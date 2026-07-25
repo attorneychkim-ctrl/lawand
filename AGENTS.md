@@ -12,10 +12,10 @@
 고객 전 생애주기를 **최대한 사람 손이 안 타는 자동화**로 흐르게 한다. (상세: `PROJECT_PLAN.md`)
 
 ## 현재 상태
-- **설계 논의 단계 — 스캐폴딩 전.**
+- **홈페이지 구현 시작 — `/bank` 모바일 우선 초안 완료.**
 - 스택 전제: Next.js 16(App Router) · React 19 · TypeScript · Tailwind 4 · shadcn/ui ·
   TanStack Query, **모노레포(pnpm workspaces + Turborepo)**.
-- 이 WSL 환경: node **v22.22.2**, **pnpm 미설치**(스캐폴딩 시 설치 필요).
+- 이 WSL 환경: node **v22.22.2**, pnpm **11.17.0**(Corepack + 로컬 shim).
 
 ## 작업 규칙
 - 의미 있는 작업(스캐폴딩, 신규 패키지/앱, DB 스키마, 외부 연동, 배포 등)을 마치면
@@ -26,6 +26,23 @@
 ---
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
+
+### 2026-07-25 — 모노레포·홈페이지 스캐폴딩과 `/bank` 첫 화면 구현
+- pnpm 11.17.0 + Turborepo, Next.js 16.2.11, React 19.2.8, TypeScript 6.0.3,
+  Tailwind CSS 4.3.3으로 `apps/homepage`를 스캐폴딩했다.
+- `/bank`에 모바일 우선 헤더·히어로·검색의도 카드·회생/파산 비교·상담 전 확인 순서·
+  공개 사례·기존 고객후기 샘플·로앤 원칙·상담 CTA·사무소 푸터를 구현했다.
+- `/`는 `/bank`로 이동하며 `robots.txt`, `sitemap.xml`, canonical metadata,
+  `WebSite`/`LegalService` JSON-LD를 추가했다. 자사 후기 별점 스키마는 넣지 않았다.
+- 390×844 모바일과 1440×1000 데스크톱을 Chrome으로 시각 검수했다. `typecheck`,
+  ESLint, Next 프로덕션 빌드가 모두 통과했다. 프로덕션 모바일 Lighthouse는
+  Performance 99, Accessibility 100, Best Practices 100, SEO 100(LCP 2.1s, CLS 0)이다.
+- 기존 홈페이지 본문은 복사하지 않고 공식 1차 자료를 기준으로 새로 작성한다. 전체 URL
+  대응표는 선행 조건에서 제외하고 출시 전 검색 가치가 있는 핵심 URL만 최소 보호한다.
+- 생성·실행 방법은 루트 `README.md`에 기록했다. 시스템 `/usr/bin` 쓰기 권한이 없는
+  현재 WSL에서는 Corepack과 로컬 shim을 사용한다.
+- 다음 구현 페이지는 `/bank/personal-rehabilitation/eligibility`이며, 그다음 상담 요청
+  폼과 `consultation.requested` 이벤트를 연결한다.
 
 ### 2026-07-25 — 도메인·홈페이지 역할·SEO 콘텐츠 이전 방향 확정
 - 정식 도메인은 기존 검색 자산이 있는 `lawandfirm.com` 유지로 확정했다.

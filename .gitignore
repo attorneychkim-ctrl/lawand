@@ -1,0 +1,27 @@
+# dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# Turborepo
+.turbo/
+
+# local environment
+.env
+.env.*.local
+
+# test and build output
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+
+# editors and OS
+.DS_Store
+*.swp
+
+# private migration artifacts
+artifacts/content/*
+!artifacts/content/.gitkeep
