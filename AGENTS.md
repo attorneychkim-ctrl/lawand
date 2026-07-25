@@ -27,6 +27,16 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-07-25 — `/bank` 색상 위계 보정
+- 시각 정체성을 아이보리·잉크 중심으로 확정하고 그린은 버튼·링크·체크·상태표시 같은
+  신호색으로 제한했다.
+- 히어로의 그린 기운을 중립 아이보리·스톤 그라데이션으로 낮추고, 비교·후기·상담의
+  넓은 짙은 면을 포레스트 그린에서 잉크·차콜로 변경했다.
+- 디자인 토큰과 `docs/HOMEPAGE_BLUEPRINT_V1.md`, `PROJECT_PLAN.md`를 함께 갱신했다.
+- 모바일 Lighthouse는 변경 후에도 Performance 99, Accessibility 100, Best Practices
+  100, SEO 100(LCP 2.1s, CLS 0)을 유지했다.
+- 다음 단계는 기존대로 개인회생 신청자격 검색 랜딩페이지 구현이다.
+
 ### 2026-07-25 — 모노레포·홈페이지 스캐폴딩과 `/bank` 첫 화면 구현
 - pnpm 11.17.0 + Turborepo, Next.js 16.2.11, React 19.2.8, TypeScript 6.0.3,
   Tailwind CSS 4.3.3으로 `apps/homepage`를 스캐폴딩했다.

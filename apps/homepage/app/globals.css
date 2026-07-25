@@ -1,25 +1,29 @@
 @import "tailwindcss";
 
 :root {
-  --ink: #14211d;
-  --forest-900: #0f3329;
-  --forest-800: #123f32;
-  --forest-700: #174a3a;
-  --action-600: #176b56;
-  --action-500: #1f8068;
-  --mint-100: #dcece4;
-  --mint-050: #eaf4ef;
-  --ivory-100: #efe9dd;
-  --ivory-050: #f7f4ed;
-  --paper: #fffefa;
-  --slate-700: #4b5a54;
-  --slate-600: #5e6b66;
-  --slate-400: #8a958f;
-  --line: #dbe1dc;
+  --ink: #181e1c;
+  --ink-950: #0f1412;
+  --ink-900: #171d1b;
+  --ink-800: #242c29;
+  --forest-900: var(--ink-950);
+  --forest-800: var(--ink-800);
+  --forest-700: var(--ink);
+  --action-700: #1e5747;
+  --action-600: #276a57;
+  --action-500: #347d68;
+  --mint-100: #dfeae5;
+  --mint-050: #eef5f1;
+  --ivory-100: #ede6d9;
+  --ivory-050: #f7f3ea;
+  --paper: #fffdf8;
+  --slate-700: #49534f;
+  --slate-600: #5d6863;
+  --slate-400: #87908c;
+  --line: #dddeda;
   --line-dark: rgba(255, 255, 255, 0.16);
   --amber-700: #8a551d;
-  --shadow-sm: 0 10px 30px rgba(20, 33, 29, 0.06);
-  --shadow-lg: 0 30px 80px rgba(14, 43, 34, 0.14);
+  --shadow-sm: 0 10px 30px rgba(24, 30, 28, 0.06);
+  --shadow-lg: 0 30px 80px rgba(24, 30, 28, 0.13);
   --radius-sm: 12px;
   --radius-md: 22px;
   --radius-lg: 34px;
@@ -128,7 +132,7 @@ svg {
 }
 
 .brand-mark {
-  color: var(--forest-700);
+  color: var(--ink);
   font-family: Georgia, "Times New Roman", serif;
   font-size: 25px;
   font-weight: 700;
@@ -185,7 +189,7 @@ svg {
   gap: 9px;
   padding: 0 19px;
   border-radius: 999px;
-  background: var(--forest-700);
+  background: var(--action-600);
   color: white;
   font-size: 14px;
   font-weight: 700;
@@ -212,8 +216,7 @@ svg {
   position: relative;
   overflow: hidden;
   padding: 96px 0 0;
-  background:
-    linear-gradient(115deg, var(--ivory-050) 0%, #f7f5ef 54%, #edf4ef 100%);
+  background: linear-gradient(115deg, var(--ivory-050) 0%, #f8f5ee 56%, #eff0ec 100%);
 }
 
 .hero-glow {
@@ -222,14 +225,14 @@ svg {
   right: -170px;
   width: 640px;
   height: 640px;
-  border: 1px solid rgba(23, 107, 86, 0.11);
+  border: 1px solid rgba(39, 106, 87, 0.09);
   border-radius: 50%;
 }
 
 .hero-glow::before,
 .hero-glow::after {
   position: absolute;
-  border: 1px solid rgba(23, 107, 86, 0.09);
+  border: 1px solid rgba(39, 106, 87, 0.07);
   border-radius: 50%;
   content: "";
 }
@@ -281,7 +284,7 @@ svg {
 }
 
 .hero h1 span {
-  color: var(--forest-700);
+  color: var(--ink);
 }
 
 .hero-description {
@@ -337,7 +340,7 @@ svg {
 }
 
 .button-primary:hover {
-  background: var(--forest-800);
+  background: var(--action-700);
 }
 
 .button-secondary {
@@ -346,7 +349,7 @@ svg {
 }
 
 .button-secondary:hover {
-  border-color: var(--forest-700);
+  border-color: var(--ink);
   background: white;
 }
 
@@ -429,7 +432,7 @@ svg {
   place-items: center;
   border-radius: 50%;
   background: var(--mint-050);
-  color: var(--forest-700);
+  color: var(--action-600);
   font-size: 12px;
   font-weight: 800;
 }
@@ -438,7 +441,7 @@ svg {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: var(--forest-700);
+  color: var(--action-600);
   font-size: 14px;
   font-weight: 800;
 }
@@ -583,7 +586,7 @@ svg {
   align-items: center;
   gap: 7px;
   margin-top: auto;
-  color: var(--forest-700);
+  color: var(--action-600);
   font-size: 14px;
   font-weight: 800;
 }
@@ -630,7 +633,7 @@ svg {
 }
 
 .compare-rehabilitation {
-  background: #174a3a;
+  background: var(--ink-800);
 }
 
 .compare-bankruptcy {
@@ -776,7 +779,7 @@ svg {
   align-items: center;
   gap: 8px;
   margin-top: 30px;
-  color: var(--forest-700);
+  color: var(--action-600);
   font-size: 14px;
   font-weight: 800;
 }
@@ -848,7 +851,7 @@ svg {
   padding: 0 10px;
   border-radius: 999px;
   background: var(--mint-050);
-  color: var(--forest-700);
+  color: var(--action-700);
   font-size: 11px;
   font-weight: 800;
 }
@@ -893,18 +896,18 @@ svg {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: var(--forest-700);
+  color: var(--action-600);
   font-size: 14px;
   font-weight: 800;
 }
 
 .review-section {
-  background: var(--forest-700);
+  background: var(--ink-800);
   color: white;
 }
 
 .light-eyebrow {
-  color: #a8d3c1;
+  color: #a9cbbd;
 }
 
 .review-heading-copy {
@@ -913,14 +916,14 @@ svg {
 
 .review-heading-copy p {
   margin: 0;
-  color: #d2ded9;
+  color: #d5dcda;
   font-size: 15px;
 }
 
 .review-heading-copy span {
   display: block;
   margin-top: 10px;
-  color: #9bb3a9;
+  color: #aebbb6;
   font-size: 12px;
 }
 
@@ -939,12 +942,12 @@ svg {
   padding: 30px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .quote-mark {
   height: 46px;
-  color: #9cc8b5;
+  color: #94bbaa;
   font-family: Georgia, "Times New Roman", serif;
   font-size: 58px;
   line-height: 1;
@@ -952,7 +955,7 @@ svg {
 
 .review-card blockquote {
   margin: 16px 0 30px;
-  color: #f1f5f3;
+  color: #f1f3f2;
   font-size: 15px;
   line-height: 1.85;
 }
@@ -972,13 +975,13 @@ svg {
 
 .review-card figcaption span:nth-child(2),
 .review-card time {
-  color: #c5d3cd;
+  color: #cbd3d0;
   font-size: 12px;
 }
 
 .review-migration-note {
   margin: 22px 0 0;
-  color: #a9bfb6;
+  color: #b4bfbb;
   font-size: 12px;
   text-align: right;
 }
@@ -1107,7 +1110,7 @@ svg {
 
 .site-footer {
   padding: 68px 0 42px;
-  background: #0d1814;
+  background: var(--ink-950);
   color: #a8b5b0;
 }
 
