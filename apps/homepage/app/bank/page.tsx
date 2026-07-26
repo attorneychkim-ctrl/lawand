@@ -3,16 +3,16 @@ import type { Metadata } from "next";
 const siteUrl = "https://lawandfirm.com";
 
 export const metadata: Metadata = {
-  title: "개인회생·개인파산, 조건부터 차분히",
+  title: "개인회생·개인파산, 무엇부터 확인해야 할까",
   description:
-    "개인회생과 개인파산 중 무엇을 확인해야 할지 소득·재산·채무 조건부터 알아보세요. 실제 고객후기와 사례를 살펴보고 법무법인 로앤에 상담을 요청할 수 있습니다.",
+    "개인회생과 개인파산 중 어느 쪽을 봐야 할지, 소득·재산·채무부터 짚어보세요. 실제 고객후기와 사례를 함께 보고 법무법인 로앤에 상담을 요청할 수 있습니다.",
   alternates: {
     canonical: "/bank",
   },
   openGraph: {
-    title: "개인회생·개인파산, 조건부터 차분히 | 법무법인 로앤",
+    title: "개인회생·개인파산, 무엇부터 확인해야 할까 | 법무법인 로앤",
     description:
-      "빚의 크기보다 지금의 조건부터. 개인회생·개인파산의 차이와 확인할 쟁점을 차분히 안내합니다.",
+      "채무 금액보다 지금의 조건이 먼저입니다. 개인회생과 개인파산이 무엇이 다르고 무엇을 따져야 하는지 안내합니다.",
     url: `${siteUrl}/bank`,
   },
 };
@@ -20,33 +20,33 @@ export const metadata: Metadata = {
 const intents = [
   {
     number: "01",
-    eyebrow: "정기적인 소득이 있다면",
-    title: "개인회생 조건부터",
-    body: "급여·사업·연금 등 계속될 수입과 채무·재산을 함께 확인합니다.",
+    eyebrow: "매달 들어오는 소득이 있다면",
+    title: "개인회생이 맞을까",
+    body: "급여·사업·연금처럼 앞으로도 이어질 소득이 있다면, 채무와 재산을 함께 놓고 봐야 합니다.",
     href: "#compare",
-    link: "회생 기준 살펴보기",
+    link: "개인회생 기준 보기",
   },
   {
     number: "02",
-    eyebrow: "소득활동이 어렵다면",
-    title: "개인파산·면책 조건부터",
-    body: "현재 재산으로 채무를 갚기 어려운 상태와 면책 심사의 쟁점을 나누어 봅니다.",
+    eyebrow: "지금은 일하기 어렵다면",
+    title: "개인파산·면책은 어떨까",
+    body: "가진 재산으로 채무를 갚기 어려운 상태인지, 면책 심사에서는 무엇을 보는지 나눠서 짚어봅니다.",
     href: "#compare",
-    link: "파산·면책 살펴보기",
+    link: "파산·면책 기준 보기",
   },
   {
     number: "03",
-    eyebrow: "독촉·압류가 걱정된다면",
-    title: "지금 확인할 순서부터",
-    body: "받은 문서의 종류와 기한, 진행 중인 집행 절차를 먼저 구분해야 합니다.",
+    eyebrow: "독촉장·압류가 걱정된다면",
+    title: "지금 뭘 먼저 해야 할까",
+    body: "받은 문서가 무엇인지, 기한은 언제까지인지, 이미 시작된 절차가 있는지부터 구분해야 합니다.",
     href: "#first-check",
-    link: "먼저 확인할 것",
+    link: "확인 순서 보기",
   },
   {
     number: "04",
-    eyebrow: "어느 제도인지 모르겠다면",
-    title: "두 제도의 차이부터",
-    body: "소득, 재산, 변제 재원이라는 세 가지 축으로 차분히 비교합니다.",
+    eyebrow: "어느 쪽인지 모르겠다면",
+    title: "두 제도는 뭐가 다를까",
+    body: "소득, 재산, 변제 재원이라는 세 가지 축으로 나란히 놓고 보면 차이가 분명해집니다.",
     href: "#compare",
     link: "차이 비교하기",
   },
@@ -211,44 +211,44 @@ export default function BankHomePage() {
             <div className="hero-copy">
               <p className="eyebrow">개인회생 · 개인파산 · 면책</p>
               <h1>
-                빚의 크기보다,
+                채무 금액보다,
                 <br />
-                <span>지금의 조건부터 봅니다.</span>
+                <span>지금의 조건이 먼저입니다.</span>
               </h1>
               <p className="hero-description">
-                소득·재산·채무와 현재 상황을 차분히 정리하고, 어떤 제도를 더 확인해야
-                하는지 이해하기 쉽게 안내합니다.
+                같은 금액이라도 소득과 재산, 채무가 어떻게 얽혀 있느냐에 따라 확인할
+                것이 달라집니다. 무엇을 먼저 봐야 하는지 순서대로 짚어드립니다.
               </p>
               <div className="hero-actions">
                 <a className="button button-primary" href="#starting-points">
-                  내 상황에 맞는 정보 찾기
+                  내 상황부터 짚어보기
                   <ArrowIcon />
                 </a>
                 <a className="button button-secondary" href="#consultation">
-                  사람에게 상담 요청
+                  바로 상담 요청하기
                 </a>
               </div>
               <p className="hero-assurance">
                 <span aria-hidden="true">●</span>
-                개인정보 입력 없이 먼저 둘러볼 수 있습니다.
+                이름이나 연락처를 남기지 않아도 끝까지 둘러볼 수 있습니다.
               </p>
             </div>
 
             <aside className="hero-guide" aria-label="먼저 확인할 질문">
               <p className="guide-kicker">어디서부터 봐야 할지 모르겠다면</p>
-              <h2>세 가지를 먼저 확인하세요</h2>
+              <h2>이 세 가지를 먼저 떠올려 보세요</h2>
               <ol>
                 <li>
                   <span>1</span>
-                  앞으로 계속될 수입이 있나요?
+                  매달 들어오는 소득이 있나요?
                 </li>
                 <li>
                   <span>2</span>
-                  현재 가진 재산과 담보채무는 어느 정도인가요?
+                  집·차·보험 같은 재산이 남아 있나요?
                 </li>
                 <li>
                   <span>3</span>
-                  독촉·소송·압류 등 급한 절차가 진행 중인가요?
+                  독촉이나 압류처럼 급한 일이 있나요?
                 </li>
               </ol>
               <a href="#first-check">
@@ -259,9 +259,9 @@ export default function BankHomePage() {
           </div>
 
           <div className="shell trust-row" aria-label="서비스 원칙">
-            <span>변호사 검토 정보</span>
+            <span>변호사가 검토한 정보</span>
             <span>과장 없는 제도 비교</span>
-            <span>상담 전 최소 정보 수집</span>
+            <span>꼭 필요한 정보만 수집</span>
           </div>
         </section>
 
@@ -275,7 +275,7 @@ export default function BankHomePage() {
               <p>
                 제도를 먼저 고를 필요는 없습니다.
                 <br />
-                지금 가진 조건과 걱정에서 시작하면 됩니다.
+                지금의 형편과 걱정에서 출발하면 충분합니다.
               </p>
             </div>
 
@@ -301,65 +301,65 @@ export default function BankHomePage() {
           <div className="shell">
             <div className="section-heading centered-heading">
               <p className="eyebrow">개인회생과 개인파산</p>
-              <h2>둘 중 하나를 서둘러 고르기보다<br />차이를 정확히 이해해야 합니다</h2>
+              <h2>서둘러 고르기 전에<br />무엇이 다른지부터 봅니다</h2>
               <p>
-                개인회생은 장래의 계속적인 수입을 변제 재원으로 삼고, 개인파산은 현재
-                재산으로 모든 채무를 변제할 수 없는 상태에서 파산과 면책을 심사하는
-                절차입니다.
+                개인회생은 앞으로 들어올 소득을 재원으로 삼아 법원이 인가한 변제계획을
+                이행하는 절차이고, 개인파산은 지금의 재산으로는 채무를 다 갚을 수 없는
+                상태에서 파산과 면책을 심사받는 절차입니다.
               </p>
             </div>
 
             <div className="compare-grid">
               <article className="compare-card compare-rehabilitation">
                 <div className="compare-label">개인회생</div>
-                <h3>계속될 수입이 있는 개인채무자</h3>
+                <h3>앞으로도 소득이 이어지는 분</h3>
                 <p>
-                  급여·사업·연금 등 정기적인 수입 가능성을 바탕으로 법원이 인가한
-                  변제계획을 수행하는 절차입니다.
+                  급여·사업·연금처럼 계속 들어올 소득을 근거로, 법원이 인가한 변제계획을
+                  정해진 기간 동안 이행하는 절차입니다.
                 </p>
                 <ul>
                   <li>
                     <CheckIcon />
-                    앞으로 얻을 수입의 계속성
+                    소득이 앞으로도 이어질 수 있는지
                   </li>
                   <li>
                     <CheckIcon />
-                    무담보·담보 채무 한도
+                    담보·무담보 채무가 한도 안에 있는지
                   </li>
                   <li>
                     <CheckIcon />
-                    재산가치와 월 변제 재원
+                    재산 가치와 매달 갚을 수 있는 금액
                   </li>
                 </ul>
                 <a href="#first-check">
-                  개인회생에서 확인할 것
+                  개인회생에서 따져볼 것
                   <ArrowIcon />
                 </a>
               </article>
 
               <article className="compare-card compare-bankruptcy">
                 <div className="compare-label">개인파산 · 면책</div>
-                <h3>현재 재산으로 채무 변제가 어려운 개인</h3>
+                <h3>지금 재산으로는 갚기 어려운 분</h3>
                 <p>
-                  파산절차에서 재산을 정리하고, 별도의 면책 심사를 거쳐 남은 채무의
-                  책임 면제 여부를 법원이 결정합니다.
+                  파산 절차로 남은 재산을 정리한 뒤, 별도의 면책 심사를 거쳐 남은 채무의
+                  책임을 면할지 법원이 판단합니다.
                 </p>
                 <ul>
                   <li>
                     <CheckIcon />
-                    현재의 지급불능 상태
+                    지금 채무를 갚을 수 없는 상태인지
                   </li>
                   <li>
                     <CheckIcon />
-                    소득활동 가능성과 보유 재산
+                    일해서 벌 수 있는 여력과 남은 재산
                   </li>
                   <li>
                     <CheckIcon />
-                    면책불허가 사유와 예외 채무
+                    면책이 막히는 사유나 예외 채무가 있는지
                   </li>
                 </ul>
                 <a href="#first-check">
-                  파산·면책에서 확인할 것
+                  파산·면책에서 따져볼 것
                   <ArrowIcon />
                 </a>
               </article>
@@ -368,9 +368,9 @@ export default function BankHomePage() {
             <div className="source-note">
               <span>공식 근거</span>
               <p>
-                위 내용은 법원의 개인회생·개인파산 안내를 바탕으로 한 일반적인
-                설명입니다. 실제 적용은 소득·재산·채무 구성과 법원 심사에 따라 달라질
-                수 있습니다.
+                위 설명은 법원의 개인회생·개인파산 안내를 바탕으로 정리한 일반적인
+                내용입니다. 실제로 어떻게 적용되는지는 소득·재산·채무의 구성과 법원의
+                심사에 따라 달라질 수 있습니다.
               </p>
               <a
                 href="https://slb.scourt.go.kr/rel/information/qna/member_manual.pdf"
@@ -388,13 +388,13 @@ export default function BankHomePage() {
           <div className="shell first-check-grid">
             <div className="section-heading">
               <p className="eyebrow">상담 전 확인 순서</p>
-              <h2>금액 하나보다<br />조건의 조합이 중요합니다</h2>
+              <h2>같은 채무액이라도<br />확인할 것은 사람마다 다릅니다</h2>
               <p>
-                같은 채무액이라도 소득의 형태, 재산의 가치, 가족 상황과 현재 진행 중인
-                절차에 따라 먼저 확인할 쟁점이 달라집니다.
+                소득의 형태, 재산의 가치, 가족 상황, 이미 시작된 절차. 이 중 하나만
+                달라져도 먼저 확인해야 할 쟁점이 바뀝니다.
               </p>
               <a className="text-link" href="#consultation">
-                내 조건을 정리해 상담 요청
+                내 상황을 정리해 상담 요청하기
                 <ArrowIcon />
               </a>
             </div>
@@ -404,21 +404,21 @@ export default function BankHomePage() {
                 <span>01</span>
                 <div>
                   <h3>소득</h3>
-                  <p>급여·사업·연금 등 수입의 종류와 앞으로 계속될 가능성</p>
+                  <p>급여·사업·연금 중 어떤 소득이 얼마나, 언제까지 이어질 수 있는지</p>
                 </div>
               </li>
               <li>
                 <span>02</span>
                 <div>
                   <h3>재산</h3>
-                  <p>주거, 차량, 보험, 예금과 담보채무를 포함한 실제 가치</p>
+                  <p>집·차량·보험·예금에서 담보채무를 뺀 실제 가치가 얼마인지</p>
                 </div>
               </li>
               <li>
                 <span>03</span>
                 <div>
                   <h3>채무와 현재 단계</h3>
-                  <p>채권자·채무 원인과 독촉, 지급명령, 소송, 압류 진행 여부</p>
+                  <p>누구에게 왜 생긴 채무인지, 독촉·지급명령·소송·압류가 어디까지 왔는지</p>
                 </div>
               </li>
             </ol>
@@ -430,10 +430,10 @@ export default function BankHomePage() {
             <div className="section-heading heading-row">
               <div>
                 <p className="eyebrow">사례로 이해하기</p>
-                <h2>결과보다, 어떤 조건을 확인했는지 봅니다</h2>
+                <h2>결과보다, 무엇을 확인했는지를 봅니다</h2>
               </div>
               <p>
-                아래 사례는 기존 공개자료를 바탕으로 핵심 맥락만 정리했습니다.
+                아래 사례는 기존 공개자료에서 핵심 맥락만 정리한 것입니다.
                 <br />
                 다른 사건의 결과를 보장하지 않습니다.
               </p>
@@ -445,17 +445,17 @@ export default function BankHomePage() {
                   <span>개인회생</span>
                   <span>급여소득 · 1인 가구</span>
                 </div>
-                <h3>정기적인 소득으로 변제계획을 세운 경우</h3>
+                <h3>매달 들어오는 소득으로 변제계획을 세운 경우</h3>
                 <p>
-                  월 소득만 보는 것이 아니라 재산가치, 가구 상황과 채무 구성을 함께
-                  확인해 개인회생 절차를 진행한 사례입니다.
+                  월 소득만 보지 않고 재산 가치와 가구 상황, 채무 구성을 함께 확인한 뒤
+                  개인회생으로 진행한 사례입니다.
                 </p>
                 <div className="case-point">
                   <span>핵심 확인</span>
-                  소득의 계속성과 월 변제 재원
+                  소득이 이어질 수 있는지, 매달 얼마를 갚을 수 있는지
                 </div>
                 <a href="#consultation">
-                  내 상황과 다른 점 확인하기
+                  내 상황은 어떤지 물어보기
                   <ArrowIcon />
                 </a>
               </article>
@@ -465,17 +465,17 @@ export default function BankHomePage() {
                   <span>개인파산 · 면책</span>
                   <span>건강 악화 · 소득활동 곤란</span>
                 </div>
-                <h3>건강 문제로 소득활동이 어려워진 경우</h3>
+                <h3>건강 문제로 일을 계속하기 어려워진 경우</h3>
                 <p>
-                  현재 소득활동 가능성과 병원비로 증가한 채무의 경위, 보유 재산을 함께
-                  확인해 파산·면책 절차를 진행한 사례입니다.
+                  지금 일할 수 있는 여력과 병원비로 늘어난 채무의 경위, 남은 재산을 함께
+                  확인한 뒤 파산·면책으로 진행한 사례입니다.
                 </p>
                 <div className="case-point">
                   <span>핵심 확인</span>
-                  지급불능 상태와 면책 심사 쟁점
+                  채무를 갚을 수 없는 상태인지, 면책 심사에서 무엇을 보는지
                 </div>
                 <a href="#consultation">
-                  내 상황과 다른 점 확인하기
+                  내 상황은 어떤지 물어보기
                   <ArrowIcon />
                 </a>
               </article>
@@ -488,12 +488,12 @@ export default function BankHomePage() {
             <div className="section-heading heading-row">
               <div>
                 <p className="eyebrow light-eyebrow">고객후기</p>
-                <h2>먼저 경험한 고객의<br />말을 그대로 전합니다</h2>
+                <h2>먼저 겪어본 분들의<br />말을 그대로 옮겼습니다</h2>
               </div>
               <div className="review-heading-copy">
                 <p>
-                  기존 로앤 홈페이지에 고객이 남긴 공개 후기 중 일부입니다. 원문의
-                  표현과 작성 당시의 진행단계를 함께 표시했습니다.
+                  로앤 홈페이지에 고객이 직접 남긴 공개 후기 중 일부입니다. 표현을
+                  다듬지 않고 원문 그대로, 작성 당시의 진행 단계와 함께 싣습니다.
                 </p>
                 <span>개별 사건의 결과는 사실관계와 시점에 따라 달라질 수 있습니다.</span>
               </div>
@@ -516,7 +516,7 @@ export default function BankHomePage() {
             </div>
 
             <p className="review-migration-note">
-              전체 고객후기는 개인정보와 공개 상태를 다시 확인한 뒤 순차적으로 이관합니다.
+              나머지 후기도 개인정보와 공개 여부를 다시 확인한 뒤 차례로 옮겨 싣습니다.
             </p>
           </div>
         </section>
@@ -535,17 +535,17 @@ export default function BankHomePage() {
               <article>
                 <span>01</span>
                 <h3>쉽고 정확한 설명</h3>
-                <p>법률용어보다 고객이 지금 궁금해하는 질문의 언어로 설명합니다.</p>
+                <p>법률용어로 말하지 않습니다. 지금 궁금해하는 그 질문의 언어로 설명합니다.</p>
               </article>
               <article>
                 <span>02</span>
                 <h3>사람이 책임지는 판단</h3>
-                <p>자동화는 준비를 돕고, 법률 판단과 고객 안내는 사람이 책임집니다.</p>
+                <p>자동화는 준비를 도울 뿐, 법률 판단과 안내는 끝까지 사람이 책임집니다.</p>
               </article>
               <article>
                 <span>03</span>
                 <h3>계약 후에도 끊기지 않게</h3>
-                <p>계약 후 사건 정보와 할 일은 리걸프렌즈에서 안전하게 공유합니다.</p>
+                <p>사건이 시작된 뒤에도 진행 상황과 할 일을 리걸프렌즈에서 함께 확인합니다.</p>
               </article>
             </div>
           </div>
@@ -554,7 +554,7 @@ export default function BankHomePage() {
         <section className="consultation-section" id="consultation">
           <div className="shell consultation-grid">
             <div>
-              <p className="eyebrow">사람에게 상담 요청</p>
+              <p className="eyebrow">상담 요청</p>
               <h2>
                 아직 어떤 절차인지
                 <br />
@@ -563,8 +563,8 @@ export default function BankHomePage() {
             </div>
             <div className="consultation-copy">
               <p>
-                지금 알고 있는 내용부터 말씀해 주세요. 상담 요청 단계에서는 주민등록번호,
-                계좌번호나 원본 서류를 받지 않습니다.
+                지금 알고 있는 것부터 말씀해 주시면 됩니다. 상담을 요청하는 단계에서는
+                주민등록번호나 계좌번호, 원본 서류를 받지 않습니다.
               </p>
               <div className="consultation-actions">
                 <a className="button button-inverse" href="tel:16708480">
