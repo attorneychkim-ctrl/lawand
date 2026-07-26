@@ -25,3 +25,6 @@ test-results/
 # private migration artifacts
 artifacts/content/*
 !artifacts/content/.gitkeep
+
+# 로컬 dev 서버 로그
+.dev-*.log
