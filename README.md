@@ -29,7 +29,17 @@ corepack enable --install-directory ./node_modules/.bin pnpm
 corepack pnpm dev
 ```
 
-브라우저에서 `http://localhost:3000/bank`를 연다.
+브라우저에서 `http://localhost:3020/bank`를 연다.
+
+`apps/homepage`의 개발·프로덕션 포트는 **3020으로 고정**한다. 같은 개발 머신에서
+`adpilot`(3000)·`ai-agents-mono/web-console`(3010)이 함께 떠 있어, 포트를 비워두면
+Next가 빈 포트로 자동으로 밀려 매번 주소가 달라진다.
+
+원격(SSH)에서 개발 중이라면 해당 포트를 포워딩한다.
+
+```bash
+ssh -L 3020:localhost:3020 <계정>@<개발머신>
+```
 
 ## 검증
 
