@@ -5,11 +5,21 @@
   "packageManager": "pnpm@11.17.0",
   "scripts": {
     "build": "turbo run build",
+    "db:local:setup": "node scripts/setup-local-db.mjs",
     "dev": "turbo run dev",
-    "lint": "turbo run lint",
+    "lint": "eslint scripts && turbo run lint",
+    "reviews:migrate": "node scripts/import-legacy-reviews.mjs",
+    "test": "turbo run test",
     "typecheck": "turbo run typecheck"
   },
   "devDependencies": {
-    "turbo": "2.10.6"
+    "@eslint/js": "9.39.5",
+    "@types/pg": "8.16.0",
+    "eslint": "9.39.5",
+    "globals": "16.5.0",
+    "pg": "8.16.3",
+    "turbo": "2.10.6",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.53.1"
   }
 }

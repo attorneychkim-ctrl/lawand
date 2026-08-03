@@ -1,12 +1,19 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 
+import { JourneyTracker } from "./_components/journey-tracker";
 import "./globals.css";
 
 const siteUrl = "https://lawandfirm.com";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
+  formatDetection: {
+    address: false,
+    date: false,
+    email: false,
+    telephone: false,
+  },
   title: {
     default: "법무법인 로앤",
     template: "%s | 법무법인 로앤",
@@ -41,8 +48,11 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="ko">
-      <body>{children}</body>
+    <html lang="ko" suppressHydrationWarning>
+      <body>
+        <JourneyTracker />
+        {children}
+      </body>
     </html>
   );
 }

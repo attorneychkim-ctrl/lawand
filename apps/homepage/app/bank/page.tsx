@@ -1,5 +1,14 @@
 import type { Metadata } from "next";
 
+import {
+  ArrowIcon,
+  CheckIcon,
+  ConsultationSection,
+  MobileActions,
+  SiteFooter,
+  SiteHeader,
+} from "./_components/site-chrome";
+
 const siteUrl = "https://lawandfirm.com";
 
 export const metadata: Metadata = {
@@ -23,15 +32,15 @@ const intents = [
     eyebrow: "매달 들어오는 소득이 있다면",
     title: "개인회생이 맞을까",
     body: "급여·사업·연금처럼 앞으로도 이어질 소득이 있다면, 채무와 재산을 함께 놓고 봐야 합니다.",
-    href: "#compare",
-    link: "개인회생 기준 보기",
+    href: "/bank/personal-rehabilitation/eligibility",
+    link: "개인회생 신청자격 보기",
   },
   {
     number: "02",
     eyebrow: "지금은 일하기 어렵다면",
     title: "개인파산·면책은 어떨까",
     body: "가진 재산으로 채무를 갚기 어려운 상태인지, 면책 심사에서는 무엇을 보는지 나눠서 짚어봅니다.",
-    href: "#compare",
+    href: "/bank/personal-bankruptcy/eligibility",
     link: "파산·면책 기준 보기",
   },
   {
@@ -39,15 +48,15 @@ const intents = [
     eyebrow: "독촉장·압류가 걱정된다면",
     title: "지금 뭘 먼저 해야 할까",
     body: "받은 문서가 무엇인지, 기한은 언제까지인지, 이미 시작된 절차가 있는지부터 구분해야 합니다.",
-    href: "#first-check",
-    link: "확인 순서 보기",
+    href: "/bank/situations/collection-and-seizure",
+    link: "독촉·압류 대응 보기",
   },
   {
     number: "04",
     eyebrow: "어느 쪽인지 모르겠다면",
     title: "두 제도는 뭐가 다를까",
     body: "소득, 재산, 변제 재원이라는 세 가지 축으로 나란히 놓고 보면 차이가 분명해집니다.",
-    href: "#compare",
+    href: "/bank/compare",
     link: "차이 비교하기",
   },
 ];
@@ -73,21 +82,6 @@ const reviews = [
   },
 ];
 
-const officeAddresses = [
-  {
-    city: "서울",
-    address: "서울특별시 강남구 논현로87길 25 HB타워 3층, 4층",
-  },
-  {
-    city: "대전",
-    address: "대전광역시 서구 둔산중로78번길 26 민석타워 14층",
-  },
-  {
-    city: "부산",
-    address: "부산광역시 연제구 법원로 38 로펌빌딩 401호",
-  },
-];
-
 const legalServiceJsonLd = {
   "@context": "https://schema.org",
   "@type": "LegalService",
@@ -98,12 +92,26 @@ const legalServiceJsonLd = {
   telephone: "+82-1670-8480",
   email: "lawand5@lawandfirm.com",
   areaServed: "KR",
-  address: officeAddresses.map(({ city, address }) => ({
-    "@type": "PostalAddress",
-    streetAddress: address,
-    addressLocality: city,
-    addressCountry: "KR",
-  })),
+  address: [
+    {
+      "@type": "PostalAddress",
+      streetAddress: "서울특별시 강남구 논현로87길 25 HB타워 3층, 4층",
+      addressLocality: "서울",
+      addressCountry: "KR",
+    },
+    {
+      "@type": "PostalAddress",
+      streetAddress: "대전광역시 서구 둔산중로78번길 26 민석타워 14층",
+      addressLocality: "대전",
+      addressCountry: "KR",
+    },
+    {
+      "@type": "PostalAddress",
+      streetAddress: "부산광역시 연제구 법원로 38 로펌빌딩 401호",
+      addressLocality: "부산",
+      addressCountry: "KR",
+    },
+  ],
   openingHoursSpecification: [
     {
       "@type": "OpeningHoursSpecification",
@@ -127,39 +135,6 @@ const websiteJsonLd = {
   },
 };
 
-function ArrowIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 20 20">
-      <path d="M4 10h11M11 5l5 5-5 5" />
-    </svg>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24">
-      <path d="m5 12 4 4L19 6" />
-    </svg>
-  );
-}
-
-function PhoneIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24">
-      <path d="M7.1 3.8 9.7 8l-2.2 2a15.7 15.7 0 0 0 6.5 6.5l2-2.2 4.2 2.6-1.1 3.2c-.3.8-1.1 1.3-2 1.2C9.5 20.4 3.6 14.5 2.7 6.9c-.1-.9.4-1.7 1.2-2l3.2-1.1Z" />
-    </svg>
-  );
-}
-
-function Logo() {
-  return (
-    <span className="brand" aria-label="법무법인 로앤">
-      <span className="brand-mark">LAW&amp;</span>
-      <span className="brand-korean">법무법인 로앤</span>
-    </span>
-  );
-}
-
 export default function BankHomePage() {
   return (
     <>
@@ -167,42 +142,7 @@ export default function BankHomePage() {
         본문으로 바로가기
       </a>
 
-      <header className="site-header">
-        <div className="shell header-inner">
-          <a className="logo-link" href="/bank" aria-label="LAW& 법무법인 로앤 회생·파산 홈">
-            <Logo />
-          </a>
-
-          <nav className="desktop-nav" aria-label="주요 메뉴">
-            <a href="#compare">개인회생</a>
-            <a href="#compare">개인파산·면책</a>
-            <a href="#reviews">고객후기</a>
-            <a href="#cases">사례</a>
-            <a href="#about">로앤 소개</a>
-          </nav>
-
-          <a className="header-cta" href="#consultation">
-            상담 요청
-            <ArrowIcon />
-          </a>
-
-          <details className="mobile-menu">
-            <summary aria-label="메뉴 열기">
-              <span />
-              <span />
-              <span />
-            </summary>
-            <nav aria-label="모바일 메뉴">
-              <a href="#compare">개인회생·개인파산 비교</a>
-              <a href="#first-check">먼저 확인할 것</a>
-              <a href="#cases">사례로 이해하기</a>
-              <a href="#reviews">고객후기</a>
-              <a href="#about">로앤 소개</a>
-              <a href="#consultation">상담 요청</a>
-            </nav>
-          </details>
-        </div>
-      </header>
+      <SiteHeader />
 
       <main id="main-content">
         <section className="hero">
@@ -224,7 +164,11 @@ export default function BankHomePage() {
                   내 상황부터 짚어보기
                   <ArrowIcon />
                 </a>
-                <a className="button button-secondary" href="#consultation">
+                <a
+                  className="button button-secondary"
+                  href="/bank/consultation"
+                  data-consultation-cta="home-hero"
+                >
                   바로 상담 요청하기
                 </a>
               </div>
@@ -331,7 +275,7 @@ export default function BankHomePage() {
                     재산 가치와 매달 갚을 수 있는 금액
                   </li>
                 </ul>
-                <a href="#first-check">
+                <a href="/bank/personal-rehabilitation">
                   개인회생에서 따져볼 것
                   <ArrowIcon />
                 </a>
@@ -358,7 +302,7 @@ export default function BankHomePage() {
                     면책이 막히는 사유나 예외 채무가 있는지
                   </li>
                 </ul>
-                <a href="#first-check">
+                <a href="/bank/personal-bankruptcy">
                   파산·면책에서 따져볼 것
                   <ArrowIcon />
                 </a>
@@ -393,7 +337,11 @@ export default function BankHomePage() {
                 소득의 형태, 재산의 가치, 가족 상황, 이미 시작된 절차. 이 중 하나만
                 달라져도 먼저 확인해야 할 쟁점이 바뀝니다.
               </p>
-              <a className="text-link" href="#consultation">
+              <a
+                className="text-link"
+                href="/bank/consultation"
+                data-consultation-cta="home-first-check"
+              >
                 내 상황을 정리해 상담 요청하기
                 <ArrowIcon />
               </a>
@@ -454,7 +402,10 @@ export default function BankHomePage() {
                   <span>핵심 확인</span>
                   소득이 이어질 수 있는지, 매달 얼마를 갚을 수 있는지
                 </div>
-                <a href="#consultation">
+                <a
+                  href="/bank/consultation"
+                  data-consultation-cta="home-case-rehabilitation"
+                >
                   내 상황은 어떤지 물어보기
                   <ArrowIcon />
                 </a>
@@ -474,7 +425,10 @@ export default function BankHomePage() {
                   <span>핵심 확인</span>
                   채무를 갚을 수 없는 상태인지, 면책 심사에서 무엇을 보는지
                 </div>
-                <a href="#consultation">
+                <a
+                  href="/bank/consultation"
+                  data-consultation-cta="home-case-bankruptcy"
+                >
                   내 상황은 어떤지 물어보기
                   <ArrowIcon />
                 </a>
@@ -515,9 +469,10 @@ export default function BankHomePage() {
               ))}
             </div>
 
-            <p className="review-migration-note">
-              나머지 후기도 개인정보와 공개 여부를 다시 확인한 뒤 차례로 옮겨 싣습니다.
-            </p>
+            <a className="review-migration-note" href="/bank/reviews">
+              고객이 직접 남긴 후기 전체 보기
+              <ArrowIcon />
+            </a>
           </div>
         </section>
 
@@ -530,6 +485,10 @@ export default function BankHomePage() {
                 <br />
                 다음 행동을 선명하게.
               </h2>
+              <a className="button button-secondary" href="/about">
+                로앤의 일하는 방식
+                <ArrowIcon />
+              </a>
             </div>
             <div className="principle-grid">
               <article>
@@ -551,76 +510,11 @@ export default function BankHomePage() {
           </div>
         </section>
 
-        <section className="consultation-section" id="consultation">
-          <div className="shell consultation-grid">
-            <div>
-              <p className="eyebrow">상담 요청</p>
-              <h2>
-                아직 어떤 절차인지
-                <br />
-                정하지 않아도 괜찮습니다.
-              </h2>
-            </div>
-            <div className="consultation-copy">
-              <p>
-                지금 알고 있는 것부터 말씀해 주시면 됩니다. 상담을 요청하는 단계에서는
-                주민등록번호나 계좌번호, 원본 서류를 받지 않습니다.
-              </p>
-              <div className="consultation-actions">
-                <a className="button button-inverse" href="tel:16708480">
-                  <PhoneIcon />
-                  1670-8480
-                </a>
-                <a className="button button-outline-light" href="mailto:lawand5@lawandfirm.com">
-                  이메일로 문의
-                  <ArrowIcon />
-                </a>
-              </div>
-              <span>평일 오전 8시–오후 7시 · 주말 및 공휴일 휴무</span>
-            </div>
-          </div>
-        </section>
+        <ConsultationSection />
       </main>
 
-      <footer className="site-footer">
-        <div className="shell">
-          <div className="footer-top">
-            <Logo />
-            <div className="footer-links">
-              <a href="#main-content">개인정보처리방침</a>
-              <a href="#main-content">이용약관</a>
-              <a href="#about">AI·자동화 원칙</a>
-            </div>
-          </div>
-          <div className="office-grid">
-            {officeAddresses.map((office) => (
-              <address key={office.city}>
-                <strong>{office.city} 사무소</strong>
-                <span>{office.address}</span>
-              </address>
-            ))}
-          </div>
-          <div className="footer-bottom">
-            <p>
-              법무법인 로앤 · 대표변호사 김충환 · 사업자등록번호 783-86-00865
-              <br />
-              광고책임변호사 표시는 책임자 확정 후 배포 전에 반영합니다.
-            </p>
-            <p>© {new Date().getFullYear()} LAW&amp;. All rights reserved.</p>
-          </div>
-        </div>
-      </footer>
-
-      <nav className="mobile-actions" aria-label="빠른 상담">
-        <a href="tel:16708480">
-          <PhoneIcon />
-          전화 상담
-        </a>
-        <a href="#consultation">
-          상담 요청
-          <ArrowIcon />
-        </a>
-      </nav>
+      <SiteFooter />
+      <MobileActions />
 
       <script
         type="application/ld+json"

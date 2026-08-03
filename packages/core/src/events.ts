@@ -1,0 +1,237 @@
+import { z } from "zod";
+
+import { consultationModeSchema } from "./consultation.js";
+
+const eventEnvelopeSchema = z
+  .object({
+    eventId: z.uuid(),
+    eventVersion: z.literal(1),
+    occurredAt: z.iso.datetime({ offset: true }),
+    producer: z.literal("lawand.gateway"),
+    correlationId: z.uuid(),
+    causationId: z.uuid().optional(),
+  })
+  .strict();
+
+const requestedDataSchema = z
+  .object({
+    consultationId: z.uuid(),
+    requestId: z.uuid(),
+    intakeRef: z.string().regex(/^consultation_requests\/[0-9a-f-]{36}$/),
+    attributionRef: z
+      .string()
+      .regex(/^consultation_attributions\/[0-9a-f-]{36}$/)
+      .optional(),
+    mode: consultationModeSchema,
+    privacyNoticeVersion: z.string().trim().min(1).max(50),
+    privacyBasis: z.enum([
+      "explicit_consent",
+      "customer_initiated_channel_message",
+      "customer_initiated_channel_entry",
+      "customer_initiated_booking",
+    ]),
+    consentAgreedAt: z.iso.datetime({ offset: true }).optional(),
+    dedupeOutcome: z.enum(["new", "suspected_duplicate"]),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const hasConsent = Boolean(value.consentAgreedAt);
+    if (
+      (value.privacyBasis === "explicit_consent" && !hasConsent) ||
+      (value.privacyBasis !== "explicit_consent" && hasConsent)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "개인정보 처리 근거와 동의 시각이 일치하지 않습니다.",
+        path: ["consentAgreedAt"],
+      });
+    }
+  });
+
+const updatedDataSchema = z
+  .object({
+    consultationId: z.uuid(),
+    requestId: z.uuid(),
+    intakeRef: z.string().regex(/^consultation_requests\/[0-9a-f-]{36}$/),
+    attributionRef: z
+      .string()
+      .regex(/^consultation_attributions\/[0-9a-f-]{36}$/)
+      .optional(),
+    updateReason: z.literal("identity_enriched"),
+    dedupeOutcome: z.literal("identity_enrichment"),
+  })
+  .strict();
+
+const duplicateSuspectedDataSchema = z
+  .object({
+    consultationId: z.uuid(),
+    requestId: z.uuid(),
+    candidateConsultationId: z.uuid(),
+    reason: z.literal("same_phone_within_7_days"),
+    dedupeOutcome: z.literal("suspected_duplicate"),
+  })
+  .strict();
+
+const assignmentReferenceDataSchema = z
+  .object({
+    consultationId: z.uuid(),
+    requestId: z.uuid(),
+    assignmentId: z.uuid(),
+    assignmentRef: z
+      .string()
+      .regex(/^consultation_assignments\/[0-9a-f-]{36}$/),
+    intakeRef: z.string().regex(/^consultation_requests\/[0-9a-f-]{36}$/),
+  })
+  .strict();
+
+const requestReferenceDataSchema = z
+  .object({
+    consultationId: z.uuid(),
+    requestId: z.uuid(),
+    intakeRef: z.string().regex(/^consultation_requests\/[0-9a-f-]{36}$/),
+  })
+  .strict();
+
+const kakaoHomepageEntryReferenceDataSchema = requestReferenceDataSchema
+  .extend({
+    entryId: z.uuid(),
+    actorUserId: z.uuid(),
+  })
+  .strict();
+
+const assignedDataSchema = assignmentReferenceDataSchema
+  .extend({
+    assigneeUserId: z.uuid(),
+    assigneeMembershipId: z.uuid(),
+    assignmentMethod: z.literal("self_claim"),
+  })
+  .strict();
+
+export const consultationRequestedEventSchema = eventEnvelopeSchema
+  .extend({
+    eventType: z.literal("consultation.requested"),
+    data: requestedDataSchema,
+  })
+  .strict();
+
+export const consultationRequestUpdatedEventSchema = eventEnvelopeSchema
+  .extend({
+    eventType: z.literal("consultation.request.updated"),
+    data: updatedDataSchema,
+  })
+  .strict();
+
+export const consultationDuplicateSuspectedEventSchema = eventEnvelopeSchema
+  .extend({
+    eventType: z.literal("consultation.duplicate_suspected"),
+    data: duplicateSuspectedDataSchema,
+  })
+  .strict();
+
+export const consultationAssignedEventSchema = eventEnvelopeSchema
+  .extend({
+    eventType: z.literal("consultation.assigned"),
+    data: assignedDataSchema,
+  })
+  .strict();
+
+export const consultationKakaoChatConfirmedEventSchema =
+  eventEnvelopeSchema
+    .extend({
+      eventType: z.literal("consultation.kakao_chat.confirmed"),
+      data: kakaoHomepageEntryReferenceDataSchema,
+    })
+    .strict();
+
+export const consultationKakaoEntryInvalidatedEventSchema =
+  eventEnvelopeSchema
+    .extend({
+      eventType: z.literal("consultation.kakao_entry.invalidated"),
+      data: kakaoHomepageEntryReferenceDataSchema,
+    })
+    .strict();
+
+export const legalfriendsRegistrationRequestedEventSchema =
+  eventEnvelopeSchema
+    .extend({
+      eventType: z.literal(
+        "legalfriends.consultation.registration.requested",
+      ),
+      data: assignmentReferenceDataSchema,
+    })
+    .strict();
+
+export const alimtalkRequestNotificationRequestedEventSchema =
+  eventEnvelopeSchema
+    .extend({
+      eventType: z.literal(
+        "alimtalk.consultation.request_notification.requested",
+      ),
+      data: requestReferenceDataSchema.extend({
+        templatePurpose: z.literal("consultation_requested"),
+      }),
+    })
+    .strict();
+
+export const alimtalkAssignmentNotificationRequestedEventSchema =
+  eventEnvelopeSchema
+    .extend({
+      eventType: z.literal(
+        "alimtalk.consultation.assignment_notification.requested",
+      ),
+      data: assignmentReferenceDataSchema.extend({
+        templatePurpose: z.literal("consultation_assigned"),
+      }),
+    })
+    .strict();
+
+export const platformEventSchema = z.discriminatedUnion("eventType", [
+  consultationRequestedEventSchema,
+  consultationRequestUpdatedEventSchema,
+  consultationDuplicateSuspectedEventSchema,
+  consultationAssignedEventSchema,
+  consultationKakaoChatConfirmedEventSchema,
+  consultationKakaoEntryInvalidatedEventSchema,
+  legalfriendsRegistrationRequestedEventSchema,
+  alimtalkRequestNotificationRequestedEventSchema,
+  alimtalkAssignmentNotificationRequestedEventSchema,
+]);
+
+export type ConsultationRequestedEvent = z.infer<
+  typeof consultationRequestedEventSchema
+>;
+export type ConsultationRequestUpdatedEvent = z.infer<
+  typeof consultationRequestUpdatedEventSchema
+>;
+export type ConsultationDuplicateSuspectedEvent = z.infer<
+  typeof consultationDuplicateSuspectedEventSchema
+>;
+export type ConsultationAssignedEvent = z.infer<
+  typeof consultationAssignedEventSchema
+>;
+export type ConsultationKakaoChatConfirmedEvent = z.infer<
+  typeof consultationKakaoChatConfirmedEventSchema
+>;
+export type ConsultationKakaoEntryInvalidatedEvent = z.infer<
+  typeof consultationKakaoEntryInvalidatedEventSchema
+>;
+export type LegalfriendsRegistrationRequestedEvent = z.infer<
+  typeof legalfriendsRegistrationRequestedEventSchema
+>;
+export type AlimtalkRequestNotificationRequestedEvent = z.infer<
+  typeof alimtalkRequestNotificationRequestedEventSchema
+>;
+export type AlimtalkAssignmentNotificationRequestedEvent = z.infer<
+  typeof alimtalkAssignmentNotificationRequestedEventSchema
+>;
+export type PlatformEvent = z.infer<typeof platformEventSchema>;
+export type ConsultationEvent = PlatformEvent;
+
+export function assertPlatformEvent(
+  value: unknown,
+): asserts value is PlatformEvent {
+  platformEventSchema.parse(value);
+}
+
+export const consultationEventSchema = platformEventSchema;
+export const assertConsultationEvent = assertPlatformEvent;

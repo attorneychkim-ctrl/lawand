@@ -1,0 +1,118 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1785135712118,
+      "tag": "0000_consultation_intake_v1",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785137400784,
+      "tag": "0001_attribution_consent_and_landing_seed",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785139143468,
+      "tag": "0002_remove_attribution_consent",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785215557997,
+      "tag": "0003_staff_authentication",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785218268351,
+      "tag": "0004_staff_organization_membership",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1785220491852,
+      "tag": "0005_consultation_self_assignment",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785293208272,
+      "tag": "0006_outbox_delivery_worker",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1785293490975,
+      "tag": "0007_staff_external_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1785295337356,
+      "tag": "0008_legalfriends_two_step_assignment",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1785308804009,
+      "tag": "0009_customer_reviews",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785311380088,
+      "tag": "0010_customer_review_submissions",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785374192606,
+      "tag": "0011_legalfriends_v2_member_idx",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1785376566047,
+      "tag": "0012_solapi_alimtalk_delivery",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1785380377854,
+      "tag": "0013_kakao_channel_intake",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1785400909777,
+      "tag": "0014_kakao_homepage_entry",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1785472931536,
+      "tag": "0015_naver_booking_imap",
+      "breakpoints": true
+    }
+  ]
+}

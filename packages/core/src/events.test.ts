@@ -1,0 +1,262 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { consultationAttributionInputSchema } from "./attribution.js";
+import {
+  alimtalkAssignmentNotificationRequestedEventSchema,
+  alimtalkRequestNotificationRequestedEventSchema,
+  consultationAssignedEventSchema,
+  consultationRequestedEventSchema,
+  legalfriendsRegistrationRequestedEventSchema,
+} from "./events.js";
+
+const requestedEvent = {
+  eventId: "01984c7d-8500-7000-8000-000000000010",
+  eventType: "consultation.requested",
+  eventVersion: 1,
+  occurredAt: "2026-07-27T09:30:00.000Z",
+  producer: "lawand.gateway",
+  correlationId: "01984c7d-8500-7000-8000-000000000001",
+  data: {
+    consultationId: "01984c7d-8500-7000-8000-000000000001",
+    requestId: "01984c7d-8500-7000-8000-000000000002",
+    intakeRef:
+      "consultation_requests/01984c7d-8500-7000-8000-000000000002",
+    attributionRef:
+      "consultation_attributions/01984c7d-8500-7000-8000-000000000004",
+    mode: "quick",
+    privacyNoticeVersion: "2026-07-27",
+    privacyBasis: "explicit_consent",
+    consentAgreedAt: "2026-07-27T09:29:50.000Z",
+    dedupeOutcome: "new",
+  },
+} as const;
+
+test("consultation.requested v1은 개인정보 없는 참조 계약을 허용한다", () => {
+  assert.deepEqual(consultationRequestedEventSchema.parse(requestedEvent), requestedEvent);
+});
+
+test("consultation.requested에 전화번호 같은 계약 외 필드를 넣으면 거부한다", () => {
+  const unsafeEvent = {
+    ...requestedEvent,
+    data: {
+      ...requestedEvent.data,
+      phone: "01012345678",
+    },
+  };
+
+  assert.equal(consultationRequestedEventSchema.safeParse(unsafeEvent).success, false);
+});
+
+test("카카오 최초 메시지는 동의 시각을 꾸미지 않고 채널 시작 근거를 남긴다", () => {
+  const kakaoEvent = {
+    ...requestedEvent,
+    data: {
+      ...requestedEvent.data,
+      privacyBasis: "customer_initiated_channel_message",
+      consentAgreedAt: undefined,
+    },
+  };
+
+  assert.equal(
+    consultationRequestedEventSchema.safeParse(kakaoEvent).success,
+    true,
+  );
+  assert.equal(
+    consultationRequestedEventSchema.safeParse({
+      ...kakaoEvent,
+      data: {
+        ...kakaoEvent.data,
+        consentAgreedAt: requestedEvent.data.consentAgreedAt,
+      },
+    }).success,
+    false,
+  );
+});
+
+test("홈페이지 카카오 진입 클릭은 실제 채널 메시지와 다른 처리 근거를 남긴다", () => {
+  const event = {
+    eventId: "01984c7d-8500-7000-8000-000000000010",
+    eventType: "consultation.requested",
+    eventVersion: 1,
+    occurredAt: "2026-07-30T09:00:00+09:00",
+    producer: "lawand.gateway",
+    correlationId: "01984c7d-8500-7000-8000-000000000011",
+    data: {
+      consultationId: "01984c7d-8500-7000-8000-000000000011",
+      requestId: "01984c7d-8500-7000-8000-000000000012",
+      intakeRef:
+        "consultation_requests/01984c7d-8500-7000-8000-000000000012",
+      mode: "quick",
+      privacyNoticeVersion: "2026-07-30.kakao-homepage-entry.1",
+      privacyBasis: "customer_initiated_channel_entry",
+      dedupeOutcome: "new",
+    },
+  };
+  assert.equal(
+    consultationRequestedEventSchema.safeParse(event).success,
+    true,
+  );
+  assert.equal(
+    consultationRequestedEventSchema.safeParse({
+      ...event,
+      data: {
+        ...event.data,
+        consentAgreedAt: "2026-07-30T09:00:00+09:00",
+      },
+    }).success,
+    false,
+  );
+});
+
+test("네이버 예약은 고객이 직접 예약한 처리 근거를 남긴다", () => {
+  const event = {
+    ...requestedEvent,
+    data: {
+      ...requestedEvent.data,
+      privacyNoticeVersion: "2026-07-31.naver-booking.1",
+      privacyBasis: "customer_initiated_booking",
+      consentAgreedAt: undefined,
+    },
+  };
+
+  assert.equal(
+    consultationRequestedEventSchema.safeParse(event).success,
+    true,
+  );
+});
+
+test("상담 접수 알림톡은 개인정보 없이 접수 참조와 템플릿 용도만 남긴다", () => {
+  assert.equal(
+    alimtalkRequestNotificationRequestedEventSchema.safeParse({
+      ...requestedEvent,
+      eventId: "01984c7d-8500-7000-8000-000000000011",
+      eventType: "alimtalk.consultation.request_notification.requested",
+      causationId: requestedEvent.eventId,
+      data: {
+        consultationId: requestedEvent.data.consultationId,
+        requestId: requestedEvent.data.requestId,
+        intakeRef: requestedEvent.data.intakeRef,
+        templatePurpose: "consultation_requested",
+      },
+    }).success,
+    true,
+  );
+});
+
+const assignmentReference = {
+  consultationId: "01984c7d-8500-7000-8000-000000000001",
+  requestId: "01984c7d-8500-7000-8000-000000000002",
+  assignmentId: "01984c7d-8500-7000-8000-000000000005",
+  assignmentRef:
+    "consultation_assignments/01984c7d-8500-7000-8000-000000000005",
+  intakeRef: "consultation_requests/01984c7d-8500-7000-8000-000000000002",
+} as const;
+
+const assignmentEnvelope = {
+  eventId: "01984c7d-8500-7000-8000-000000000010",
+  eventVersion: 1,
+  occurredAt: "2026-07-27T09:30:00.000Z",
+  producer: "lawand.gateway",
+  correlationId: "01984c7d-8500-7000-8000-000000000001",
+} as const;
+
+test("담당 배정은 업무 이벤트와 외부 실행 요청을 개인정보 없는 참조로 남긴다", () => {
+  assert.equal(
+    consultationAssignedEventSchema.safeParse({
+      ...assignmentEnvelope,
+      eventType: "consultation.assigned",
+      data: {
+        ...assignmentReference,
+        assigneeUserId: "01984c7d-8500-7000-8000-000000000006",
+        assigneeMembershipId: "01984c7d-8500-7000-8000-000000000007",
+        assignmentMethod: "self_claim",
+      },
+    }).success,
+    true,
+  );
+  assert.equal(
+    legalfriendsRegistrationRequestedEventSchema.safeParse({
+      ...assignmentEnvelope,
+      eventType: "legalfriends.consultation.registration.requested",
+      causationId: "01984c7d-8500-7000-8000-000000000011",
+      data: assignmentReference,
+    }).success,
+    true,
+  );
+  assert.equal(
+    alimtalkAssignmentNotificationRequestedEventSchema.safeParse({
+      ...assignmentEnvelope,
+      eventType:
+        "alimtalk.consultation.assignment_notification.requested",
+      causationId: "01984c7d-8500-7000-8000-000000000011",
+      data: {
+        ...assignmentReference,
+        templatePurpose: "consultation_assigned",
+      },
+    }).success,
+    true,
+  );
+});
+
+test("외부 실행 요청 payload에 전화번호를 직접 넣으면 거부한다", () => {
+  assert.equal(
+    legalfriendsRegistrationRequestedEventSchema.safeParse({
+      ...assignmentEnvelope,
+      eventType: "legalfriends.consultation.registration.requested",
+      data: {
+        ...assignmentReference,
+        phone: "01012345678",
+      },
+    }).success,
+    false,
+  );
+});
+
+test("귀속 입력은 허용된 광고값과 내부 경로만 받는다", () => {
+  const result = consultationAttributionInputSchema.safeParse({
+    journeySessionId: "01984c7d-8500-7000-8000-000000000003",
+    startedAt: "2026-07-27T09:20:00.000Z",
+    firstLandingPath: "/bank/personal-rehabilitation/eligibility",
+    referrerHost: "www.google.com",
+    source: {
+      adpilotClickId: "ap-click-123",
+      externalCampaignId: "campaign-1",
+      externalAdGroupId: "adgroup-7",
+      externalKeywordId: "keyword-42",
+      matchedKeyword: "개인회생",
+      matchType: "exact",
+    },
+    journey: [
+      {
+        path: "/bank/personal-rehabilitation/eligibility",
+        visitedAt: "2026-07-27T09:20:00.000Z",
+        pageKey: "rehabilitation-eligibility",
+        pageVersion: "1",
+      },
+    ],
+    consultationCta: {
+      path: "/bank/personal-rehabilitation/eligibility",
+      placement: "mobile-sticky",
+      clickedAt: "2026-07-27T09:25:00.000Z",
+    },
+    submittedFromPath: "/bank/consultation",
+  });
+
+  assert.equal(result.success, true);
+});
+
+test("전체 URL이나 정의되지 않은 검색어 원문 필드는 귀속 입력에서 거부한다", () => {
+  const result = consultationAttributionInputSchema.safeParse({
+    journeySessionId: "01984c7d-8500-7000-8000-000000000003",
+    startedAt: "2026-07-27T09:20:00.000Z",
+    firstLandingPath: "https://lawandfirm.com/bank?phone=01012345678",
+    source: {
+      rawSearchQuery: "개인회생 전화번호 포함 원문",
+    },
+    journey: [],
+    submittedFromPath: "/bank/consultation",
+  });
+
+  assert.equal(result.success, false);
+});

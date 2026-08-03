@@ -1,0 +1,33 @@
+{
+  "name": "@lawand/gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx watch src/server.ts",
+    "lint": "eslint src",
+    "kakao:verify": "tsx src/verify-kakao-consultation.ts",
+    "kakao-homepage:verify": "tsx src/verify-kakao-homepage-entry.ts",
+    "alimtalk:run-events": "tsx src/run-alimtalk-events.ts",
+    "alimtalk:verify": "tsx src/verify-alimtalk-worker.ts",
+    "outbox:verify": "tsx src/verify-outbox-worker.ts",
+    "staff:bootstrap": "tsx src/create-staff-invite.ts",
+    "start": "node dist/server.js",
+    "test": "tsx --test src/**/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@lawand/core": "workspace:*",
+    "@lawand/db": "workspace:*",
+    "drizzle-orm": "0.45.1",
+    "imapflow": "^1.6.5",
+    "mailparser": "^3.9.14"
+  },
+  "devDependencies": {
+    "@types/mailparser": "^3.4.6",
+    "@types/node": "26.1.1",
+    "tsx": "4.21.0",
+    "typescript": "6.0.3"
+  }
+}

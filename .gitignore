@@ -10,9 +10,11 @@ out/
 
 # local environment
 .env
+.env.local
 .env.*.local
 
 # test and build output
+dist/
 coverage/
 playwright-report/
 test-results/
