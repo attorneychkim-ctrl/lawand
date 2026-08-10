@@ -55,6 +55,34 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-10 — 브리지 재접속 종료 보정·회선당 활성 통화 단일화 운영 배포
+- 김지안 회선에서 수신 `connected`와 직접 발신이 동시에 활성로 보인 원인을 운영 원장과
+  Windows 로그로 대사했다. 다른 장소의 중복 센트릭스 로그인 때문에 slot 013이
+  `LOGIN_RESULT=-1`·`NETWORK_ERROR` 뒤 재접속했고, v0.7.0이 로그인 성공 때 메모리의 기존
+  수신 상태를 종료 이벤트 없이 비워 DB에 ghost가 남았다. 뒤 직접 발신은 정상 종료됐지만
+  수신 한 건만 계속 활성로 남은 상태였다.
+- Windows bridge v0.7.1은 네트워크 재접속·수동 해제·회선 재설정·본인확인 실패·프로세스
+  종료 전에 현재 활성 수신·발신별 `ended` 보정 이벤트를 DPAPI 내구 큐에 넣고 나서 상태를
+  비운다. 로그인 성공 시 남은 상태와 3분 지난 수신 ring도 보정한다. 외부 번호 계약에
+  맞지 않는 4자리 내부 leg는 payload 검증 전에 활성 상태를 만들지 않게 해 뒤따르는
+  `connected/ended` 고아 큐도 차단했다. x86 self-test 16개를 통과한 v0.7.1.0 실행 파일
+  SHA-256은 `0EF80F01F74EE631FFF02E626A4681127A7F344430AF6D307DA34DACB30101D8`이며
+  조직용 인증서가 없어 기존과 같이 `NotSigned`다.
+- gateway는 bridge와 U+ callback의 모든 새 ring을 endpoint advisory lock으로 직렬화하고,
+  같은 회선의 다른 `ringing/connected` 원장을 `SUPERSEDED_BY_NEW_CALL` 합성 종료 이벤트와
+  함께 닫는다. 뒤 실제 종료가 도착하면 provider cause로 보강한다. migration 없이 릴리스
+  `20260810T073937Z-centrex-active-call-v1`을 배포했다. private S3 AES256 아티팩트 SHA-256은
+  `8e89a0cfe418cdb2dde1acdb381ee9f454e27eb46e9914f9179d3b1b3f0c70a3`, gateway 이미지 ID는
+  `sha256:585b6878b719dbe70093212fe5822606f9a38f3027247f662375507d9cc4abe9`다.
+- 기존 수신 ghost는 확인된 재접속 시각 `2026-08-10T07:15:14.401Z`로
+  `BRIDGE_RECONNECT_RECOVERY` 종료 이벤트를 남겨 복구했다. 배포 전 409 고아 암호문 6건은
+  삭제하지 않고 slot 007·013의 `gateway-dead-letter-archive`로 옮겼다. 최종 상태는 배정
+  11+warm 5, 프로세스 16개 전부 v0.7.1.0, 오프라인·로그인 실패·활성 큐·dead-letter 0,
+  감독기 정상, CloudWatch 5종 경보 `OK`이고 회선별 활성 중복 0건이다.
+- 전체 typecheck·lint·production build, core 55개·gateway 78개 테스트, gateway 로컬 DB
+  ingress 통합 검증과 `git diff --check`를 통과했다. 운영 gateway·Caddy active, 컨테이너
+  재시작 0, 외부 health 200이다. `PROJECT_PLAN.md`는 v0.94다.
+
 ### 2026-08-10 — 홈페이지 출시 후보 EIP 배포·정식 도메인 안전 전환 준비
 - 기존 217개 워크트리 변경을 `d069eb6`으로 보존하고 뒤처진 `origin/main`을 병합한 뒤,
   실제 `/bank/self-diagnosis`에 단계 전환 스크롤·포커스 어텐션 UX를 적용했다. 운영 DB

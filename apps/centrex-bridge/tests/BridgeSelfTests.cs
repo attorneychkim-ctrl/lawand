@@ -118,6 +118,12 @@ namespace Lawand.CentrexBridge
             True(json.Contains("\"eventType\":\"inbound.ringing\""));
             True(json.Contains("\"callerNumber\":\"01012345678\""));
             True(!json.Contains("RINGEVENT"));
+            string endedJson = GatewayEventPayload.Ended(
+                configuration,
+                "1315457785.80",
+                "BRIDGE_RECONNECT").ToJson();
+            True(endedJson.Contains("\"eventType\":\"inbound.ended\""));
+            True(endedJson.Contains("\"providerEndCause\":\"BRIDGE_RECONNECT\""));
         }
 
         private static void GatewayOutboundEventJson()
@@ -136,6 +142,26 @@ namespace Lawand.CentrexBridge
             True(json.Contains("\"calledNumber\":\"01012341382\""));
             True(!json.Contains("callerNumber"));
             True(!json.Contains("RINGEVENT"));
+            string endedJson = GatewayEventPayload.OutboundEnded(
+                configuration,
+                "1785994319.2611306",
+                "BRIDGE_RECONNECT").ToJson();
+            True(endedJson.Contains("\"eventType\":\"outbound.ended\""));
+            True(endedJson.Contains("\"providerEndCause\":\"BRIDGE_RECONNECT\""));
+
+            bool rejectedInternalExtension = false;
+            try
+            {
+                GatewayEventPayload.OutboundRinging(
+                    configuration,
+                    "1785994319.2611307",
+                    "8307");
+            }
+            catch (ArgumentException)
+            {
+                rejectedInternalExtension = true;
+            }
+            True(rejectedInternalExtension);
         }
 
         private static void GatewayPermanentFailureDisposition()

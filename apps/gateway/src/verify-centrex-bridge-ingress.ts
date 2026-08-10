@@ -172,6 +172,29 @@ try {
       authenticationNonceHash: randomBytes(32),
     },
   );
+  const activeAfterConcurrentRing = await database.db
+    .select({
+      id: telephonyInboundCalls.id,
+    })
+    .from(telephonyInboundCalls)
+    .where(
+      and(
+        eq(telephonyInboundCalls.endpointId, endpointId),
+        isNull(telephonyInboundCalls.endedAt),
+      ),
+    );
+  assert.deepEqual(activeAfterConcurrentRing, [{ id: concurrentRing.callId }]);
+  const [supersededInboundCall] = await database.db
+    .select({
+      state: telephonyInboundCalls.state,
+      providerEndCause: telephonyInboundCalls.providerEndCause,
+    })
+    .from(telephonyInboundCalls)
+    .where(eq(telephonyInboundCalls.id, ring.callId));
+  assert.deepEqual(supersededInboundCall, {
+    state: "ended",
+    providerEndCause: "SUPERSEDED_BY_NEW_CALL",
+  });
   await service.ingest(
     {
       schemaVersion: 1,
@@ -196,6 +219,7 @@ try {
     .where(eq(telephonyInboundCalls.id, ring.callId));
   assert.ok(storedCall);
   assert.equal(storedCall.state, "ended");
+  assert.equal(storedCall.providerEndCause, "16");
   assert.equal(storedCall.remotePhoneMasked, "***5678");
   assert.equal(storedCall.remotePhoneFingerprint.equals(protection.fingerprint(phone)), true);
   assert.equal(storedCall.remotePhoneCiphertext.includes(Buffer.from(phone)), false);
@@ -204,7 +228,7 @@ try {
     .select({ id: telephonyInboundEvents.id })
     .from(telephonyInboundEvents)
     .where(eq(telephonyInboundEvents.inboundCallId, ring.callId));
-  assert.equal(events.length, 3);
+  assert.equal(events.length, 4);
 
   const outboundRing = await service.ingest(
     {
@@ -223,6 +247,27 @@ try {
       authenticationNonceHash: randomBytes(32),
     },
   );
+  const activeAfterOutboundRing = await database.db
+    .select({ id: telephonyInboundCalls.id })
+    .from(telephonyInboundCalls)
+    .where(
+      and(
+        eq(telephonyInboundCalls.endpointId, endpointId),
+        isNull(telephonyInboundCalls.endedAt),
+      ),
+    );
+  assert.deepEqual(activeAfterOutboundRing, [{ id: outboundRing.callId }]);
+  const [supersededConcurrentCall] = await database.db
+    .select({
+      state: telephonyInboundCalls.state,
+      providerEndCause: telephonyInboundCalls.providerEndCause,
+    })
+    .from(telephonyInboundCalls)
+    .where(eq(telephonyInboundCalls.id, concurrentRing.callId));
+  assert.deepEqual(supersededConcurrentCall, {
+    state: "ended",
+    providerEndCause: "SUPERSEDED_BY_NEW_CALL",
+  });
   await service.ingest(
     {
       schemaVersion: 1,

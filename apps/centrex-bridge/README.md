@@ -9,6 +9,8 @@ LG U+ 고급형 센트릭스 A타입의 32비트 OpenAPI OCX를 상시 호스팅
 - 인스턴스별 설정·로그·DPAPI 큐·mutex·작업 스케줄러 격리
 - 최대 50개 논리 슬롯을 미리 준비하되 배정된 슬롯과 유휴 warm pool 5개만 상시 실행
 - 센트릭스 네트워크 오류·health check 기반 지수 backoff 재연결
+- 재접속·명시적 연결 해제·프로세스 종료 전에 메모리의 활성 수신·발신을 각각
+  `ended` 보정 이벤트로 내구 큐에 넣은 뒤 상태를 비움
 - 비밀번호는 Windows 자격 증명 관리자에만 저장
 - 발신번호는 로컬 로그와 트레이 알림에서 끝 4자리만 표시
 - 수신과 센트릭스 직접 발신 이벤트는 현재 Windows 사용자 DPAPI로 암호화한 디스크 큐에 먼저 저장하고,
@@ -21,6 +23,8 @@ LG U+ 고급형 센트릭스 A타입의 32비트 OpenAPI OCX를 상시 호스팅
   통화로 판정하고, 연결된 통화는 `CHANNELLIST`의 양쪽 channel ID를 종료까지 추적
 - `RINGEVENT(ISDIAL=1)`은 상대 `CALLERID`를 직접 발신으로 기록하고 수신과 분리된
   `outbound.ringing → outbound.connected → outbound.ended` 계약으로 전달
+- 외부 전화번호 계약을 만족하지 않는 4자리 내부 leg 등은 활성 통화 상태를 만들기 전에
+  거부해 뒤따르는 연결·종료 이벤트가 고아 큐가 되지 않게 함
 - gateway의 전화 받기 명령을 0.75초 간격의 서명된 polling으로 가져오며 전화번호는
   명령 payload에 포함하지 않음
 - `Answer()`는 현재 활성 수신 unique ID가 명령의 provider ID와 맞을 때만 호출하고,
@@ -41,6 +45,9 @@ LG U+ 고급형 센트릭스 A타입의 32비트 OpenAPI OCX를 상시 호스팅
 소유자가 누른 현재 수신 한 건만 처리한다. OpenAPI가 직접 발신의 단말 종류를 별도로
 제공하지 않으므로 ERP 클릭투콜 원장과 연결되지 않은 발신은 `센트릭스 직접 발신`으로
 관리한다. 실물 전화기와 U+ 비즈콜 앱의 표시 구분은 비즈콜 실제 canary 뒤 확정한다.
+gateway는 bridge와 U+ callback 양쪽의 새 ring을 endpoint advisory lock으로 직렬화하고,
+같은 회선에 남아 있는 다른 `ringing/connected` 원장을 `SUPERSEDED_BY_NEW_CALL`로 종료한다.
+따라서 재접속 보정 이벤트가 유실되더라도 ERP에는 회선당 활성 통화가 하나만 남는다.
 실제 무응답 canary에서 `RINGEVENT`와 `CHANNELOUT`의 provider ID가 인접 sequence의
 서로 다른 leg로 전달되는 것을 확인해 위 제한 규칙을 적용했다.
 실제 받기 canary에서는 최초 수신 ID와 전화기 쪽 연결 channel ID의 prefix·sequence가

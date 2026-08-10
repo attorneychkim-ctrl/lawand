@@ -1,4 +1,4 @@
-# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v0.93)
+# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v0.94)
 
 > 이 문서는 새 로앤 홈페이지 + 새 ERP + 리걸플로/리걸프렌즈 연동을 하나의 플랫폼으로
 > 묶기 위한 **저장소 구조·아키텍처 설계 초안**이다. 코덱스/클로드코드 세션이 번갈아
@@ -303,6 +303,26 @@
 > 필요한 한계는 유지한다. RDP 창은 로그아웃하지 말고 연결만 끊어 interactive session을
 > 보존한다. 운영 실행 파일은 v0.7.0.0이고 빌드·설치 단계의 Authenticode 강제 경계는
 > 구현했으나 서버에 조직용 코드 서명 인증서가 없어 현재 배포본은 아직 `NotSigned`다.
+> 같은 날 한 직원 회선이 다른 장소의 중복 센트릭스 로그인으로 재접속되면서, 재접속 전
+> 수신 통화는 ERP 원장에 `connected`로 남고 재로그인 뒤 직접 발신이 별도 활성 통화로
+> 표시되는 문제를 확인했다. bridge v0.7.1은 네트워크 재접속·수동 연결 해제·회선 재설정·
+> 프로세스 종료 전에 메모리의 활성 수신·발신을 각각 `ended` 보정 이벤트로 DPAPI 큐에
+> 넣고 나서 상태를 비운다. 로그인 성공 시 남은 상태와 3분 지난 수신 ring도 같은 방식으로
+> 보정한다. 외부 전화번호가 아닌 4자리 내부 leg는 ring payload 검증이 끝난 뒤에만 활성
+> 상태를 만들도록 순서를 바꿔 고아 `connected/ended` 이벤트를 차단했다.
+> gateway는 bridge와 U+ callback의 새 ring을 모두 endpoint advisory lock 아래 직렬화한다.
+> 새 통화를 만들기 전에 같은 회선의 다른 `ringing/connected` 원장을
+> `SUPERSEDED_BY_NEW_CALL`과 비식별 합성 종료 이벤트로 닫아, bridge 보정이 네트워크에서
+> 유실돼도 회선당 활성 통화를 하나로 유지한다. 뒤늦은 실제 종료 이벤트는 합성 원장의
+> 종료 원인을 실제 provider cause로 보강한다. 기존 김지안 회선의 수신 ghost 한 건은 확인된
+> 재접속 시각으로 `BRIDGE_RECONNECT_RECOVERY` 종료 이벤트를 남겨 복구했다. gateway 릴리스
+> `20260810T073937Z-centrex-active-call-v1`과 Windows bridge v0.7.1.0을 운영 배포했으며,
+> gateway 78개·core 55개 테스트, 전체 typecheck·lint·production build, bridge x86
+> self-test 16개와 로컬 DB ingress 통합 검증을 통과했다. 운영 최종 대사에서 회선별 활성
+> 중복 0, 배정 11개+warm 5개 전부 온라인, 큐·dead-letter 0, 로그인 실패 0을 확인했다.
+> 배포 전에 생성된 409 격리 암호문 6건은 삭제하지 않고 인스턴스별
+> `gateway-dead-letter-archive`에 보존했고 CloudWatch 5종 경보는 모두 `OK`로 복귀했다.
+> 실행 파일은 여전히 `NotSigned`다.
 > 재택 U+ 비즈콜 앱은 같은 4535 회선 수신을 휴대전화에서 받지만 Windows OCX 이벤트가
 > 없으므로 기존 bridge 전용 수신 바와 전화데스크에는 나타나지 않았다. 운영에서 실제 누락
 > 시각을 U+ REST `getinboundcall`로 대사하자 `FAILED`, `CANCEL` 이력이 존재해 망 단위
@@ -1346,6 +1366,8 @@ Manager와 별도 역할·보안그룹·TLS 기준을 적용한다.
     홈페이지형 날짜·30분 시간 카드, 저장 뒤 목록 이동과 상세 목록 버튼 복구
 - [x] Windows 다중 bridge 운영 안정화: 감독기·비정상 종료 재시작, SYSTEM health metric·
   CloudWatch 5종 경보, DPAPI dead-letter, 직원관리 4단계 상태, 관리자 유휴 슬롯 재배정
+- [x] bridge 재접속 전 활성 수·발신 종료 보정 + gateway endpoint lock 기반 회선당 활성
+  통화 단일화 + 내부 4자리 leg 고아 이벤트 차단을 v0.7.1로 운영 배포
 - [x] 실제 업무 통화를 포함한 10→25→50 프로세스 CPU·메모리 canary와 warm 5개 원복
 - [ ] bridge 조직용 Authenticode 인증서 발급·서명 배포
 - [x] Windows 재부팅 canary: 평문 자동 로그온 없이 SYSTEM 경보 확인 → 관리자 RDP 로그인 →
