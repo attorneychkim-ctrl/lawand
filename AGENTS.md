@@ -59,6 +59,28 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-10 — silver-stone 메인 병합·기배포 상태 검증
+- 원격 `worktree/silver-stone-87f7`의 기능·운영 문서 커밋을 기존 고객 찾기 커밋이 있는
+  `main`에 병합해 `3d41396`으로 만들고 `origin/main`에 푸시했다. 최신 인수인계 로그 충돌은
+  재접속 보정 항목을 위에, 고객 찾기 항목을 아래에 두어 둘 다 보존했다. 병합 상태에서 전체
+  typecheck·lint·production build, core 57개·gateway 79개 테스트, Drizzle schema check와
+  `git diff --check`를 통과했다.
+- 브랜치 세션이 gateway 릴리스 `20260810T073937Z-centrex-active-call-v1`과 Windows bridge
+  v0.7.1.0을 이미 운영에 배포했으므로 main에서는 재배포하지 않았다. 기존 김지안 수신 ghost
+  보정과 slot 007·013 dead-letter 6건 아카이브도 다시 실행하지 않았다. gateway 실행 이미지
+  ID `sha256:585b6878b719dbe70093212fe5822606f9a38f3027247f662375507d9cc4abe9`, bridge
+  SHA-256 `0EF80F01F74EE631FFF02E626A4681127A7F344430AF6D307DA34DACB30101D8`을 운영에서
+  읽기 전용으로 재확인했다.
+- 운영은 gateway·Caddy active, 양쪽 systemd·컨테이너 재시작 0, 릴리스 이후 error journal 0,
+  내부·외부 health 200이다. Windows 상태는 설치 51, 배정 11, 실행 16, warm 5, 오프라인·
+  로그인 실패·활성 큐·dead-letter 0, 감독기 정상이고 16개 프로세스가 모두 v0.7.1.0이다.
+  최근 10분 CloudWatch 원시 지표도 같은 값이며 5종 경보는 모두 `OK`다. 검증 중 실제 업무
+  통화가 새로 진행되어 활성 통화 수는 인수인계 시점의 0이 아닌 동적 값이었지만, 회선별 활성
+  중복은 0을 유지했다. 통화를 강제 종료하거나 운영 원장을 보정하지 않았다.
+- 현재 main의 고객 찾기 커밋 `5bb3087`과 migration 0040은 이 작업에서 운영 배포하지 않았다.
+  따라서 다음 main 배포에서는 고객 찾기 운영 migration·gateway·ERP 배포 범위를 별도
+  승인·검증하고, 이번 기배포 확인과 혼동하지 않는다.
+
 ### 2026-08-10 — 브리지 재접속 종료 보정·회선당 활성 통화 단일화 운영 배포
 - 김지안 회선에서 수신 `connected`와 직접 발신이 동시에 활성로 보인 원인을 운영 원장과
   Windows 로그로 대사했다. 다른 장소의 중복 센트릭스 로그인 때문에 slot 013이

@@ -6,7 +6,7 @@ CloudFormation 스택: `lawand-prod`
 최초 배포 릴리스: `20260804T085006Z-84e8708`
 현재 홈페이지 릴리스: `20260810T064408Z-homepage-cutover-ready-v3`
 현재 ERP 릴리스: `20260807T072916Z-phone-aftercare-ux`
-현재 gateway 릴리스: `20260807T072916Z-phone-aftercare-ux`
+현재 gateway 릴리스: `20260810T073937Z-centrex-active-call-v1`
 
 이 문서는 정식 도메인 전환 전까지의 실제 AWS 구성, 접속점, 데이터 이관 범위와
 운영 체크리스트를 기록한다. 비밀번호·API 키·AWS 계정 ID·RDS 마스터 시크릿 ARN은
