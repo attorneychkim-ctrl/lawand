@@ -165,6 +165,32 @@ export const legalFriendsDirectoryClickToCallSchema = z
   })
   .strict();
 
+export const legalFriendsDirectoryMessageSendSchema = z
+  .object({
+    clientIdx: z.number().int().positive(),
+    caseIdx: z.number().int().positive(),
+    idempotencyKey: z.uuid(),
+    templateId: z.uuid().nullable(),
+    body: z.string().trim().min(1).max(CENTREX_LMS_MAX_BYTES),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (templateVariables(value.body).length > 0) {
+      context.addIssue({
+        code: "custom",
+        message: "치환되지 않은 템플릿 변수가 남아 있습니다.",
+        path: ["body"],
+      });
+    }
+    if (centrexMessageByteLength(value.body) > CENTREX_LMS_MAX_BYTES) {
+      context.addIssue({
+        code: "custom",
+        message: "문자 내용은 센트릭스 LMS 기준 720바이트 이하여야 합니다.",
+        path: ["body"],
+      });
+    }
+  });
+
 export type TelephonyCallDisposition = z.infer<
   typeof telephonyCallDispositionSchema
 >;

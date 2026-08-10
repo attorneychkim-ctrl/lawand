@@ -556,6 +556,8 @@ test("클릭투콜 API는 인증된 현재 담당자와 상담 ID를 서비스�
 test("고객찾기 API는 검색어와 리걸프렌즈 고객 식별자만 서비스에 전달한다", async (context) => {
   let searchedQuery = "";
   let clickTarget: { clientIdx: number; caseIdx: number } | undefined;
+  let messageTarget: { clientIdx: number; caseIdx: number } | undefined;
+  let messageBody = "";
   const telephonyService = {
     searchLegalFriendsClients: async (
       query: string,
@@ -590,6 +592,37 @@ test("고객찾기 API는 검색어와 리걸프렌즈 고객 식별자만 서�
         reconciledAt: null,
         disposition: null,
         dispositionConfirmedAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        replayed: false,
+      };
+    },
+    requestDirectoryMessage: async (
+      target: { clientIdx: number; caseIdx: number },
+      input: { body: string },
+      actor: StaffPrincipal,
+    ) => {
+      messageTarget = target;
+      messageBody = input.body;
+      assert.equal(actor.id, realtimeActor.id);
+      return {
+        id: "019fa6a4-6834-7782-aa0b-4e71ffb8a2e3",
+        targetSource: "legal_friends_directory" as const,
+        consultationId: null,
+        endpointId: "019fa6a4-6834-7782-aa0b-4e71ffb8a2e2",
+        templateId: null,
+        templateName: null,
+        provider: "centrex" as const,
+        messageKind: "sms" as const,
+        imageAttached: false,
+        imageName: null,
+        bodyByteLength: 16,
+        commandStatus: "queued" as const,
+        requestedAt: "2026-08-10T07:00:00.000Z",
+        dispatchedAt: null,
+        providerRespondedAt: null,
+        providerCode: null,
+        providerRemainingCount: null,
         lastErrorCode: null,
         lastErrorMessage: null,
         replayed: false,
@@ -631,6 +664,24 @@ test("고객찾기 API는 검색어와 리걸프렌즈 고객 식별자만 서�
   );
   assert.equal(clickResponse.status, 201);
   assert.deepEqual(clickTarget, { clientIdx: 123, caseIdx: 456 });
+
+  const messageResponse = await fetch(
+    `http://127.0.0.1:${address.port}/v1/client-directory/messages`,
+    {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({
+        clientIdx: 123,
+        caseIdx: 456,
+        idempotencyKey: "019fa6a4-6834-7782-aa0b-4e71ffb8a2e4",
+        templateId: null,
+        body: "고객 안내 문자",
+      }),
+    },
+  );
+  assert.equal(messageResponse.status, 201);
+  assert.deepEqual(messageTarget, { clientIdx: 123, caseIdx: 456 });
+  assert.equal(messageBody, "고객 안내 문자");
 });
 
 test("일반 직원은 자신의 문자 템플릿을 만들고 담당 상담에 문자를 요청한 뒤 삭제한다", async (context) => {

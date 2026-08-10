@@ -29,6 +29,7 @@ import {
   phoneDeskAftercareSaveSchema,
   phoneDeskFollowUpCompletionSchema,
   legalFriendsDirectoryClickToCallSchema,
+  legalFriendsDirectoryMessageSendSchema,
   telephonyCallDispositionConfirmationSchema,
   telephonyMessageSendSchema,
 } from "@lawand/core";
@@ -1439,6 +1440,48 @@ export function createGatewayServer(options?: {
             parsed.data,
             actor,
           );
+        sendJson(response, result.replayed ? 200 : 201, result);
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        url.pathname === "/v1/client-directory/messages"
+      ) {
+        if (
+          !options?.telephonyService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const parsed = legalFriendsDirectoryMessageSendSchema.safeParse(
+          await readJson(request),
+        );
+        if (!parsed.success) {
+          sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        const { clientIdx, caseIdx, ...messageInput } = parsed.data;
+        const result = await options.telephonyService.requestDirectoryMessage(
+          { clientIdx, caseIdx },
+          messageInput,
+          actor,
+        );
         sendJson(response, result.replayed ? 200 : 201, result);
         return;
       }

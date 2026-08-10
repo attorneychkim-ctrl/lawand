@@ -23,6 +23,7 @@ import {
   telephonyCallDirectoryTargets,
   telephonyCalls,
   telephonyEndpoints,
+  telephonyMessageDirectoryTargets,
   telephonyMessages,
 } from "@lawand/db";
 import type { createDatabaseClient } from "@lawand/db";
@@ -487,6 +488,7 @@ export function createCentrexWorker(options: {
       .select({
         messageId: telephonyMessages.id,
         provider: telephonyMessages.provider,
+        targetSource: telephonyMessages.targetSource,
         requestId: telephonyMessages.consultationRequestId,
         endpointId: telephonyMessages.endpointId,
         bodyCiphertext: telephonyMessages.bodyCiphertext,
@@ -500,6 +502,13 @@ export function createCentrexWorker(options: {
         phoneNonce: consultationRequests.phoneNonce,
         phoneKeyVersion: consultationRequests.phoneKeyVersion,
         requestPhoneFingerprint: consultationRequests.phoneFingerprint,
+        directoryClientIdx: telephonyMessageDirectoryTargets.clientIdx,
+        directoryCaseIdx: telephonyMessageDirectoryTargets.caseIdx,
+        directoryPhoneCiphertext:
+          telephonyMessageDirectoryTargets.phoneCiphertext,
+        directoryPhoneNonce: telephonyMessageDirectoryTargets.phoneNonce,
+        directoryPhoneKeyVersion:
+          telephonyMessageDirectoryTargets.phoneKeyVersion,
       })
       .from(telephonyMessages)
       .innerJoin(
@@ -510,40 +519,78 @@ export function createCentrexWorker(options: {
           eq(telephonyEndpoints.provider, "centrex"),
         ),
       )
-      .innerJoin(
+      .leftJoin(
         consultationRequests,
         eq(
           consultationRequests.id,
           telephonyMessages.consultationRequestId,
         ),
       )
+      .leftJoin(
+        telephonyMessageDirectoryTargets,
+        eq(
+          telephonyMessageDirectoryTargets.telephonyMessageId,
+          telephonyMessages.id,
+        ),
+      )
       .where(eq(telephonyMessages.id, event.messageId))
       .limit(1);
-    if (
-      !row ||
-      row.requestId !== envelope.data.requestId ||
-      row.endpointId !== envelope.data.endpointId ||
-      !row.phoneCiphertext ||
-      !row.phoneNonce ||
-      !row.phoneKeyVersion ||
-      !row.requestPhoneFingerprint ||
-      !row.remotePhoneFingerprint.equals(row.requestPhoneFingerprint)
-    ) {
+    if (!row || row.endpointId !== envelope.data.endpointId) {
       throw new Error("telephony_message_reference_not_found");
     }
     if (row.provider !== envelope.data.provider) {
       throw new Error("telephony_message_provider_mismatch");
     }
+    let directoryEvent = false;
+    let referenceMatches = false;
+    let phoneCiphertext: Buffer | null = null;
+    let phoneNonce: Buffer | null = null;
+    let phoneKeyVersion: string | null = null;
+    if (
+      "targetSource" in envelope.data &&
+      envelope.data.targetSource === "legal_friends_directory"
+    ) {
+      directoryEvent = true;
+      referenceMatches =
+        row.targetSource === "legal_friends_directory" &&
+        row.directoryClientIdx === envelope.data.directoryClientIdx &&
+        row.directoryCaseIdx === envelope.data.directoryCaseIdx;
+      phoneCiphertext = row.directoryPhoneCiphertext;
+      phoneNonce = row.directoryPhoneNonce;
+      phoneKeyVersion = row.directoryPhoneKeyVersion;
+    } else {
+      const requestPhoneFingerprint = row.requestPhoneFingerprint;
+      referenceMatches =
+        row.targetSource === "consultation" &&
+        row.requestId === envelope.data.requestId &&
+        requestPhoneFingerprint !== null &&
+        row.remotePhoneFingerprint.equals(requestPhoneFingerprint);
+      phoneCiphertext = row.phoneCiphertext;
+      phoneNonce = row.phoneNonce;
+      phoneKeyVersion = row.phoneKeyVersion;
+    }
+    if (!referenceMatches || !phoneCiphertext || !phoneNonce || !phoneKeyVersion) {
+      throw new Error("telephony_message_reference_not_found");
+    }
+    const destination = protection.decrypt(
+      {
+        ciphertext: phoneCiphertext,
+        nonce: phoneNonce,
+        keyVersion: phoneKeyVersion,
+      },
+      directoryEvent
+        ? `telephony_message_directory_targets/${row.messageId}/phone`
+        : `consultation_requests.phone:${row.requestId}`,
+    );
+    if (
+      directoryEvent &&
+      !row.remotePhoneFingerprint.equals(protection.fingerprint(destination))
+    ) {
+      throw new Error("telephony_message_reference_not_found");
+    }
     const common = {
       endpointId: row.endpointId,
-      destination: protection.decrypt(
-        {
-          ciphertext: row.phoneCiphertext,
-          nonce: row.phoneNonce,
-          keyVersion: row.phoneKeyVersion,
-        },
-        `consultation_requests.phone:${row.requestId}`,
-      ),
+      destination,
       message: protection.decrypt(
         {
           ciphertext: row.bodyCiphertext,

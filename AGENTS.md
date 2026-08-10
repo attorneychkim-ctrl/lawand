@@ -71,6 +71,27 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-11 — ERP 고객 찾기 문자·전화 동등 흐름 출시 후보
+- `/clients` 검색 결과에 기존 센트릭스 클릭투콜과 함께 상담 상세의 문자 작성창을 재사용해
+  개인 템플릿·직접 입력·SMS/LMS·JPG MMS를 보낼 수 있게 했다. `{{고객명}}`과
+  `{{담당자명}}`은 검색 결과와 로그인 직원을, `{{접수번호}}`는 리걸프렌즈 사건번호를
+  사용하며 사건번호가 없으면 `미등록`으로 치환한다. 발신 가능한 번호가 없으면 문자와
+  전화를 모두 막는다.
+- 브라우저와 outbox에는 전화번호·본문을 넣지 않는다. 고객·사건 ID만 받은 gateway가 기존
+  삭제 사건 제외 security-definer 함수로 대상을 다시 확인하고, migration
+  `0043_famous_rafael_vega.sql`의 `telephony_message_directory_targets`에 고객명·전화번호를
+  AES-GCM 스냅샷으로 보존한다. 문자 원장은 상담/리걸프렌즈 대상을 명시하며 기존 상담 문자,
+  직원 개인 템플릿 소유권, 회선·MMS 설정, 직렬 worker 계약을 유지한다.
+- 전화데스크는 통화 사실·후처리 원장으로 유지했다. 고객 대상이 명시되지 않은 직접 수·발신
+  행에서 원시 상대번호로 새 문자를 보내면 오발송 위험과 감사 맥락이 커지므로 이번 범위에는
+  추가하지 않았다. 후속 필요가 확인되면 상담 또는 리걸프렌즈 고객으로 해석된 상세에서만
+  같은 대상 재검증 경계를 재사용한다.
+- core 61개·gateway 87개 테스트, 전체 5개 패키지 typecheck·lint·production build,
+  Drizzle schema check와 `git diff --check`를 통과했다. `lawand_dev` 복제 임시 DB에서
+  migration 43개 적용, 기존 문자 대상 보존 제약, `lawand_app` CRUD·viewer SELECT 전용·
+  PUBLIC 권한 0을 확인하고 임시 DB를 삭제했다. 실제 로컬·운영 DB migration, 문자 발송,
+  운영 배포는 수행하지 않았다. `PROJECT_PLAN.md`는 v1.02다.
+
 ### 2026-08-11 — ERP 내 정보 입력 스타일·전화 내선 중복 표시 수정
 - 우측 상단 직원 이름에서 진입하는 `/profile` 기본 정보의 소속·지역 `select`와 부서·직책
   `input`에 ERP의 다른 입력 UI와 같은 테두리·배경·텍스트·hover/focus ring을 적용했다.

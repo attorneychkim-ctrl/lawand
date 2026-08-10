@@ -135,8 +135,6 @@ const telephonyCallReferenceDataSchema = z.union([
 
 const telephonyMessageReferenceFields = {
   messageId: z.uuid(),
-  consultationId: z.uuid(),
-  requestId: z.uuid(),
   endpointId: z.uuid(),
   staffUserId: z.uuid(),
   contentRef: z
@@ -144,10 +142,24 @@ const telephonyMessageReferenceFields = {
     .regex(/^telephony_messages\/[0-9a-f-]{36}\/body$/),
 };
 
-const telephonyMessageReferenceDataSchema = z.discriminatedUnion("provider", [
+const consultationTelephonyMessageReferenceFields = {
+  ...telephonyMessageReferenceFields,
+  targetSource: z.literal("consultation").optional(),
+  consultationId: z.uuid(),
+  requestId: z.uuid(),
+};
+
+const legalFriendsDirectoryTelephonyMessageReferenceFields = {
+  ...telephonyMessageReferenceFields,
+  targetSource: z.literal("legal_friends_directory"),
+  directoryClientIdx: z.number().int().positive(),
+  directoryCaseIdx: z.number().int().positive(),
+};
+
+const telephonyMessageReferenceDataSchema = z.union([
   z
     .object({
-      ...telephonyMessageReferenceFields,
+      ...consultationTelephonyMessageReferenceFields,
       provider: z.literal("centrex"),
       channel: z.literal("sms"),
       command: z.literal("smssend"),
@@ -155,7 +167,23 @@ const telephonyMessageReferenceDataSchema = z.discriminatedUnion("provider", [
     .strict(),
   z
     .object({
-      ...telephonyMessageReferenceFields,
+      ...consultationTelephonyMessageReferenceFields,
+      provider: z.literal("solapi"),
+      channel: z.literal("mms"),
+      command: z.literal("send-many"),
+    })
+    .strict(),
+  z
+    .object({
+      ...legalFriendsDirectoryTelephonyMessageReferenceFields,
+      provider: z.literal("centrex"),
+      channel: z.literal("sms"),
+      command: z.literal("smssend"),
+    })
+    .strict(),
+  z
+    .object({
+      ...legalFriendsDirectoryTelephonyMessageReferenceFields,
       provider: z.literal("solapi"),
       channel: z.literal("mms"),
       command: z.literal("send-many"),

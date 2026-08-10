@@ -9,6 +9,7 @@ import {
   centrexMessageByteLength,
   centrexMessageKind,
   legalFriendsDirectoryClickToCallSchema,
+  legalFriendsDirectoryMessageSendSchema,
   messageTemplateCreateSchema,
   messageTemplateUpdateSchema,
   phoneDeskAftercareSaveSchema,
@@ -27,6 +28,27 @@ test("고객찾기 발신은 양의 고객·사건 식별자만 받는다", () =
       clientIdx: 10,
       caseIdx: 20,
       phone: "01012345678",
+    }).success,
+    false,
+  );
+  assert.equal(
+    legalFriendsDirectoryMessageSendSchema.safeParse({
+      clientIdx: 10,
+      caseIdx: 20,
+      idempotencyKey: "01980000-0000-7000-8000-000000000042",
+      templateId: null,
+      body: "고객 안내 문자",
+    }).success,
+    true,
+  );
+  assert.equal(
+    legalFriendsDirectoryMessageSendSchema.safeParse({
+      clientIdx: 10,
+      caseIdx: 20,
+      phone: "01012345678",
+      idempotencyKey: "01980000-0000-7000-8000-000000000042",
+      templateId: null,
+      body: "고객 안내 문자",
     }).success,
     false,
   );

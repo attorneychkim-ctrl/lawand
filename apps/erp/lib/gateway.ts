@@ -91,7 +91,8 @@ export type MessageTemplate = {
 
 export type TelephonyMessage = {
   id: string;
-  consultationId: string;
+  targetSource: "consultation" | "legal_friends_directory";
+  consultationId: string | null;
   endpointId: string;
   templateId: string | null;
   templateName: string | null;
@@ -779,6 +780,21 @@ export async function requestConsultationMessage(
 ): Promise<TelephonyMessage> {
   return messageResponse(
     await gatewayFetch(`/v1/consultations/${consultationId}/messages`, {
+      method: "POST",
+      body: input,
+    }),
+  );
+}
+
+export async function requestDirectoryMessage(input: {
+  clientIdx: number;
+  caseIdx: number;
+  idempotencyKey: string;
+  templateId: string | null;
+  body: string;
+}): Promise<TelephonyMessage> {
+  return messageResponse(
+    await gatewayFetch("/v1/client-directory/messages", {
       method: "POST",
       body: input,
     }),

@@ -326,6 +326,26 @@ test("문자 발송 이벤트는 전화번호와 본문 대신 암호화 원장 
     }).success,
     false,
   );
+  assert.equal(
+    telephonyMessageRequestedEventSchema.safeParse({
+      ...messageEvent,
+      correlationId: "01984c7d-8500-7000-8000-000000000030",
+      data: {
+        messageId: "01984c7d-8500-7000-8000-000000000030",
+        targetSource: "legal_friends_directory",
+        directoryClientIdx: 123,
+        directoryCaseIdx: 456,
+        endpointId: "01984c7d-8500-7000-8000-000000000021",
+        staffUserId: "01984c7d-8500-7000-8000-000000000006",
+        provider: "centrex",
+        channel: "sms",
+        command: "smssend",
+        contentRef:
+          "telephony_messages/01984c7d-8500-7000-8000-000000000030/body",
+      },
+    }).success,
+    true,
+  );
 });
 
 test("귀속 입력은 허용된 광고값과 내부 경로만 받는다", () => {

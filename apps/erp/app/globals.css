@@ -4891,18 +4891,20 @@ a.inbound-customer:hover { text-decoration: underline; }
   line-height: 1.45;
 }
 
-.client-directory-call {
+.client-directory-actions {
   display: grid;
   align-content: center;
+  gap: 10px;
   border-left: 1px solid var(--line);
   padding-left: 18px;
 }
 
-.client-directory-call .call-button {
+.client-directory-actions .call-button,
+.client-directory-actions .message-button {
   width: 100%;
 }
 
-.client-directory-call p,
+.client-directory-actions p,
 .client-directory-empty {
   margin: 0;
   color: var(--muted);
@@ -4943,7 +4945,7 @@ a.inbound-customer:hover { text-decoration: underline; }
     grid-template-columns: 1fr;
   }
 
-  .client-directory-call {
+  .client-directory-actions {
     border-top: 1px solid var(--line);
     border-left: 0;
     padding-top: 14px;

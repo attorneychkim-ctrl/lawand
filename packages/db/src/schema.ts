@@ -2138,12 +2138,17 @@ export const telephonyMessages = pgTable(
     staffUserId: uuid("staff_user_id")
       .notNull()
       .references(() => staffUsers.id, { onDelete: "restrict" }),
-    consultationId: uuid("consultation_id")
-      .notNull()
-      .references(() => consultations.id, { onDelete: "restrict" }),
-    consultationRequestId: uuid("consultation_request_id")
-      .notNull()
-      .references(() => consultationRequests.id, { onDelete: "restrict" }),
+    targetSource: telephonyCallTargetSourceEnum("target_source")
+      .default("consultation")
+      .notNull(),
+    consultationId: uuid("consultation_id").references(
+      () => consultations.id,
+      { onDelete: "restrict" },
+    ),
+    consultationRequestId: uuid("consultation_request_id").references(
+      () => consultationRequests.id,
+      { onDelete: "restrict" },
+    ),
     templateId: uuid("template_id").references(() => messageTemplates.id, {
       onDelete: "set null",
     }),
@@ -2255,6 +2260,18 @@ export const telephonyMessages = pgTable(
       sql`${table.templateId} IS NULL OR ${table.templateNameSnapshot} IS NOT NULL`,
     ),
     check(
+      "telephony_messages_target_reference",
+      sql`(
+        ${table.targetSource} = 'consultation'
+        AND ${table.consultationId} IS NOT NULL
+        AND ${table.consultationRequestId} IS NOT NULL
+      ) OR (
+        ${table.targetSource} = 'legal_friends_directory'
+        AND ${table.consultationId} IS NULL
+        AND ${table.consultationRequestId} IS NULL
+      )`,
+    ),
+    check(
       "telephony_messages_dispatch_time_order",
       sql`${table.dispatchedAt} IS NULL OR ${table.dispatchedAt} >= ${table.requestedAt}`,
     ),
@@ -2270,6 +2287,45 @@ export const telephonyMessages = pgTable(
       "telephony_messages_error_pair",
       sql`(${table.lastErrorCode} IS NULL AND ${table.lastErrorMessage} IS NULL)
         OR (${table.lastErrorCode} IS NOT NULL AND ${table.lastErrorMessage} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export const telephonyMessageDirectoryTargets = pgTable(
+  "telephony_message_directory_targets",
+  {
+    telephonyMessageId: uuid("telephony_message_id")
+      .primaryKey()
+      .references(() => telephonyMessages.id, { onDelete: "restrict" }),
+    clientIdx: integer("client_idx").notNull(),
+    caseIdx: integer("case_idx").notNull(),
+    clientNameCiphertext: bytea("client_name_ciphertext").notNull(),
+    clientNameNonce: bytea("client_name_nonce").notNull(),
+    clientNameKeyVersion: varchar("client_name_key_version", {
+      length: 50,
+    }).notNull(),
+    phoneCiphertext: bytea("phone_ciphertext").notNull(),
+    phoneNonce: bytea("phone_nonce").notNull(),
+    phoneKeyVersion: varchar("phone_key_version", { length: 50 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("telephony_message_directory_targets_client_case_idx").on(
+      table.clientIdx,
+      table.caseIdx,
+    ),
+    check(
+      "telephony_message_directory_targets_ids_positive",
+      sql`${table.clientIdx} > 0 AND ${table.caseIdx} > 0`,
+    ),
+    check(
+      "telephony_message_directory_targets_crypto",
+      sql`octet_length(${table.clientNameNonce}) = 12
+        AND octet_length(${table.clientNameCiphertext}) >= 17
+        AND octet_length(${table.phoneNonce}) = 12
+        AND octet_length(${table.phoneCiphertext}) >= 17`,
     ),
   ],
 );

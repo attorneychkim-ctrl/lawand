@@ -51,6 +51,7 @@ import {
   telephonyEndpoints,
   telephonyInboundCalls,
   telephonyInboundCommands,
+  telephonyMessageDirectoryTargets,
   telephonyMessages,
   telephonyFollowUpTasks,
 } from "@lawand/db";
@@ -317,7 +318,8 @@ function callResponse(call: {
 
 function messageResponse(message: {
   id: string;
-  consultationId: string;
+  targetSource: "consultation" | "legal_friends_directory";
+  consultationId: string | null;
   endpointId: string;
   templateId: string | null;
   templateNameSnapshot: string | null;
@@ -337,6 +339,7 @@ function messageResponse(message: {
 }) {
   return {
     id: message.id,
+    targetSource: message.targetSource,
     consultationId: message.consultationId,
     endpointId: message.endpointId,
     templateId: message.templateId,
@@ -2738,6 +2741,7 @@ export function createTelephonyService(options: {
           provider === "solapi"
             ? {
                 messageId,
+                targetSource: "consultation",
                 consultationId,
                 requestId: request.id,
                 endpointId: endpoint.id,
@@ -2749,6 +2753,7 @@ export function createTelephonyService(options: {
               }
             : {
                 messageId,
+                targetSource: "consultation",
                 consultationId,
                 requestId: request.id,
                 endpointId: endpoint.id,
@@ -2770,6 +2775,7 @@ export function createTelephonyService(options: {
           provider,
           endpointId: endpoint.id,
           staffUserId: actor.id,
+          targetSource: "consultation",
           consultationId,
           consultationRequestId: request.id,
           templateId: input.templateId,
@@ -2800,6 +2806,259 @@ export function createTelephonyService(options: {
         targetId: messageId,
         metadata: {
           consultationId,
+          endpointId: endpoint.id,
+          templateId: input.templateId,
+          messageKind,
+          bodyByteLength,
+        },
+        occurredAt: requestedAt,
+        createdAt: requestedAt,
+      });
+      return { ...messageResponse(message), replayed: false };
+    });
+  }
+
+  async function requestDirectoryMessage(
+    targetInput: { clientIdx: number; caseIdx: number },
+    input: TelephonyMessageSend,
+    actor: StaffPrincipal,
+  ) {
+    if (!dispatchEnabled) {
+      throw new TelephonyCallError(
+        "feature_disabled",
+        "센트릭스 문자 발송이 아직 활성화되지 않았습니다.",
+      );
+    }
+    const textKind = centrexMessageKind(input.body);
+    if (textKind === "too_long") {
+      throw new TelephonyCallError(
+        "message_body_invalid",
+        "문자 내용은 센트릭스 LMS 기준 720바이트 이하여야 합니다.",
+      );
+    }
+    const requestedAt = now();
+    return db.transaction(async (tx) => {
+      const [existing] = await tx
+        .select()
+        .from(telephonyMessages)
+        .where(eq(telephonyMessages.idempotencyKey, input.idempotencyKey))
+        .limit(1);
+      if (existing) {
+        const [existingTarget] = await tx
+          .select({
+            clientIdx: telephonyMessageDirectoryTargets.clientIdx,
+            caseIdx: telephonyMessageDirectoryTargets.caseIdx,
+          })
+          .from(telephonyMessageDirectoryTargets)
+          .where(
+            eq(
+              telephonyMessageDirectoryTargets.telephonyMessageId,
+              existing.id,
+            ),
+          )
+          .limit(1);
+        if (
+          existing.targetSource !== "legal_friends_directory" ||
+          existing.staffUserId !== actor.id ||
+          existingTarget?.clientIdx !== targetInput.clientIdx ||
+          existingTarget?.caseIdx !== targetInput.caseIdx
+        ) {
+          throw new TelephonyCallError(
+            "message_idempotency_conflict",
+            "문자 발송 재시도 식별자가 다른 요청과 충돌했습니다.",
+          );
+        }
+        return { ...messageResponse(existing), replayed: true };
+      }
+
+      const targetResult = await tx.execute(
+        sql<LegalFriendsDirectoryCallTargetRow>`SELECT * FROM public.resolve_legalfriends_directory_call_target(${targetInput.clientIdx}, ${targetInput.caseIdx})`,
+      );
+      const [target] = targetResult.rows as LegalFriendsDirectoryCallTargetRow[];
+      if (!target) {
+        throw new TelephonyCallError(
+          "directory_target_not_found",
+          "삭제되었거나 현재 조회할 수 없는 리걸프렌즈 고객입니다.",
+        );
+      }
+      if (!/^[0-9]{9,15}$/.test(target.phone)) {
+        throw new TelephonyCallError(
+          "directory_phone_not_callable",
+          "문자를 보낼 수 있는 전화번호가 등록되어 있지 않습니다.",
+        );
+      }
+
+      const [endpoint] = await tx
+        .select({ id: telephonyEndpoints.id })
+        .from(staffTelephonyBindings)
+        .innerJoin(
+          telephonyEndpoints,
+          eq(telephonyEndpoints.id, staffTelephonyBindings.endpointId),
+        )
+        .where(
+          and(
+            eq(staffTelephonyBindings.staffUserId, actor.id),
+            eq(staffTelephonyBindings.isActive, true),
+            eq(staffTelephonyBindings.isPrimary, true),
+            eq(telephonyEndpoints.provider, "centrex"),
+            eq(telephonyEndpoints.isActive, true),
+          ),
+        )
+        .limit(1);
+      if (!endpoint) {
+        throw new TelephonyCallError(
+          "centrex_endpoint_not_linked",
+          "직원 계정에 활성 센트릭스 회선이 연결되지 않았습니다.",
+        );
+      }
+
+      let templateName: string | null = null;
+      let imageFileId: string | null = null;
+      let imageOriginalName: string | null = null;
+      if (input.templateId) {
+        const [template] = await tx
+          .select({
+            id: messageTemplates.id,
+            name: messageTemplates.name,
+            ownerUserId: messageTemplates.ownerUserId,
+            imageFileId: messageTemplates.imageFileId,
+            imageOriginalName: messageTemplates.imageOriginalName,
+          })
+          .from(messageTemplates)
+          .where(eq(messageTemplates.id, input.templateId))
+          .limit(1)
+          .for("key share");
+        if (!template) {
+          throw new TelephonyCallError(
+            "message_template_not_found",
+            "선택한 문자 템플릿을 찾을 수 없습니다.",
+          );
+        }
+        if (template.ownerUserId !== actor.id) {
+          throw new TelephonyCallError(
+            "message_template_owned_by_other_staff",
+            "다른 직원의 개인 템플릿은 사용할 수 없습니다.",
+          );
+        }
+        templateName = template.name;
+        imageFileId = template.imageFileId;
+        imageOriginalName = template.imageOriginalName;
+      }
+
+      const provider = imageFileId ? ("solapi" as const) : ("centrex" as const);
+      const messageKind = imageFileId ? ("mms" as const) : textKind;
+      if (provider === "solapi" && (!solapiClient || !solapiMmsSender)) {
+        throw new TelephonyCallError(
+          "mms_feature_disabled",
+          "이미지 문자를 보내려면 솔라피 MMS 발신번호 설정이 필요합니다.",
+        );
+      }
+
+      const messageId = createTelephonyMessageId();
+      const eventId = createEventId();
+      const encryptedBody = protection.encrypt(
+        input.body,
+        `telephony_messages/${messageId}/body`,
+      );
+      const encryptedPhone = protection.encrypt(
+        target.phone,
+        `telephony_message_directory_targets/${messageId}/phone`,
+      );
+      const encryptedClientName = protection.encrypt(
+        target.client_name,
+        `telephony_message_directory_targets/${messageId}/client_name`,
+      );
+      const phoneFingerprint = protection.fingerprint(target.phone);
+      const bodyByteLength = centrexMessageByteLength(input.body);
+      const event: PlatformEvent = {
+        eventId,
+        eventType: "telephony.message.requested",
+        eventVersion: 1,
+        occurredAt: requestedAt.toISOString(),
+        producer: "lawand.gateway",
+        correlationId: messageId,
+        data:
+          provider === "solapi"
+            ? {
+                messageId,
+                targetSource: "legal_friends_directory",
+                directoryClientIdx: targetInput.clientIdx,
+                directoryCaseIdx: targetInput.caseIdx,
+                endpointId: endpoint.id,
+                staffUserId: actor.id,
+                provider: "solapi",
+                channel: "mms",
+                command: "send-many",
+                contentRef: `telephony_messages/${messageId}/body`,
+              }
+            : {
+                messageId,
+                targetSource: "legal_friends_directory",
+                directoryClientIdx: targetInput.clientIdx,
+                directoryCaseIdx: targetInput.caseIdx,
+                endpointId: endpoint.id,
+                staffUserId: actor.id,
+                provider: "centrex",
+                channel: "sms",
+                command: "smssend",
+                contentRef: `telephony_messages/${messageId}/body`,
+              },
+      };
+      assertPlatformEvent(event);
+      await tx.insert(outboxEvents).values(
+        eventRow(event, messageId, "telephony_message"),
+      );
+      const [message] = await tx
+        .insert(telephonyMessages)
+        .values({
+          id: messageId,
+          provider,
+          endpointId: endpoint.id,
+          staffUserId: actor.id,
+          targetSource: "legal_friends_directory",
+          consultationId: null,
+          consultationRequestId: null,
+          templateId: input.templateId,
+          templateNameSnapshot: templateName,
+          imageFileIdSnapshot: imageFileId,
+          imageOriginalNameSnapshot: imageOriginalName,
+          outboxEventId: eventId,
+          idempotencyKey: input.idempotencyKey,
+          remotePhoneFingerprint: phoneFingerprint,
+          bodyCiphertext: encryptedBody.ciphertext,
+          bodyNonce: encryptedBody.nonce,
+          bodyKeyVersion: encryptedBody.keyVersion,
+          bodyFingerprint: protection.fingerprint(input.body),
+          messageKind,
+          bodyByteLength,
+          commandStatus: "queued",
+          requestedAt,
+          createdAt: requestedAt,
+          updatedAt: requestedAt,
+        })
+        .returning();
+      if (!message) throw new Error("telephony_message_not_created");
+      await tx.insert(telephonyMessageDirectoryTargets).values({
+        telephonyMessageId: messageId,
+        clientIdx: targetInput.clientIdx,
+        caseIdx: targetInput.caseIdx,
+        clientNameCiphertext: encryptedClientName.ciphertext,
+        clientNameNonce: encryptedClientName.nonce,
+        clientNameKeyVersion: encryptedClientName.keyVersion,
+        phoneCiphertext: encryptedPhone.ciphertext,
+        phoneNonce: encryptedPhone.nonce,
+        phoneKeyVersion: encryptedPhone.keyVersion,
+        createdAt: requestedAt,
+      });
+      await tx.insert(staffAuditLogs).values({
+        id: createEventId(),
+        actorUserId: actor.id,
+        action: "telephony.directory_message.requested",
+        targetType: "legalfriends_directory_client",
+        targetId: String(targetInput.clientIdx),
+        metadata: {
+          messageId,
+          caseIdx: targetInput.caseIdx,
           endpointId: endpoint.id,
           templateId: input.templateId,
           messageKind,
@@ -3284,6 +3543,7 @@ export function createTelephonyService(options: {
     pollInboundAnswerCommand,
     requestClickToCall,
     requestDirectoryClickToCall,
+    requestDirectoryMessage,
     requestInboundAnswer,
     searchLegalFriendsClients,
     requestMessage,

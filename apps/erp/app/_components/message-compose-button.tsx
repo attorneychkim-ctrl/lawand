@@ -26,17 +26,31 @@ function messageStatus(message: TelephonyMessage | null) {
   return message.lastErrorMessage ?? "문자 발송 결과를 확인해 주세요.";
 }
 
-export function MessageComposeButton({
-  consultationId,
-  customerName,
-  receiptCode,
-  staffName,
-}: {
-  consultationId: string;
+type MessageComposeButtonProps = {
   customerName: string;
   receiptCode: string;
   staffName: string;
-}) {
+} & (
+  | {
+      consultationId: string;
+      directoryTarget?: never;
+    }
+  | {
+      consultationId?: never;
+      directoryTarget: {
+        clientIdx: number;
+        caseIdx: number;
+      };
+    }
+);
+
+export function MessageComposeButton({
+  consultationId,
+  directoryTarget,
+  customerName,
+  receiptCode,
+  staffName,
+}: MessageComposeButtonProps) {
   const [open, setOpen] = useState(false);
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -140,15 +154,22 @@ export function MessageComposeButton({
     setError("");
     setMessage(null);
     try {
-      const response = await fetch(`/api/consultations/${consultationId}/messages`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          idempotencyKey: crypto.randomUUID(),
-          templateId: selectedTemplate?.id ?? null,
-          body,
-        }),
-      });
+      const messageInput = {
+        idempotencyKey: crypto.randomUUID(),
+        templateId: selectedTemplate?.id ?? null,
+        body,
+      };
+      const response = directoryTarget
+        ? await fetch("/api/client-directory/messages", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ ...directoryTarget, ...messageInput }),
+          })
+        : await fetch(`/api/consultations/${consultationId}/messages`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(messageInput),
+          });
       const result = (await response.json().catch(() => null)) as
         | (TelephonyMessage & { message?: string })
         | null;

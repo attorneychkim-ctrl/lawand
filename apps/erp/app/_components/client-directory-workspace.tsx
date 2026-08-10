@@ -8,6 +8,7 @@ import type {
   LegalFriendsClientDirectorySearch,
 } from "../../lib/gateway";
 import { ClickToCallButton } from "./click-to-call-button";
+import { MessageComposeButton } from "./message-compose-button";
 
 const revivalStateLabels = new Map([
   [5, "상담대기"], [10, "상담완료"], [11, "재상담필요"], [15, "계약"],
@@ -54,7 +55,7 @@ function formatDate(value: string) {
   return year && month && day ? `${year}.${month}.${day}.` : value;
 }
 
-export function ClientDirectoryWorkspace() {
+export function ClientDirectoryWorkspace({ staffName }: { staffName: string }) {
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
   const [result, setResult] = useState<LegalFriendsClientDirectorySearch | null>(null);
@@ -154,17 +155,28 @@ export function ClientDirectoryWorkspace() {
                       <div><dt>최근 갱신</dt><dd>{formatDate(item.caseUpdatedOn)}</dd></div>
                     </dl>
                   </div>
-                  <div className="client-directory-call">
+                  <div className="client-directory-actions">
                     {item.callable ? (
-                      <ClickToCallButton
-                        directoryTarget={{
-                          clientIdx: item.clientIdx,
-                          caseIdx: item.caseIdx,
-                          clientName: item.clientName,
-                        }}
-                      />
+                      <>
+                        <MessageComposeButton
+                          customerName={item.clientName}
+                          directoryTarget={{
+                            clientIdx: item.clientIdx,
+                            caseIdx: item.caseIdx,
+                          }}
+                          receiptCode={item.caseNumber ?? "미등록"}
+                          staffName={staffName}
+                        />
+                        <ClickToCallButton
+                          directoryTarget={{
+                            clientIdx: item.clientIdx,
+                            caseIdx: item.caseIdx,
+                            clientName: item.clientName,
+                          }}
+                        />
+                      </>
                     ) : (
-                      <p>발신 가능한 전화번호가 없습니다.</p>
+                      <p>문자·전화를 보낼 수 있는 전화번호가 없습니다.</p>
                     )}
                   </div>
                 </article>
@@ -179,8 +191,8 @@ export function ClientDirectoryWorkspace() {
             <p>삭제 처리되지 않은 로앤 사건의 고객명·전화번호·사건·담당 정보를 조회합니다.</p>
           </div>
           <div>
-            <strong>바로 전화 연결</strong>
-            <p>내 계정에 연결된 센트릭스 회선으로 검색 결과에서 바로 발신할 수 있습니다.</p>
+            <strong>문자와 전화 연결</strong>
+            <p>내 개인 템플릿으로 문자를 보내거나 연결된 센트릭스 회선으로 바로 전화할 수 있습니다.</p>
           </div>
         </section>
       )}
