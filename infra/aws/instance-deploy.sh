@@ -39,6 +39,8 @@ ARCHIVE_PATH="/opt/lawand/${RELEASE_ID}.tar.gz"
 IMAGE_NAME="lawand-${APP}:${RELEASE_ID}"
 ENV_PATH="/etc/lawand/${APP}.env"
 TEMPORARY_HOST="${ELASTIC_IP//./-}.sslip.io"
+HOMEPAGE_PUBLIC_HOST='lawandfirm.com'
+HOMEPAGE_LEGACY_ORIGIN='222.239.248.41'
 
 mkdir -p "$RELEASE_DIR" /etc/lawand /var/lib/lawand-caddy/data /var/lib/lawand-caddy/config
 chmod 700 /etc/lawand
@@ -123,6 +125,12 @@ install -d -m 0755 /etc/lawand/caddy
 if [ "$APP" = "gateway" ]; then
   printf ':80 {\n  @centrex_ring path /v1/centrex-ring/*.html\n  handle @centrex_ring {\n    reverse_proxy 127.0.0.1:%s\n  }\n  handle {\n    redir https://%s{uri} permanent\n  }\n}\n\n%s {\n  encode zstd gzip\n  reverse_proxy 127.0.0.1:%s\n}\n' \
     "$APP_PORT" "$TEMPORARY_HOST" "$TEMPORARY_HOST" "$APP_PORT" > /etc/lawand/caddy/Caddyfile
+elif [ "$APP" = "homepage" ]; then
+  printf 'http://%s {\n  redir https://%s{uri} permanent\n}\n\n%s {\n  encode zstd gzip\n  reverse_proxy 127.0.0.1:%s\n}\n\n%s {\n  encode zstd gzip\n\n  @lawand_new path / /bank* /about* /people* /privacy* /terms* /api* /_next* /images* /icon.svg /robots.txt /sitemap.xml\n  handle @lawand_new {\n    reverse_proxy 127.0.0.1:%s\n  }\n\n  handle {\n    reverse_proxy https://%s {\n      header_up Host %s\n      transport http {\n        tls_server_name %s\n      }\n    }\n  }\n}\n\nwww.%s {\n  redir https://%s{uri} permanent\n}\n' \
+    "$ELASTIC_IP" "$TEMPORARY_HOST" "$TEMPORARY_HOST" "$APP_PORT" \
+    "$HOMEPAGE_PUBLIC_HOST" "$APP_PORT" "$HOMEPAGE_LEGACY_ORIGIN" \
+    "$HOMEPAGE_PUBLIC_HOST" "$HOMEPAGE_PUBLIC_HOST" \
+    "$HOMEPAGE_PUBLIC_HOST" "$HOMEPAGE_PUBLIC_HOST" > /etc/lawand/caddy/Caddyfile
 else
   printf 'http://%s {\n  redir https://%s{uri} permanent\n}\n\n%s {\n  encode zstd gzip\n  reverse_proxy 127.0.0.1:%s\n}\n' \
     "$ELASTIC_IP" "$TEMPORARY_HOST" "$TEMPORARY_HOST" "$APP_PORT" > /etc/lawand/caddy/Caddyfile
