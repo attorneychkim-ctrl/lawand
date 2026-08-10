@@ -25,6 +25,20 @@ export type GatewayConfig = {
     appPassword: string;
     mailbox: string;
   } | null;
+  centrexWorkerEnabled: boolean;
+  centrexCredentials: Readonly<Record<string, string>> | null;
+  centrexBridgeKeys: Readonly<
+    Record<
+      string,
+      { endpointId: string; secret: Buffer; staffUserId?: string }
+    >
+  > | null;
+  centrexRingCallback: {
+    token: string;
+    host: string;
+    port: number;
+    pollIntervalMs: number;
+  } | null;
 };
 
 function required(name: string): string {
@@ -41,6 +55,181 @@ function booleanValue(name: string, fallback: boolean): boolean {
   if (value === "true") return true;
   if (value === "false") return false;
   throw new Error(`${name}은 true 또는 false여야 합니다.`);
+}
+
+function centrexCredentialsValue(): Readonly<Record<string, string>> | null {
+  const raw = process.env.LAWAND_CENTREX_CREDENTIALS_JSON?.trim();
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    throw new Error(
+      "LAWAND_CENTREX_CREDENTIALS_JSON은 JSON 객체여야 합니다.",
+    );
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(
+      "LAWAND_CENTREX_CREDENTIALS_JSON은 JSON 객체여야 합니다.",
+    );
+  }
+  const credentials: Record<string, string> = {};
+  for (const [key, value] of Object.entries(parsed)) {
+    if (!/^[a-z0-9][a-z0-9._-]{0,99}$/.test(key)) {
+      throw new Error("센트릭스 credential key 형식이 올바르지 않습니다.");
+    }
+    if (typeof value !== "string" || !/^[0-9a-fA-F]{128}$/.test(value)) {
+      throw new Error(
+        `센트릭스 ${key} 자격증명은 SHA-512 128자리 16진수여야 합니다.`,
+      );
+    }
+    credentials[key] = value.toLowerCase();
+  }
+  return Object.keys(credentials).length > 0 ? credentials : null;
+}
+
+function centrexBridgeKeysValue(): Readonly<
+  Record<
+    string,
+    { endpointId: string; secret: Buffer; staffUserId?: string }
+  >
+> | null {
+  const raw = process.env.LAWAND_CENTREX_BRIDGE_KEYS_JSON?.trim();
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    throw new Error(
+      "LAWAND_CENTREX_BRIDGE_KEYS_JSON은 JSON 객체여야 합니다.",
+    );
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(
+      "LAWAND_CENTREX_BRIDGE_KEYS_JSON은 JSON 객체여야 합니다.",
+    );
+  }
+
+  const result: Record<
+    string,
+    { endpointId: string; secret: Buffer; staffUserId?: string }
+  > = {};
+  for (const [bridgeId, value] of Object.entries(parsed)) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{2,79}$/.test(bridgeId)) {
+      throw new Error("센트릭스 bridge ID 형식이 올바르지 않습니다.");
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error(`센트릭스 ${bridgeId} bridge 설정이 올바르지 않습니다.`);
+    }
+    const entry = value as {
+      endpointId?: unknown;
+      secret?: unknown;
+      staffUserId?: unknown;
+    };
+    if (
+      typeof entry.endpointId !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        entry.endpointId,
+      )
+    ) {
+      throw new Error(`센트릭스 ${bridgeId} endpoint ID가 올바르지 않습니다.`);
+    }
+    if (typeof entry.secret !== "string") {
+      throw new Error(`센트릭스 ${bridgeId} bridge secret이 필요합니다.`);
+    }
+    if (!/^[A-Za-z0-9+/_-]{43}=?$/.test(entry.secret)) {
+      throw new Error(
+        `센트릭스 ${bridgeId} bridge secret은 base64 32바이트여야 합니다.`,
+      );
+    }
+    const normalizedSecret = entry.secret
+      .replaceAll("-", "+")
+      .replaceAll("_", "/")
+      .padEnd(Math.ceil(entry.secret.length / 4) * 4, "=");
+    const secret = Buffer.from(normalizedSecret, "base64");
+    if (secret.length !== 32) {
+      throw new Error(
+        `센트릭스 ${bridgeId} bridge secret은 base64 32바이트여야 합니다.`,
+      );
+    }
+    if (
+      entry.staffUserId !== undefined &&
+      (typeof entry.staffUserId !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          entry.staffUserId,
+        ))
+    ) {
+      throw new Error(
+        `센트릭스 ${bridgeId} bridge 직원 ID가 올바르지 않습니다.`,
+      );
+    }
+    result[bridgeId] = {
+      endpointId: entry.endpointId,
+      secret,
+      ...(typeof entry.staffUserId === "string"
+        ? { staffUserId: entry.staffUserId }
+        : {}),
+    };
+  }
+  return Object.keys(result).length > 0 ? result : null;
+}
+
+function positiveIntegerValue(
+  name: string,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < minimum || value > maximum) {
+    throw new Error(`${name}은 ${minimum}부터 ${maximum} 사이의 정수여야 합니다.`);
+  }
+  return value;
+}
+
+function centrexRingCallbackValue(): GatewayConfig["centrexRingCallback"] {
+  if (!booleanValue("LAWAND_CENTREX_RING_CALLBACK_ENABLED", false)) {
+    return null;
+  }
+  const token = required("LAWAND_CENTREX_RING_CALLBACK_TOKEN").trim();
+  const host = required("LAWAND_CENTREX_RING_CALLBACK_HOST").trim();
+  const port = positiveIntegerValue(
+    "LAWAND_CENTREX_RING_CALLBACK_PORT",
+    80,
+    1,
+    65_535,
+  );
+  const pollIntervalSeconds = positiveIntegerValue(
+    "LAWAND_CENTREX_INBOUND_HISTORY_POLL_SECONDS",
+    15,
+    5,
+    300,
+  );
+  if (!/^[A-Za-z0-9_-]{32,96}$/.test(token)) {
+    throw new Error(
+      "LAWAND_CENTREX_RING_CALLBACK_TOKEN은 URL-safe 32~96자리여야 합니다.",
+    );
+  }
+  const parts = host.split(".");
+  if (
+    parts.length !== 4 ||
+    parts.some((part) => {
+      const value = Number(part);
+      return !/^(0|[1-9][0-9]{0,2})$/.test(part) || value > 255;
+    })
+  ) {
+    throw new Error(
+      "LAWAND_CENTREX_RING_CALLBACK_HOST는 공인 IPv4 형식이어야 합니다.",
+    );
+  }
+  return {
+    token,
+    host,
+    port,
+    pollIntervalMs: pollIntervalSeconds * 1_000,
+  };
 }
 
 export function readGatewayConfig(): GatewayConfig {
@@ -112,6 +301,13 @@ export function readGatewayConfig(): GatewayConfig {
       "네이버 예약 IMAP 수집을 사용하려면 계정과 애플리케이션 비밀번호가 필요합니다.",
     );
   }
+  const centrexWorkerEnabled = booleanValue(
+    "LAWAND_CENTREX_WORKER_ENABLED",
+    false,
+  );
+  const centrexCredentials = centrexCredentialsValue();
+  const centrexBridgeKeys = centrexBridgeKeysValue();
+  const centrexRingCallback = centrexRingCallbackValue();
   return {
     databaseUrl: required("LAWAND_APP_DATABASE_URL"),
     encryptionKey: required("LAWAND_DATA_ENCRYPTION_KEY_V1"),
@@ -126,5 +322,9 @@ export function readGatewayConfig(): GatewayConfig {
     kakaoSkill,
     naverBookingImapEnabled,
     naverBookingImap,
+    centrexWorkerEnabled,
+    centrexCredentials,
+    centrexBridgeKeys,
+    centrexRingCallback,
   };
 }

@@ -8,6 +8,7 @@ import {
   consultationAssignedEventSchema,
   consultationRequestedEventSchema,
   legalfriendsRegistrationRequestedEventSchema,
+  telephonyCallRequestedEventSchema,
 } from "./events.js";
 
 const requestedEvent = {
@@ -208,6 +209,35 @@ test("외부 실행 요청 payload에 전화번호를 직접 넣으면 거부한
         ...assignmentReference,
         phone: "01012345678",
       },
+    }).success,
+    false,
+  );
+});
+
+test("클릭투콜 요청은 전화번호 대신 통화·상담·회선 참조만 남긴다", () => {
+  const callEvent = {
+    ...assignmentEnvelope,
+    eventType: "telephony.call.requested",
+    data: {
+      callId: "01984c7d-8500-7000-8000-000000000020",
+      consultationId: assignmentEnvelope.correlationId,
+      requestId: "01984c7d-8500-7000-8000-000000000002",
+      endpointId: "01984c7d-8500-7000-8000-000000000021",
+      staffUserId: "01984c7d-8500-7000-8000-000000000006",
+      provider: "centrex",
+      direction: "outbound",
+      command: "clickdial",
+    },
+  } as const;
+
+  assert.equal(
+    telephonyCallRequestedEventSchema.safeParse(callEvent).success,
+    true,
+  );
+  assert.equal(
+    telephonyCallRequestedEventSchema.safeParse({
+      ...callEvent,
+      data: { ...callEvent.data, phone: "01012345678" },
     }).success,
     false,
   );

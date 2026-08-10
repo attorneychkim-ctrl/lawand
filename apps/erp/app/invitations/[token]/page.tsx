@@ -19,6 +19,11 @@ const roleLabels = {
   civil_complaint_vendor: "민원업체",
 };
 
+function formatCentrexLine(value: string | null) {
+  if (!value) return "지정하지 않음";
+  return `${value.slice(0, 3)}-${value.slice(3, 7)}-${value.slice(7)}`;
+}
+
 export default async function InvitationPage({
   params,
 }: {
@@ -79,6 +84,15 @@ export default async function InvitationPage({
           <div>
             <dt>역할·권한</dt>
             <dd>{roleLabels[invitation.role]}</dd>
+          </div>
+          <div>
+            <dt>센트릭스 회선</dt>
+            <dd>
+              {formatCentrexLine(invitation.centrexLineNumber)}
+              {invitation.centrexExtension
+                ? ` · 내선 ${invitation.centrexExtension}`
+                : ""}
+            </dd>
           </div>
           <div>
             <dt>리걸프렌즈 계정</dt>

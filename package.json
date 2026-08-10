@@ -5,8 +5,13 @@
   "packageManager": "pnpm@11.17.0",
   "scripts": {
     "build": "turbo run build",
+    "cases:generate": "node scripts/generate-public-case-study.mjs",
     "db:local:setup": "node scripts/setup-local-db.mjs",
     "dev": "turbo run dev",
+    "diagnosis:sync": "node scripts/sync-self-diagnosis-profiles.mjs",
+    "legalfriends:case-memo": "node scripts/import-legalfriends-casememo.mjs",
+    "legalfriends:client-statement": "node scripts/import-legalfriends-client-statement.mjs",
+    "legalfriends:phone-directory": "node scripts/import-legalfriends-phone-directory.mjs",
     "lint": "eslint scripts && turbo run lint",
     "reviews:migrate": "node scripts/import-legacy-reviews.mjs",
     "test": "turbo run test",

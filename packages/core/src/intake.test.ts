@@ -9,7 +9,7 @@ const quickSubmission = {
   mode: "quick",
   phone: "010-1234-5678",
   contact: { preference: "as_soon_as_possible" },
-  privacyNoticeVersion: "2026-07-28.1",
+  privacyNoticeVersion: "2026-08-03.1",
   consentAgreedAt: "2026-07-27T10:00:00.000+09:00",
   attribution: {
     journeySessionId: "01984c7d-8500-7000-8000-000000000002",

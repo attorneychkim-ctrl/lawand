@@ -1,0 +1,854 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useRouter } from "next/navigation";
+
+import type {
+  PhoneDeskAftercareInput,
+  PhoneDeskCallDetail,
+  PhoneDeskCallResult,
+} from "../../lib/gateway";
+
+const resultOptions = [
+  { value: "consultation_completed", label: "상담완료" },
+  { value: "reconsultation_required", label: "재상담필요" },
+  { value: "no_answer", label: "부재 및 무응답" },
+  { value: "busy", label: "통화중" },
+  { value: "manager_callback_requested", label: "담당자 연결 요청" },
+  { value: "rejected", label: "거절" },
+  { value: "public_institution", label: "법원 등 관공서" },
+  { value: "creditor", label: "채권자 등" },
+  { value: "wrong_number", label: "잘못 걸린 전화" },
+  { value: "other", label: "기타" },
+] as const satisfies ReadonlyArray<{
+  value: PhoneDeskCallResult;
+  label: string;
+}>;
+
+const followUpDefaultResults = new Set<PhoneDeskCallResult>([
+  "reconsultation_required",
+  "no_answer",
+  "busy",
+  "manager_callback_requested",
+  "rejected",
+]);
+
+const consultationStateLabels: Record<string, string> = {
+  requested: "신규 접수",
+  assigned: "상담 진행",
+  contacted: "연락 완료",
+  completed: "상담 완료",
+  engaged: "계약",
+  closed: "종결",
+};
+
+const revivalStateLabels = new Map([
+  [5, "상담대기"],
+  [10, "상담완료"],
+  [11, "재상담필요"],
+  [15, "계약"],
+  [20, "서류준비"],
+  [21, "부채증명서 발급중"],
+  [22, "부채증명서 발급완료"],
+  [25, "신청서 작성 진행중"],
+  [30, "신청서 제출"],
+  [35, "금지명령"],
+  [40, "보정기간"],
+  [45, "개시결정"],
+  [50, "채권자 집회기일"],
+  [55, "인가결정"],
+]);
+
+const bankruptcyStateLabels = new Map([
+  [5, "상담대기"],
+  [10, "상담완료"],
+  [11, "재상담필요"],
+  [15, "계약"],
+  [20, "서류준비"],
+  [21, "부채증명서 발급중"],
+  [22, "부채증명서 발급완료"],
+  [25, "신청서 작성 진행중"],
+  [30, "신청서 제출"],
+  [40, "보정기간"],
+  [100, "파산선고"],
+  [105, "의견청취기일"],
+  [110, "재산환가 및 배당"],
+  [115, "파산폐지"],
+  [120, "면책결정"],
+  [125, "면책불허가"],
+]);
+
+type FollowUpDateOption = {
+  value: string;
+  label: string;
+  sublabel: string;
+};
+
+type LinkedConsultationContext = {
+  id: string;
+  publicReceiptCode: string;
+  displayName: string;
+  state: string;
+  firstRequestedAt: string | null;
+  lastRequestedAt: string | null;
+  assigneeDisplayName: string | null;
+};
+
+export const phoneDeskResultLabels = Object.fromEntries(
+  resultOptions.map((item) => [item.value, item.label]),
+) as Record<PhoneDeskCallResult, string>;
+
+function nextHalfHourValue() {
+  const next = new Date();
+  next.setSeconds(0, 0);
+  next.setMinutes(next.getMinutes() < 30 ? 30 : 60);
+  if (next.getTime() <= Date.now() + 10 * 60_000) {
+    next.setMinutes(next.getMinutes() + 30);
+  }
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(next);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}T${part("hour")}:${part("minute")}`;
+}
+
+function kstDateTimeValue(value: string) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  })
+    .format(new Date(value))
+    .replace(", ", "T");
+}
+
+function formatDate(value: string | null) {
+  if (!value) return "확인되지 않음";
+  return new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  }).format(new Date(value));
+}
+
+function formatDateOnly(value: string) {
+  const [year, month, day] = value.split("-");
+  return year && month && day
+    ? `${year}.${month}.${day}.`
+    : value;
+}
+
+function makeFollowUpDateOptions(
+  minimumDueAt: string,
+  count = 5,
+): FollowUpDateOption[] {
+  if (!minimumDueAt) return [];
+  const [dateValue, minimumTime] = minimumDueAt.split("T");
+  const [year, month, day] = dateValue.split("-").map(Number);
+  const anchor = new Date(Date.UTC(year, month - 1, day));
+  const options: FollowUpDateOption[] = [];
+
+  for (let offset = 0; options.length < count && offset < 14; offset += 1) {
+    const candidate = new Date(anchor);
+    candidate.setUTCDate(anchor.getUTCDate() + offset);
+    const weekday = candidate.getUTCDay();
+    if (weekday === 0 || weekday === 6) continue;
+    if (offset === 0 && minimumTime > "18:30") continue;
+    const candidateMonth = candidate.getUTCMonth() + 1;
+    const candidateDay = candidate.getUTCDate();
+    const value = `${candidate.getUTCFullYear()}-${String(candidateMonth).padStart(2, "0")}-${String(candidateDay).padStart(2, "0")}`;
+    options.push({
+      value,
+      label: offset === 0 ? "오늘" : offset === 1 ? "내일" : `${candidateMonth}월 ${candidateDay}일`,
+      sublabel: new Intl.DateTimeFormat("ko-KR", {
+        timeZone: "UTC",
+        weekday: "short",
+      }).format(candidate),
+    });
+  }
+  return options;
+}
+
+function makeFollowUpTimeOptions(
+  dateValue: string,
+  minimumDueAt: string,
+  selectedTime: string,
+) {
+  if (!dateValue || !minimumDueAt) return [];
+  const [minimumDate, minimumTime] = minimumDueAt.split("T");
+  const start = 8 * 60;
+  const lastStart = 18 * 60 + 30;
+  let first = start;
+  if (dateValue === minimumDate) {
+    const [hour, minute] = minimumTime.split(":").map(Number);
+    first = Math.max(first, hour * 60 + minute);
+  }
+  const options: string[] = [];
+  for (let minutes = first; minutes <= lastStart; minutes += 30) {
+    options.push(
+      `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`,
+    );
+  }
+  if (selectedTime && !options.includes(selectedTime)) {
+    options.push(selectedTime);
+    options.sort();
+  }
+  return options;
+}
+
+function formatTimeRange(time: string) {
+  const [hour, minute] = time.split(":").map(Number);
+  const start = hour * 60 + minute;
+  const end = start + 30;
+  const display = (minutes: number) =>
+    `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+  return `${display(start)}~${display(end)}`;
+}
+
+function caseTypeLabel(caseType: number) {
+  return caseType === 1
+    ? "개인회생"
+    : caseType === 2
+      ? "파산면책"
+      : "기타사건";
+}
+
+function caseStateLabel(caseType: number, caseState: number) {
+  const label = caseType === 2
+    ? bankruptcyStateLabels.get(caseState)
+    : revivalStateLabels.get(caseState);
+  return label ?? `진행 상태 ${caseState}`;
+}
+
+function formatPhone(phone: string) {
+  const digits = phone.replace(/\D/g, "");
+  if (/^02\d{7,8}$/.test(digits)) {
+    const split = digits.length === 9 ? 5 : 6;
+    return `${digits.slice(0, 2)}-${digits.slice(2, split)}-${digits.slice(split)}`;
+  }
+  if (/^\d{10}$/.test(digits)) {
+    return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+  }
+  if (/^\d{11}$/.test(digits)) {
+    return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
+  }
+  return phone;
+}
+
+function suggestedConsultation(
+  detail: PhoneDeskCallDetail,
+): LinkedConsultationContext | null {
+  const resolved = detail.call.customerMatch?.source === "consultation"
+    ? detail.call.customerMatch.consultation
+    : null;
+  const clicked = detail.call.clickToCall?.consultation ?? null;
+  if (clicked) {
+    if (resolved?.id === clicked.id) return resolved;
+    return {
+      ...clicked,
+      firstRequestedAt: null,
+      lastRequestedAt: null,
+      assigneeDisplayName: null,
+    };
+  }
+  return resolved;
+}
+
+export function PhoneAftercareForm({
+  detail,
+  onSaved,
+  returnTo,
+}: {
+  detail: PhoneDeskCallDetail;
+  onSaved?: (next: PhoneDeskCallDetail) => void;
+  returnTo?: string;
+}) {
+  const router = useRouter();
+  const existing = detail.call.aftercare;
+  const suggested = suggestedConsultation(detail);
+  const recommendedAssignee = detail.recommendedAssigneeUserIds[0] ?? "";
+  const [result, setResult] = useState<PhoneDeskCallResult | "">(
+    existing?.result ?? "",
+  );
+  const [otherText, setOtherText] = useState(existing?.otherText ?? "");
+  const [memo, setMemo] = useState(existing?.memo ?? "");
+  const [consultationMode, setConsultationMode] = useState<
+    "none" | "link" | "create"
+  >(existing?.consultationId || suggested ? "link" : "none");
+  const [customerName, setCustomerName] = useState(
+    detail.legalFriendsMatch?.clientName ??
+      (detail.call.customerMatch?.source === "legal_friends"
+        ? detail.call.customerMatch.clientName
+        : ""),
+  );
+  const [consultationAssignee, setConsultationAssignee] = useState(
+    recommendedAssignee,
+  );
+  const [followUpEnabled, setFollowUpEnabled] = useState(
+    existing?.followUp?.state === "open",
+  );
+  const existingFollowUpDueAt = existing?.followUp?.state === "open"
+    ? kstDateTimeValue(existing.followUp.dueAt)
+    : "";
+  const [followUpDate, setFollowUpDate] = useState(
+    existingFollowUpDueAt.split("T")[0] ?? "",
+  );
+  const [followUpTime, setFollowUpTime] = useState(
+    existingFollowUpDueAt.split("T")[1] ?? "",
+  );
+  const [minimumDueAt, setMinimumDueAt] = useState("");
+  const [customDateOpen, setCustomDateOpen] = useState(false);
+  const [followUpAssignee, setFollowUpAssignee] = useState(
+    existing?.followUp?.state === "open"
+      ? existing.followUp.assignee.staffUserId
+      : recommendedAssignee,
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      const minimum = nextHalfHourValue();
+      setMinimumDueAt(minimum);
+      const [date, time] = minimum.split("T");
+      setFollowUpDate((current) => current || date);
+      setFollowUpTime((current) => current || time);
+    });
+  }, []);
+
+  const linkedConsultationId =
+    existing?.consultationId ?? suggested?.id ?? null;
+  const followUpDateOptions = useMemo(
+    () => makeFollowUpDateOptions(minimumDueAt),
+    [minimumDueAt],
+  );
+  const followUpTimeOptions = useMemo(
+    () => makeFollowUpTimeOptions(
+      followUpDate,
+      minimumDueAt,
+      followUpTime,
+    ),
+    [followUpDate, followUpTime, minimumDueAt],
+  );
+  const followUpDueAt = followUpDate && followUpTime
+    ? `${followUpDate}T${followUpTime}`
+    : "";
+  const followUpDueValid = Boolean(
+    followUpDueAt && minimumDueAt && followUpDueAt >= minimumDueAt,
+  );
+  const canSave = Boolean(
+    result &&
+      (result !== "other" || otherText.trim()) &&
+      (consultationMode !== "link" || linkedConsultationId) &&
+      (consultationMode !== "create" || customerName.trim()) &&
+      (!followUpEnabled || (followUpDueValid && followUpAssignee)),
+  );
+
+  function chooseResult(value: PhoneDeskCallResult) {
+    setResult(value);
+    setFollowUpEnabled(followUpDefaultResults.has(value));
+    setSaved(false);
+  }
+
+  async function save() {
+    if (!result || !canSave) return;
+    setSaving(true);
+    setError("");
+    setSaved(false);
+    const consultation: PhoneDeskAftercareInput["consultation"] =
+      consultationMode === "link" && linkedConsultationId
+        ? { mode: "link", consultationId: linkedConsultationId }
+        : consultationMode === "create"
+          ? {
+              mode: "create",
+              customerName: customerName.trim(),
+              ...(consultationAssignee
+                ? { assigneeUserId: consultationAssignee }
+                : {}),
+            }
+          : { mode: "none" };
+    const input: PhoneDeskAftercareInput = {
+      result,
+      ...(result === "other" ? { otherText: otherText.trim() } : {}),
+      ...(memo.trim() ? { memo: memo.trim() } : {}),
+      consultation,
+      followUp: followUpEnabled
+        ? {
+            enabled: true,
+            dueAt: `${followUpDueAt}:00+09:00`,
+            assigneeUserId: followUpAssignee,
+          }
+        : { enabled: false },
+    };
+    try {
+      const response = await fetch(
+        `/api/phone-desk/calls/${detail.call.id}/aftercare`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(input),
+        },
+      );
+      const body = (await response.json().catch(() => null)) as
+        | (PhoneDeskCallDetail & { message?: string })
+        | null;
+      if (!response.ok || !body?.call) {
+        throw new Error(body?.message ?? "통화 후처리를 저장하지 못했습니다.");
+      }
+      setSaved(true);
+      onSaved?.(body);
+      if (returnTo) {
+        router.push(returnTo);
+      }
+      router.refresh();
+    } catch (saveError) {
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : "통화 후처리를 저장하지 못했습니다.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="phone-aftercare-form">
+      <fieldset className="phone-aftercare-section">
+        <legend>통화 결과</legend>
+        <div className="phone-aftercare-results">
+          {resultOptions.map((option) => (
+            <button
+              aria-pressed={result === option.value}
+              className={result === option.value ? "is-selected" : undefined}
+              key={option.value}
+              onClick={() => chooseResult(option.value)}
+              type="button"
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        {result === "other" ? (
+          <label className="phone-aftercare-field">
+            <span>기타 내용</span>
+            <input
+              maxLength={500}
+              onChange={(event) => setOtherText(event.target.value)}
+              placeholder="통화 결과를 입력해 주세요"
+              value={otherText}
+            />
+          </label>
+        ) : null}
+      </fieldset>
+
+      <fieldset className="phone-aftercare-section">
+        <legend>상담데스크 연결</legend>
+        {suggested || existing?.consultationId ? (
+          <div className={`phone-aftercare-choice-block${consultationMode === "link" ? " is-selected" : ""}`}>
+            <label className="phone-aftercare-choice">
+              <input
+                checked={consultationMode === "link"}
+                onChange={() => setConsultationMode("link")}
+                type="radio"
+              />
+              <span>
+                <strong>기존 상담에 연결</strong>
+                <span>같은 전화번호로 등록된 상담 기록에 이 통화를 연결합니다.</span>
+              </span>
+            </label>
+            {suggested ? (
+              <div className="phone-aftercare-consultation-context">
+                <div className="phone-aftercare-context-heading">
+                  <Link href={`/consultations/${suggested.id}`}>
+                    {suggested.displayName} · {suggested.publicReceiptCode}
+                  </Link>
+                  <span>{consultationStateLabels[suggested.state] ?? suggested.state}</span>
+                </div>
+                <dl>
+                  <div>
+                    <dt>등록일</dt>
+                    <dd>{formatDate(suggested.firstRequestedAt)}</dd>
+                  </div>
+                  <div>
+                    <dt>최근 요청</dt>
+                    <dd>{formatDate(suggested.lastRequestedAt)}</dd>
+                  </div>
+                  <div>
+                    <dt>담당자</dt>
+                    <dd>{suggested.assigneeDisplayName ?? "미배정"}</dd>
+                  </div>
+                </dl>
+              </div>
+            ) : (
+              <div className="phone-aftercare-consultation-context">
+                <Link href={`/consultations/${existing!.consultationId}`}>
+                  이미 연결된 상담 상세 보기
+                </Link>
+              </div>
+            )}
+          </div>
+        ) : null}
+        <label className="phone-aftercare-choice">
+          <input
+            checked={consultationMode === "create"}
+            onChange={() => setConsultationMode("create")}
+            type="radio"
+          />
+          <span>
+            <strong>신건상담으로 저장</strong>
+            <span>전화데스크 통화와 상담데스크 고객을 함께 연결합니다.</span>
+          </span>
+        </label>
+        <label className="phone-aftercare-choice">
+          <input
+            checked={consultationMode === "none"}
+            onChange={() => setConsultationMode("none")}
+            type="radio"
+          />
+          <span>
+            <strong>전화데스크에만 저장</strong>
+            <span>상담데스크 고객은 만들거나 연결하지 않습니다.</span>
+          </span>
+        </label>
+        {consultationMode === "create" ? (
+          <div className="phone-aftercare-grid">
+            <label className="phone-aftercare-field">
+              <span>고객명</span>
+              <input
+                maxLength={50}
+                onChange={(event) => setCustomerName(event.target.value)}
+                placeholder="고객명"
+                value={customerName}
+              />
+            </label>
+            <label className="phone-aftercare-field">
+              <span>상담 담당자</span>
+              <select
+                onChange={(event) => setConsultationAssignee(event.target.value)}
+                value={consultationAssignee}
+              >
+                <option value="">미배정으로 생성</option>
+                {detail.staffOptions.map((staff) => (
+                  <option key={staff.staffUserId} value={staff.staffUserId}>
+                    {staff.displayName} · {staff.department}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        ) : null}
+
+        {detail.legalFriendsMatch ? (
+          <section className="phone-aftercare-directory-context" aria-label="리걸프렌즈 동기화 정보">
+            <div className="phone-aftercare-directory-heading">
+              <div>
+                <strong>리걸프렌즈 동기화 정보</strong>
+                <span>{detail.legalFriendsMatch.clientName} · 관련 사건 {detail.legalFriendsMatch.cases.length}건</span>
+              </div>
+              <span>전화번호 일치</span>
+            </div>
+            <div className="phone-aftercare-directory-list">
+              {detail.legalFriendsMatch.cases.slice(0, 3).map((caseItem, index) => (
+                <article key={`${caseItem.caseType}-${caseItem.caseUpdatedOn}-${index}`}>
+                  <div>
+                    <strong>{caseTypeLabel(caseItem.caseType)}</strong>
+                    <span>{caseStateLabel(caseItem.caseType, caseItem.caseState)}</span>
+                    {caseItem.isClosed ? <em>종결</em> : caseItem.isRepealed ? <em>폐지</em> : null}
+                  </div>
+                  <dl>
+                    <div>
+                      <dt>담당</dt>
+                      <dd>{caseItem.staffNames.join(" · ") || "미지정"}</dd>
+                    </div>
+                    <div>
+                      <dt>법원</dt>
+                      <dd>{caseItem.courtName || "미등록"}</dd>
+                    </div>
+                    <div>
+                      <dt>사건 등록</dt>
+                      <dd>{formatDateOnly(caseItem.caseCreatedOn)}</dd>
+                    </div>
+                    <div>
+                      <dt>최근 갱신</dt>
+                      <dd>{formatDateOnly(caseItem.caseUpdatedOn)}</dd>
+                    </div>
+                  </dl>
+                </article>
+              ))}
+            </div>
+            {detail.legalFriendsMatch.cases.length > 3 ? (
+              <p>최근 갱신 기준 3건을 표시했습니다. 그 외 {detail.legalFriendsMatch.cases.length - 3}건이 더 있습니다.</p>
+            ) : null}
+          </section>
+        ) : null}
+      </fieldset>
+
+      <fieldset className="phone-aftercare-section is-follow-up">
+        <legend>재통화 업무</legend>
+        <label className="phone-aftercare-toggle">
+          <input
+            checked={followUpEnabled}
+            onChange={(event) => setFollowUpEnabled(event.target.checked)}
+            type="checkbox"
+          />
+          <span>
+            <strong>재통화 업무 큐에 추가</strong>
+            <small>필요한 결과는 기본으로 체크되며 언제든 해제할 수 있습니다.</small>
+          </span>
+        </label>
+        {followUpEnabled ? (
+          <div className="phone-aftercare-follow-up-fields">
+            <div className="phone-aftercare-schedule-picker">
+              <p>재통화할 날짜와 30분 구간을 차례로 선택해 주세요.</p>
+              <div className="phone-aftercare-date-options" aria-label="재통화 날짜">
+                {followUpDateOptions.map((option) => (
+                  <button
+                    aria-pressed={followUpDate === option.value}
+                    className={followUpDate === option.value ? "is-selected" : undefined}
+                    key={option.value}
+                    onClick={() => {
+                      setFollowUpDate(option.value);
+                      setFollowUpTime("");
+                      setCustomDateOpen(false);
+                    }}
+                    type="button"
+                  >
+                    <strong>{option.label}</strong>
+                    <span>{option.sublabel}</span>
+                  </button>
+                ))}
+                <button
+                  aria-pressed={customDateOpen || Boolean(followUpDate && !followUpDateOptions.some((option) => option.value === followUpDate))}
+                  className={customDateOpen || Boolean(followUpDate && !followUpDateOptions.some((option) => option.value === followUpDate)) ? "is-selected" : undefined}
+                  onClick={() => setCustomDateOpen(true)}
+                  type="button"
+                >
+                  <strong>다른 날짜</strong>
+                  <span>직접 선택</span>
+                </button>
+              </div>
+              {customDateOpen ? (
+                <label className="phone-aftercare-custom-date">
+                  <span>재통화 날짜</span>
+                  <input
+                    min={minimumDueAt.split("T")[0] || undefined}
+                    onChange={(event) => {
+                      setFollowUpDate(event.target.value);
+                      setFollowUpTime("");
+                    }}
+                    type="date"
+                    value={followUpDate}
+                  />
+                </label>
+              ) : null}
+              {followUpDate ? (
+                <>
+                  <p className="phone-aftercare-schedule-label">
+                    {formatDateOnly(followUpDate)} 재통화 시간
+                  </p>
+                  {followUpTimeOptions.length ? (
+                    <div className="phone-aftercare-time-options">
+                      {followUpTimeOptions.map((time) => (
+                        <button
+                          aria-pressed={followUpTime === time}
+                          className={followUpTime === time ? "is-selected" : undefined}
+                          key={time}
+                          onClick={() => setFollowUpTime(time)}
+                          type="button"
+                        >
+                          {formatTimeRange(time)}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="phone-aftercare-schedule-empty">선택 가능한 업무시간이 지났습니다. 다음 날짜를 선택해 주세요.</p>
+                  )}
+                </>
+              ) : null}
+              {followUpDueAt && !followUpDueValid ? (
+                <p className="phone-aftercare-schedule-error">현재보다 이후의 30분 구간을 선택해 주세요.</p>
+              ) : null}
+            </div>
+            <label className="phone-aftercare-field">
+              <span>담당자</span>
+              <select
+                onChange={(event) => setFollowUpAssignee(event.target.value)}
+                required
+                value={followUpAssignee}
+              >
+                <option value="">담당자 선택</option>
+                {detail.staffOptions.map((staff) => (
+                  <option key={staff.staffUserId} value={staff.staffUserId}>
+                    {staff.displayName} · {staff.department}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        ) : null}
+      </fieldset>
+
+      <label className="phone-aftercare-field">
+        <span>통화 메모</span>
+        <textarea
+          maxLength={2000}
+          onChange={(event) => setMemo(event.target.value)}
+          placeholder="다음 담당자가 바로 이해할 수 있도록 핵심 내용을 남겨 주세요."
+          rows={5}
+          value={memo}
+        />
+      </label>
+
+      {error ? <p className="phone-aftercare-error" role="alert">{error}</p> : null}
+      {saved ? <p className="phone-aftercare-success" role="status">통화 후처리와 업무 큐를 저장했습니다.</p> : null}
+      <button
+        className="primary-button phone-aftercare-submit"
+        disabled={!canSave || saving}
+        onClick={save}
+        type="button"
+      >
+        {saving ? "저장 중…" : existing ? "후처리 수정 저장" : "후처리 저장"}
+      </button>
+    </div>
+  );
+}
+
+export function PhoneAftercareDialog({
+  callId,
+  open,
+  onClose,
+  onSaved,
+}: {
+  callId: string | null;
+  open: boolean;
+  onClose: () => void;
+  onSaved?: (next: PhoneDeskCallDetail) => void;
+}) {
+  const [detail, setDetail] = useState<PhoneDeskCallDetail | null>(null);
+  const [error, setError] = useState("");
+  const [portalReady, setPortalReady] = useState(false);
+  const dialogRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    queueMicrotask(() => setPortalReady(true));
+  }, []);
+
+  useEffect(() => {
+    if (!open || !portalReady) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [open, portalReady]);
+
+  useEffect(() => {
+    if (!open || !callId || !portalReady) return;
+    const frame = window.requestAnimationFrame(() => {
+      dialogRef.current?.scrollTo({ top: 0 });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [callId, open, portalReady]);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose, open]);
+
+  useEffect(() => {
+    if (!open || !callId) return;
+    const controller = new AbortController();
+    queueMicrotask(() => {
+      if (!controller.signal.aborted) {
+        setDetail(null);
+        setError("");
+      }
+    });
+    void fetch(`/api/phone-desk/calls/${callId}`, {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const body = (await response.json().catch(() => null)) as
+          | (PhoneDeskCallDetail & { message?: string })
+          | null;
+        if (!response.ok || !body?.call) {
+          throw new Error(body?.message ?? "통화 상세를 불러오지 못했습니다.");
+        }
+        setDetail(body);
+      })
+      .catch((loadError) => {
+        if (controller.signal.aborted) return;
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : "통화 상세를 불러오지 못했습니다.",
+        );
+      });
+    return () => controller.abort();
+  }, [callId, open]);
+
+  if (!open || !callId || !portalReady) return null;
+  return createPortal(
+    <div
+      className="phone-aftercare-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        aria-labelledby="phone-aftercare-dialog-title"
+        aria-modal="true"
+        className="phone-aftercare-dialog"
+        ref={dialogRef}
+        role="dialog"
+      >
+        <header>
+          <div>
+            <p className="eyebrow">CALL AFTERCARE</p>
+            <h2 id="phone-aftercare-dialog-title">통화 후처리</h2>
+            <p>
+              {detail
+                ? `${formatPhone(detail.call.remotePhone)} 통화 결과를 정리해 주세요.`
+                : "통화 정보를 불러오는 중입니다."}
+            </p>
+          </div>
+          <button aria-label="닫기" onClick={onClose} type="button">×</button>
+        </header>
+        {error ? <p className="error-banner" role="alert">{error}</p> : null}
+        {detail ? (
+          <PhoneAftercareForm
+            detail={detail}
+            onSaved={(next) => {
+              setDetail(next);
+              onSaved?.(next);
+            }}
+          />
+        ) : !error ? (
+          <p className="phone-aftercare-loading">통화 상세를 불러오는 중…</p>
+        ) : null}
+      </section>
+    </div>,
+    document.body,
+  );
+}

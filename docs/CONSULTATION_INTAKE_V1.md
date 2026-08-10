@@ -43,7 +43,7 @@
 
 - `consultations`: 접수번호, 상태, 전화번호 HMAC 지문, 익명 표시명, 암호화된 선호 이름
 - `consultation_requests`: 제출별 idempotency key, 암호화된 연락처·이름·거주 시·도·
-  상담 원문, 연락 희망 구간, 동의 버전·시각, 중복 판정
+  상담 원문, 자가진단 결과 카드 스냅샷, 연락 희망 구간, 동의 버전·시각, 중복 판정
 - `consultation_status_history`: 상태 전환과 행위자 감사 기록
 - `consultation_assignments`: 상담별 담당 직원·주 멤버십·배정자·배정 시각
 
@@ -106,6 +106,20 @@ referrer host와 허용 목록의 광고 식별자만 넣으며, 전체 URL 쿼�
 외부 생성 여부를 확정할 수 없는 실패는 중복 등록을 피하기 위해 자동 재시도하지 않는다.
 ERP에서 `워커 대기/처리 중/재시도 예정/완료/확인 필요`와 시도 이력을 확인한다.
 
+### ERP 실시간 상담 목록
+
+`outbox_events`에 `consultation.*` 이벤트가 INSERT되고 트랜잭션이 커밋되면 PostgreSQL
+트리거가 이벤트 ID·유형·상담 ID·발생시각만 `lawand_consultation_events` 채널로
+`NOTIFY`한다. 이름·전화번호·상담 내용과 outbox 본문은 알림 payload에 넣지 않는다.
+gateway는 전용 `LISTEN` 연결로 알림을 받아 인증된 직원 SSE에 전달하며 20초 heartbeat를
+보낸다.
+
+ERP 브라우저는 내부 API 키나 직원 세션 원문을 gateway 주소로 직접 보내지 않는다.
+HttpOnly 직원 쿠키를 읽을 수 있는 ERP의 same-origin route가 gateway SSE를 프록시한다.
+브라우저는 `consultation.changed`를 받을 때만 목록 API를 다시 읽으며 주기적 HTTP 폴링은
+하지 않는다. 최초 연결과 자동 재연결에서는 `consultation.sync`를 받아 한 번 재조회하므로,
+gateway·네트워크 중단 중 PostgreSQL `NOTIFY`가 유실돼도 현재 DB 상태로 복구한다.
+
 리걸프렌즈 호출은 배정된 직원의 `staff_external_accounts(provider=legalfriends)` 활성
 로그인 ID와 숫자형 `member_idx` 매핑이 모두 있어야 한다. 워커는
 `createForLawnV2` 신건 등록 body에 `member_idx`를 보내고, 성공 응답의
@@ -157,7 +171,7 @@ ERP에서 `워커 대기/처리 중/재시도 예정/완료/확인 필요`와 �
     "intakeRef": "consultation_requests/01984c7d-8500-7000-8000-000000000002",
     "attributionRef": "consultation_attributions/01984c7d-8500-7000-8000-000000000004",
     "mode": "quick",
-    "privacyNoticeVersion": "2026-07-28.1",
+    "privacyNoticeVersion": "2026-08-03.1",
     "consentAgreedAt": "2026-07-28T09:29:50.000Z",
     "dedupeOutcome": "new"
   }
@@ -276,6 +290,8 @@ V2 최초 등록의 담당자 반영은 실제 검증했다. 이후 ERP에서 �
 - [ ] 실제 AdPilot 운영 파라미터 이름·최대 길이를 개발자 계약과 대조해 별칭을 확정한다.
 - [ ] 책임 변호사·개인정보 담당자가 상담 고지 v2와 전체 처리방침을 승인한다.
 - [x] ERP 초대 가입·로그인·서버 세션·기본 역할과 상담 목록·PII 상세 조회 감사 v1을 구현한다.
+- [x] outbox 커밋 알림을 gateway SSE와 ERP same-origin 프록시로 전달하고, 이벤트·재연결
+  시 목록을 동기화한다.
 - [x] ERP `상담하기` 확인 후 본인 담당 배정, 상태이력·감사로그와 업무/리걸프렌즈/알림톡 outbox를 한 트랜잭션으로 만든다.
 - [ ] 비밀번호 재설정·계정 비활성화 UI·MFA/SSO·외부 rate limit 등 인증 운영 게이트를 통과한 뒤 외부 환경에 배포한다.
 - [x] 공개 POST에 IP 비저장형 전화·네트워크 rate limit, 정상 멱등 재시도 예외,

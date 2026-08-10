@@ -1,0 +1,1 @@
+ALTER TYPE "public"."telephony_call_disposition" ADD VALUE 'callback_required';

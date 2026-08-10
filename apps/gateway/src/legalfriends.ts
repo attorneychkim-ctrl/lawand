@@ -46,6 +46,7 @@ const memoLabels: Array<
   ["discharge", "과거 면책"],
   ["dischargeYear", "면책 연도"],
   ["concern", "남긴 내용"],
+  ["selfDiagnosis", "자가진단"],
 ];
 
 export type LegalFriendsCasePayload = {
@@ -113,14 +114,27 @@ function memoValue(value: unknown): string | null {
   if (Array.isArray(value)) {
     return value.length > 0 ? value.join(", ") : null;
   }
+  if (value && typeof value === "object") {
+    return Object.entries(value)
+      .map(([key, item]) => `${key}=${String(item)}`)
+      .join(", ");
+  }
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 function createMemo(
-  mode: "quick" | "detailed",
+  mode: "quick" | "detailed" | "self_diagnosis",
   intake: ConsultationIntakeAnswers,
 ): string {
-  const lines = [`접수 방식: ${mode === "quick" ? "빠른 상담" : "상세 상담"}`];
+  const lines = [
+    `접수 방식: ${
+      mode === "quick"
+        ? "빠른 상담"
+        : mode === "self_diagnosis"
+          ? "자가진단"
+          : "상세 상담"
+    }`,
+  ];
   for (const [key, label] of memoLabels) {
     const value = memoValue(intake[key]);
     if (value) lines.push(`${label}: ${value}`);
@@ -129,7 +143,7 @@ function createMemo(
 }
 
 export function createLegalFriendsCasePayload(input: {
-  mode: "quick" | "detailed";
+  mode: "quick" | "detailed" | "self_diagnosis";
   memberIdx: number;
   name: string;
   phone: string;

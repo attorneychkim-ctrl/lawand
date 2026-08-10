@@ -328,6 +328,15 @@ GRANT USAGE, SELECT
 GRANT SELECT
   ON ALL TABLES IN SCHEMA public TO ${database.viewerUser};
 
+-- 센트릭스 인증값은 암호화돼 있어도 일반 조회 계정에는 노출하지 않는다.
+REVOKE ALL ON TABLE telephony_endpoint_credentials
+  FROM PUBLIC, ${database.viewerUser};
+
+-- 공개 사례는 생성·검수 전용 경로만 변경하고 홈페이지·gateway 런타임은 조회만 한다.
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
+  ON TABLE public_case_studies FROM ${database.appUser};
+GRANT SELECT ON TABLE public_case_studies TO ${database.appUser};
+
 ALTER DEFAULT PRIVILEGES FOR ROLE ${database.migratorUser} IN SCHEMA public
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${database.appUser};
 ALTER DEFAULT PRIVILEGES FOR ROLE ${database.migratorUser} IN SCHEMA public

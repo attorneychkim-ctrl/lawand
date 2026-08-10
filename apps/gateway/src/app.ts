@@ -13,30 +13,68 @@ import {
   kakaoSkillRequestSchema,
   kakaoSkillUserKey,
   reviewSubmissionSchema,
+  selfDiagnosisSubmissionSchema,
+  staffCentrexLineUpdateSchema,
   staffExternalAccountUpdateSchema,
   staffInvitationAcceptanceSchema,
   staffInvitationCreationSchema,
   staffInvitationTokenSchema,
   staffLoginSchema,
+  centrexBridgeEventSchema,
+  centrexBridgeCommandResultSchema,
+  phoneDeskAftercareSaveSchema,
+  phoneDeskFollowUpCompletionSchema,
+  telephonyCallDispositionConfirmationSchema,
 } from "@lawand/core";
 
 import {
   StaffAuthError,
   type StaffAuthService,
 } from "./auth.js";
+import type { ConsultationEventSource } from "./consultation-events.js";
+import type { TelephonyInboundEventSource } from "./telephony-inbound-events.js";
+import type { TelephonyDeskEventSource } from "./telephony-desk-events.js";
+import {
+  CENTREX_BRIDGE_COMMAND_NEXT_PATH,
+  CENTREX_BRIDGE_COMMAND_RESULT_PREFIX,
+  CENTREX_BRIDGE_CLOCK_SKEW_SECONDS,
+  CENTREX_BRIDGE_EVENT_PATH,
+  CentrexBridgeAuthenticationError,
+  type CentrexBridgeKeyMap,
+  verifyCentrexBridgeRequest,
+} from "./centrex-bridge-auth.js";
+import {
+  CentrexBridgeIngressError,
+  type CentrexBridgeIngressService,
+} from "./centrex-bridge-service.js";
+import {
+  CENTREX_RING_CALLBACK_PREFIX,
+  CentrexRingCallbackError,
+  type CentrexInboundObserver,
+} from "./centrex-inbound-observer.js";
+import {
+  CentrexBridgeProvisioningError,
+  type CentrexBridgeProvisioningService,
+} from "./centrex-bridge-provisioning.js";
 import type { ConsultationService } from "./service.js";
 import {
   ConsultationAssignmentError,
   ConsultationValidationError,
   KakaoHomepageEntryError,
+  SelfDiagnosisUnavailableError,
 } from "./service.js";
 import type { PublicIntakeProtection } from "./intake-protection.js";
 import {
   ReviewSubmissionValidationError,
   type ReviewSubmissionService,
 } from "./review-service.js";
+import {
+  TelephonyCallError,
+  type TelephonyService,
+} from "./telephony-service.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
+const SSE_HEARTBEAT_INTERVAL_MS = 20_000;
 
 function sendJson(
   response: ServerResponse,
@@ -53,7 +91,18 @@ function sendJson(
   response.end(JSON.stringify(body));
 }
 
-async function readJson(request: IncomingMessage): Promise<unknown> {
+function sendSseEvent(
+  response: ServerResponse,
+  event: string,
+  data: unknown,
+  id?: string,
+) {
+  if (id) response.write(`id: ${id}\n`);
+  response.write(`event: ${event}\n`);
+  response.write(`data: ${JSON.stringify(data)}\n\n`);
+}
+
+async function readBody(request: IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
@@ -64,11 +113,19 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
     }
     chunks.push(buffer);
   }
+  return Buffer.concat(chunks);
+}
+
+function parseJson(body: Buffer): unknown {
   try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+    return JSON.parse(body.toString("utf8")) as unknown;
   } catch {
     throw new Error("invalid_json");
   }
+}
+
+async function readJson(request: IncomingMessage): Promise<unknown> {
+  return parseJson(await readBody(request));
 }
 
 function hasHeaderAccess(
@@ -124,11 +181,38 @@ export function createGatewayServer(options?: {
   authService?: StaffAuthService;
   intakeProtection?: PublicIntakeProtection;
   reviewService?: ReviewSubmissionService;
+  telephonyService?: TelephonyService;
+  centrexBridgeIngress?: CentrexBridgeIngressService;
+  centrexBridgeKeys?: CentrexBridgeKeyMap;
+  centrexBridgeProvisioning?: CentrexBridgeProvisioningService;
+  centrexInboundObserver?: CentrexInboundObserver;
+  consultationEvents?: ConsultationEventSource;
+  telephonyInboundEvents?: TelephonyInboundEventSource;
+  telephonyDeskEvents?: TelephonyDeskEventSource;
   kakaoSkill?: {
     botId: string;
     secret: string;
   };
 }) {
+  const seenBridgeNonces = new Map<string, number>();
+  const consumeBridgeNonce = (authentication: {
+    bridgeId: string;
+    authenticationNonceHash: Buffer;
+  }) => {
+    const current = Date.now();
+    for (const [key, expiresAt] of seenBridgeNonces) {
+      if (expiresAt > current) break;
+      seenBridgeNonces.delete(key);
+    }
+    const key = `${authentication.bridgeId}:${authentication.authenticationNonceHash.toString("hex")}`;
+    if (seenBridgeNonces.has(key)) {
+      throw new CentrexBridgeAuthenticationError("invalid_nonce");
+    }
+    seenBridgeNonces.set(
+      key,
+      current + CENTREX_BRIDGE_CLOCK_SKEW_SECONDS * 1_000,
+    );
+  };
   return createServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? "/", "http://lawand-gateway.local");
@@ -138,6 +222,396 @@ export function createGatewayServer(options?: {
           service: "lawand-gateway",
           status: "ok",
         });
+        return;
+      }
+
+      if (
+        request.method === "GET" &&
+        url.pathname.startsWith(CENTREX_RING_CALLBACK_PREFIX) &&
+        url.pathname.endsWith(".html")
+      ) {
+        if (
+          !options?.centrexInboundObserver ||
+          !options.centrexInboundObserver.matchesPath(url.pathname)
+        ) {
+          sendJson(response, 404, { error: "not_found" });
+          return;
+        }
+        await options.centrexInboundObserver.ingest(url.searchParams);
+        sendJson(response, 200, { status: "ok" });
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        url.pathname === CENTREX_BRIDGE_EVENT_PATH
+      ) {
+        if (!options?.centrexBridgeIngress || !options.centrexBridgeKeys) {
+          sendJson(response, 503, { error: "service_unavailable" });
+          return;
+        }
+        const body = await readBody(request);
+        const authentication = verifyCentrexBridgeRequest({
+          headers: request.headers,
+          body,
+          keys: options.centrexBridgeKeys,
+        });
+        consumeBridgeNonce(authentication);
+        const parsed = centrexBridgeEventSchema.safeParse(parseJson(body));
+        if (!parsed.success) {
+          sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+          return;
+        }
+        const resolvedAuthentication = options.centrexBridgeProvisioning
+          ? await options.centrexBridgeProvisioning.resolveAuthentication(
+              authentication,
+              parsed.data.endpointId,
+            )
+          : authentication;
+        const result = await options.centrexBridgeIngress.ingest(
+          parsed.data,
+          resolvedAuthentication,
+        );
+        sendJson(response, result.replayed ? 200 : 201, result);
+        return;
+      }
+
+      if (
+        request.method === "GET" &&
+        url.pathname === CENTREX_BRIDGE_COMMAND_NEXT_PATH
+      ) {
+        if (!options?.telephonyService || !options.centrexBridgeKeys) {
+          sendJson(response, 503, { error: "service_unavailable" });
+          return;
+        }
+        const body = Buffer.alloc(0);
+        const authentication = verifyCentrexBridgeRequest({
+          headers: request.headers,
+          body,
+          keys: options.centrexBridgeKeys,
+          method: "GET",
+          path: url.pathname,
+        });
+        consumeBridgeNonce(authentication);
+        const provisioningCommand = options.centrexBridgeProvisioning
+          ? await options.centrexBridgeProvisioning.poll(authentication)
+          : null;
+        if (
+          options.centrexBridgeProvisioning &&
+          !provisioningCommand &&
+          !options.centrexBridgeProvisioning.isReadyForTelephony(
+            authentication.bridgeId,
+          )
+        ) {
+          response.writeHead(204, {
+            "cache-control": "no-store",
+            "x-content-type-options": "nosniff",
+          });
+          response.end();
+          return;
+        }
+        const command = provisioningCommand
+          ? provisioningCommand
+          : await options.telephonyService.pollInboundAnswerCommand(
+              options.centrexBridgeProvisioning
+                ? await options.centrexBridgeProvisioning.resolveAuthentication(
+                    authentication,
+                  )
+                : authentication,
+            );
+        if (!command) {
+          response.writeHead(204, {
+            "cache-control": "no-store",
+            "x-content-type-options": "nosniff",
+          });
+          response.end();
+          return;
+        }
+        sendJson(response, 200, command);
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        url.pathname.startsWith(CENTREX_BRIDGE_COMMAND_RESULT_PREFIX) &&
+        url.pathname.endsWith("/result")
+      ) {
+        if (!options?.telephonyService || !options.centrexBridgeKeys) {
+          sendJson(response, 503, { error: "service_unavailable" });
+          return;
+        }
+        const commandId = url.pathname.slice(
+          CENTREX_BRIDGE_COMMAND_RESULT_PREFIX.length,
+          -"/result".length,
+        );
+        if (!validUuid(commandId)) {
+          sendJson(response, 400, { error: "invalid_command_id" });
+          return;
+        }
+        const body = await readBody(request);
+        const authentication = verifyCentrexBridgeRequest({
+          headers: request.headers,
+          body,
+          keys: options.centrexBridgeKeys,
+          method: "POST",
+          path: url.pathname,
+        });
+        consumeBridgeNonce(authentication);
+        const parsed = centrexBridgeCommandResultSchema.safeParse(
+          parseJson(body),
+        );
+        if (!parsed.success) {
+          sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+          return;
+        }
+        if (parsed.data.commandId !== commandId) {
+          sendJson(response, 409, { error: "command_id_mismatch" });
+          return;
+        }
+        const result =
+          options.centrexBridgeProvisioning?.handlesCommand(
+            commandId,
+            authentication.bridgeId,
+          )
+            ? await options.centrexBridgeProvisioning.complete(
+                commandId,
+                parsed.data,
+                authentication,
+              )
+            : await options.telephonyService.completeInboundAnswerCommand(
+                commandId,
+                parsed.data,
+                options.centrexBridgeProvisioning
+                  ? await options.centrexBridgeProvisioning.resolveAuthentication(
+                      authentication,
+                    )
+                  : authentication,
+              );
+        sendJson(response, 200, result);
+        return;
+      }
+
+      if (
+        request.method === "GET" &&
+        url.pathname === "/v1/consultation-events/stream"
+      ) {
+        if (
+          !options?.consultationEvents ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+
+        response.writeHead(200, {
+          "content-type": "text/event-stream; charset=utf-8",
+          "cache-control": "no-cache, no-store, no-transform",
+          connection: "keep-alive",
+          "x-accel-buffering": "no",
+          "x-content-type-options": "nosniff",
+        });
+        response.flushHeaders();
+        response.write("retry: 3000\n\n");
+        sendSseEvent(response, "consultation.sync", {
+          reason: "connected",
+        });
+
+        const unsubscribe = options.consultationEvents.subscribe(
+          (message) => {
+            if (response.destroyed || response.writableEnded) return;
+            if (message.kind === "sync") {
+              sendSseEvent(response, "consultation.sync", {
+                reason: "source_reconnected",
+              });
+              return;
+            }
+            sendSseEvent(
+              response,
+              "consultation.changed",
+              message.notification,
+              message.notification.eventId,
+            );
+          },
+        );
+        const heartbeat = setInterval(() => {
+          if (!response.destroyed && !response.writableEnded) {
+            response.write(": keepalive\n\n");
+          }
+        }, SSE_HEARTBEAT_INTERVAL_MS);
+        heartbeat.unref();
+
+        let closed = false;
+        const close = () => {
+          if (closed) return;
+          closed = true;
+          clearInterval(heartbeat);
+          unsubscribe();
+        };
+        request.once("aborted", close);
+        response.once("close", close);
+        return;
+      }
+
+      if (
+        request.method === "GET" &&
+        url.pathname === "/v1/telephony-inbound-events/stream"
+      ) {
+        if (
+          !options?.telephonyInboundEvents ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+
+        response.writeHead(200, {
+          "content-type": "text/event-stream; charset=utf-8",
+          "cache-control": "no-cache, no-store, no-transform",
+          connection: "keep-alive",
+          "x-accel-buffering": "no",
+          "x-content-type-options": "nosniff",
+        });
+        response.flushHeaders();
+        response.write("retry: 3000\n\n");
+        sendSseEvent(response, "telephony.inbound.sync", {
+          reason: "connected",
+        });
+
+        const unsubscribe = options.telephonyInboundEvents.subscribe(
+          (message) => {
+            if (response.destroyed || response.writableEnded) return;
+            if (message.kind === "sync") {
+              sendSseEvent(response, "telephony.inbound.sync", {
+                reason: "source_reconnected",
+              });
+              return;
+            }
+            sendSseEvent(
+              response,
+              "telephony.inbound.changed",
+              message.notification,
+              message.notification.eventId,
+            );
+          },
+        );
+        const heartbeat = setInterval(() => {
+          if (!response.destroyed && !response.writableEnded) {
+            response.write(": keepalive\n\n");
+          }
+        }, SSE_HEARTBEAT_INTERVAL_MS);
+        heartbeat.unref();
+
+        let closed = false;
+        const close = () => {
+          if (closed) return;
+          closed = true;
+          clearInterval(heartbeat);
+          unsubscribe();
+        };
+        request.once("aborted", close);
+        response.once("close", close);
+        return;
+      }
+
+      if (
+        request.method === "GET" &&
+        url.pathname === "/v1/phone-desk/events/stream"
+      ) {
+        if (
+          !options?.telephonyDeskEvents ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+
+        response.writeHead(200, {
+          "content-type": "text/event-stream; charset=utf-8",
+          "cache-control": "no-cache, no-store, no-transform",
+          connection: "keep-alive",
+          "x-accel-buffering": "no",
+          "x-content-type-options": "nosniff",
+        });
+        response.flushHeaders();
+        response.write("retry: 3000\n\n");
+        sendSseEvent(response, "telephony.desk.sync", {
+          reason: "connected",
+        });
+
+        const unsubscribe = options.telephonyDeskEvents.subscribe(
+          (message) => {
+            if (response.destroyed || response.writableEnded) return;
+            if (message.kind === "sync") {
+              sendSseEvent(response, "telephony.desk.sync", {
+                reason: "source_reconnected",
+              });
+              return;
+            }
+            sendSseEvent(
+              response,
+              "telephony.desk.changed",
+              message.notification,
+            );
+          },
+        );
+        const heartbeat = setInterval(() => {
+          if (!response.destroyed && !response.writableEnded) {
+            response.write(": keepalive\n\n");
+          }
+        }, SSE_HEARTBEAT_INTERVAL_MS);
+        heartbeat.unref();
+
+        let closed = false;
+        const close = () => {
+          if (closed) return;
+          closed = true;
+          clearInterval(heartbeat);
+          unsubscribe();
+        };
+        request.once("aborted", close);
+        response.once("close", close);
         return;
       }
 
@@ -248,6 +722,74 @@ export function createGatewayServer(options?: {
           "admin",
         ]);
         sendJson(response, 200, await options!.authService!.listStaff(actor));
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        url.pathname.startsWith("/v1/staff-auth/users/") &&
+        url.pathname.endsWith("/centrex-line")
+      ) {
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const staffUserId = url.pathname.slice(
+          "/v1/staff-auth/users/".length,
+          -"/centrex-line".length,
+        );
+        if (!validUuid(staffUserId)) {
+          sendJson(response, 400, { error: "invalid_staff_user_id" });
+          return;
+        }
+        const parsed = staffCentrexLineUpdateSchema.safeParse(
+          await readJson(request),
+        );
+        if (!parsed.success) {
+          sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+          return;
+        }
+        const actor = await options!.authService!.authorize(sessionToken, [
+          "admin",
+        ]);
+        const result =
+          await options!.authService!.updateCentrexLineNumber(
+            actor,
+            staffUserId,
+            parsed.data,
+          );
+        sendJson(response, 200, result);
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        url.pathname.startsWith("/v1/staff-auth/users/") &&
+        url.pathname.endsWith("/centrex-bridge-reassign")
+      ) {
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const staffUserId = url.pathname.slice(
+          "/v1/staff-auth/users/".length,
+          -"/centrex-bridge-reassign".length,
+        );
+        if (!validUuid(staffUserId)) {
+          sendJson(response, 400, { error: "invalid_staff_user_id" });
+          return;
+        }
+        const actor = await options!.authService!.authorize(sessionToken, [
+          "admin",
+        ]);
+        const result =
+          await options!.authService!.reassignCentrexBridge(
+            actor,
+            staffUserId,
+          );
+        sendJson(response, 200, result);
         return;
       }
 
@@ -456,6 +998,58 @@ export function createGatewayServer(options?: {
 
       if (
         request.method === "POST" &&
+        url.pathname === "/v1/self-diagnoses"
+      ) {
+        if (
+          !options?.publicIntakeApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-public-intake-key",
+            options.publicIntakeApiKey,
+          )
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        if (!options.service || !options.intakeProtection) {
+          sendJson(response, 503, { error: "service_unavailable" });
+          return;
+        }
+        const parsed = selfDiagnosisSubmissionSchema.safeParse(
+          await readJson(request),
+        );
+        if (!parsed.success) {
+          sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+          return;
+        }
+        const protection = options.intakeProtection.check({
+          clientKey:
+            typeof request.headers["x-lawand-client-key"] === "string"
+              ? request.headers["x-lawand-client-key"]
+              : null,
+          idempotencyKey: parsed.data.idempotencyKey,
+          phone: parsed.data.phone,
+        });
+        if (!protection.allowed) {
+          sendJson(
+            response,
+            429,
+            {
+              error: "too_many_requests",
+              message:
+                "자가진단 요청이 짧은 시간에 반복되었습니다. 잠시 후 다시 시도해 주세요.",
+            },
+            { "retry-after": String(protection.retryAfterSeconds) },
+          );
+          return;
+        }
+        const result = await options.service.submitSelfDiagnosis(parsed.data);
+        sendJson(response, result.replayed ? 200 : 201, result);
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
         url.pathname === "/v1/consultations"
       ) {
         if (
@@ -579,6 +1173,250 @@ export function createGatewayServer(options?: {
 
       if (
         request.method === "POST" &&
+        url.pathname.startsWith("/v1/telephony-inbound-calls/") &&
+        url.pathname.endsWith("/answer")
+      ) {
+        if (
+          !options?.telephonyService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const inboundCallId = url.pathname.slice(
+          "/v1/telephony-inbound-calls/".length,
+          -"/answer".length,
+        );
+        if (!validUuid(inboundCallId)) {
+          sendJson(response, 400, { error: "invalid_inbound_call_id" });
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        const result = await options.telephonyService.requestInboundAnswer(
+          inboundCallId,
+          actor,
+        );
+        sendJson(response, result.replayed ? 200 : 201, result);
+        return;
+      }
+
+      if (
+        request.method === "GET" &&
+        url.pathname === "/v1/telephony-inbound-calls"
+      ) {
+        if (
+          !options?.telephonyService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        sendJson(
+          response,
+          200,
+          await options.telephonyService.getInboundCallSnapshot(),
+        );
+        return;
+      }
+
+      if (
+        request.method === "GET" &&
+        url.pathname === "/v1/phone-desk/calls"
+      ) {
+        if (
+          !options?.telephonyService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        const limit = Number(url.searchParams.get("limit") ?? "50");
+        sendJson(
+          response,
+          200,
+          await options.telephonyService.getPhoneDeskCalls(limit),
+        );
+        return;
+      }
+
+      const phoneDeskAftercareMatch = url.pathname.match(
+        /^\/v1\/phone-desk\/calls\/([^/]+)\/aftercare$/,
+      );
+      if (request.method === "POST" && phoneDeskAftercareMatch) {
+        if (
+          !options?.telephonyService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        const callId = phoneDeskAftercareMatch[1];
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        if (!callId || !validUuid(callId)) {
+          sendJson(response, 400, { error: "invalid_call_id" });
+          return;
+        }
+        const parsed = phoneDeskAftercareSaveSchema.safeParse(
+          await readJson(request),
+        );
+        if (!parsed.success) {
+          sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        sendJson(
+          response,
+          200,
+          await options.telephonyService.savePhoneDeskAftercare(
+            callId,
+            parsed.data,
+            actor,
+          ),
+        );
+        return;
+      }
+
+      const phoneDeskCallMatch = url.pathname.match(
+        /^\/v1\/phone-desk\/calls\/([^/]+)$/,
+      );
+      if (request.method === "GET" && phoneDeskCallMatch) {
+        if (
+          !options?.telephonyService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        const callId = phoneDeskCallMatch[1];
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        if (!callId || !validUuid(callId)) {
+          sendJson(response, 400, { error: "invalid_call_id" });
+          return;
+        }
+        await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        sendJson(
+          response,
+          200,
+          await options.telephonyService.getPhoneDeskCall(callId),
+        );
+        return;
+      }
+
+      const phoneDeskFollowUpMatch = url.pathname.match(
+        /^\/v1\/phone-desk\/follow-ups\/([^/]+)\/complete$/,
+      );
+      if (request.method === "POST" && phoneDeskFollowUpMatch) {
+        if (
+          !options?.telephonyService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        const taskId = phoneDeskFollowUpMatch[1];
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        if (!taskId || !validUuid(taskId)) {
+          sendJson(response, 400, { error: "invalid_follow_up_id" });
+          return;
+        }
+        const parsed = phoneDeskFollowUpCompletionSchema.safeParse(
+          await readJson(request),
+        );
+        if (!parsed.success) {
+          sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        sendJson(
+          response,
+          200,
+          await options.telephonyService.completePhoneDeskFollowUp(
+            taskId,
+            actor,
+          ),
+        );
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
         url.pathname.startsWith("/v1/consultations/") &&
         url.pathname.endsWith("/assign-to-me")
       ) {
@@ -617,6 +1455,140 @@ export function createGatewayServer(options?: {
           actor,
         );
         sendJson(response, result.replayed ? 200 : 201, result);
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        url.pathname.startsWith("/v1/consultations/") &&
+        url.pathname.endsWith("/click-to-call")
+      ) {
+        if (
+          !options?.telephonyService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const consultationId = url.pathname.slice(
+          "/v1/consultations/".length,
+          -"/click-to-call".length,
+        );
+        if (!validUuid(consultationId)) {
+          sendJson(response, 400, { error: "invalid_consultation_id" });
+          return;
+        }
+        const actor = await options.authService.authorize(
+          sessionToken,
+          [...consultationAccessRoles],
+        );
+        const result = await options.telephonyService.requestClickToCall(
+          consultationId,
+          actor,
+        );
+        sendJson(response, result.replayed ? 200 : 201, result);
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        url.pathname.startsWith("/v1/telephony-calls/") &&
+        url.pathname.endsWith("/disposition")
+      ) {
+        if (
+          !options?.telephonyService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const callId = url.pathname.slice(
+          "/v1/telephony-calls/".length,
+          -"/disposition".length,
+        );
+        if (!validUuid(callId)) {
+          sendJson(response, 400, { error: "invalid_call_id" });
+          return;
+        }
+        const parsed = telephonyCallDispositionConfirmationSchema.safeParse(
+          await readJson(request),
+        );
+        if (!parsed.success) {
+          sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        sendJson(
+          response,
+          200,
+          await options.telephonyService.confirmDisposition(
+            callId,
+            parsed.data.disposition,
+            actor,
+          ),
+        );
+        return;
+      }
+
+      if (
+        request.method === "GET" &&
+        url.pathname.startsWith("/v1/telephony-calls/")
+      ) {
+        if (
+          !options?.telephonyService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const callId = url.pathname.slice("/v1/telephony-calls/".length);
+        if (!validUuid(callId)) {
+          sendJson(response, 400, { error: "invalid_call_id" });
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        sendJson(
+          response,
+          200,
+          await options.telephonyService.getCall(callId, actor),
+        );
         return;
       }
 
@@ -687,16 +1659,32 @@ export function createGatewayServer(options?: {
         const statusCode =
           error.code === "forbidden"
             ? 403
-            : error.code === "email_already_registered" ||
-                error.code === "legalfriends_id_already_registered" ||
-                error.code === "bootstrap_already_completed"
-              ? 409
-              : error.code === "staff_not_found"
-                ? 404
-              : error.code === "invalid_invitation"
-                ? 410
-                : 401;
+            : error.code === "centrex_provisioning_unavailable"
+              ? 503
+              : error.code === "email_already_registered" ||
+                  error.code === "legalfriends_id_already_registered" ||
+                  error.code === "bootstrap_already_completed" ||
+                  error.code === "centrex_verification_failed" ||
+                  error.code === "centrex_line_mismatch" ||
+                  error.code === "centrex_endpoint_conflict" ||
+                  error.code === "centrex_bridge_unassigned" ||
+                  error.code === "centrex_bridge_busy" ||
+                  error.code === "centrex_bridge_active_call" ||
+                  error.code === "centrex_bridge_failed"
+                ? 409
+                : error.code === "staff_not_found"
+                  ? 404
+                  : error.code === "invalid_invitation"
+                    ? 410
+                    : 401;
         sendJson(response, statusCode, {
+          error: error.code,
+          message: error.message,
+        });
+        return;
+      }
+      if (error instanceof CentrexBridgeProvisioningError) {
+        sendJson(response, 409, {
           error: error.code,
           message: error.message,
         });
@@ -709,9 +1697,59 @@ export function createGatewayServer(options?: {
         });
         return;
       }
+      if (error instanceof SelfDiagnosisUnavailableError) {
+        sendJson(response, 503, {
+          error: "diagnosis_unavailable",
+          message: error.message,
+        });
+        return;
+      }
       if (error instanceof ReviewSubmissionValidationError) {
         sendJson(response, 400, {
           error: "invalid_request",
+          message: error.message,
+        });
+        return;
+      }
+      if (error instanceof CentrexBridgeAuthenticationError) {
+        sendJson(response, 401, { error: "unauthorized" });
+        return;
+      }
+      if (error instanceof CentrexBridgeIngressError) {
+        sendJson(
+          response,
+          error.code === "endpoint_not_found" ? 404 : 409,
+          { error: error.code, message: error.message },
+        );
+        return;
+      }
+      if (error instanceof CentrexRingCallbackError) {
+        sendJson(
+          response,
+          error.code === "endpoint_not_found" ? 404 : 400,
+          { error: error.code },
+        );
+        return;
+      }
+      if (error instanceof TelephonyCallError) {
+        const statusCode =
+          error.code === "consultation_not_found" ||
+          error.code === "call_not_found" ||
+          error.code === "aftercare_not_found" ||
+          error.code === "follow_up_not_found" ||
+          error.code === "inbound_call_not_found" ||
+          error.code === "inbound_command_not_found"
+            ? 404
+            : error.code === "call_owned_by_other_staff" ||
+                error.code === "inbound_call_owned_by_other_staff"
+              ? 403
+              : error.code === "follow_up_due_invalid"
+                ? 400
+              : error.code === "feature_disabled"
+                ? 503
+                : 409;
+        sendJson(response, statusCode, {
+          error: error.code,
           message: error.message,
         });
         return;

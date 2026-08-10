@@ -2,8 +2,10 @@ import { z } from "zod";
 
 import { consultationAttributionInputSchema } from "./attribution.js";
 import { consultationModeSchema, dedupeOutcomeSchema } from "./consultation.js";
+import { CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION } from "./privacy.js";
+import { selfDiagnosisRecordSchema } from "./self-diagnosis.js";
 
-export const CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION = "2026-07-28.1";
+export { CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION } from "./privacy.js";
 
 export const residenceRegionSchema = z.enum([
   "seoul",
@@ -47,6 +49,7 @@ export const consultationIntakeAnswersSchema = z
     discharge: optionalAnswer(100),
     dischargeYear: z.string().regex(/^\d{4}$/).optional(),
     concern: optionalAnswer(500),
+    selfDiagnosis: selfDiagnosisRecordSchema.optional(),
   })
   .strict();
 
@@ -103,6 +106,14 @@ export const consultationSubmissionSchema = z
           path: ["intake"],
         });
       }
+    }
+
+    if (value.mode === "self_diagnosis" && !value.intake.selfDiagnosis) {
+      context.addIssue({
+        code: "custom",
+        message: "자가진단 정보가 누락되었습니다.",
+        path: ["intake", "selfDiagnosis"],
+      });
     }
 
     if (value.contact.preference === "scheduled_window") {

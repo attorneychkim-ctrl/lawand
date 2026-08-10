@@ -32,6 +32,60 @@ export const legalFriendsMemberIdxSchema = z
   .positive("리걸프렌즈 member_idx는 1 이상이어야 합니다.")
   .max(2_147_483_647, "리걸프렌즈 member_idx가 허용 범위를 벗어났습니다.");
 
+export const centrexLineNumberSchema = z
+  .string()
+  .trim()
+  .transform((value) => value.replaceAll("-", ""))
+  .pipe(
+    z
+      .string()
+      .regex(
+        /^070[0-9]{8}$/,
+        "센트릭스 회선번호는 070으로 시작하는 전체 11자리 번호여야 합니다.",
+      ),
+  );
+
+export const centrexExtensionSchema = z
+  .string()
+  .trim()
+  .regex(
+    /^[0-9]{2,10}$/,
+    "센트릭스 내선번호는 숫자 2~10자리여야 합니다.",
+  );
+
+export const centrexPasswordSchema = z
+  .string()
+  .min(1, "센트릭스 비밀번호를 입력해 주세요.")
+  .max(128, "센트릭스 비밀번호는 128자 이하여야 합니다.")
+  .refine(
+    (value) =>
+      Array.from(value).every((character) => {
+        const codePoint = character.codePointAt(0) ?? 0;
+        return codePoint > 31 && codePoint !== 127;
+      }),
+    "센트릭스 비밀번호에 제어 문자를 사용할 수 없습니다.",
+  );
+
+function requireCentrexPair(
+  value: {
+    centrexLineNumber?: string | null | undefined;
+    centrexExtension?: string | null | undefined;
+  },
+  context: z.RefinementCtx,
+) {
+  if (Boolean(value.centrexLineNumber) === Boolean(value.centrexExtension)) {
+    return;
+  }
+  context.addIssue({
+    code: "custom",
+    path: value.centrexLineNumber
+      ? ["centrexExtension"]
+      : ["centrexLineNumber"],
+    message:
+      "센트릭스 전체 회선번호와 내선번호를 함께 입력해 주세요.",
+  });
+}
+
 export const staffLoginSchema = z
   .object({
     email: normalizedEmailSchema,
@@ -63,11 +117,14 @@ export const staffInvitationCreationSchema = z
       .min(1, "직책을 입력해 주세요.")
       .max(100, "직책은 100자 이하여야 합니다."),
     role: staffRoleSchema,
+    centrexLineNumber: centrexLineNumberSchema.optional(),
+    centrexExtension: centrexExtensionSchema.optional(),
     legalFriendsId: legalFriendsAccountIdSchema.optional(),
     legalFriendsMemberIdx: legalFriendsMemberIdxSchema.optional(),
   })
   .strict()
   .superRefine((value, context) => {
+    requireCentrexPair(value, context);
     if (Boolean(value.legalFriendsId) !== Boolean(value.legalFriendsMemberIdx)) {
       context.addIssue({
         code: "custom",
@@ -95,6 +152,31 @@ export const staffExternalAccountUpdateSchema = z
           : ["legalFriendsId"],
         message:
           "리걸프렌즈 아이디와 member_idx를 함께 입력하거나 둘 다 비워 주세요.",
+      });
+    }
+  });
+
+export const staffCentrexLineUpdateSchema = z
+  .object({
+    centrexLineNumber: centrexLineNumberSchema.nullable(),
+    centrexExtension: centrexExtensionSchema.nullable(),
+    centrexPassword: centrexPasswordSchema.nullable(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    requireCentrexPair(value, context);
+    if (value.centrexLineNumber && !value.centrexPassword) {
+      context.addIssue({
+        code: "custom",
+        path: ["centrexPassword"],
+        message: "회선 검증을 위해 센트릭스 비밀번호를 입력해 주세요.",
+      });
+    }
+    if (!value.centrexLineNumber && value.centrexPassword) {
+      context.addIssue({
+        code: "custom",
+        path: ["centrexPassword"],
+        message: "회선번호와 내선번호를 입력한 경우에만 비밀번호를 검증할 수 있습니다.",
       });
     }
   });
@@ -135,4 +217,7 @@ export type StaffInvitationAcceptance = z.infer<
 >;
 export type StaffExternalAccountUpdate = z.infer<
   typeof staffExternalAccountUpdateSchema
+>;
+export type StaffCentrexLineUpdate = z.infer<
+  typeof staffCentrexLineUpdateSchema
 >;

@@ -6,6 +6,7 @@ import {
   eq,
   gte,
   inArray,
+  isNotNull,
   sql,
 } from "drizzle-orm";
 
@@ -21,6 +22,10 @@ import {
   CURRENT_KAKAO_CONSULTATION_NOTICE_VERSION,
   DEDUPE_WINDOWS,
   residenceRegionSchema,
+  assessSelfDiagnosis,
+  SELF_DIAGNOSIS_INCOME_TYPES,
+  SELF_DIAGNOSIS_MODEL_VERSION,
+  selfDiagnosisSubmissionSchema,
   type KakaoHomepageEntryConfirmation,
   type KakaoHomepageEntryReceipt,
   type KakaoHomepageEntrySubmission,
@@ -30,6 +35,9 @@ import {
   type ConsultationSubmissionResponse,
   type DedupeOutcome,
   type ExistingConsultationCandidate,
+  type SelfDiagnosisCaseProfile,
+  type SelfDiagnosisSubmission,
+  type SelfDiagnosisSubmissionResponse,
 } from "@lawand/core";
 import {
   alimtalkDeliveries,
@@ -47,11 +55,15 @@ import {
   naverBookingEntries,
   outboxDeliveryAttempts,
   outboxEvents,
+  selfDiagnosisCaseProfiles,
   staffAuditLogs,
   staffMemberships,
   staffOrganizations,
   staffProfiles,
   staffRegions,
+  telephonyCallAftercare,
+  telephonyCalls,
+  telephonyEndpoints,
 } from "@lawand/db";
 import type { createDatabaseClient } from "@lawand/db";
 
@@ -65,6 +77,8 @@ import {
 type Database = ReturnType<typeof createDatabaseClient>["db"];
 
 export class ConsultationValidationError extends Error {}
+
+export class SelfDiagnosisUnavailableError extends Error {}
 
 export class ConsultationAssignmentError extends Error {
   constructor(
@@ -159,6 +173,119 @@ export function createConsultationService(options: {
   protection: DataProtection;
 }) {
   const { db, protection } = options;
+
+  async function submitSelfDiagnosis(
+    rawSubmission: SelfDiagnosisSubmission,
+  ): Promise<SelfDiagnosisSubmissionResponse> {
+    const diagnosis = selfDiagnosisSubmissionSchema.parse(rawSubmission);
+    const profileRows = await db
+      .select()
+      .from(selfDiagnosisCaseProfiles)
+      .where(
+        eq(
+          selfDiagnosisCaseProfiles.modelVersion,
+          SELF_DIAGNOSIS_MODEL_VERSION,
+        ),
+      );
+    const profiles: SelfDiagnosisCaseProfile[] = profileRows.map((profile) => ({
+      id: profile.id,
+      caseType: profile.caseType === 2 ? 2 : 1,
+      courtIdx: profile.courtIdx,
+      courtName: profile.courtName,
+      monthlyIncome: profile.monthlyIncome,
+      incomeType: profile.incomeType,
+      residenceType: profile.residenceType,
+      marriageState: profile.marriageState,
+      minorChildCount: profile.minorChildCount,
+      dependentCount: profile.dependentCount,
+      totalDebt: profile.totalDebt,
+      liquidationValue: profile.liquidationValue,
+      priorityDebt: profile.priorityDebt,
+      monthlyPayment: profile.monthlyPayment,
+      paymentCount: profile.paymentCount,
+      estimatedSpend: profile.estimatedSpend,
+      livingCostType: profile.livingCostType,
+      livingCostCost: profile.livingCostCost,
+      totalPayment: profile.totalPayment,
+      repaymentRate: profile.repaymentRate,
+      filingDate: profile.filingDate,
+      prohibitionDate: profile.prohibitionDate,
+      commencementDate: profile.commencementDate,
+      approvalDate: profile.approvalDate,
+      bankruptcyDate: profile.bankruptcyDate,
+      dischargeDate: profile.dischargeDate,
+    }));
+    const assessment = assessSelfDiagnosis(diagnosis.answers, profiles);
+    if (assessment.matches.length !== 5) {
+      throw new SelfDiagnosisUnavailableError(
+        "비교 가능한 로앤 사건 다섯 건을 구성하지 못했습니다.",
+      );
+    }
+
+    const totalDebt =
+      diagnosis.answers.unsecuredDebt + diagnosis.answers.securedDebt;
+    const roundMoney = (value: number) => Math.round(value / 10_000) * 10_000;
+    // 고객 결과 화면과 ERP가 서로 다른 사건·금액을 보지 않도록
+    // 응답 직전에 정규화하는 동일한 카드 스냅샷을 암호화 intake에도 보관한다.
+    const matchedCases = assessment.matches.map((match) => ({
+      ...match,
+      monthlyIncome: roundMoney(match.monthlyIncome),
+      totalDebt: roundMoney(match.totalDebt),
+      liquidationValue: roundMoney(match.liquidationValue),
+      monthlyPayment: roundMoney(match.monthlyPayment),
+      totalPayment: roundMoney(match.totalPayment),
+      repaymentRate: Math.round(match.repaymentRate * 10) / 10,
+    }));
+    const record = {
+      ...diagnosis.answers,
+      modelVersion: assessment.modelVersion,
+      recommendation: assessment.recommendation,
+      recommendationReason: assessment.recommendationReason,
+      adjustedDependentCount: assessment.adjustedDependentCount,
+      referenceLivingCost: assessment.referenceLivingCost,
+      availableMonthlyIncome: assessment.availableMonthlyIncome,
+      minimumRequiredTotalPayment: assessment.minimumRequiredTotalPayment,
+      matchedCaseCount: assessment.matches.length,
+      matchedCases,
+    } as const;
+    const receipt = await submit({
+      source: diagnosis.source,
+      idempotencyKey: diagnosis.idempotencyKey,
+      mode: "self_diagnosis",
+      phone: diagnosis.phone,
+      name: diagnosis.name,
+      contact: { preference: "as_soon_as_possible" },
+      privacyNoticeVersion: diagnosis.privacyNoticeVersion,
+      consentAgreedAt: diagnosis.consentAgreedAt,
+      attribution: diagnosis.attribution,
+      intake: {
+        residenceRegion: diagnosis.answers.residenceRegion,
+        topic:
+          assessment.recommendation === "personal_rehabilitation"
+            ? "개인회생"
+            : "개인파산·면책",
+        urgencies: ["자가진단 완료"],
+        incomes: [
+          SELF_DIAGNOSIS_INCOME_TYPES.find(
+            (item) => item.value === diagnosis.answers.incomeType,
+          )?.label ?? "기타",
+        ],
+        unsecuredDebt: `${diagnosis.answers.unsecuredDebt}원`,
+        securedDebt: `${diagnosis.answers.securedDebt}원`,
+        assets: `청산가치 ${diagnosis.answers.liquidationValue}원`,
+        concern: `로앤 유사사건 ${assessment.matches.length}건 비교 · 총채무 ${totalDebt}원`,
+        selfDiagnosis: record,
+      },
+    });
+
+    return {
+      ...receipt,
+      assessment: {
+        ...assessment,
+        matches: matchedCases,
+      },
+    };
+  }
 
   async function submit(
     rawSubmission: ConsultationSubmission,
@@ -1829,6 +1956,7 @@ export function createConsultationService(options: {
     const assignmentRows = await db
       .select({
         consultationId: consultationAssignments.consultationId,
+        assigneeUserId: consultationAssignments.assigneeUserId,
         displayName: staffProfiles.displayName,
       })
       .from(consultationAssignments)
@@ -1838,7 +1966,7 @@ export function createConsultationService(options: {
       )
       .where(inArray(consultationAssignments.consultationId, ids));
     const assigneeByConsultation = new Map(
-      assignmentRows.map((row) => [row.consultationId, row.displayName]),
+      assignmentRows.map((row) => [row.consultationId, row]),
     );
     const homepageEntryRows = await db
       .select({
@@ -1864,6 +1992,64 @@ export function createConsultationService(options: {
     const naverBookingByConsultation = new Map(
       naverBookingRows.map((row) => [row.consultationId, row]),
     );
+    const telephonyRows = await db
+      .select({
+        consultationId: telephonyCalls.consultationId,
+        disposition: telephonyCalls.disposition,
+        requestedAt: telephonyCalls.requestedAt,
+      })
+      .from(telephonyCalls)
+      .where(
+        and(
+          inArray(telephonyCalls.consultationId, ids),
+          isNotNull(telephonyCalls.disposition),
+        ),
+      )
+      .orderBy(desc(telephonyCalls.requestedAt));
+    const aftercareRows = await db
+      .select({
+        consultationId: telephonyCallAftercare.consultationId,
+        result: telephonyCallAftercare.result,
+        confirmedAt: telephonyCallAftercare.confirmedAt,
+      })
+      .from(telephonyCallAftercare)
+      .where(
+        and(
+          inArray(telephonyCallAftercare.consultationId, ids),
+          isNotNull(telephonyCallAftercare.consultationId),
+        ),
+      )
+      .orderBy(desc(telephonyCallAftercare.confirmedAt));
+    const latestTelephonyByConsultation = new Map<
+      string,
+      {
+        disposition: (typeof telephonyRows)[number]["disposition"];
+        aftercareResult: (typeof aftercareRows)[number]["result"] | null;
+        occurredAt: Date;
+      }
+    >();
+    for (const call of telephonyRows) {
+      if (!latestTelephonyByConsultation.has(call.consultationId)) {
+        latestTelephonyByConsultation.set(call.consultationId, {
+          disposition: call.disposition,
+          aftercareResult: null,
+          occurredAt: call.requestedAt,
+        });
+      }
+    }
+    for (const aftercare of aftercareRows) {
+      if (!aftercare.consultationId) continue;
+      const existing = latestTelephonyByConsultation.get(
+        aftercare.consultationId,
+      );
+      if (!existing || aftercare.confirmedAt > existing.occurredAt) {
+        latestTelephonyByConsultation.set(aftercare.consultationId, {
+          disposition: null,
+          aftercareResult: aftercare.result,
+          occurredAt: aftercare.confirmedAt,
+        });
+      }
+    }
 
     return {
       items: consultationRows.map((consultation) => {
@@ -1911,6 +2097,9 @@ export function createConsultationService(options: {
         );
         const kakaoEntry = homepageEntryByConsultation.get(consultation.id);
         const naverBooking = naverBookingByConsultation.get(consultation.id);
+        const latestTelephony = latestTelephonyByConsultation.get(
+          consultation.id,
+        );
         return {
           id: consultation.id,
           publicReceiptCode: consultation.publicReceiptCode,
@@ -1924,8 +2113,11 @@ export function createConsultationService(options: {
           mode: request?.mode ?? "quick",
           dedupeOutcome: request?.dedupeOutcome ?? "new",
           requestCount: requestCounts.get(consultation.id) ?? 0,
+          assigneeUserId:
+            assigneeByConsultation.get(consultation.id)?.assigneeUserId ??
+            null,
           assigneeDisplayName:
-            assigneeByConsultation.get(consultation.id) ?? null,
+            assigneeByConsultation.get(consultation.id)?.displayName ?? null,
           kakaoEntry: kakaoEntry
             ? {
                 status: kakaoEntry.status,
@@ -1938,6 +2130,13 @@ export function createConsultationService(options: {
                 bookingNumber: naverBooking.bookingNumber,
                 status: naverBooking.status,
                 scheduledAt: naverBooking.scheduledAt.toISOString(),
+              }
+            : null,
+          latestTelephony: latestTelephony
+            ? {
+                disposition: latestTelephony.disposition,
+                aftercareResult: latestTelephony.aftercareResult,
+                requestedAt: latestTelephony.occurredAt.toISOString(),
               }
             : null,
           firstRequestedAt: consultation.firstRequestedAt.toISOString(),
@@ -2101,6 +2300,48 @@ export function createConsultationService(options: {
           )
           .limit(1)
       : [];
+    const telephonyCallRows = await db
+      .select({
+        id: telephonyCalls.id,
+        staffUserId: telephonyCalls.staffUserId,
+        staffDisplayName: staffProfiles.displayName,
+        endpointId: telephonyCalls.endpointId,
+        endpointLabel: telephonyEndpoints.label,
+        endpointLineNumber: telephonyEndpoints.lineNumber,
+        endpointExtension: telephonyEndpoints.extension,
+        commandStatus: telephonyCalls.commandStatus,
+        outcome: telephonyCalls.outcome,
+        requestedAt: telephonyCalls.requestedAt,
+        dispatchedAt: telephonyCalls.dispatchedAt,
+        providerRespondedAt: telephonyCalls.providerRespondedAt,
+        providerStatus: telephonyCalls.providerStatus,
+        providerStartedAt: telephonyCalls.providerStartedAt,
+        providerEndedAt: telephonyCalls.providerEndedAt,
+        providerDurationSeconds: telephonyCalls.providerDurationSeconds,
+        providerBillableSeconds: telephonyCalls.providerBillableSeconds,
+        reconciledAt: telephonyCalls.reconciledAt,
+        disposition: telephonyCalls.disposition,
+        aftercareResult: telephonyCallAftercare.result,
+        dispositionConfirmedAt: telephonyCalls.dispositionConfirmedAt,
+        lastErrorCode: telephonyCalls.lastErrorCode,
+        lastErrorMessage: telephonyCalls.lastErrorMessage,
+      })
+      .from(telephonyCalls)
+      .innerJoin(
+        telephonyEndpoints,
+        eq(telephonyEndpoints.id, telephonyCalls.endpointId),
+      )
+      .innerJoin(
+        staffProfiles,
+        eq(staffProfiles.userId, telephonyCalls.staffUserId),
+      )
+      .leftJoin(
+        telephonyCallAftercare,
+        eq(telephonyCallAftercare.telephonyCallId, telephonyCalls.id),
+      )
+      .where(eq(telephonyCalls.consultationId, consultationId))
+      .orderBy(desc(telephonyCalls.requestedAt))
+      .limit(10);
     const deliveryAttemptsByEvent = new Map<
       string,
       typeof deliveryAttemptRows
@@ -2251,6 +2492,45 @@ export function createConsultationService(options: {
               legalFriendsCase.managerAssignedAt?.toISOString() ?? null,
           }
         : null,
+      telephonyCalls: telephonyCallRows.map((call) => ({
+        id: call.id,
+        staffUserId: call.staffUserId,
+        staffDisplayName: call.staffDisplayName,
+        endpoint: {
+          id: call.endpointId,
+          label: call.endpointLabel,
+          lineNumber: call.endpointLineNumber,
+          extension: call.endpointExtension,
+        },
+        commandStatus: call.commandStatus,
+        outcome: call.outcome,
+        requestedAt: call.requestedAt.toISOString(),
+        dispatchedAt: call.dispatchedAt?.toISOString() ?? null,
+        providerRespondedAt:
+          call.providerRespondedAt?.toISOString() ?? null,
+        providerStatus: call.providerStatus,
+        providerStartedAt:
+          call.providerStartedAt?.toISOString() ?? null,
+        providerEndedAt: call.providerEndedAt?.toISOString() ?? null,
+        providerDurationSeconds: call.providerDurationSeconds,
+        providerBillableSeconds: call.providerBillableSeconds,
+        providerRingSeconds:
+          call.providerDurationSeconds === null ||
+          call.providerBillableSeconds === null
+            ? null
+            : Math.max(
+                0,
+                call.providerDurationSeconds -
+                  call.providerBillableSeconds,
+              ),
+        reconciledAt: call.reconciledAt?.toISOString() ?? null,
+        disposition: call.disposition,
+        aftercareResult: call.aftercareResult,
+        dispositionConfirmedAt:
+          call.dispositionConfirmedAt?.toISOString() ?? null,
+        lastErrorCode: call.lastErrorCode,
+        lastErrorMessage: call.lastErrorMessage,
+      })),
       firstRequestedAt: consultation.firstRequestedAt.toISOString(),
       lastRequestedAt: consultation.lastRequestedAt.toISOString(),
       requests: requestRows.map((request) => {
@@ -2331,6 +2611,7 @@ export function createConsultationService(options: {
     invalidateKakaoHomepageEntry,
     list,
     submit,
+    submitSelfDiagnosis,
     submitKakao,
     submitKakaoHomepageEntry,
   };

@@ -2,11 +2,24 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import {
+  SELF_DIAGNOSIS_COURTS,
+  SELF_DIAGNOSIS_INCOME_TYPES,
+  SELF_DIAGNOSIS_LIVING_COST_TYPES,
+  SELF_DIAGNOSIS_MARRIAGE_STATES,
+  SELF_DIAGNOSIS_RESIDENCE_TYPES,
+  selfDiagnosisRecordSchema,
+  type SelfDiagnosisMatch,
+  type SelfDiagnosisRecord,
+} from "@lawand/core";
+
+import {
   getConsultation,
   type ConsultationDetail,
 } from "../../../lib/gateway";
 import { requireStaff } from "../../../lib/session";
 import { ClaimConsultationButton } from "../../_components/claim-consultation-button";
+import { ClickToCallButton } from "../../_components/click-to-call-button";
+import { CopyButton } from "../../_components/copy-button";
 import { KakaoEntryPanel } from "../../_components/kakao-entry-panel";
 import { StaffBar } from "../../_components/staff-bar";
 
@@ -20,8 +33,32 @@ function formatDate(value: string | null) {
   }).format(new Date(value));
 }
 
+function formatCaseDate(value: string) {
+  return new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  }).format(new Date(`${value}T00:00:00+09:00`));
+}
+
 function formatPhone(value: string) {
   return value.replace(/(\d{3})(\d{4})(\d{4})/, "$1-$2-$3");
+}
+
+function formatWon(value: number) {
+  if (value >= 100_000_000) {
+    const eok = value / 100_000_000;
+    return `${Number.isInteger(eok) ? eok : eok.toFixed(1)}억원`;
+  }
+  if (value >= 10_000) {
+    return `${Math.round(value / 10_000).toLocaleString("ko-KR")}만원`;
+  }
+  return `${value.toLocaleString("ko-KR")}원`;
+}
+
+function formatPersonCount(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
 const residenceRegionLabels: Record<string, string> = {
@@ -44,22 +81,6 @@ const residenceRegionLabels: Record<string, string> = {
   jeju: "제주",
   overseas_or_other: "해외·기타",
 };
-
-function answer(key: string, value: unknown): string {
-  if (
-    key === "residenceRegion" &&
-    typeof value === "string" &&
-    residenceRegionLabels[value]
-  ) {
-    return residenceRegionLabels[value];
-  }
-  if (key === "scheduledAt" && typeof value === "string") {
-    return formatDate(value);
-  }
-  if (Array.isArray(value)) return value.join(", ") || "입력 없음";
-  if (typeof value === "number") return String(value);
-  return typeof value === "string" && value ? value : "입력 없음";
-}
 
 const answerLabels: Record<string, string> = {
   residenceRegion: "거주 지역",
@@ -87,35 +108,458 @@ const answerLabels: Record<string, string> = {
 
 const stateLabels: Record<string, string> = {
   requested: "신규 접수",
-  assigned: "담당 배정",
+  assigned: "상담 진행",
   contacted: "연락 완료",
   completed: "상담 완료",
   engaged: "계약",
   closed: "종결",
 };
 
+const dedupeLabels: Record<
+  ConsultationDetail["requests"][number]["dedupeOutcome"],
+  string
+> = {
+  new: "신규 접수",
+  exact_duplicate: "동일 내용 재접수",
+  identity_enrichment: "고객정보 보강",
+  suspected_duplicate: "7일 내 중복 의심",
+};
+
+function answer(key: string, value: unknown): string {
+  if (
+    key === "residenceRegion" &&
+    typeof value === "string" &&
+    residenceRegionLabels[value]
+  ) {
+    return residenceRegionLabels[value];
+  }
+  if (key === "scheduledAt" && typeof value === "string") {
+    return formatDate(value);
+  }
+  if (Array.isArray(value)) return value.join(" · ") || "입력 없음";
+  if (typeof value === "number") return value.toLocaleString("ko-KR");
+  if (typeof value === "boolean") return value ? "있음" : "없음";
+  if (typeof value !== "string" || !value) return "입력 없음";
+  return value.replace(/\d{4,}(?=원)/g, (amount) =>
+    Number(amount).toLocaleString("ko-KR"),
+  );
+}
+
+function modeLabel(request: ConsultationDetail["requests"][number]) {
+  if (request.contactChannel === "kakao_channel") return "카카오 채널 상담";
+  if (request.contactChannel === "naver_booking") return "네이버 예약 상담";
+  if (request.mode === "self_diagnosis") return "자가진단 상담";
+  return request.mode === "detailed" ? "상세 상담" : "빠른 상담";
+}
+
+function sourceLabel(request: ConsultationDetail["requests"][number]) {
+  const labels: Record<typeof request.source, string> = {
+    homepage: "로앤 홈페이지",
+    kakao_channel: "카카오 채널",
+    homepage_kakao: "홈페이지 카카오 진입",
+    naver_booking_email: "네이버 예약",
+    erp_phone_desk: "전화데스크 신건상담",
+  };
+  return labels[request.source];
+}
+
+function contactPreferenceLabel(
+  request: ConsultationDetail["requests"][number],
+) {
+  if (request.contactChannel === "kakao_channel") return "카카오 채팅 확인";
+  if (request.contactChannel === "naver_booking") {
+    return `${formatDate(request.contactWindowStart)} 예약`;
+  }
+  return request.contactPreference === "as_soon_as_possible"
+    ? "가능한 빠른 연락"
+    : `${formatDate(request.contactWindowStart)} ~ ${formatDate(
+        request.contactWindowEnd,
+      )}`;
+}
+
+function privacyBasisLabel(
+  request: ConsultationDetail["requests"][number],
+) {
+  if (request.privacyBasis === "explicit_consent") {
+    return `명시적 동의 · ${formatDate(request.consentAgreedAt)}`;
+  }
+  if (request.privacyBasis === "customer_initiated_channel_message") {
+    return "고객이 먼저 보낸 카카오 메시지";
+  }
+  if (request.privacyBasis === "customer_initiated_channel_entry") {
+    return "고객이 홈페이지 카카오 버튼을 선택";
+  }
+  if (request.privacyBasis === "staff_recorded_phone_interaction") {
+    return "직원이 고객과의 전화 통화를 기록";
+  }
+  return "고객이 네이버 예약을 직접 신청";
+}
+
+function readSelfDiagnosisRecord(
+  intake: Record<string, unknown>,
+): SelfDiagnosisRecord | null {
+  const parsed = selfDiagnosisRecordSchema.safeParse(intake.selfDiagnosis);
+  return parsed.success ? parsed.data : null;
+}
+
+function matchSimilarityLabel(value: SelfDiagnosisMatch["similarity"]) {
+  return value === "very_close"
+    ? "매우 가까움"
+    : value === "close"
+      ? "가까움"
+      : "참고 범위";
+}
+
+function incomeLabel(value: number, caseType?: number) {
+  if (caseType === 2 && value === 0) return "소득형태 기록 없음";
+  return (
+    SELF_DIAGNOSIS_INCOME_TYPES.find((entry) => entry.value === value)?.label ??
+    "기타"
+  );
+}
+
+function residenceTypeLabel(value: number) {
+  return (
+    SELF_DIAGNOSIS_RESIDENCE_TYPES.find((entry) => entry.value === value)
+      ?.label ?? `코드 ${value}`
+  );
+}
+
+function marriageLabel(value: number) {
+  return (
+    SELF_DIAGNOSIS_MARRIAGE_STATES.find((entry) => entry.value === value)
+      ?.label ?? "기타"
+  );
+}
+
+function livingCostLabel(match: SelfDiagnosisMatch) {
+  if (match.livingCostType === 0) return "추가 인정 없음";
+  const label =
+    SELF_DIAGNOSIS_LIVING_COST_TYPES.find(
+      (entry) => entry.value === match.livingCostType,
+    )?.label ?? `코드 ${match.livingCostType}`;
+  return match.livingCostCost > 0
+    ? `${label} · ${formatWon(match.livingCostCost)}`
+    : `${label} · 금액 기록 없음`;
+}
+
+function matchTimeline(match: SelfDiagnosisMatch) {
+  return (
+    match.caseType === 1
+      ? [
+          { date: match.filingDate, label: "신청서 접수" },
+          { date: match.prohibitionDate, label: "금지결정" },
+          { date: match.commencementDate, label: "개시결정" },
+          { date: match.approvalDate, label: "인가결정" },
+        ]
+      : [
+          { date: match.filingDate, label: "신청서 접수" },
+          { date: match.bankruptcyDate, label: "파산선고" },
+          { date: match.dischargeDate, label: "면책허가" },
+        ]
+  ).filter((event): event is { date: string; label: string } => event.date !== null);
+}
+
+function SelfDiagnosisOverview({ record }: { record: SelfDiagnosisRecord }) {
+  const court = SELF_DIAGNOSIS_COURTS.find(
+    (entry) => entry.idx === record.courtIdx,
+  )?.name;
+  const recommendation =
+    record.recommendation === "personal_rehabilitation"
+      ? "개인회생 유사사례"
+      : "개인파산·면책 검토";
+  const reasonLabels: Record<SelfDiagnosisRecord["recommendationReason"], string> = {
+    similar_rehabilitation_cases: "회생 제약을 충족한 유사사건을 비교했습니다.",
+    dependent_adjustment_needed:
+      "부양가족 인정 범위를 조정한 시나리오로 비교했습니다.",
+    income_below_one_person_living_cost:
+      "월소득이 1인 기준 생계비 이하로 확인됐습니다.",
+    repayment_constraints_not_met:
+      "가용소득·청산가치 기준상 회생 변제 제약을 충족하기 어려웠습니다.",
+  };
+
+  return (
+    <section className="diagnosis-overview" aria-labelledby="diagnosis-overview-title">
+      <header className="diagnosis-overview-heading">
+        <div>
+          <p className="section-kicker">SELF-DIAGNOSIS SNAPSHOT</p>
+          <h4 id="diagnosis-overview-title">자가진단 입력·판정</h4>
+          <p>{reasonLabels[record.recommendationReason]}</p>
+        </div>
+        <span className="diagnosis-recommendation">{recommendation}</span>
+      </header>
+      <dl className="diagnosis-key-metrics">
+        <div>
+          <dt>월소득</dt>
+          <dd>{formatWon(record.monthlyIncome)}</dd>
+        </div>
+        <div>
+          <dt>총채무</dt>
+          <dd>{formatWon(record.unsecuredDebt + record.securedDebt)}</dd>
+        </div>
+        <div>
+          <dt>청산가치</dt>
+          <dd>{formatWon(record.liquidationValue)}</dd>
+        </div>
+        <div>
+          <dt>가용소득 참고액</dt>
+          <dd>{formatWon(record.availableMonthlyIncome)}</dd>
+        </div>
+        <div>
+          <dt>기준 생계비</dt>
+          <dd>{formatWon(record.referenceLivingCost)}</dd>
+        </div>
+        <div>
+          <dt>최소 필요 총변제액</dt>
+          <dd>{formatWon(record.minimumRequiredTotalPayment)}</dd>
+        </div>
+      </dl>
+      <dl className="diagnosis-facts">
+        <div><dt>거주·법원</dt><dd>{residenceRegionLabels[record.residenceRegion]} · {court}</dd></div>
+        <div><dt>소득·거주형태</dt><dd>{incomeLabel(record.incomeType)} · {residenceTypeLabel(record.residenceType)}</dd></div>
+        <div><dt>혼인·자녀</dt><dd>{marriageLabel(record.marriageState)} · 미성년 자녀 {record.minorChildCount}명</dd></div>
+        <div><dt>비교 가구원</dt><dd>본인 포함 {record.adjustedDependentCount + 1}명 · 우선권채권 {record.priorityDebt ? "있음" : "없음"}</dd></div>
+      </dl>
+      <p className="diagnosis-model-note">
+        비교 모델 {record.modelVersion} · 고객 화면에 유사사례 {record.matchedCaseCount}건 표시
+      </p>
+    </section>
+  );
+}
+
+function SelfDiagnosisMatches({
+  requestId,
+  matches,
+}: {
+  requestId: string;
+  matches: SelfDiagnosisMatch[] | null;
+}) {
+  const titleId = `self-diagnosis-matches-${requestId}`;
+  return (
+    <section className="self-diagnosis-match-panel" aria-labelledby={titleId}>
+      <header className="self-diagnosis-match-heading">
+        <div>
+          <p className="section-kicker">CASES SHOWN TO CLIENT</p>
+          <h4 id={titleId}>의뢰인이 실제로 본 유사사례</h4>
+          <p>
+            결과 화면에 표시한 순서와 비교값을 그대로 보관한 비식별 스냅샷입니다.
+          </p>
+        </div>
+        <span className="count-badge">
+          {matches ? `${matches.length}건` : "이전 접수"}
+        </span>
+      </header>
+
+      {matches ? (
+        <div className="self-diagnosis-match-grid">
+          {matches.map((match) => (
+            <article className="self-diagnosis-match-card" key={match.rank}>
+              <header className="match-card-heading">
+                <div>
+                  <span>유사사례 {String(match.rank).padStart(2, "0")}</span>
+                  <strong>{match.caseType === 1 ? "개인회생" : "개인파산·면책"}</strong>
+                </div>
+                <small>{matchSimilarityLabel(match.similarity)}</small>
+              </header>
+
+              <div className="match-card-finance">
+                <div>
+                  <span>{match.caseType === 1 ? "월 변제금" : "절차 결과"}</span>
+                  <strong>
+                    {match.caseType === 1
+                      ? formatWon(match.monthlyPayment)
+                      : "파산·면책"}
+                  </strong>
+                  <small>
+                    {match.caseType === 1
+                      ? `${match.paymentCount}개월 변제`
+                      : "월 변제금 없음"}
+                  </small>
+                </div>
+                <div>
+                  <span>총채무</span>
+                  <strong>{formatWon(match.totalDebt)}</strong>
+                  <small>{match.courtName}</small>
+                </div>
+              </div>
+
+              <dl className="match-card-facts">
+                <div><dt>월소득</dt><dd>{match.caseType === 2 && match.monthlyIncome === 0 ? "원천 기록 없음" : formatWon(match.monthlyIncome)}</dd></div>
+                <div><dt>청산가치</dt><dd>{formatWon(match.liquidationValue)}</dd></div>
+                <div><dt>소득·혼인</dt><dd>{incomeLabel(match.incomeType, match.caseType)} · {marriageLabel(match.marriageState)}</dd></div>
+                <div><dt>거주형태</dt><dd>{residenceTypeLabel(match.residenceType)}</dd></div>
+                <div><dt>자녀·가구원</dt><dd>미성년 {match.minorChildCount}명 · 인정 {formatPersonCount(match.dependentCount)}명</dd></div>
+                {match.caseType === 1 ? (
+                  <>
+                    <div><dt>예상 지출</dt><dd>{formatWon(match.estimatedSpend)}</dd></div>
+                    <div><dt>추가생계비</dt><dd>{livingCostLabel(match)}</dd></div>
+                    <div><dt>총변제·변제율</dt><dd>{formatWon(match.totalPayment)} · {match.repaymentRate}%</dd></div>
+                  </>
+                ) : null}
+              </dl>
+
+              <ol className="self-diagnosis-match-timeline" aria-label="사건 진행일">
+                {matchTimeline(match).map((event) => (
+                  <li key={event.label}>
+                    <span>{event.label}</span>
+                    <time dateTime={event.date}>{formatCaseDate(event.date)}</time>
+                  </li>
+                ))}
+              </ol>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="self-diagnosis-match-empty">
+          이 요청은 유사사례 카드 보관 기능 적용 전 접수됐거나 카드 스냅샷을 읽지
+          못했습니다. 자가진단 입력·판정값은 위에서 확인할 수 있습니다.
+        </p>
+      )}
+    </section>
+  );
+}
+
 type IntegrationRequest = ConsultationDetail["integrationRequests"][number];
+
+const integrationLabels: Record<string, string> = {
+  "alimtalk.consultation.request_notification.requested": "접수 알림톡",
+  "legalfriends.consultation.registration.requested": "리걸프렌즈 사건 등록",
+  "alimtalk.consultation.assignment_notification.requested": "담당 배정 알림톡",
+};
+
+function integrationTone(request: IntegrationRequest) {
+  if (request.status === "published") return "success";
+  if (request.status === "dead") return "danger";
+  if (request.attempts > 0) return "warning";
+  return "pending";
+}
 
 function integrationStatus(request: IntegrationRequest | undefined): string {
   if (!request) return "요청 없음";
-  if (request.status === "published") {
-    return `완료${request.attempts > 0 ? ` · ${request.attempts}회 시도` : ""}`;
-  }
+  if (request.status === "published") return "완료";
   if (request.status === "dead") return "확인 필요";
   if (request.lockedAt) return "처리 중";
-  if (request.attempts > 0) {
-    return `재시도 예정 · ${formatDate(request.availableAt)}`;
-  }
-  return "워커 대기";
+  if (request.attempts > 0) return "재시도 예정";
+  return "처리 대기";
 }
 
-const integrationLabels: Record<string, string> = {
-  "alimtalk.consultation.request_notification.requested":
-    "상담 요청 접수 알림톡",
-  "legalfriends.consultation.registration.requested": "리걸프렌즈 상담 등록",
-  "alimtalk.consultation.assignment_notification.requested":
-    "담당 배정 알림톡",
-};
+function nextAction(consultation: ConsultationDetail) {
+  if (consultation.kakaoEntry?.status === "pending") {
+    return {
+      title: "카카오 채팅을 확인해 주세요",
+      description: "채널 관리자에서 실제 메시지를 찾은 뒤 표시명을 반영해야 담당 배정할 수 있습니다.",
+    };
+  }
+  if (consultation.naverBooking?.status === "details_pending") {
+    return {
+      title: "네이버 예약 상세를 확인해 주세요",
+      description: "예약 상세에서 고객 연락정보와 요청사항을 확인한 뒤 상담을 준비해 주세요.",
+    };
+  }
+  if (consultation.state === "requested") {
+    return {
+      title: "담당자를 배정해 주세요",
+      description: "상담하기를 누르면 본인에게 배정되고 전화 접수는 외부 등록과 담당 배정 알림이 시작됩니다.",
+    };
+  }
+  if (consultation.state === "assigned") {
+    return {
+      title: "고객에게 연락할 차례입니다",
+      description: "접수 내용과 자가진단 결과를 먼저 확인한 뒤 고객 상황을 이어서 들어 주세요.",
+    };
+  }
+  if (consultation.state === "contacted") {
+    return {
+      title: "상담 결과를 정리해 주세요",
+      description: "연락 결과와 다음 약속을 확인하고 상담 상태를 이어서 관리해 주세요.",
+    };
+  }
+  return {
+    title: `${stateLabels[consultation.state] ?? consultation.state} 상태입니다`,
+    description: "요청 이력과 외부 연동 원장에서 현재 처리 결과를 확인할 수 있습니다.",
+  };
+}
+
+const telephonyDispositionLabels = {
+  customer_conversation: "고객과 상담함",
+  voicemail: "음성사서함 연결",
+  no_answer: "받지 않음",
+  rejected: "수신 거절",
+  busy: "통화 중",
+  caller_cancelled: "발신 취소",
+  callback_required: "재상담 필요",
+} satisfies Record<
+  NonNullable<ConsultationDetail["telephonyCalls"][number]["disposition"]>,
+  string
+>;
+
+const phoneAftercareLabels = {
+  consultation_completed: "상담완료",
+  reconsultation_required: "재상담필요",
+  no_answer: "부재 및 무응답",
+  busy: "통화중",
+  manager_callback_requested: "담당자 연결 요청",
+  rejected: "거절",
+  public_institution: "법원 등 관공서",
+  creditor: "채권자 등",
+  wrong_number: "잘못 걸린 전화",
+  other: "기타",
+} satisfies Record<
+  NonNullable<ConsultationDetail["telephonyCalls"][number]["aftercareResult"]>,
+  string
+>;
+
+function telephonyStatusLabel(
+  call: ConsultationDetail["telephonyCalls"][number],
+) {
+  if (call.aftercareResult) return phoneAftercareLabels[call.aftercareResult];
+  if (call.disposition) return telephonyDispositionLabels[call.disposition];
+  if (call.reconciledAt) {
+    return call.outcome === "answered" ? "연결 확인" : "결과 입력 필요";
+  }
+  return {
+    queued: "발신 대기",
+    dispatching: "연결 중",
+    succeeded: "종료 확인 중",
+    failed: "발신 실패",
+    unknown: "확인 필요",
+  }[call.commandStatus];
+}
+
+function telephonyStatusTone(
+  call: ConsultationDetail["telephonyCalls"][number],
+) {
+  if (call.aftercareResult) {
+    return [
+      "reconsultation_required",
+      "no_answer",
+      "busy",
+      "manager_callback_requested",
+      "rejected",
+    ].includes(call.aftercareResult)
+      ? "danger"
+      : "success";
+  }
+  if (call.disposition || call.outcome === "answered") return "success";
+  if (
+    call.reconciledAt ||
+    call.commandStatus === "failed" ||
+    call.commandStatus === "unknown"
+  ) {
+    return "danger";
+  }
+  return "pending";
+}
+
+function telephonyResultDetail(
+  call: ConsultationDetail["telephonyCalls"][number],
+) {
+  if (!call.reconciledAt) return null;
+  if (call.outcome === "answered") {
+    return `센트릭스 연결 ${call.providerBillableSeconds ?? 0}초 · 호출 ${call.providerRingSeconds ?? 0}초`;
+  }
+  return `센트릭스 미연결 · 상태 ${call.providerStatus ?? "확인 불가"}`;
+}
 
 export default async function ConsultationDetailPage({
   params,
@@ -124,323 +568,366 @@ export default async function ConsultationDetailPage({
 }) {
   const { id } = await params;
   const staff = await requireStaff();
-  let consultation;
+  let consultation: ConsultationDetail | null;
   try {
     consultation = await getConsultation(id);
   } catch {
     throw new Error("상담 상세를 불러오지 못했습니다.");
   }
   if (!consultation) notFound();
-  const legalFriendsRequest = consultation.integrationRequests.find(
-    (request) => request.eventType.startsWith("legalfriends."),
-  );
-  const assignmentAlimtalkRequest = consultation.integrationRequests.find(
-    (request) =>
-      request.eventType ===
-      "alimtalk.consultation.assignment_notification.requested",
+
+  const latestRequest = consultation.requests[0];
+  const latestPhone = latestRequest?.phone ?? null;
+  const latestRegion = latestRequest?.intake.residenceRegion;
+  const action = nextAction(consultation);
+  const canClaim =
+    consultation.state === "requested" &&
+    consultation.kakaoEntry?.status !== "pending";
+  const canClickToCall =
+    Boolean(latestPhone) &&
+    consultation.assignment?.assigneeUserId === staff.id;
+  const latestMyCall = consultation.telephonyCalls.find(
+    (call) => call.staffUserId === staff.id,
   );
 
   return (
     <>
       <StaffBar staff={staff} />
-      <main className="erp-shell detail-shell">
-      <Link className="back-link" href="/">
-        ← 상담 목록
-      </Link>
-      <header className="detail-header">
-        <div>
-          <p className="eyebrow">{consultation.publicReceiptCode}</p>
-          <h1>{consultation.displayName}</h1>
-          <p>
-            최초 접수 {formatDate(consultation.firstRequestedAt)} · 최근 요청{" "}
-            {formatDate(consultation.lastRequestedAt)}
-          </p>
-        </div>
-        <div className="detail-actions">
-          <span className="state-badge">
-            {stateLabels[consultation.state] ?? consultation.state}
-          </span>
-          {consultation.state === "requested" &&
-          consultation.kakaoEntry?.status !== "pending" ? (
-            <ClaimConsultationButton consultationId={consultation.id} />
-          ) : null}
-        </div>
-      </header>
+      <main className={`erp-shell detail-shell${canClaim ? " has-mobile-action" : ""}`}>
+        <Link className="page-back-link" href="/">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7" /></svg>
+          상담 목록
+        </Link>
 
-      {consultation.kakaoEntry ? (
-        <KakaoEntryPanel
-          consultationId={consultation.id}
-          entry={consultation.kakaoEntry}
-        />
-      ) : null}
-
-      {consultation.naverBooking ? (
-        <section className="assignment-panel" aria-labelledby="naver-title">
-          <div>
-            <p className="eyebrow">NAVER BOOKING</p>
-            <h2 id="naver-title">
-              {formatDate(consultation.naverBooking.scheduledAt)} 예약
-            </h2>
-            <p>
-              예약번호 {consultation.naverBooking.bookingNumber} ·{" "}
-              {consultation.naverBooking.status === "details_pending"
-                ? "이름·전화번호 상세 확인 필요"
-                : consultation.naverBooking.status === "ready"
-                  ? "상세정보 반영 완료"
-                  : "예약 취소"}
-            </p>
-          </div>
-          <div className="assignment-meta">
-            <a
-              className="back-link"
-              href={consultation.naverBooking.detailsUrl}
-              rel="noopener noreferrer"
-              target="_blank"
-            >
-              네이버 예약 상세 열기 ↗
-            </a>
-            <span>
-              메일 감지 {formatDate(consultation.naverBooking.sourceReceivedAt)}
-            </span>
-          </div>
-        </section>
-      ) : null}
-
-      {consultation.assignment ? (
-        <section className="assignment-panel" aria-labelledby="assignment-title">
-          <div>
-            <p className="eyebrow">ASSIGNMENT</p>
-            <h2 id="assignment-title">
-              {consultation.assignment.displayName} 담당
-            </h2>
-            <p>
-              {consultation.assignment.organization.name} ·{" "}
-              {consultation.assignment.region.name} ·{" "}
-              {consultation.assignment.department} ·{" "}
-              {consultation.assignment.jobTitle}
-            </p>
-          </div>
-          <div className="assignment-meta">
-            <span>{formatDate(consultation.assignment.assignedAt)} 배정</span>
-            {consultation.contactChannel !== "phone" ? (
-              <span>
-                {consultation.contactChannel === "kakao_channel"
-                  ? "전화번호 미수집"
-                  : "네이버 예약 상세정보 확인 필요"}{" "}
-                · 리걸프렌즈·알림톡 보류
+        <header className="consultation-hero">
+          <div className="consultation-hero-main">
+            <div className="consultation-hero-labels">
+              <span className="receipt-code">{consultation.publicReceiptCode}</span>
+              <span className={`state-badge is-${consultation.state}`}>
+                {stateLabels[consultation.state] ?? consultation.state}
               </span>
-            ) : (
-              <>
-                <span>
-                  리걸프렌즈 등록 {integrationStatus(legalFriendsRequest)}
-                </span>
-                <span>
-                  담당 배정 알림톡{" "}
-                  {integrationStatus(assignmentAlimtalkRequest)}
-                </span>
-              </>
-            )}
-          </div>
-        </section>
-      ) : null}
-
-      {consultation.integrationRequests.length > 0 ? (
-        <section className="erp-panel integration-ledger">
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">DELIVERY LEDGER</p>
-              <h2>외부 연동 실행 원장</h2>
             </div>
+            <h1>{consultation.displayName}</h1>
+            <p>
+              최초 접수 {formatDate(consultation.firstRequestedAt)} · 최근 요청 {formatDate(consultation.lastRequestedAt)}
+            </p>
           </div>
-          <div className="integration-list">
-            {consultation.integrationRequests.map((request) => (
-              <article key={request.id}>
-                <div>
-                  <h3>
-                    {integrationLabels[request.eventType] ?? request.eventType}
-                  </h3>
-                  <p>
-                    {integrationStatus(request)} · 총 {request.attempts}회 시도
-                    {request.publishedAt
-                      ? ` · ${formatDate(request.publishedAt)} 완료`
-                      : ""}
-                  </p>
-                  {request.eventType.startsWith("legalfriends.") &&
-                  consultation.legalFriendsCase ? (
-                    <p>
-                      리걸프렌즈 사건 {consultation.legalFriendsCase.caseIdx} ·{" "}
-                      {consultation.legalFriendsCase.managerAssignedAt
-                        ? `담당자 ${consultation.legalFriendsCase.managerExternalAccountId} 지정 완료`
-                        : `신건 등록 완료 · 담당자 ${consultation.legalFriendsCase.managerExternalAccountId} 변경 대기`}
-                    </p>
-                  ) : null}
-                  {request.eventType.startsWith("alimtalk.") &&
-                  request.providerDelivery ? (
-                    <p>
-                      솔라피 메시지 상태{" "}
-                      {request.providerDelivery.statusCode} · 메시지{" "}
-                      {request.providerDelivery.messageId}
-                    </p>
-                  ) : null}
-                  {request.lastError ? (
-                    <p className="integration-error">{request.lastError}</p>
-                  ) : null}
-                </div>
-                {request.deliveryAttempts.length > 0 ? (
-                  <details>
-                    <summary>시도 이력 보기</summary>
-                    <ol>
-                      {request.deliveryAttempts.map((attempt) => (
-                        <li key={attempt.attemptNumber}>
-                          {attempt.attemptNumber}차 ·{" "}
-                          {formatDate(attempt.startedAt)} · {attempt.status}
-                          {attempt.httpStatus
-                            ? ` · HTTP ${attempt.httpStatus}`
-                            : ""}
-                          {attempt.errorCode ? ` · ${attempt.errorCode}` : ""}
-                        </li>
-                      ))}
-                    </ol>
-                  </details>
-                ) : null}
-              </article>
-            ))}
+          <div className="detail-actions">
+            {canClickToCall ? (
+              <ClickToCallButton
+                consultationId={consultation.id}
+                initialCall={latestMyCall ?? null}
+              />
+            ) : null}
+            {canClaim ? (
+              <ClaimConsultationButton consultationId={consultation.id} />
+            ) : null}
           </div>
-        </section>
-      ) : null}
+        </header>
 
-      <section className="request-stack" aria-label="상담 요청 이력">
-        {consultation.requests.map((request, index) => (
-          <article className="erp-panel request-card" key={request.id}>
-            <div className="panel-heading">
+        <div className="consultation-command-grid">
+          <section className="erp-panel customer-summary-card" aria-labelledby="customer-summary-title">
+            <header className="card-heading">
               <div>
-                <p className="request-index">
-                  요청 {consultation.requests.length - index}
-                </p>
-                <h2>
-                  {request.contactChannel !== "phone"
-                    ? request.contactChannel === "kakao_channel"
-                      ? "카카오 채널"
-                      : "네이버 예약"
-                    : request.mode === "detailed"
-                      ? "상세 상황"
-                      : "빠른 상담"}{" "}
-                  요청
-                </h2>
+                <p className="section-kicker">CLIENT SUMMARY</p>
+                <h2 id="customer-summary-title">고객 핵심정보</h2>
               </div>
-              <time dateTime={request.submittedAt}>
-                {formatDate(request.submittedAt)}
-              </time>
+              <span className="count-badge">요청 {consultation.requests.length}회</span>
+            </header>
+
+            <div className="primary-contact">
+              <div>
+                <span>휴대전화</span>
+                {latestPhone ? (
+                  <a href={`tel:${latestPhone}`}>{formatPhone(latestPhone)}</a>
+                ) : (
+                  <strong>미수집</strong>
+                )}
+              </div>
+              {latestPhone ? (
+                <div className="primary-contact-actions">
+                  <CopyButton value={formatPhone(latestPhone)} />
+                </div>
+              ) : null}
             </div>
 
-            {request.dedupeOutcome === "suspected_duplicate" ? (
-              <div className="warning-banner">
-                같은 전화번호의 7일 내 다른 접수입니다.
-                {request.candidateReceiptCode
-                  ? ` 비교 후보: ${request.candidateReceiptCode}`
-                  : ""}
-              </div>
+            {latestRequest ? (
+              <dl className="summary-facts">
+                <div><dt>접수 경로</dt><dd>{sourceLabel(latestRequest)}</dd></div>
+                <div><dt>상담 유형</dt><dd>{modeLabel(latestRequest)}</dd></div>
+                <div><dt>거주 지역</dt><dd>{typeof latestRegion === "string" ? residenceRegionLabels[latestRegion] ?? latestRegion : "미기록"}</dd></div>
+                <div><dt>연락 희망</dt><dd>{contactPreferenceLabel(latestRequest)}</dd></div>
+                <div><dt>중복 판정</dt><dd>{dedupeLabels[latestRequest.dedupeOutcome]}</dd></div>
+                <div><dt>접수 시각</dt><dd>{formatDate(latestRequest.submittedAt)}</dd></div>
+              </dl>
             ) : null}
 
-            <div className="detail-grid">
-              <section>
-                <h3>연락 정보</h3>
-                <dl className="data-list">
-                  <div>
-                    <dt>이름·호칭</dt>
-                    <dd>{request.name ?? "익명"}</dd>
-                  </div>
-                  <div>
-                    <dt>휴대전화</dt>
-                    <dd>
-                      {request.phone
-                        ? formatPhone(request.phone)
-                        : "010-0000-0000 · 미수집"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>연락 희망</dt>
-                    <dd>
-                      {request.contactChannel !== "phone"
-                        ? request.contactChannel === "kakao_channel"
-                          ? "카카오 채팅방"
-                          : `${formatDate(request.contactWindowStart)} 예약`
-                        : request.contactPreference ===
-                            "as_soon_as_possible"
-                        ? "가능한 빨리"
-                        : `${formatDate(request.contactWindowStart)} ~ ${formatDate(request.contactWindowEnd)}`}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>중복 판정</dt>
-                    <dd>{request.dedupeOutcome}</dd>
-                  </div>
-                </dl>
-              </section>
+            {latestRequest?.dedupeOutcome === "suspected_duplicate" ? (
+              <div className="inline-alert is-warning">
+                <strong>중복 가능성 확인</strong>
+                <span>
+                  같은 전화번호의 7일 내 다른 접수입니다.
+                  {latestRequest.candidateReceiptCode
+                    ? ` 비교 대상 ${latestRequest.candidateReceiptCode}`
+                    : ""}
+                </span>
+              </div>
+            ) : null}
+          </section>
 
-              <section>
-                <h3>상담 내용</h3>
-                <dl className="data-list">
-                  {Object.entries(request.intake).map(([key, value]) => (
-                    <div key={key}>
-                      <dt>{answerLabels[key] ?? key}</dt>
-                      <dd>{answer(key, value)}</dd>
-                    </div>
-                  ))}
-                </dl>
-              </section>
+          <aside className="erp-panel workflow-card" aria-labelledby="workflow-title">
+            <header className="card-heading">
+              <div>
+                <p className="section-kicker">NEXT ACTION</p>
+                <h2 id="workflow-title">처리 현황</h2>
+              </div>
+            </header>
+            <div className="next-action-card">
+              <span className="next-action-dot" />
+              <div>
+                <strong>{action.title}</strong>
+                <p>{action.description}</p>
+              </div>
             </div>
+            <dl className="workflow-assignment">
+              <div>
+                <dt>담당자</dt>
+                <dd>{consultation.assignment?.displayName ?? "미배정"}</dd>
+              </div>
+              {consultation.assignment ? (
+                <div>
+                  <dt>배정 시각</dt>
+                  <dd>{formatDate(consultation.assignment.assignedAt)}</dd>
+                </div>
+              ) : null}
+            </dl>
+            <div className="workflow-integrations">
+              <h3>자동화 상태</h3>
+              {consultation.integrationRequests.length ? (
+                consultation.integrationRequests.map((request) => (
+                  <div key={request.id}>
+                    <span className={`status-dot is-${integrationTone(request)}`} />
+                    <span>{integrationLabels[request.eventType] ?? request.eventType}</span>
+                    <strong>{integrationStatus(request)}</strong>
+                  </div>
+                ))
+              ) : (
+                <p>이 접수에는 실행할 외부 연동이 없습니다.</p>
+              )}
+            </div>
+          </aside>
+        </div>
 
-            <details className="attribution-details">
-              <summary>유입 정보 보기</summary>
-              <dl className="data-list">
-                <div>
-                  <dt>상담 고지</dt>
-                  <dd>
-                    {request.privacyNoticeVersion} ·{" "}
-                    {request.privacyBasis === "explicit_consent"
-                      ? `명시적 동의 ${formatDate(request.consentAgreedAt)}`
-                      : request.privacyBasis ===
-                          "customer_initiated_channel_message"
-                        ? "고객이 먼저 보낸 카카오 메시지"
-                        : request.privacyBasis ===
-                            "customer_initiated_channel_entry"
-                          ? "고객이 홈페이지 카카오톡 버튼을 선택"
-                          : "고객이 네이버 예약을 직접 신청"}
-                  </dd>
-                </div>
-                <div>
-                  <dt>유입 분석</dt>
-                  <dd>
-                    {request.attribution
-                      ? `${request.attribution.firstLandingPageKey ?? "미등록 랜딩"} v${request.attribution.firstLandingPageVersion ?? "-"}`
-                      : "유입 정보 기록 없음"}
-                  </dd>
-                </div>
-                {request.attribution ? (
-                  <>
-                    <div>
-                      <dt>상담 CTA</dt>
-                      <dd>
-                        {request.attribution.ctaPath ?? "직접 진입"} ·{" "}
-                        {request.attribution.ctaPlacement ?? "-"}
-                      </dd>
+        {consultation.telephonyCalls.length > 0 ? (
+          <section className="detail-section telephony-ledger" aria-labelledby="telephony-ledger-title">
+            <header className="detail-section-heading">
+              <div>
+                <p className="section-kicker">CALL LEDGER</p>
+                <h2 id="telephony-ledger-title">센트릭스 발신 원장</h2>
+                <p>발신 명령, 센트릭스 통화 이력, 담당자가 확인한 실제 결과를 함께 보관합니다.</p>
+              </div>
+              <span className="count-badge">최근 {consultation.telephonyCalls.length}건</span>
+            </header>
+            <div className="telephony-call-list">
+              {consultation.telephonyCalls.map((call) => (
+                <article className="telephony-call-row" key={call.id}>
+                  <div>
+                    <strong>{call.endpoint.label} · 내선 {call.endpoint.extension}</strong>
+                    <span>{call.staffDisplayName} · {formatDate(call.requestedAt)}</span>
+                    {telephonyResultDetail(call) ? (
+                      <span>{telephonyResultDetail(call)}</span>
+                    ) : null}
+                  </div>
+                  <span className={`telephony-call-status is-${telephonyStatusTone(call)}`}>
+                    {telephonyStatusLabel(call)}
+                  </span>
+                  {call.lastErrorMessage ? <p>{call.lastErrorMessage}</p> : null}
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {consultation.kakaoEntry ? (
+          <KakaoEntryPanel
+            consultationId={consultation.id}
+            entry={consultation.kakaoEntry}
+          />
+        ) : null}
+
+        {consultation.naverBooking ? (
+          <section className="channel-action-panel is-naver" aria-labelledby="naver-title">
+            <div>
+              <p className="section-kicker">NAVER BOOKING</p>
+              <h2 id="naver-title">{formatDate(consultation.naverBooking.scheduledAt)} 예약</h2>
+              <p>
+                예약번호 {consultation.naverBooking.bookingNumber} · {consultation.naverBooking.status === "details_pending" ? "상세 확인 필요" : consultation.naverBooking.status === "ready" ? "상세정보 반영 완료" : "예약 취소"}
+              </p>
+            </div>
+            <div className="channel-action-meta">
+              <a href={consultation.naverBooking.detailsUrl} rel="noopener noreferrer" target="_blank">
+                네이버 예약 상세 열기
+                <span aria-hidden="true">↗</span>
+              </a>
+              <small>메일 감지 {formatDate(consultation.naverBooking.sourceReceivedAt)}</small>
+            </div>
+          </section>
+        ) : null}
+
+        <section className="detail-section" aria-labelledby="request-history-title">
+          <header className="detail-section-heading">
+            <div>
+              <p className="section-kicker">REQUEST HISTORY</p>
+              <h2 id="request-history-title">상담 요청 이력</h2>
+              <p>가장 최근 요청을 먼저 보여줍니다. 이전 요청도 같은 고객 흐름에서 확인할 수 있습니다.</p>
+            </div>
+            <span className="count-badge">{consultation.requests.length}건</span>
+          </header>
+
+          <div className="request-history">
+            {consultation.requests.map((request, index) => {
+              const diagnosis =
+                request.mode === "self_diagnosis"
+                  ? readSelfDiagnosisRecord(request.intake)
+                  : null;
+              const intakeEntries = Object.entries(request.intake).filter(
+                ([key]) => key !== "selfDiagnosis",
+              );
+              return (
+                <details className="request-history-item" key={request.id} open={index === 0}>
+                  <summary>
+                    <span className="request-number">요청 {consultation.requests.length - index}</span>
+                    <span className="request-summary-main">
+                      <strong>{modeLabel(request)}</strong>
+                      <small>{sourceLabel(request)} · {dedupeLabels[request.dedupeOutcome]}</small>
+                    </span>
+                    <time dateTime={request.submittedAt}>{formatDate(request.submittedAt)}</time>
+                    <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m7 9 5 5 5-5" /></svg>
+                  </summary>
+
+                  <div className="request-history-body">
+                    {request.dedupeOutcome === "suspected_duplicate" ? (
+                      <div className="inline-alert is-warning">
+                        <strong>7일 내 중복 의심</strong>
+                        <span>{request.candidateReceiptCode ? `비교 대상 ${request.candidateReceiptCode}` : "같은 전화번호의 다른 접수를 확인해 주세요."}</span>
+                      </div>
+                    ) : null}
+
+                    <div className="request-contact-strip">
+                      <div><span>이름·호칭</span><strong>{request.name ?? "익명"}</strong></div>
+                      <div><span>휴대전화</span><strong>{request.phone ? formatPhone(request.phone) : "미수집"}</strong></div>
+                      <div><span>연락 희망</span><strong>{contactPreferenceLabel(request)}</strong></div>
                     </div>
+
+                    {intakeEntries.length ? (
+                      <section className="request-intake" aria-label="상담 내용">
+                        <h3>고객이 남긴 내용</h3>
+                        <dl className="data-list">
+                          {intakeEntries.map(([key, value]) => (
+                            <div key={key}>
+                              <dt>{answerLabels[key] ?? key}</dt>
+                              <dd>{answer(key, value)}</dd>
+                            </div>
+                          ))}
+                        </dl>
+                      </section>
+                    ) : null}
+
+                    {diagnosis ? (
+                      <>
+                        <SelfDiagnosisOverview record={diagnosis} />
+                        <SelfDiagnosisMatches
+                          requestId={request.id}
+                          matches={diagnosis.matchedCases ?? null}
+                        />
+                      </>
+                    ) : request.mode === "self_diagnosis" ? (
+                      <SelfDiagnosisMatches requestId={request.id} matches={null} />
+                    ) : null}
+
+                    <details className="attribution-details">
+                      <summary>개인정보 고지·유입 정보</summary>
+                      <dl className="data-list">
+                        <div><dt>상담 고지</dt><dd>{request.privacyNoticeVersion} · {privacyBasisLabel(request)}</dd></div>
+                        <div><dt>유입 분석</dt><dd>{request.attribution ? `${request.attribution.firstLandingPageKey ?? "미등록 랜딩"} v${request.attribution.firstLandingPageVersion ?? "-"}` : "유입 정보 기록 없음"}</dd></div>
+                        {request.attribution ? (
+                          <>
+                            <div><dt>상담 CTA</dt><dd>{request.attribution.ctaPath ?? "직접 진입"} · {request.attribution.ctaPlacement ?? "-"}</dd></div>
+                            <div><dt>광고 식별자</dt><dd className="code-value">{Object.keys(request.attribution.source).length ? JSON.stringify(request.attribution.source) : "직접·자연 유입"}</dd></div>
+                          </>
+                        ) : null}
+                      </dl>
+                    </details>
+                  </div>
+                </details>
+              );
+            })}
+          </div>
+        </section>
+
+        {consultation.integrationRequests.length > 0 ? (
+          <section className="detail-section" aria-labelledby="integration-ledger-title">
+            <header className="detail-section-heading">
+              <div>
+                <p className="section-kicker">DELIVERY LEDGER</p>
+                <h2 id="integration-ledger-title">외부 연동 실행 원장</h2>
+                <p>알림톡과 리걸프렌즈 등록의 실제 처리 결과와 재시도 이력을 확인합니다.</p>
+              </div>
+            </header>
+            <div className="integration-list">
+              {consultation.integrationRequests.map((request) => (
+                <article className="integration-card" key={request.id}>
+                  <div className="integration-card-main">
+                    <span className={`integration-icon is-${integrationTone(request)}`}>
+                      <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg>
+                    </span>
                     <div>
-                      <dt>광고 식별자</dt>
-                      <dd className="code-value">
-                        {Object.keys(request.attribution.source).length
-                          ? JSON.stringify(request.attribution.source)
-                          : "직접·자연 유입"}
-                      </dd>
+                      <h3>{integrationLabels[request.eventType] ?? request.eventType}</h3>
+                      <p>
+                        {request.publishedAt
+                          ? `${formatDate(request.publishedAt)} 완료`
+                          : request.status === "dead"
+                            ? "수동 확인이 필요합니다"
+                            : `다음 처리 ${formatDate(request.availableAt)}`}
+                      </p>
                     </div>
-                  </>
-                ) : null}
-              </dl>
-            </details>
-          </article>
-        ))}
-      </section>
+                  </div>
+                  <span className={`integration-status is-${integrationTone(request)}`}>
+                    {integrationStatus(request)}
+                  </span>
+                  {request.lastError ? <p className="integration-error">{request.lastError}</p> : null}
+                  <details className="integration-details">
+                    <summary>실행 세부정보</summary>
+                    <dl>
+                      <div><dt>총 시도</dt><dd>{request.attempts}회</dd></div>
+                      {request.eventType.startsWith("legalfriends.") && consultation.legalFriendsCase ? (
+                        <div><dt>리걸프렌즈 사건</dt><dd>{consultation.legalFriendsCase.caseIdx} · 담당 {consultation.legalFriendsCase.managerExternalAccountId}</dd></div>
+                      ) : null}
+                      {request.providerDelivery ? (
+                        <div><dt>솔라피 메시지</dt><dd>{request.providerDelivery.statusCode} · {request.providerDelivery.messageId}</dd></div>
+                      ) : null}
+                    </dl>
+                    {request.deliveryAttempts.length ? (
+                      <ol>
+                        {request.deliveryAttempts.map((attempt) => (
+                          <li key={attempt.attemptNumber}>
+                            {attempt.attemptNumber}차 · {formatDate(attempt.startedAt)} · {attempt.status}
+                            {attempt.httpStatus ? ` · HTTP ${attempt.httpStatus}` : ""}
+                            {attempt.errorCode ? ` · ${attempt.errorCode}` : ""}
+                          </li>
+                        ))}
+                      </ol>
+                    ) : null}
+                  </details>
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        <p className="security-note">
+          이 페이지의 개인정보 조회는 직원 계정과 상담번호 기준으로 감사 기록에 남습니다.
+        </p>
       </main>
     </>
   );

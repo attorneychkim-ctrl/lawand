@@ -1,6 +1,10 @@
 import { z } from "zod";
 
-export const consultationModeSchema = z.enum(["quick", "detailed"]);
+export const consultationModeSchema = z.enum([
+  "quick",
+  "detailed",
+  "self_diagnosis",
+]);
 export const consultationStateSchema = z.enum([
   "requested",
   "assigned",

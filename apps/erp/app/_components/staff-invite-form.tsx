@@ -66,6 +66,36 @@ export function StaffInviteForm() {
           <option value="civil_complaint_vendor">민원업체</option>
         </select>
       </label>
+      <div className="form-row centrex-invite-row">
+        <label>
+          <span>센트릭스 전체 회선번호</span>
+          <input
+            autoComplete="off"
+            inputMode="tel"
+            maxLength={13}
+            name="centrexLineNumber"
+            pattern="070-?[0-9]{4}-?[0-9]{4}"
+            placeholder="예: 07046074535"
+            type="tel"
+          />
+        </label>
+        <label>
+          <span>내선번호</span>
+          <input
+            autoComplete="off"
+            inputMode="numeric"
+            maxLength={10}
+            name="centrexExtension"
+            pattern="[0-9]{2,10}"
+            placeholder="예: 4535"
+            type="text"
+          />
+        </label>
+      </div>
+      <small>
+        두 값을 함께 입력합니다. 가입 시 검증된 전화 endpoint와 정확히 일치하면
+        자동 배정되고, 아직 준비되지 않은 회선은 연결 대기로 저장됩니다.
+      </small>
       <div className="form-row">
         <label>
           <span>리걸프렌즈 아이디</span>

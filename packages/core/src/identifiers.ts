@@ -9,6 +9,7 @@ export type ConsultationId = string;
 export type ConsultationRequestId = string;
 export type EventId = string;
 export type ReviewSubmissionId = string;
+export type TelephonyCallId = string;
 
 export function createConsultationId(): ConsultationId {
   return uuidv7();
@@ -23,6 +24,10 @@ export function createEventId(): EventId {
 }
 
 export function createReviewSubmissionId(): ReviewSubmissionId {
+  return uuidv7();
+}
+
+export function createTelephonyCallId(): TelephonyCallId {
   return uuidv7();
 }
 

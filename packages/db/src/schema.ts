@@ -4,12 +4,14 @@ import {
   boolean,
   check,
   customType,
+  date,
   foreignKey,
   index,
   integer,
   jsonb,
   pgEnum,
   pgTable,
+  real,
   text,
   timestamp,
   unique,
@@ -51,6 +53,7 @@ export const consultationStateEnum = pgEnum("consultation_state", [
 export const consultationModeEnum = pgEnum("consultation_mode", [
   "quick",
   "detailed",
+  "self_diagnosis",
 ]);
 
 export const consultationContactChannelEnum = pgEnum(
@@ -75,6 +78,7 @@ export const privacyBasisEnum = pgEnum("privacy_basis", [
   "customer_initiated_channel_message",
   "customer_initiated_channel_entry",
   "customer_initiated_booking",
+  "staff_recorded_phone_interaction",
 ]);
 
 export const kakaoHomepageEntryStatusEnum = pgEnum(
@@ -140,6 +144,22 @@ export const reviewSubmissionStatusEnum = pgEnum("review_submission_status", [
   "withdrawn",
 ]);
 
+export const caseStudyPracticeAreaEnum = pgEnum("case_study_practice_area", [
+  "personal_rehabilitation",
+  "personal_bankruptcy",
+]);
+
+export const caseStudyPublicationStatusEnum = pgEnum(
+  "case_study_publication_status",
+  ["draft", "preview", "published", "withdrawn"],
+);
+
+export const caseStudyReviewStatusEnum = pgEnum("case_study_review_status", [
+  "pending",
+  "approved",
+  "rejected",
+]);
+
 export const staffAccountStatusEnum = pgEnum("staff_account_status", [
   "active",
   "disabled",
@@ -152,6 +172,90 @@ export const staffRoleEnum = pgEnum("staff_role", [
   "separate_accounting",
   "civil_complaint_vendor",
 ]);
+
+export const telephonyProviderEnum = pgEnum("telephony_provider", [
+  "centrex",
+]);
+
+export const telephonyEndpointTypeEnum = pgEnum(
+  "telephony_endpoint_type",
+  ["personal", "representative"],
+);
+
+export const telephonyCallDirectionEnum = pgEnum(
+  "telephony_call_direction",
+  ["outbound", "inbound"],
+);
+
+export const telephonyCommandStatusEnum = pgEnum(
+  "telephony_command_status",
+  ["queued", "dispatching", "succeeded", "failed", "unknown"],
+);
+
+export const telephonyCallOutcomeEnum = pgEnum("telephony_call_outcome", [
+  "unknown",
+  "answered",
+  "no_answer",
+  "busy",
+  "failed",
+  "cancelled",
+]);
+
+export const telephonyCallDispositionEnum = pgEnum(
+  "telephony_call_disposition",
+  [
+    "customer_conversation",
+    "voicemail",
+    "no_answer",
+    "rejected",
+    "busy",
+    "caller_cancelled",
+    "callback_required",
+  ],
+);
+
+export const telephonyAftercareResultEnum = pgEnum(
+  "telephony_aftercare_result",
+  [
+    "consultation_completed",
+    "reconsultation_required",
+    "no_answer",
+    "busy",
+    "manager_callback_requested",
+    "rejected",
+    "public_institution",
+    "creditor",
+    "wrong_number",
+    "other",
+  ],
+);
+
+export const telephonyFollowUpStateEnum = pgEnum(
+  "telephony_follow_up_state",
+  ["open", "completed", "cancelled"],
+);
+
+export const telephonyInboundCallStateEnum = pgEnum(
+  "telephony_inbound_call_state",
+  ["ringing", "connected", "ended"],
+);
+
+export const telephonyInboundCommandStatusEnum = pgEnum(
+  "telephony_inbound_command_status",
+  ["queued", "dispatching", "succeeded", "failed", "expired"],
+);
+
+export const telephonyBridgeEventTypeEnum = pgEnum(
+  "telephony_bridge_event_type",
+  [
+    "inbound.ringing",
+    "inbound.connected",
+    "inbound.ended",
+    "outbound.ringing",
+    "outbound.connected",
+    "outbound.ended",
+  ],
+);
 
 export const staffOrganizations = pgTable("staff_organizations", {
   key: varchar("key", { length: 50 }).primaryKey(),
@@ -195,13 +299,32 @@ export const staffUsers = pgTable(
   ],
 );
 
-export const staffProfiles = pgTable("staff_profiles", {
-  userId: uuid("user_id")
-    .primaryKey()
-    .references(() => staffUsers.id, { onDelete: "restrict" }),
-  displayName: varchar("display_name", { length: 50 }).notNull(),
-  ...timestamps,
-});
+export const staffProfiles = pgTable(
+  "staff_profiles",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => staffUsers.id, { onDelete: "restrict" }),
+    displayName: varchar("display_name", { length: 50 }).notNull(),
+    centrexLineNumber: varchar("centrex_line_number", { length: 20 }),
+    centrexExtension: varchar("centrex_extension", { length: 20 }),
+    ...timestamps,
+  },
+  (table) => [
+    check(
+      "staff_profiles_centrex_line_number_format",
+      sql`${table.centrexLineNumber} IS NULL OR ${table.centrexLineNumber} ~ '^070[0-9]{8}$'`,
+    ),
+    check(
+      "staff_profiles_centrex_extension_format",
+      sql`${table.centrexExtension} IS NULL OR ${table.centrexExtension} ~ '^[0-9]{2,10}$'`,
+    ),
+    check(
+      "staff_profiles_centrex_pair",
+      sql`(${table.centrexLineNumber} IS NULL) = (${table.centrexExtension} IS NULL)`,
+    ),
+  ],
+);
 
 export const staffMemberships = pgTable(
   "staff_memberships",
@@ -261,6 +384,8 @@ export const staffInvitations = pgTable(
     department: varchar("department", { length: 100 }).notNull(),
     jobTitle: varchar("job_title", { length: 100 }).notNull(),
     role: staffRoleEnum("role").$type<StaffRole>().notNull(),
+    centrexLineNumber: varchar("centrex_line_number", { length: 20 }),
+    centrexExtension: varchar("centrex_extension", { length: 20 }),
     legalFriendsAccountId: varchar("legalfriends_account_id", {
       length: 100,
     }),
@@ -316,6 +441,18 @@ export const staffInvitations = pgTable(
     check(
       "staff_invitations_legalfriends_member_idx_positive",
       sql`${table.legalFriendsMemberIdx} IS NULL OR ${table.legalFriendsMemberIdx} > 0`,
+    ),
+    check(
+      "staff_invitations_centrex_line_number_format",
+      sql`${table.centrexLineNumber} IS NULL OR ${table.centrexLineNumber} ~ '^070[0-9]{8}$'`,
+    ),
+    check(
+      "staff_invitations_centrex_extension_format",
+      sql`${table.centrexExtension} IS NULL OR ${table.centrexExtension} ~ '^[0-9]{2,10}$'`,
+    ),
+    check(
+      "staff_invitations_centrex_pair",
+      sql`(${table.centrexLineNumber} IS NULL) = (${table.centrexExtension} IS NULL)`,
     ),
   ],
 );
@@ -396,6 +533,220 @@ export const staffExternalAccounts = pgTable(
     check(
       "staff_external_accounts_member_idx_positive",
       sql`${table.externalMemberIdx} IS NULL OR ${table.externalMemberIdx} > 0`,
+    ),
+  ],
+);
+
+export const telephonyEndpoints = pgTable(
+  "telephony_endpoints",
+  {
+    id: uuid("id").primaryKey(),
+    provider: telephonyProviderEnum("provider").default("centrex").notNull(),
+    endpointType: telephonyEndpointTypeEnum("endpoint_type")
+      .default("personal")
+      .notNull(),
+    label: varchar("label", { length: 100 }).notNull(),
+    lineNumber: varchar("line_number", { length: 20 }).notNull(),
+    extension: varchar("extension", { length: 20 }).notNull(),
+    apiLoginId: varchar("api_login_id", { length: 50 }).notNull(),
+    credentialKey: varchar("credential_key", { length: 100 }).notNull(),
+    regionKey: varchar("region_key", { length: 50 }).references(
+      () => staffRegions.key,
+      { onDelete: "restrict" },
+    ),
+    isActive: boolean("is_active").default(true).notNull(),
+    passwordExpiresAt: timestamp("password_expires_at", {
+      withTimezone: true,
+    }),
+    lastAuthSucceededAt: timestamp("last_auth_succeeded_at", {
+      withTimezone: true,
+    }),
+    lastAuthFailedAt: timestamp("last_auth_failed_at", {
+      withTimezone: true,
+    }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("telephony_endpoints_active_provider_line_uidx")
+      .on(table.provider, table.lineNumber)
+      .where(sql`${table.isActive} = true`),
+    uniqueIndex("telephony_endpoints_active_provider_login_uidx")
+      .on(table.provider, table.apiLoginId)
+      .where(sql`${table.isActive} = true`),
+    check(
+      "telephony_endpoints_label_nonempty",
+      sql`length(btrim(${table.label})) > 0`,
+    ),
+    check(
+      "telephony_endpoints_line_number_format",
+      sql`${table.lineNumber} ~ '^070[0-9]{8}$'`,
+    ),
+    check(
+      "telephony_endpoints_extension_format",
+      sql`${table.extension} ~ '^[0-9]{2,10}$'`,
+    ),
+    check(
+      "telephony_endpoints_api_login_format",
+      sql`${table.apiLoginId} ~ '^[0-9]{8,50}$'`,
+    ),
+    check(
+      "telephony_endpoints_credential_key_format",
+      sql`${table.credentialKey} ~ '^[a-z0-9][a-z0-9._-]{0,99}$'`,
+    ),
+  ],
+);
+
+export const telephonyEndpointCredentials = pgTable(
+  "telephony_endpoint_credentials",
+  {
+    endpointId: uuid("endpoint_id")
+      .primaryKey()
+      .references(() => telephonyEndpoints.id, { onDelete: "restrict" }),
+    passwordSha512Ciphertext: bytea("password_sha512_ciphertext").notNull(),
+    passwordSha512Nonce: bytea("password_sha512_nonce").notNull(),
+    passwordSha512KeyVersion: varchar("password_sha512_key_version", {
+      length: 50,
+    }).notNull(),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }).notNull(),
+    verifiedByUserId: uuid("verified_by_user_id").references(
+      () => staffUsers.id,
+      { onDelete: "restrict" },
+    ),
+    ...timestamps,
+  },
+  (table) => [
+    check(
+      "telephony_endpoint_credentials_ciphertext_length",
+      sql`octet_length(${table.passwordSha512Ciphertext}) >= 17`,
+    ),
+    check(
+      "telephony_endpoint_credentials_nonce_length",
+      sql`octet_length(${table.passwordSha512Nonce}) = 12`,
+    ),
+    check(
+      "telephony_endpoint_credentials_key_version_nonempty",
+      sql`length(btrim(${table.passwordSha512KeyVersion})) > 0`,
+    ),
+  ],
+);
+
+export const staffTelephonyBindings = pgTable(
+  "staff_telephony_bindings",
+  {
+    id: uuid("id").primaryKey(),
+    staffUserId: uuid("staff_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "restrict" }),
+    endpointId: uuid("endpoint_id")
+      .notNull()
+      .references(() => telephonyEndpoints.id, { onDelete: "restrict" }),
+    isPrimary: boolean("is_primary").default(true).notNull(),
+    isActive: boolean("is_active").default(true).notNull(),
+    assignedAt: timestamp("assigned_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    assignedByUserId: uuid("assigned_by_user_id").references(
+      () => staffUsers.id,
+      { onDelete: "restrict" },
+    ),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("staff_telephony_bindings_active_staff_endpoint_uidx")
+      .on(table.staffUserId, table.endpointId)
+      .where(sql`${table.isActive} = true`),
+    uniqueIndex("staff_telephony_bindings_primary_staff_uidx")
+      .on(table.staffUserId)
+      .where(sql`${table.isActive} = true AND ${table.isPrimary} = true`),
+  ],
+);
+
+export const staffTelephonyBridgeAssignments = pgTable(
+  "staff_telephony_bridge_assignments",
+  {
+    id: uuid("id").primaryKey(),
+    staffUserId: uuid("staff_user_id").references(() => staffUsers.id, {
+      onDelete: "restrict",
+    }),
+    bridgeId: varchar("bridge_id", { length: 80 }).notNull(),
+    currentEndpointId: uuid("current_endpoint_id").references(
+      () => telephonyEndpoints.id,
+      { onDelete: "restrict" },
+    ),
+    pendingEndpointId: uuid("pending_endpoint_id").references(
+      () => telephonyEndpoints.id,
+      { onDelete: "restrict" },
+    ),
+    state: varchar("state", { length: 30 }).default("assigned").notNull(),
+    provisioningCommandId: uuid("provisioning_command_id"),
+    provisioningExpiresAt: timestamp("provisioning_expires_at", {
+      withTimezone: true,
+    }),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    lastLoginSucceededAt: timestamp("last_login_succeeded_at", {
+      withTimezone: true,
+    }),
+    lastLoginFailedAt: timestamp("last_login_failed_at", {
+      withTimezone: true,
+    }),
+    lastResultCode: varchar("last_result_code", { length: 60 }),
+    isActive: boolean("is_active").default(true).notNull(),
+    assignedAt: timestamp("assigned_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    assignedByUserId: uuid("assigned_by_user_id").references(
+      () => staffUsers.id,
+      { onDelete: "restrict" },
+    ),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("staff_telephony_bridge_assignments_staff_uidx")
+      .on(table.staffUserId)
+      .where(sql`${table.isActive} = true`),
+    uniqueIndex("staff_telephony_bridge_assignments_bridge_uidx")
+      .on(table.bridgeId)
+      .where(sql`${table.isActive} = true`),
+    check(
+      "staff_telephony_bridge_assignments_bridge_format",
+      sql`${table.bridgeId} ~ '^[A-Za-z0-9][A-Za-z0-9_.-]{2,79}$'`,
+    ),
+    check(
+      "staff_telephony_bridge_assignments_state",
+      sql`${table.state} IN ('idle', 'quarantined', 'assigned', 'provisioning', 'connected', 'failed')`,
+    ),
+    check(
+      "staff_telephony_bridge_assignments_ownership",
+      sql`(
+        ${table.state} = 'idle'
+        AND ${table.staffUserId} IS NULL
+        AND ${table.currentEndpointId} IS NULL
+      ) OR (
+        ${table.state} = 'quarantined'
+        AND ${table.staffUserId} IS NULL
+        AND ${table.currentEndpointId} IS NOT NULL
+      ) OR (
+        ${table.state} NOT IN ('idle', 'quarantined')
+        AND ${table.staffUserId} IS NOT NULL
+      )`,
+    ),
+    check(
+      "staff_telephony_bridge_assignments_provisioning",
+      sql`(
+        ${table.state} = 'provisioning'
+        AND ${table.pendingEndpointId} IS NOT NULL
+        AND ${table.provisioningCommandId} IS NOT NULL
+        AND ${table.provisioningExpiresAt} IS NOT NULL
+      ) OR (
+        ${table.state} <> 'provisioning'
+        AND ${table.pendingEndpointId} IS NULL
+        AND ${table.provisioningCommandId} IS NULL
+        AND ${table.provisioningExpiresAt} IS NULL
+      )`,
+    ),
+    check(
+      "staff_telephony_bridge_assignments_result_code",
+      sql`${table.lastResultCode} IS NULL OR ${table.lastResultCode} ~ '^[A-Za-z0-9_.:-]{1,60}$'`,
     ),
   ],
 );
@@ -681,6 +1032,199 @@ export const customerReviewSubmissions = pgTable(
   ],
 );
 
+export const selfDiagnosisCaseProfiles = pgTable(
+  "self_diagnosis_case_profiles",
+  {
+    id: uuid("id").primaryKey(),
+    modelVersion: varchar("model_version", { length: 50 }).notNull(),
+    sourceOfficeIdx: integer("source_office_idx").notNull(),
+    caseType: integer("case_type").notNull(),
+    courtIdx: integer("court_idx").notNull(),
+    courtName: varchar("court_name", { length: 50 }).notNull(),
+    monthlyIncome: bigint("monthly_income", { mode: "number" }).notNull(),
+    incomeType: integer("income_type").notNull(),
+    residenceType: integer("residence_type").notNull(),
+    marriageState: integer("marriage_state").notNull(),
+    minorChildCount: integer("minor_child_count").notNull(),
+    dependentCount: real("dependent_count").notNull(),
+    totalDebt: bigint("total_debt", { mode: "number" }).notNull(),
+    liquidationValue: bigint("liquidation_value", { mode: "number" }).notNull(),
+    priorityDebt: boolean("priority_debt").notNull(),
+    monthlyPayment: bigint("monthly_payment", { mode: "number" }).notNull(),
+    paymentCount: integer("payment_count").notNull(),
+    estimatedSpend: bigint("estimated_spend", { mode: "number" })
+      .default(0)
+      .notNull(),
+    livingCostType: integer("living_cost_type").default(0).notNull(),
+    livingCostCost: bigint("living_cost_cost", { mode: "number" })
+      .default(0)
+      .notNull(),
+    totalPayment: bigint("total_payment", { mode: "number" }).notNull(),
+    repaymentRate: real("repayment_rate").notNull(),
+    filingDate: date("filing_date", { mode: "string" }),
+    prohibitionDate: date("prohibition_date", { mode: "string" }),
+    commencementDate: date("commencement_date", { mode: "string" }),
+    approvalDate: date("approval_date", { mode: "string" }),
+    bankruptcyDate: date("bankruptcy_date", { mode: "string" }),
+    dischargeDate: date("discharge_date", { mode: "string" }),
+    filingToProhibitionDays: integer("filing_to_prohibition_days"),
+    filingToCommencementDays: integer("filing_to_commencement_days"),
+    filingToApprovalDays: integer("filing_to_approval_days"),
+    filingToBankruptcyDays: integer("filing_to_bankruptcy_days"),
+    filingToDischargeDays: integer("filing_to_discharge_days"),
+    importedAt: timestamp("imported_at", { withTimezone: true }).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    index("self_diagnosis_profiles_match_idx").on(
+      table.modelVersion,
+      table.caseType,
+      table.priorityDebt,
+      table.courtIdx,
+      table.incomeType,
+    ),
+    index("self_diagnosis_profiles_financial_idx").on(
+      table.caseType,
+      table.monthlyIncome,
+      table.totalDebt,
+      table.liquidationValue,
+    ),
+    check(
+      "self_diagnosis_profiles_office_56",
+      sql`${table.sourceOfficeIdx} = 56`,
+    ),
+    check(
+      "self_diagnosis_profiles_case_type",
+      sql`${table.caseType} IN (1, 2)`,
+    ),
+    check(
+      "self_diagnosis_profiles_nonnegative",
+      sql`${table.monthlyIncome} >= 0
+        AND ${table.minorChildCount} >= 0
+        AND ${table.dependentCount} >= 0
+        AND ${table.totalDebt} > 0
+        AND ${table.liquidationValue} >= 0
+        AND ${table.monthlyPayment} >= 0
+        AND ${table.paymentCount} >= 0
+        AND ${table.paymentCount} <= 60
+        AND ${table.totalPayment} >= 0
+        AND ${table.repaymentRate} >= 0`,
+    ),
+  ],
+);
+
+export const publicCaseStudies = pgTable(
+  "public_case_studies",
+  {
+    id: uuid("id").primaryKey(),
+    slug: varchar("slug", { length: 160 }).notNull(),
+    // 공개 화면에는 렌더링하지 않는 내부 연결 키. 자가진단 카드와 같은 사건을
+    // 연결할 때만 서버에서 사용한다.
+    sourceCaseIdx: bigint("source_case_idx", { mode: "number" }),
+    sourceCaseFingerprint: bytea("source_case_fingerprint").notNull(),
+    sourceSnapshotHash: bytea("source_snapshot_hash").notNull(),
+    sourceSnapshot: jsonb("source_snapshot").notNull(),
+    sourceOfficeIdx: integer("source_office_idx").notNull(),
+    practiceArea: caseStudyPracticeAreaEnum("practice_area").notNull(),
+    publicationStatus: caseStudyPublicationStatusEnum("publication_status")
+      .default("draft")
+      .notNull(),
+    privacyReviewStatus: caseStudyReviewStatusEnum("privacy_review_status")
+      .default("pending")
+      .notNull(),
+    legalReviewStatus: caseStudyReviewStatusEnum("legal_review_status")
+      .default("pending")
+      .notNull(),
+    publicationBasis: varchar("publication_basis", { length: 100 }),
+    title: text("title").notNull(),
+    dek: text("dek").notNull(),
+    content: jsonb("content").notNull(),
+    financialSnapshot: jsonb("financial_snapshot").notNull(),
+    timeline: jsonb("timeline").notNull(),
+    tags: text("tags")
+      .array()
+      .default(sql`ARRAY[]::text[]`)
+      .notNull(),
+    cohortSize: integer("cohort_size").notNull(),
+    anonymizationVersion: varchar("anonymization_version", {
+      length: 50,
+    }).notNull(),
+    promptVersion: varchar("prompt_version", { length: 50 }).notNull(),
+    generationModel: varchar("generation_model", { length: 100 }).notNull(),
+    generationReasoningEffort: varchar("generation_reasoning_effort", {
+      length: 20,
+    }).notNull(),
+    generatedAt: timestamp("generated_at", { withTimezone: true }).notNull(),
+    privacyReviewedAt: timestamp("privacy_reviewed_at", {
+      withTimezone: true,
+    }),
+    legalReviewedAt: timestamp("legal_reviewed_at", { withTimezone: true }),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    withdrawnAt: timestamp("withdrawn_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("public_case_studies_slug_uidx").on(table.slug),
+    uniqueIndex("public_case_studies_source_fingerprint_uidx").on(
+      table.sourceCaseFingerprint,
+    ),
+    index("public_case_studies_visible_idx")
+      .on(table.publicationStatus, table.generatedAt)
+      .where(sql`${table.publicationStatus} IN ('preview', 'published')`),
+    index("public_case_studies_tags_gin_idx").using("gin", table.tags),
+    check(
+      "public_case_studies_office_56",
+      sql`${table.sourceOfficeIdx} = 56`,
+    ),
+    check(
+      "public_case_studies_source_hashes",
+      sql`octet_length(${table.sourceCaseFingerprint}) = 32
+        AND octet_length(${table.sourceSnapshotHash}) = 32`,
+    ),
+    check(
+      "public_case_studies_safe_snapshot",
+      sql`jsonb_typeof(${table.sourceSnapshot}) = 'object'
+        AND jsonb_typeof(${table.content}) = 'object'
+        AND jsonb_typeof(${table.financialSnapshot}) = 'object'
+        AND jsonb_typeof(${table.timeline}) = 'array'`,
+    ),
+    check(
+      "public_case_studies_nonempty_copy",
+      sql`length(btrim(${table.slug})) > 0
+        AND length(btrim(${table.title})) > 0
+        AND length(btrim(${table.dek})) > 0`,
+    ),
+    check(
+      "public_case_studies_anonymity_floor",
+      sql`${table.cohortSize} >= 5`,
+    ),
+    check(
+      "public_case_studies_tags_count",
+      sql`cardinality(${table.tags}) BETWEEN 2 AND 8`,
+    ),
+    check(
+      "public_case_studies_publication_gate",
+      sql`(
+        ${table.publicationStatus} = 'published'
+        AND ${table.privacyReviewStatus} = 'approved'
+        AND ${table.legalReviewStatus} = 'approved'
+        AND ${table.publicationBasis} IS NOT NULL
+        AND ${table.privacyReviewedAt} IS NOT NULL
+        AND ${table.legalReviewedAt} IS NOT NULL
+        AND ${table.publishedAt} IS NOT NULL
+        AND ${table.withdrawnAt} IS NULL
+      ) OR (
+        ${table.publicationStatus} IN ('draft', 'preview')
+        AND ${table.publishedAt} IS NULL
+        AND ${table.withdrawnAt} IS NULL
+      ) OR (
+        ${table.publicationStatus} = 'withdrawn'
+        AND ${table.withdrawnAt} IS NOT NULL
+      )`,
+    ),
+  ],
+);
+
 export const marketingLandingPages = pgTable(
   "marketing_landing_pages",
   {
@@ -913,7 +1457,7 @@ export const consultationAssignments = pgTable(
     ),
     check(
       "consultation_assignments_method_allowed",
-      sql`${table.assignmentMethod} IN ('self_claim')`,
+      sql`${table.assignmentMethod} IN ('self_claim', 'phone_desk_conversion')`,
     ),
   ],
 );
@@ -1039,7 +1583,7 @@ export const consultationRequests = pgTable(
     check(
       "consultation_requests_privacy_basis_consistent",
       sql`(${table.privacyBasis} = 'explicit_consent' AND ${table.consentAgreedAt} IS NOT NULL)
-        OR (${table.privacyBasis} IN ('customer_initiated_channel_message', 'customer_initiated_channel_entry', 'customer_initiated_booking') AND ${table.consentAgreedAt} IS NULL)`,
+        OR (${table.privacyBasis} IN ('customer_initiated_channel_message', 'customer_initiated_channel_entry', 'customer_initiated_booking', 'staff_recorded_phone_interaction') AND ${table.consentAgreedAt} IS NULL)`,
     ),
     check(
       "consultation_requests_candidate_consistent",
@@ -1492,6 +2036,569 @@ export const outboxDeliveryAttempts = pgTable(
       ) OR (
         ${table.status} <> 'started'
         AND ${table.finishedAt} IS NOT NULL
+      )`,
+    ),
+  ],
+);
+
+export const telephonyCalls = pgTable(
+  "telephony_calls",
+  {
+    id: uuid("id").primaryKey(),
+    provider: telephonyProviderEnum("provider").default("centrex").notNull(),
+    direction: telephonyCallDirectionEnum("direction")
+      .default("outbound")
+      .notNull(),
+    endpointId: uuid("endpoint_id")
+      .notNull()
+      .references(() => telephonyEndpoints.id, { onDelete: "restrict" }),
+    staffUserId: uuid("staff_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "restrict" }),
+    consultationId: uuid("consultation_id")
+      .notNull()
+      .references(() => consultations.id, { onDelete: "restrict" }),
+    consultationRequestId: uuid("consultation_request_id")
+      .notNull()
+      .references(() => consultationRequests.id, { onDelete: "restrict" }),
+    outboxEventId: uuid("outbox_event_id")
+      .notNull()
+      .references(() => outboxEvents.id, { onDelete: "restrict" }),
+    remotePhoneFingerprint: bytea("remote_phone_fingerprint").notNull(),
+    commandStatus: telephonyCommandStatusEnum("command_status")
+      .default("queued")
+      .notNull(),
+    outcome: telephonyCallOutcomeEnum("outcome").default("unknown").notNull(),
+    requestedAt: timestamp("requested_at", { withTimezone: true }).notNull(),
+    dispatchedAt: timestamp("dispatched_at", { withTimezone: true }),
+    providerRespondedAt: timestamp("provider_responded_at", {
+      withTimezone: true,
+    }),
+    providerStatus: varchar("provider_status", { length: 30 }),
+    providerStartedAt: timestamp("provider_started_at", {
+      withTimezone: true,
+    }),
+    providerEndedAt: timestamp("provider_ended_at", {
+      withTimezone: true,
+    }),
+    providerDurationSeconds: integer("provider_duration_seconds"),
+    providerBillableSeconds: integer("provider_billable_seconds"),
+    reconciledAt: timestamp("reconciled_at", { withTimezone: true }),
+    disposition: telephonyCallDispositionEnum("disposition"),
+    dispositionConfirmedAt: timestamp("disposition_confirmed_at", {
+      withTimezone: true,
+    }),
+    dispositionConfirmedByUserId: uuid(
+      "disposition_confirmed_by_user_id",
+    ).references(() => staffUsers.id, { onDelete: "restrict" }),
+    lastErrorCode: varchar("last_error_code", { length: 100 }),
+    lastErrorMessage: text("last_error_message"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("telephony_calls_outbox_event_uidx").on(table.outboxEventId),
+    index("telephony_calls_consultation_requested_idx").on(
+      table.consultationId,
+      table.requestedAt,
+    ),
+    index("telephony_calls_staff_requested_idx").on(
+      table.staffUserId,
+      table.requestedAt,
+    ),
+    index("telephony_calls_command_status_requested_idx").on(
+      table.commandStatus,
+      table.requestedAt,
+    ),
+    uniqueIndex("telephony_calls_endpoint_provider_started_uidx")
+      .on(table.endpointId, table.providerStartedAt)
+      .where(sql`${table.providerStartedAt} IS NOT NULL`),
+    check(
+      "telephony_calls_remote_phone_fingerprint_length",
+      sql`octet_length(${table.remotePhoneFingerprint}) = 32`,
+    ),
+    check(
+      "telephony_calls_dispatch_time_order",
+      sql`${table.dispatchedAt} IS NULL OR ${table.dispatchedAt} >= ${table.requestedAt}`,
+    ),
+    check(
+      "telephony_calls_provider_response_time_order",
+      sql`${table.providerRespondedAt} IS NULL OR ${table.providerRespondedAt} >= ${table.requestedAt}`,
+    ),
+    check(
+      "telephony_calls_error_pair",
+      sql`(${table.lastErrorCode} IS NULL AND ${table.lastErrorMessage} IS NULL)
+        OR (${table.lastErrorCode} IS NOT NULL AND ${table.lastErrorMessage} IS NOT NULL)`,
+    ),
+    check(
+      "telephony_calls_provider_duration_nonnegative",
+      sql`${table.providerDurationSeconds} IS NULL OR ${table.providerDurationSeconds} >= 0`,
+    ),
+    check(
+      "telephony_calls_provider_billable_nonnegative",
+      sql`${table.providerBillableSeconds} IS NULL OR ${table.providerBillableSeconds} >= 0`,
+    ),
+    check(
+      "telephony_calls_provider_time_order",
+      sql`${table.providerEndedAt} IS NULL
+        OR ${table.providerStartedAt} IS NULL
+        OR ${table.providerEndedAt} >= ${table.providerStartedAt}`,
+    ),
+    check(
+      "telephony_calls_reconciliation_complete",
+      sql`${table.reconciledAt} IS NULL OR (
+        ${table.providerStatus} IS NOT NULL
+        AND ${table.providerStartedAt} IS NOT NULL
+        AND ${table.providerEndedAt} IS NOT NULL
+        AND ${table.providerDurationSeconds} IS NOT NULL
+        AND ${table.providerBillableSeconds} IS NOT NULL
+      )`,
+    ),
+    check(
+      "telephony_calls_disposition_confirmation_pair",
+      sql`(
+        ${table.disposition} IS NULL
+        AND ${table.dispositionConfirmedAt} IS NULL
+        AND ${table.dispositionConfirmedByUserId} IS NULL
+      ) OR (
+        ${table.disposition} IS NOT NULL
+        AND ${table.dispositionConfirmedAt} IS NOT NULL
+        AND ${table.dispositionConfirmedByUserId} IS NOT NULL
+      )`,
+    ),
+    check(
+      "telephony_calls_disposition_after_reconciliation",
+      sql`${table.disposition} IS NULL OR ${table.reconciledAt} IS NOT NULL`,
+    ),
+  ],
+);
+
+export const telephonyInboundCalls = pgTable(
+  "telephony_inbound_calls",
+  {
+    id: uuid("id").primaryKey(),
+    provider: telephonyProviderEnum("provider").default("centrex").notNull(),
+    direction: telephonyCallDirectionEnum("direction")
+      .default("inbound")
+      .notNull(),
+    endpointId: uuid("endpoint_id")
+      .notNull()
+      .references(() => telephonyEndpoints.id, { onDelete: "restrict" }),
+    bridgeId: varchar("bridge_id", { length: 80 }).notNull(),
+    providerCallId: varchar("provider_call_id", { length: 100 }).notNull(),
+    remotePhoneCiphertext: bytea("remote_phone_ciphertext").notNull(),
+    remotePhoneNonce: bytea("remote_phone_nonce").notNull(),
+    remotePhoneKeyVersion: varchar("remote_phone_key_version", {
+      length: 50,
+    }).notNull(),
+    remotePhoneFingerprint: bytea("remote_phone_fingerprint").notNull(),
+    remotePhoneMasked: varchar("remote_phone_masked", { length: 20 }).notNull(),
+    incomingLineLast4: varchar("incoming_line_last4", { length: 4 }).notNull(),
+    state: telephonyInboundCallStateEnum("state").default("ringing").notNull(),
+    ringingAt: timestamp("ringing_at", { withTimezone: true }).notNull(),
+    connectedAt: timestamp("connected_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    providerEndCause: varchar("provider_end_cause", { length: 30 }),
+    lastEventAt: timestamp("last_event_at", { withTimezone: true }).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("telephony_inbound_calls_endpoint_provider_call_uidx").on(
+      table.endpointId,
+      table.providerCallId,
+    ),
+    index("telephony_inbound_calls_state_last_event_idx").on(
+      table.direction,
+      table.state,
+      table.lastEventAt,
+    ),
+    index("telephony_inbound_calls_phone_ringing_idx").on(
+      table.remotePhoneFingerprint,
+      table.ringingAt,
+    ),
+    check(
+      "telephony_inbound_calls_bridge_id_format",
+      sql`${table.bridgeId} ~ '^[A-Za-z0-9][A-Za-z0-9_.-]{2,79}$'`,
+    ),
+    check(
+      "telephony_inbound_calls_provider_call_id_format",
+      sql`${table.providerCallId} ~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$'`,
+    ),
+    check(
+      "telephony_inbound_calls_phone_crypto",
+      sql`octet_length(${table.remotePhoneNonce}) = 12
+        AND octet_length(${table.remotePhoneFingerprint}) = 32
+        AND octet_length(${table.remotePhoneCiphertext}) >= 17`,
+    ),
+    check(
+      "telephony_inbound_calls_masked_phone",
+      sql`${table.remotePhoneMasked} ~ '^\\*\\*\\*[0-9]{4}$'`,
+    ),
+    check(
+      "telephony_inbound_calls_line_last4",
+      sql`${table.incomingLineLast4} ~ '^[0-9]{4}$'`,
+    ),
+    check(
+      "telephony_inbound_calls_state_times",
+      sql`(
+        ${table.state} = 'ringing'
+        AND ${table.connectedAt} IS NULL
+        AND ${table.endedAt} IS NULL
+        AND ${table.providerEndCause} IS NULL
+      ) OR (
+        ${table.state} = 'connected'
+        AND ${table.connectedAt} IS NOT NULL
+        AND ${table.endedAt} IS NULL
+        AND ${table.providerEndCause} IS NULL
+      ) OR (
+        ${table.state} = 'ended'
+        AND ${table.endedAt} IS NOT NULL
+        AND ${table.providerEndCause} IS NOT NULL
+      )`,
+    ),
+    check(
+      "telephony_inbound_calls_time_order",
+      sql`(${table.connectedAt} IS NULL OR ${table.connectedAt} >= ${table.ringingAt})
+        AND (${table.endedAt} IS NULL OR ${table.endedAt} >= ${table.ringingAt})
+        AND ${table.lastEventAt} >= ${table.ringingAt}`,
+    ),
+  ],
+);
+
+export const telephonyCallObservationLinks = pgTable(
+  "telephony_call_observation_links",
+  {
+    observedCallId: uuid("observed_call_id")
+      .primaryKey()
+      .references(() => telephonyInboundCalls.id, { onDelete: "restrict" }),
+    telephonyCallId: uuid("telephony_call_id")
+      .notNull()
+      .references(() => telephonyCalls.id, { onDelete: "restrict" }),
+    matchMethod: varchar("match_method", { length: 50 }).notNull(),
+    timeDeltaMs: integer("time_delta_ms").notNull(),
+    linkedAt: timestamp("linked_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("telephony_call_observation_links_call_uidx").on(
+      table.telephonyCallId,
+    ),
+    index("telephony_call_observation_links_linked_idx").on(table.linkedAt),
+    check(
+      "telephony_call_observation_links_method",
+      sql`${table.matchMethod} = 'endpoint_phone_time_v1'`,
+    ),
+    check(
+      "telephony_call_observation_links_time_delta",
+      sql`${table.timeDeltaMs} BETWEEN -5000 AND 120000`,
+    ),
+  ],
+);
+
+export const telephonyCallAftercare = pgTable(
+  "telephony_call_aftercare",
+  {
+    id: uuid("id").primaryKey(),
+    observedCallId: uuid("observed_call_id").references(
+      () => telephonyInboundCalls.id,
+      { onDelete: "restrict" },
+    ),
+    telephonyCallId: uuid("telephony_call_id").references(
+      () => telephonyCalls.id,
+      { onDelete: "restrict" },
+    ),
+    consultationId: uuid("consultation_id").references(
+      () => consultations.id,
+      { onDelete: "restrict" },
+    ),
+    result: telephonyAftercareResultEnum("result").notNull(),
+    otherTextCiphertext: bytea("other_text_ciphertext"),
+    otherTextNonce: bytea("other_text_nonce"),
+    otherTextKeyVersion: varchar("other_text_key_version", { length: 50 }),
+    memoCiphertext: bytea("memo_ciphertext"),
+    memoNonce: bytea("memo_nonce"),
+    memoKeyVersion: varchar("memo_key_version", { length: 50 }),
+    confirmedByUserId: uuid("confirmed_by_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "restrict" }),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("telephony_call_aftercare_observed_uidx")
+      .on(table.observedCallId)
+      .where(sql`${table.observedCallId} IS NOT NULL`),
+    uniqueIndex("telephony_call_aftercare_command_uidx")
+      .on(table.telephonyCallId)
+      .where(sql`${table.telephonyCallId} IS NOT NULL`),
+    index("telephony_call_aftercare_consultation_idx").on(
+      table.consultationId,
+      table.confirmedAt,
+    ),
+    check(
+      "telephony_call_aftercare_source_present",
+      sql`${table.observedCallId} IS NOT NULL OR ${table.telephonyCallId} IS NOT NULL`,
+    ),
+    check(
+      "telephony_call_aftercare_other_text_crypto",
+      sql`(
+        ${table.result} = 'other'
+        AND ${table.otherTextCiphertext} IS NOT NULL
+        AND ${table.otherTextNonce} IS NOT NULL
+        AND ${table.otherTextKeyVersion} IS NOT NULL
+      ) OR (
+        ${table.result} <> 'other'
+        AND ${table.otherTextCiphertext} IS NULL
+        AND ${table.otherTextNonce} IS NULL
+        AND ${table.otherTextKeyVersion} IS NULL
+      )`,
+    ),
+    check(
+      "telephony_call_aftercare_memo_crypto",
+      sql`(
+        ${table.memoCiphertext} IS NULL
+        AND ${table.memoNonce} IS NULL
+        AND ${table.memoKeyVersion} IS NULL
+      ) OR (
+        ${table.memoCiphertext} IS NOT NULL
+        AND ${table.memoNonce} IS NOT NULL
+        AND ${table.memoKeyVersion} IS NOT NULL
+      )`,
+    ),
+    check(
+      "telephony_call_aftercare_nonce_lengths",
+      sql`(${table.otherTextNonce} IS NULL OR octet_length(${table.otherTextNonce}) = 12)
+        AND (${table.memoNonce} IS NULL OR octet_length(${table.memoNonce}) = 12)`,
+    ),
+  ],
+);
+
+export const telephonyFollowUpTasks = pgTable(
+  "telephony_follow_up_tasks",
+  {
+    id: uuid("id").primaryKey(),
+    aftercareId: uuid("aftercare_id")
+      .notNull()
+      .references(() => telephonyCallAftercare.id, { onDelete: "restrict" }),
+    assigneeUserId: uuid("assignee_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "restrict" }),
+    state: telephonyFollowUpStateEnum("state").default("open").notNull(),
+    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    createdByUserId: uuid("created_by_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "restrict" }),
+    completedByUserId: uuid("completed_by_user_id").references(
+      () => staffUsers.id,
+      { onDelete: "restrict" },
+    ),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("telephony_follow_up_tasks_open_aftercare_uidx")
+      .on(table.aftercareId)
+      .where(sql`${table.state} = 'open'`),
+    index("telephony_follow_up_tasks_open_due_idx")
+      .on(table.dueAt, table.assigneeUserId)
+      .where(sql`${table.state} = 'open'`),
+    check(
+      "telephony_follow_up_tasks_state_times",
+      sql`(
+        ${table.state} = 'open'
+        AND ${table.completedAt} IS NULL
+        AND ${table.completedByUserId} IS NULL
+        AND ${table.cancelledAt} IS NULL
+      ) OR (
+        ${table.state} = 'completed'
+        AND ${table.completedAt} IS NOT NULL
+        AND ${table.completedByUserId} IS NOT NULL
+        AND ${table.cancelledAt} IS NULL
+      ) OR (
+        ${table.state} = 'cancelled'
+        AND ${table.completedAt} IS NULL
+        AND ${table.completedByUserId} IS NULL
+        AND ${table.cancelledAt} IS NOT NULL
+      )`,
+    ),
+  ],
+);
+
+export const telephonyInboundEvents = pgTable(
+  "telephony_inbound_events",
+  {
+    id: uuid("id").primaryKey(),
+    inboundCallId: uuid("inbound_call_id")
+      .notNull()
+      .references(() => telephonyInboundCalls.id, { onDelete: "restrict" }),
+    endpointId: uuid("endpoint_id")
+      .notNull()
+      .references(() => telephonyEndpoints.id, { onDelete: "restrict" }),
+    bridgeId: varchar("bridge_id", { length: 80 }).notNull(),
+    direction: telephonyCallDirectionEnum("direction")
+      .default("inbound")
+      .notNull(),
+    eventType: telephonyBridgeEventTypeEnum("event_type").notNull(),
+    providerCallId: varchar("provider_call_id", { length: 100 }).notNull(),
+    providerChannelId: varchar("provider_channel_id", { length: 100 }),
+    providerEndCause: varchar("provider_end_cause", { length: 30 }),
+    eventFingerprint: bytea("event_fingerprint").notNull(),
+    authenticationNonceHash: bytea("authentication_nonce_hash").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("telephony_inbound_events_bridge_nonce_uidx").on(
+      table.bridgeId,
+      table.authenticationNonceHash,
+    ),
+    index("telephony_inbound_events_call_occurred_idx").on(
+      table.inboundCallId,
+      table.occurredAt,
+    ),
+    check(
+      "telephony_inbound_events_hash_lengths",
+      sql`octet_length(${table.eventFingerprint}) = 32
+        AND octet_length(${table.authenticationNonceHash}) = 32`,
+    ),
+    check(
+      "telephony_inbound_events_details",
+      sql`(
+        ${table.direction} = 'inbound'
+        AND (${table.eventType})::text = 'inbound.ringing'
+        AND ${table.providerChannelId} IS NULL
+        AND ${table.providerEndCause} IS NULL
+      ) OR (
+        ${table.direction} = 'inbound'
+        AND (${table.eventType})::text = 'inbound.connected'
+        AND ${table.providerEndCause} IS NULL
+      ) OR (
+        ${table.direction} = 'inbound'
+        AND (${table.eventType})::text = 'inbound.ended'
+        AND ${table.providerChannelId} IS NULL
+        AND ${table.providerEndCause} IS NOT NULL
+      ) OR (
+        ${table.direction} = 'outbound'
+        AND (${table.eventType})::text = 'outbound.ringing'
+        AND ${table.providerChannelId} IS NULL
+        AND ${table.providerEndCause} IS NULL
+      ) OR (
+        ${table.direction} = 'outbound'
+        AND (${table.eventType})::text = 'outbound.connected'
+        AND ${table.providerEndCause} IS NULL
+      ) OR (
+        ${table.direction} = 'outbound'
+        AND (${table.eventType})::text = 'outbound.ended'
+        AND ${table.providerChannelId} IS NULL
+        AND ${table.providerEndCause} IS NOT NULL
+      )`,
+    ),
+  ],
+);
+
+export const telephonyInboundCommands = pgTable(
+  "telephony_inbound_commands",
+  {
+    id: uuid("id").primaryKey(),
+    inboundCallId: uuid("inbound_call_id")
+      .notNull()
+      .references(() => telephonyInboundCalls.id, { onDelete: "restrict" }),
+    endpointId: uuid("endpoint_id")
+      .notNull()
+      .references(() => telephonyEndpoints.id, { onDelete: "restrict" }),
+    requestedByUserId: uuid("requested_by_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "restrict" }),
+    bridgeId: varchar("bridge_id", { length: 80 }).notNull(),
+    commandType: varchar("command_type", { length: 30 })
+      .default("answer")
+      .notNull(),
+    providerCallId: varchar("provider_call_id", { length: 100 }).notNull(),
+    status: telephonyInboundCommandStatusEnum("status")
+      .default("queued")
+      .notNull(),
+    requestedAt: timestamp("requested_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    firstDispatchedAt: timestamp("first_dispatched_at", {
+      withTimezone: true,
+    }),
+    lastDispatchedAt: timestamp("last_dispatched_at", {
+      withTimezone: true,
+    }),
+    dispatchAttempts: integer("dispatch_attempts").default(0).notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    resultCode: varchar("result_code", { length: 60 }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("telephony_inbound_commands_active_call_uidx")
+      .on(table.inboundCallId, table.commandType)
+      .where(sql`${table.status} IN ('queued', 'dispatching')`),
+    index("telephony_inbound_commands_bridge_dispatch_idx").on(
+      table.bridgeId,
+      table.endpointId,
+      table.status,
+      table.requestedAt,
+    ),
+    index("telephony_inbound_commands_call_requested_idx").on(
+      table.inboundCallId,
+      table.requestedAt,
+    ),
+    check(
+      "telephony_inbound_commands_bridge_id_format",
+      sql`${table.bridgeId} ~ '^[A-Za-z0-9][A-Za-z0-9_.-]{2,79}$'`,
+    ),
+    check(
+      "telephony_inbound_commands_provider_call_id_format",
+      sql`${table.providerCallId} ~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$'`,
+    ),
+    check(
+      "telephony_inbound_commands_type",
+      sql`${table.commandType} = 'answer'`,
+    ),
+    check(
+      "telephony_inbound_commands_time_order",
+      sql`${table.expiresAt} > ${table.requestedAt}
+        AND (${table.firstDispatchedAt} IS NULL OR ${table.firstDispatchedAt} >= ${table.requestedAt})
+        AND (${table.lastDispatchedAt} IS NULL OR ${table.lastDispatchedAt} >= ${table.firstDispatchedAt})
+        AND (${table.completedAt} IS NULL OR ${table.completedAt} >= ${table.requestedAt})`,
+    ),
+    check(
+      "telephony_inbound_commands_attempts_nonnegative",
+      sql`${table.dispatchAttempts} >= 0`,
+    ),
+    check(
+      "telephony_inbound_commands_status_details",
+      sql`(
+        ${table.status} = 'queued'
+        AND ${table.firstDispatchedAt} IS NULL
+        AND ${table.lastDispatchedAt} IS NULL
+        AND ${table.dispatchAttempts} = 0
+        AND ${table.completedAt} IS NULL
+        AND ${table.resultCode} IS NULL
+      ) OR (
+        ${table.status} = 'dispatching'
+        AND ${table.firstDispatchedAt} IS NOT NULL
+        AND ${table.lastDispatchedAt} IS NOT NULL
+        AND ${table.dispatchAttempts} > 0
+        AND ${table.completedAt} IS NULL
+        AND ${table.resultCode} IS NULL
+      ) OR (
+        ${table.status} IN ('succeeded', 'failed')
+        AND ${table.firstDispatchedAt} IS NOT NULL
+        AND ${table.lastDispatchedAt} IS NOT NULL
+        AND ${table.dispatchAttempts} > 0
+        AND ${table.completedAt} IS NOT NULL
+        AND ${table.resultCode} IS NOT NULL
+      ) OR (
+        ${table.status} = 'expired'
+        AND ${table.completedAt} IS NOT NULL
+        AND ${table.resultCode} IS NOT NULL
       )`,
     ),
   ],

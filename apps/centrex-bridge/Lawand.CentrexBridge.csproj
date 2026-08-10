@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">x86</Platform>
+    <ProjectGuid>{AF033129-3DF7-4E50-B42F-CA28D3D02CF5}</ProjectGuid>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>Lawand.CentrexBridge</RootNamespace>
+    <AssemblyName>Lawand.CentrexBridge</AssemblyName>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <Deterministic>true</Deterministic>
+    <PlatformTarget>x86</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|x86' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|x86' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Runtime.Serialization" />
+    <Reference Include="System.Security" />
+    <Reference Include="System.Web.Extensions" />
+    <Reference Include="System.Windows.Forms" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="src\AssemblyInfo.cs" />
+    <Compile Include="src\AwsGatewayCredentialProvisioner.cs" />
+    <Compile Include="src\BridgeApplicationContext.cs" />
+    <Compile Include="src\BridgeConfiguration.cs" />
+    <Compile Include="src\CallObservationExpiryPolicy.cs" />
+    <Compile Include="src\CentrexActiveXHost.cs" />
+    <Compile Include="src\CentrexEventParser.cs" />
+    <Compile Include="src\CentrexRuntime.cs" />
+    <Compile Include="src\CredentialProvisionForm.cs" />
+    <Compile Include="src\CredentialStore.cs" />
+    <Compile Include="src\GatewayEventDispatcher.cs" />
+    <Compile Include="src\GatewayDeliveryDispositionPolicy.cs" />
+    <Compile Include="src\GatewayEventPayload.cs" />
+    <Compile Include="src\GatewayCommandPoller.cs" />
+    <Compile Include="src\GatewaySecretEncoding.cs" />
+    <Compile Include="src\Program.cs" />
+    <Compile Include="src\ProvisioningFailurePolicy.cs" />
+    <Compile Include="src\SafeLogger.cs" />
+    <Compile Include="src\StatusForm.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="config\bridge.example.json" />
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>

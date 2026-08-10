@@ -1,0 +1,1 @@
+ALTER TABLE "public_case_studies" ADD COLUMN "source_case_idx" bigint;

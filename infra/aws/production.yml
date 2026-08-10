@@ -1,0 +1,711 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Lawand production VPC, three EC2 application servers, EIPs, private PostgreSQL RDS, and deployment bucket.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: lawand-prod
+  HomepageInstanceType:
+    Type: String
+    Default: t4g.small
+  ErpInstanceType:
+    Type: String
+    Default: t4g.small
+  GatewayInstanceType:
+    Type: String
+    Default: t4g.medium
+  DatabaseInstanceClass:
+    Type: String
+    Default: db.t4g.small
+  DatabaseEngineVersion:
+    Type: String
+    Default: "16.14"
+  LatestArmAmi:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.42.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-vpc
+        - Key: Project
+          Value: lawand
+        - Key: Environment
+          Value: production
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-igw
+        - Key: Project
+          Value: lawand
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref Vpc
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: 10.42.0.0/24
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-public-a
+        - Key: Project
+          Value: lawand
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: 10.42.1.0/24
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-public-b
+        - Key: Project
+          Value: lawand
+
+  PrivateDatabaseSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: 10.42.10.0/24
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-db-a
+        - Key: Project
+          Value: lawand
+
+  PrivateDatabaseSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: 10.42.11.0/24
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-db-b
+        - Key: Project
+          Value: lawand
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-public
+        - Key: Project
+          Value: lawand
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetA
+
+  PublicSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetB
+
+  HomepageSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Public HTTP and HTTPS for the Lawand homepage
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-homepage-sg
+        - Key: Project
+          Value: lawand
+      VpcId: !Ref Vpc
+
+  ErpSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Public HTTP and HTTPS for the authenticated Lawand ERP
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-erp-sg
+        - Key: Project
+          Value: lawand
+      VpcId: !Ref Vpc
+
+  GatewaySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Public HTTP and HTTPS for the Lawand gateway edge
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-gateway-sg
+        - Key: Project
+          Value: lawand
+      VpcId: !Ref Vpc
+
+  GatewayFromHomepageIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: Homepage server to internal gateway port
+      FromPort: 3022
+      GroupId: !Ref GatewaySecurityGroup
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref HomepageSecurityGroup
+      ToPort: 3022
+
+  GatewayFromErpIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: ERP server to internal gateway port
+      FromPort: 3022
+      GroupId: !Ref GatewaySecurityGroup
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref ErpSecurityGroup
+      ToPort: 3022
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: PostgreSQL only from Lawand application servers
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-database-sg
+        - Key: Project
+          Value: lawand
+      VpcId: !Ref Vpc
+
+  DatabaseFromHomepageIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: Homepage read model access
+      FromPort: 5432
+      GroupId: !Ref DatabaseSecurityGroup
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref HomepageSecurityGroup
+      ToPort: 5432
+
+  DatabaseFromErpIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: Reserved ERP database access
+      FromPort: 5432
+      GroupId: !Ref DatabaseSecurityGroup
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref ErpSecurityGroup
+      ToPort: 5432
+
+  DatabaseFromGatewayIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: Gateway runtime database access
+      FromPort: 5432
+      GroupId: !Ref DatabaseSecurityGroup
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref GatewaySecurityGroup
+      ToPort: 5432
+
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireDeploymentArtifacts
+            Prefix: artifacts/
+            Status: Enabled
+            ExpirationInDays: 30
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Project
+          Value: lawand
+        - Key: Environment
+          Value: production
+      VersioningConfiguration:
+        Status: Enabled
+
+  ArtifactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ArtifactBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !GetAtt ArtifactBucket.Arn
+              - !Sub ${ArtifactBucket.Arn}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+  ApplicationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Description: Runtime role for Lawand EC2 application servers
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Policies:
+        - PolicyName: LawandRuntimeSecretsAndArtifacts
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:lawand/prod/*
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                Resource: !Sub ${ArtifactBucket.Arn}/*
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !GetAtt ArtifactBucket.Arn
+      Tags:
+        - Key: Project
+          Value: lawand
+        - Key: Environment
+          Value: production
+
+  ApplicationInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref ApplicationRole
+
+  HomepageInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      AvailabilityZone: !GetAtt PublicSubnetA.AvailabilityZone
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            VolumeSize: 30
+            VolumeType: gp3
+      DisableApiTermination: true
+      IamInstanceProfile: !Ref ApplicationInstanceProfile
+      ImageId: !Ref LatestArmAmi
+      InstanceType: !Ref HomepageInstanceType
+      MetadataOptions:
+        HttpEndpoint: enabled
+        HttpPutResponseHopLimit: 1
+        HttpTokens: required
+      SecurityGroupIds:
+        - !Ref HomepageSecurityGroup
+      SubnetId: !Ref PublicSubnetA
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-homepage
+        - Key: Project
+          Value: lawand
+        - Key: Environment
+          Value: production
+        - Key: App
+          Value: homepage
+      UserData:
+        Fn::Base64: !Sub |
+          #!/usr/bin/env bash
+          set -euxo pipefail
+          hostnamectl set-hostname ${EnvironmentName}-homepage
+          dnf install -y docker jq tar gzip
+          systemctl enable --now docker
+          systemctl enable --now amazon-ssm-agent
+          mkdir -p /opt/lawand /etc/lawand /var/lib/lawand-caddy /var/log/lawand
+          chmod 700 /etc/lawand
+          if [ ! -f /swapfile ]; then
+            fallocate -l 4G /swapfile
+            chmod 600 /swapfile
+            mkswap /swapfile
+            swapon /swapfile
+            echo '/swapfile none swap sw 0 0' >> /etc/fstab
+          fi
+
+  ErpInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      AvailabilityZone: !GetAtt PublicSubnetB.AvailabilityZone
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            VolumeSize: 30
+            VolumeType: gp3
+      DisableApiTermination: true
+      IamInstanceProfile: !Ref ApplicationInstanceProfile
+      ImageId: !Ref LatestArmAmi
+      InstanceType: !Ref ErpInstanceType
+      MetadataOptions:
+        HttpEndpoint: enabled
+        HttpPutResponseHopLimit: 1
+        HttpTokens: required
+      SecurityGroupIds:
+        - !Ref ErpSecurityGroup
+      SubnetId: !Ref PublicSubnetB
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-erp
+        - Key: Project
+          Value: lawand
+        - Key: Environment
+          Value: production
+        - Key: App
+          Value: erp
+      UserData:
+        Fn::Base64: !Sub |
+          #!/usr/bin/env bash
+          set -euxo pipefail
+          hostnamectl set-hostname ${EnvironmentName}-erp
+          dnf install -y docker jq tar gzip
+          systemctl enable --now docker
+          systemctl enable --now amazon-ssm-agent
+          mkdir -p /opt/lawand /etc/lawand /var/lib/lawand-caddy /var/log/lawand
+          chmod 700 /etc/lawand
+          if [ ! -f /swapfile ]; then
+            fallocate -l 4G /swapfile
+            chmod 600 /swapfile
+            mkswap /swapfile
+            swapon /swapfile
+            echo '/swapfile none swap sw 0 0' >> /etc/fstab
+          fi
+
+  GatewayInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      AvailabilityZone: !GetAtt PublicSubnetA.AvailabilityZone
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            VolumeSize: 40
+            VolumeType: gp3
+      DisableApiTermination: true
+      IamInstanceProfile: !Ref ApplicationInstanceProfile
+      ImageId: !Ref LatestArmAmi
+      InstanceType: !Ref GatewayInstanceType
+      MetadataOptions:
+        HttpEndpoint: enabled
+        HttpPutResponseHopLimit: 1
+        HttpTokens: required
+      SecurityGroupIds:
+        - !Ref GatewaySecurityGroup
+      SubnetId: !Ref PublicSubnetA
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-gateway
+        - Key: Project
+          Value: lawand
+        - Key: Environment
+          Value: production
+        - Key: App
+          Value: gateway
+      UserData:
+        Fn::Base64: !Sub |
+          #!/usr/bin/env bash
+          set -euxo pipefail
+          hostnamectl set-hostname ${EnvironmentName}-gateway
+          dnf install -y docker jq tar gzip
+          systemctl enable --now docker
+          systemctl enable --now amazon-ssm-agent
+          mkdir -p /opt/lawand /etc/lawand /var/lib/lawand-caddy /var/log/lawand
+          chmod 700 /etc/lawand
+          if [ ! -f /swapfile ]; then
+            fallocate -l 4G /swapfile
+            chmod 600 /swapfile
+            mkswap /swapfile
+            swapon /swapfile
+            echo '/swapfile none swap sw 0 0' >> /etc/fstab
+          fi
+
+  HomepageElasticIp:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-homepage-eip
+        - Key: Project
+          Value: lawand
+
+  HomepageElasticIpAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt HomepageElasticIp.AllocationId
+      InstanceId: !Ref HomepageInstance
+
+  ErpElasticIp:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-erp-eip
+        - Key: Project
+          Value: lawand
+
+  ErpElasticIpAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt ErpElasticIp.AllocationId
+      InstanceId: !Ref ErpInstance
+
+  GatewayElasticIp:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-gateway-eip
+        - Key: Project
+          Value: lawand
+
+  GatewayElasticIpAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt GatewayElasticIp.AllocationId
+      InstanceId: !Ref GatewayInstance
+
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Private subnets for Lawand PostgreSQL
+      SubnetIds:
+        - !Ref PrivateDatabaseSubnetA
+        - !Ref PrivateDatabaseSubnetB
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-database-subnets
+        - Key: Project
+          Value: lawand
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      AllocatedStorage: 30
+      AutoMinorVersionUpgrade: true
+      BackupRetentionPeriod: 7
+      CopyTagsToSnapshot: true
+      DBInstanceClass: !Ref DatabaseInstanceClass
+      DBInstanceIdentifier: !Sub ${EnvironmentName}-postgres
+      DBName: lawand
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      DeletionProtection: true
+      EnableCloudwatchLogsExports:
+        - postgresql
+        - upgrade
+      EnablePerformanceInsights: true
+      Engine: postgres
+      EngineVersion: !Ref DatabaseEngineVersion
+      ManageMasterUserPassword: true
+      MasterUsername: lawand_admin
+      MaxAllocatedStorage: 100
+      MultiAZ: false
+      PerformanceInsightsRetentionPeriod: 7
+      Port: 5432
+      PreferredBackupWindow: 18:00-18:30
+      PreferredMaintenanceWindow: sun:19:00-sun:20:00
+      PubliclyAccessible: false
+      StorageEncrypted: true
+      StorageType: gp3
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-postgres
+        - Key: Project
+          Value: lawand
+        - Key: Environment
+          Value: production
+      VPCSecurityGroups:
+        - !Ref DatabaseSecurityGroup
+
+  HomepageStatusAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Lawand homepage EC2 instance status check failed
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref HomepageInstance
+      EvaluationPeriods: 2
+      MetricName: StatusCheckFailed
+      Namespace: AWS/EC2
+      Period: 60
+      Statistic: Maximum
+      Threshold: 1
+      TreatMissingData: missing
+
+  ErpStatusAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Lawand ERP EC2 instance status check failed
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref ErpInstance
+      EvaluationPeriods: 2
+      MetricName: StatusCheckFailed
+      Namespace: AWS/EC2
+      Period: 60
+      Statistic: Maximum
+      Threshold: 1
+      TreatMissingData: missing
+
+  GatewayStatusAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Lawand gateway EC2 instance status check failed
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref GatewayInstance
+      EvaluationPeriods: 2
+      MetricName: StatusCheckFailed
+      Namespace: AWS/EC2
+      Period: 60
+      Statistic: Maximum
+      Threshold: 1
+      TreatMissingData: missing
+
+  DatabaseCpuAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Lawand PostgreSQL CPU above 80 percent for 10 minutes
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref Database
+      EvaluationPeriods: 2
+      MetricName: CPUUtilization
+      Namespace: AWS/RDS
+      Period: 300
+      Statistic: Average
+      Threshold: 80
+      TreatMissingData: missing
+
+  DatabaseFreeStorageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Lawand PostgreSQL free storage below 5 GiB
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref Database
+      EvaluationPeriods: 1
+      MetricName: FreeStorageSpace
+      Namespace: AWS/RDS
+      Period: 300
+      Statistic: Average
+      Threshold: 5368709120
+      TreatMissingData: missing
+
+Outputs:
+  ArtifactBucketName:
+    Value: !Ref ArtifactBucket
+  DatabaseEndpoint:
+    Value: !GetAtt Database.Endpoint.Address
+  DatabaseMasterSecretArn:
+    Value: !GetAtt Database.MasterUserSecret.SecretArn
+  ErpElasticIp:
+    Value: !Ref ErpElasticIp
+  ErpInstanceId:
+    Value: !Ref ErpInstance
+  ErpPrivateIp:
+    Value: !GetAtt ErpInstance.PrivateIp
+  GatewayElasticIp:
+    Value: !Ref GatewayElasticIp
+  GatewayInstanceId:
+    Value: !Ref GatewayInstance
+  GatewayPrivateIp:
+    Value: !GetAtt GatewayInstance.PrivateIp
+  HomepageElasticIp:
+    Value: !Ref HomepageElasticIp
+  HomepageInstanceId:
+    Value: !Ref HomepageInstance
+  HomepagePrivateIp:
+    Value: !GetAtt HomepageInstance.PrivateIp
+  VpcId:
+    Value: !Ref Vpc

@@ -56,7 +56,7 @@ const navigationGroups = [
     ],
   },
   {
-    label: "개인파산·면책",
+    label: "개인파산",
     href: "/bank/personal-bankruptcy",
     description: "파산선고와 면책을 구분해서",
     links: [
@@ -113,7 +113,7 @@ const evidenceLinks = [
     description: "함께한 과정을 내 말로 기록하기",
   },
   {
-    href: "/bank#cases",
+    href: "/bank/cases",
     label: "사례로 이해하기",
     description: "결과보다 확인한 쟁점 중심",
   },
@@ -252,11 +252,17 @@ export function SiteHeader() {
         </nav>
 
         <div className="header-actions">
+          <a
+            className="header-diagnosis"
+            href="/bank/self-diagnosis"
+            data-consultation-cta="header-self-diagnosis"
+          >
+            자가진단
+          </a>
           <KakaoConsultationEntry
             className="header-kakao"
             placement="header-kakao"
           >
-            <KakaoChatIcon />
             카톡상담
           </KakaoConsultationEntry>
           <a
@@ -264,8 +270,7 @@ export function SiteHeader() {
             href="/bank/consultation"
             data-consultation-cta="header"
           >
-            상담 요청
-            <ArrowIcon />
+            상담요청
           </a>
         </div>
 
@@ -337,7 +342,13 @@ export function SiteHeader() {
                 카톡상담
               </KakaoConsultationEntry>
               <a href="/bank/consultation" data-consultation-cta="mobile-menu">
-                상담 요청
+                상담요청
+              </a>
+              <a
+                href="/bank/self-diagnosis"
+                data-consultation-cta="mobile-menu-self-diagnosis"
+              >
+                자가진단
               </a>
             </div>
           </nav>
@@ -370,27 +381,28 @@ export function ConsultationSection({
         <div className="consultation-copy">
           <p>{body}</p>
           <div className="consultation-actions">
-            <a className="button button-inverse" href="tel:16708480">
-              <PhoneIcon />
-              1670-8480
+            <a
+              className="button button-inverse"
+              href="/bank/self-diagnosis"
+              data-consultation-cta="page-self-diagnosis"
+            >
+              자가진단
             </a>
             <a
               className="button button-outline-light"
               href="/bank/consultation"
               data-consultation-cta="page-consultation-section"
             >
-              상담 요청 남기기
-              <ArrowIcon />
+              상담요청
             </a>
             <KakaoConsultationEntry
               className="button button-kakao"
               placement="page-consultation-section-kakao"
             >
-              <KakaoChatIcon />
               카톡상담
             </KakaoConsultationEntry>
           </div>
-          <span>평일 오전 8시–오후 7시 · 주말 및 공휴일 휴무</span>
+          <span>전화 1670-8480 · 평일 오전 8시–오후 7시</span>
         </div>
       </div>
     </section>
@@ -436,19 +448,19 @@ export function SiteFooter() {
 export function MobileActions() {
   return (
     <nav className="mobile-actions" aria-label="빠른 상담">
-      <a href="tel:16708480">
-        <PhoneIcon />
-        전화 상담
-      </a>
       <KakaoConsultationEntry
         placement="mobile-fixed-bar-kakao"
       >
-        <KakaoChatIcon />
         카톡상담
       </KakaoConsultationEntry>
       <a href="/bank/consultation" data-consultation-cta="mobile-fixed-bar">
-        상담 요청
-        <ArrowIcon />
+        상담요청
+      </a>
+      <a
+        href="/bank/self-diagnosis"
+        data-consultation-cta="mobile-fixed-bar-self-diagnosis"
+      >
+        자가진단
       </a>
     </nav>
   );

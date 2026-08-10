@@ -1,11 +1,34 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { once } from "node:events";
 import test from "node:test";
 
 import { createGatewayServer } from "./app.js";
 import type { StaffAuthService, StaffPrincipal } from "./auth.js";
+import { centrexBridgeCanonicalRequest } from "./centrex-bridge-auth.js";
+import type { CentrexBridgeIngressService } from "./centrex-bridge-service.js";
+import type { CentrexBridgeProvisioningService } from "./centrex-bridge-provisioning.js";
+import type { CentrexInboundObserver } from "./centrex-inbound-observer.js";
 import type { ConsultationService } from "./service.js";
 import type { ReviewSubmissionService } from "./review-service.js";
+import type { TelephonyService } from "./telephony-service.js";
+
+const realtimeActor = {
+  id: "019fa6a4-6834-7782-aa0b-4e71ffb8a2b1",
+  email: "staff@lawand.test",
+  displayName: "로앤 직원",
+  primaryMembership: {
+    id: "019fa6a4-6834-7782-aa0b-4e71ffb8a2b2",
+    organization: { key: "lawand", name: "법무법인 로앤" },
+    region: { key: "seoul", name: "서울" },
+    department: "상담팀",
+    jobTitle: "상담 담당자",
+    role: "full_time" as const,
+    isPrimary: true,
+  },
+  memberships: [],
+  roles: ["full_time" as const],
+} satisfies StaffPrincipal;
 
 test("gateway health endpoint", async (context) => {
   const server = createGatewayServer();
@@ -24,6 +47,392 @@ test("gateway health endpoint", async (context) => {
   });
 });
 
+test("U+ 수신 콜백은 비밀 HTML 경로만 허용하고 원문을 응답하지 않는다", async (context) => {
+  const callbackPath = "/v1/centrex-ring/test_secret_value_1234567890ab.html";
+  let receivedSender = "";
+  const centrexInboundObserver = {
+    matchesPath: (pathname: string) => pathname === callbackPath,
+    ingest: async (searchParams: URLSearchParams) => {
+      receivedSender = searchParams.get("sender") ?? "";
+      return {
+        callId: "01980000-0000-7000-8000-000000000009",
+        state: "ringing" as const,
+        replayed: false,
+      };
+    },
+  } as unknown as CentrexInboundObserver;
+  const server = createGatewayServer({ centrexInboundObserver });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+
+  const query = new URLSearchParams({
+    sender: "01012345678",
+    receiver: "07012345678",
+    kind: "1",
+    inner_num: "5678",
+    message: "",
+  });
+  const accepted = await fetch(
+    `http://127.0.0.1:${address.port}${callbackPath}?${query}`,
+  );
+  assert.equal(accepted.status, 200);
+  assert.deepEqual(await accepted.json(), { status: "ok" });
+  assert.equal(receivedSender, "01012345678");
+
+  const rejected = await fetch(
+    `http://127.0.0.1:${address.port}/v1/centrex-ring/wrong.html?${query}`,
+  );
+  assert.equal(rejected.status, 404);
+});
+
+test("센트릭스 bridge 이벤트는 HMAC 검증 뒤 수신 서비스에 전달된다", async (context) => {
+  const bridgeId = "seoul-phone-01";
+  const endpointId = "01980000-0000-7000-8000-000000000002";
+  const event = {
+    schemaVersion: 1,
+    eventId: "01980000-0000-7000-8000-000000000001",
+    bridgeId,
+    endpointId,
+    eventType: "inbound.ringing",
+    occurredAt: "2026-08-06T09:10:11.000+09:00",
+    providerCallId: "1315457785.80",
+    callerNumber: "01012345678",
+    incomingLineNumber: "07000001234",
+  } as const;
+  const body = Buffer.from(JSON.stringify(event), "utf8");
+  const secret = Buffer.alloc(32, 9);
+  const timestamp = String(Math.floor(Date.now() / 1_000));
+  const nonce = "AQIDBAUGBwgJCgsMDQ4PEA";
+  const canonical = centrexBridgeCanonicalRequest({
+    bridgeId,
+    timestamp,
+    nonce,
+    body,
+  });
+  let receivedEventId: string | undefined;
+  const centrexBridgeIngress = {
+    ingest: async (receivedEvent: typeof event) => {
+      receivedEventId = receivedEvent.eventId;
+      return {
+        callId: "01980000-0000-7000-8000-000000000003",
+        state: "ringing" as const,
+        replayed: false,
+      };
+    },
+  } as unknown as CentrexBridgeIngressService;
+  const server = createGatewayServer({
+    centrexBridgeIngress,
+    centrexBridgeKeys: { [bridgeId]: { endpointId, secret } },
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const response = await fetch(
+    `http://127.0.0.1:${address.port}/v1/centrex-bridge/events`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-lawand-bridge-id": bridgeId,
+        "x-lawand-bridge-timestamp": timestamp,
+        "x-lawand-bridge-nonce": nonce,
+        "x-lawand-bridge-signature": `v1=${createHmac("sha256", secret)
+          .update(canonical)
+          .digest("hex")}`,
+      },
+      body,
+    },
+  );
+  assert.equal(response.status, 201);
+  assert.equal(receivedEventId, event.eventId);
+});
+
+test("센트릭스 bridge는 서명된 polling으로 받기 명령을 가져오고 결과를 확정한다", async (context) => {
+  const bridgeId = "seoul-phone-01";
+  const endpointId = "01980000-0000-7000-8000-000000000002";
+  const commandId = "01980000-0000-7000-8000-000000000005";
+  const inboundCallId = "01980000-0000-7000-8000-000000000006";
+  const secret = Buffer.alloc(32, 8);
+  let completedCommandId: string | undefined;
+  const telephonyService = {
+    pollInboundAnswerCommand: async () => ({
+      schemaVersion: 1 as const,
+      commandId,
+      inboundCallId,
+      commandType: "answer" as const,
+      expectedProviderCallId: "1315457785.80",
+      expiresAt: new Date(Date.now() + 20_000).toISOString(),
+    }),
+    completeInboundAnswerCommand: async (receivedCommandId: string) => {
+      completedCommandId = receivedCommandId;
+      return {
+        id: commandId,
+        inboundCallId,
+        status: "succeeded" as const,
+        requestedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 20_000).toISOString(),
+        completedAt: new Date().toISOString(),
+        resultCode: "accepted",
+        replayed: false,
+      };
+    },
+  } as unknown as TelephonyService;
+  const server = createGatewayServer({
+    centrexBridgeKeys: { [bridgeId]: { endpointId, secret } },
+    telephonyService,
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+
+  const pollPath = "/v1/centrex-bridge/commands/next";
+  const timestamp = String(Math.floor(Date.now() / 1_000));
+  const pollNonce = "AQIDBAUGBwgJCgsMDQ4PEQ";
+  const pollCanonical = centrexBridgeCanonicalRequest({
+    bridgeId,
+    timestamp,
+    nonce: pollNonce,
+    body: Buffer.alloc(0),
+    method: "GET",
+    path: pollPath,
+  });
+  const polled = await fetch(`http://127.0.0.1:${address.port}${pollPath}`, {
+    headers: {
+      "x-lawand-bridge-id": bridgeId,
+      "x-lawand-bridge-timestamp": timestamp,
+      "x-lawand-bridge-nonce": pollNonce,
+      "x-lawand-bridge-signature": `v1=${createHmac("sha256", secret)
+        .update(pollCanonical)
+        .digest("hex")}`,
+    },
+  });
+  assert.equal(polled.status, 200);
+  assert.equal((await polled.json() as { commandId: string }).commandId, commandId);
+  const replayedPoll = await fetch(
+    `http://127.0.0.1:${address.port}${pollPath}`,
+    {
+      headers: {
+        "x-lawand-bridge-id": bridgeId,
+        "x-lawand-bridge-timestamp": timestamp,
+        "x-lawand-bridge-nonce": pollNonce,
+        "x-lawand-bridge-signature": `v1=${createHmac("sha256", secret)
+          .update(pollCanonical)
+          .digest("hex")}`,
+      },
+    },
+  );
+  assert.equal(replayedPoll.status, 401);
+
+  const resultPath = `/v1/centrex-bridge/commands/${commandId}/result`;
+  const resultBody = Buffer.from(JSON.stringify({
+    schemaVersion: 1,
+    commandId,
+    status: "succeeded",
+    resultCode: "accepted",
+  }));
+  const resultNonce = "AQIDBAUGBwgJCgsMDQ4PEg";
+  const resultCanonical = centrexBridgeCanonicalRequest({
+    bridgeId,
+    timestamp,
+    nonce: resultNonce,
+    body: resultBody,
+    method: "POST",
+    path: resultPath,
+  });
+  const completed = await fetch(
+    `http://127.0.0.1:${address.port}${resultPath}`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-lawand-bridge-id": bridgeId,
+        "x-lawand-bridge-timestamp": timestamp,
+        "x-lawand-bridge-nonce": resultNonce,
+        "x-lawand-bridge-signature": `v1=${createHmac("sha256", secret)
+          .update(resultCanonical)
+          .digest("hex")}`,
+      },
+      body: resultBody,
+    },
+  );
+  assert.equal(completed.status, 200);
+  assert.equal(completedCommandId, commandId);
+});
+
+test("센트릭스 bridge 회선 교체 명령은 받기보다 우선 전달되고 로그인 결과로 확정된다", async (context) => {
+  const bridgeId = "seoul-phone-01";
+  const endpointId = "01980000-0000-7000-8000-000000000012";
+  const commandId = "01980000-0000-7000-8000-000000000015";
+  const secret = Buffer.alloc(32, 7);
+  let completedCommandId: string | undefined;
+  let answerPolled = false;
+  const command = {
+    schemaVersion: 1 as const,
+    commandId,
+    commandType: "provision" as const,
+    endpointId,
+    expectedExtension: "4535",
+    expectedLineLast4: "4535",
+    credentialEnvelope: {
+      algorithm: "A256CBC-HS256" as const,
+      iv: "AAECAwQFBgcICQoLDA0ODw",
+      ciphertext: "YWJjZA",
+      mac: "ZWZnaA",
+    },
+    expiresAt: new Date(Date.now() + 40_000).toISOString(),
+  };
+  const centrexBridgeProvisioning = {
+    poll: async () => command,
+    handlesCommand: (receivedCommandId: string, receivedBridgeId: string) =>
+      receivedCommandId === commandId && receivedBridgeId === bridgeId,
+    complete: async (receivedCommandId: string) => {
+      completedCommandId = receivedCommandId;
+      return {
+        status: "succeeded" as const,
+        resultCode: "centrex_login_succeeded",
+        replayed: false,
+      };
+    },
+  } as unknown as CentrexBridgeProvisioningService;
+  const telephonyService = {
+    pollInboundAnswerCommand: async () => {
+      answerPolled = true;
+      return null;
+    },
+  } as unknown as TelephonyService;
+  const server = createGatewayServer({
+    centrexBridgeKeys: { [bridgeId]: { endpointId, secret } },
+    centrexBridgeProvisioning,
+    telephonyService,
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+
+  const pollPath = "/v1/centrex-bridge/commands/next";
+  const timestamp = String(Math.floor(Date.now() / 1_000));
+  const pollNonce = "AQIDBAUGBwgJCgsMDQ4PFQ";
+  const pollCanonical = centrexBridgeCanonicalRequest({
+    bridgeId,
+    timestamp,
+    nonce: pollNonce,
+    body: Buffer.alloc(0),
+    method: "GET",
+    path: pollPath,
+  });
+  const polled = await fetch(`http://127.0.0.1:${address.port}${pollPath}`, {
+    headers: {
+      "x-lawand-bridge-id": bridgeId,
+      "x-lawand-bridge-timestamp": timestamp,
+      "x-lawand-bridge-nonce": pollNonce,
+      "x-lawand-bridge-signature": `v1=${createHmac("sha256", secret)
+        .update(pollCanonical)
+        .digest("hex")}`,
+    },
+  });
+  assert.equal(polled.status, 200);
+  const polledBody = await polled.text();
+  assert.equal(answerPolled, false);
+  assert.equal(polledBody.includes("password"), false);
+  assert.equal(JSON.parse(polledBody).commandType, "provision");
+
+  const resultPath = `/v1/centrex-bridge/commands/${commandId}/result`;
+  const resultBody = Buffer.from(JSON.stringify({
+    schemaVersion: 1,
+    commandId,
+    status: "succeeded",
+    resultCode: "centrex_login_succeeded",
+  }));
+  const resultNonce = "AQIDBAUGBwgJCgsMDQ4PFg";
+  const resultCanonical = centrexBridgeCanonicalRequest({
+    bridgeId,
+    timestamp,
+    nonce: resultNonce,
+    body: resultBody,
+    method: "POST",
+    path: resultPath,
+  });
+  const completed = await fetch(
+    `http://127.0.0.1:${address.port}${resultPath}`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-lawand-bridge-id": bridgeId,
+        "x-lawand-bridge-timestamp": timestamp,
+        "x-lawand-bridge-nonce": resultNonce,
+        "x-lawand-bridge-signature": `v1=${createHmac("sha256", secret)
+          .update(resultCanonical)
+          .digest("hex")}`,
+      },
+      body: resultBody,
+    },
+  );
+  assert.equal(completed.status, 200);
+  assert.equal(completedCommandId, commandId);
+});
+
+test("빈 bridge 슬롯은 서명 polling으로 온라인을 알리되 전화 받기 명령을 조회하지 않는다", async (context) => {
+  const bridgeId = "lawand-slot-001";
+  const endpointId = "01980000-0000-7000-8000-000000000019";
+  const secret = Buffer.alloc(32, 9);
+  let answerPolled = false;
+  const centrexBridgeProvisioning = {
+    poll: async () => null,
+    isReadyForTelephony: () => false,
+  } as unknown as CentrexBridgeProvisioningService;
+  const telephonyService = {
+    pollInboundAnswerCommand: async () => {
+      answerPolled = true;
+      return null;
+    },
+  } as unknown as TelephonyService;
+  const server = createGatewayServer({
+    centrexBridgeKeys: { [bridgeId]: { endpointId, secret } },
+    centrexBridgeProvisioning,
+    telephonyService,
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+
+  const path = "/v1/centrex-bridge/commands/next";
+  const timestamp = String(Math.floor(Date.now() / 1_000));
+  const nonce = "AQIDBAUGBwgJCgsMDQ4PHQ";
+  const canonical = centrexBridgeCanonicalRequest({
+    bridgeId,
+    timestamp,
+    nonce,
+    body: Buffer.alloc(0),
+    method: "GET",
+    path,
+  });
+  const response = await fetch(`http://127.0.0.1:${address.port}${path}`, {
+    headers: {
+      "x-lawand-bridge-id": bridgeId,
+      "x-lawand-bridge-timestamp": timestamp,
+      "x-lawand-bridge-nonce": nonce,
+      "x-lawand-bridge-signature": `v1=${createHmac("sha256", secret)
+        .update(canonical)
+        .digest("hex")}`,
+    },
+  });
+  assert.equal(response.status, 204);
+  assert.equal(answerPolled, false);
+});
+
 test("내부 조회 API는 인증 키 없이 열리지 않는다", async (context) => {
   const server = createGatewayServer();
   server.listen(0, "127.0.0.1");
@@ -36,6 +445,589 @@ test("내부 조회 API는 인증 키 없이 열리지 않는다", async (contex
     `http://127.0.0.1:${address.port}/v1/consultations`,
   );
   assert.equal(response.status, 401);
+});
+
+test("수신전화 받기 API는 인증된 회선 사용자와 통화 ID를 서비스에 전달한다", async (context) => {
+  const inboundCallId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2d1";
+  let requestedBy: string | undefined;
+  const telephonyService = {
+    requestInboundAnswer: async (
+      receivedCallId: string,
+      actor: StaffPrincipal,
+    ) => {
+      assert.equal(receivedCallId, inboundCallId);
+      requestedBy = actor.id;
+      return {
+        id: "019fa6a4-6834-7782-aa0b-4e71ffb8a2d2",
+        inboundCallId,
+        status: "queued" as const,
+        requestedAt: "2026-08-06T03:40:00.000Z",
+        expiresAt: "2026-08-06T03:40:20.000Z",
+        completedAt: null,
+        resultCode: null,
+        replayed: false,
+      };
+    },
+  } as unknown as TelephonyService;
+  const authService = {
+    authorize: async () => realtimeActor,
+  } as unknown as StaffAuthService;
+  const server = createGatewayServer({
+    authService,
+    internalApiKey: "test-internal-key",
+    telephonyService,
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+
+  const response = await fetch(
+    `http://127.0.0.1:${address.port}/v1/telephony-inbound-calls/${inboundCallId}/answer`,
+    {
+      method: "POST",
+      headers: {
+        "x-lawand-internal-key": "test-internal-key",
+        "x-lawand-staff-session": "test-session",
+      },
+    },
+  );
+  assert.equal(response.status, 201);
+  assert.equal(requestedBy, realtimeActor.id);
+});
+
+test("클릭투콜 API는 인증된 현재 담당자와 상담 ID를 서비스에 전달한다", async (context) => {
+  const consultationId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2c1";
+  let received:
+    | { consultationId: string; actor: StaffPrincipal }
+    | undefined;
+  const telephonyService = {
+    requestClickToCall: async (
+      receivedConsultationId: string,
+      actor: StaffPrincipal,
+    ) => {
+      received = { consultationId: receivedConsultationId, actor };
+      return {
+        id: "019fa6a4-6834-7782-aa0b-4e71ffb8a2c2",
+        consultationId: receivedConsultationId,
+        endpointId: "019fa6a4-6834-7782-aa0b-4e71ffb8a2c3",
+        commandStatus: "queued" as const,
+        outcome: "unknown" as const,
+        requestedAt: "2026-08-05T10:00:00.000Z",
+        dispatchedAt: null,
+        providerRespondedAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        replayed: false,
+      };
+    },
+  } as unknown as TelephonyService;
+  const authService = {
+    authorize: async () => realtimeActor,
+  } as unknown as StaffAuthService;
+  const server = createGatewayServer({
+    authService,
+    internalApiKey: "test-internal-key",
+    telephonyService,
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const response = await fetch(
+    `http://127.0.0.1:${address.port}/v1/consultations/${consultationId}/click-to-call`,
+    {
+      method: "POST",
+      headers: {
+        "x-lawand-internal-key": "test-internal-key",
+        "x-lawand-staff-session": "s".repeat(43),
+      },
+    },
+  );
+
+  assert.equal(response.status, 201);
+  assert.equal(received?.consultationId, consultationId);
+  assert.equal(received?.actor.id, realtimeActor.id);
+});
+
+test("통화 결과 API는 허용된 분류와 현재 직원을 서비스에 전달한다", async (context) => {
+  const callId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2d1";
+  let received:
+    | {
+        callId: string;
+        disposition: string;
+        actor: StaffPrincipal;
+      }
+    | undefined;
+  const telephonyService = {
+    confirmDisposition: async (
+      receivedCallId: string,
+      disposition: string,
+      actor: StaffPrincipal,
+    ) => {
+      received = { callId: receivedCallId, disposition, actor };
+      return {
+        id: receivedCallId,
+        disposition,
+        dispositionConfirmedAt: "2026-08-05T10:01:00.000Z",
+      };
+    },
+  } as unknown as TelephonyService;
+  const authService = {
+    authorize: async () => realtimeActor,
+  } as unknown as StaffAuthService;
+  const server = createGatewayServer({
+    authService,
+    internalApiKey: "test-internal-key",
+    telephonyService,
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const response = await fetch(
+    `http://127.0.0.1:${address.port}/v1/telephony-calls/${callId}/disposition`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-lawand-internal-key": "test-internal-key",
+        "x-lawand-staff-session": "s".repeat(43),
+      },
+      body: JSON.stringify({ disposition: "callback_required" }),
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(received?.callId, callId);
+  assert.equal(received?.disposition, "callback_required");
+  assert.equal(received?.actor.id, realtimeActor.id);
+});
+
+test("직원 상담 SSE는 연결 동기화 뒤 outbox 변경 이벤트를 전달한다", async (context) => {
+  const eventId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2a1";
+  const consultationId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2a2";
+  const authService = {
+    authorize: async () => realtimeActor,
+  } as unknown as StaffAuthService;
+  const server = createGatewayServer({
+    authService,
+    internalApiKey: "test-internal-key",
+    consultationEvents: {
+      subscribe: (listener) => {
+        queueMicrotask(() => {
+          listener({
+            kind: "changed",
+            notification: {
+              eventId,
+              eventType: "consultation.requested",
+              consultationId,
+              occurredAt: "2026-08-05T09:00:00+00:00",
+            },
+          });
+        });
+        return () => undefined;
+      },
+    },
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const controller = new AbortController();
+  const response = await fetch(
+    `http://127.0.0.1:${address.port}/v1/consultation-events/stream`,
+    {
+      headers: {
+        "x-lawand-internal-key": "test-internal-key",
+        "x-lawand-staff-session": "test-session",
+      },
+      signal: controller.signal,
+    },
+  );
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type") ?? "", /text\/event-stream/);
+  assert.ok(response.body);
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let received = "";
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    received += decoder.decode(chunk.value, { stream: true });
+    if (received.includes(`id: ${eventId}`)) break;
+  }
+  assert.match(received, /event: consultation\.sync/);
+  assert.match(received, /event: consultation\.changed/);
+  assert.match(received, new RegExp(`id: ${eventId}`));
+  assert.match(received, new RegExp(consultationId));
+  await reader.cancel();
+  controller.abort();
+});
+
+test("직원 수신전화 SSE는 연결 동기화 뒤 개인정보 없는 변경 이벤트를 전달한다", async (context) => {
+  const eventId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2e1";
+  const inboundCallId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2e2";
+  const authService = {
+    authorize: async () => realtimeActor,
+  } as unknown as StaffAuthService;
+  const server = createGatewayServer({
+    authService,
+    internalApiKey: "test-internal-key",
+    telephonyInboundEvents: {
+      subscribe: (listener) => {
+        queueMicrotask(() => {
+          listener({
+            kind: "changed",
+            notification: {
+              eventId,
+              eventType: "inbound.ringing",
+              inboundCallId,
+              occurredAt: "2026-08-06T01:15:15+00:00",
+            },
+          });
+        });
+        return () => undefined;
+      },
+    },
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const controller = new AbortController();
+  const response = await fetch(
+    `http://127.0.0.1:${address.port}/v1/telephony-inbound-events/stream`,
+    {
+      headers: {
+        "x-lawand-internal-key": "test-internal-key",
+        "x-lawand-staff-session": "test-session",
+      },
+      signal: controller.signal,
+    },
+  );
+  assert.equal(response.status, 200);
+  assert.ok(response.body);
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let received = "";
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    received += decoder.decode(chunk.value, { stream: true });
+    if (received.includes(`id: ${eventId}`)) break;
+  }
+  assert.match(received, /event: telephony\.inbound\.sync/);
+  assert.match(received, /event: telephony\.inbound\.changed/);
+  assert.match(received, new RegExp(inboundCallId));
+  assert.doesNotMatch(received, /callerNumber|remotePhone/);
+  await reader.cancel();
+  controller.abort();
+});
+
+test("직원 수신전화 스냅샷은 권한 확인 뒤 전체 번호와 동시 수신 원장을 반환한다", async (context) => {
+  let requested = false;
+  const telephonyService = {
+    getInboundCallSnapshot: async () => {
+      requested = true;
+      return {
+        snapshotAt: "2026-08-06T01:15:16.000Z",
+        items: [
+          {
+            id: "019fa6a4-6834-7782-aa0b-4e71ffb8a2e2",
+            endpointId: "019fa6a4-6834-7782-aa0b-4e71ffb8a2e3",
+            state: "ringing" as const,
+            remotePhone: "01012345678",
+            incomingLineLast4: "4591",
+            extension: "4591",
+            ringingAt: "2026-08-06T01:15:15.000Z",
+            connectedAt: null,
+            endedAt: null,
+            lastEventAt: "2026-08-06T01:15:15.000Z",
+            owners: [
+              {
+                staffUserId: realtimeActor.id,
+                displayName: realtimeActor.displayName,
+              },
+            ],
+            customerMatch: null,
+            answerCommand: null,
+          },
+          {
+            id: "019fa6a4-6834-7782-aa0b-4e71ffb8a2e4",
+            endpointId: "019fa6a4-6834-7782-aa0b-4e71ffb8a2e5",
+            state: "ringing" as const,
+            remotePhone: "0212345678",
+            incomingLineLast4: "7455",
+            extension: "7455",
+            ringingAt: "2026-08-06T01:15:15.500Z",
+            connectedAt: null,
+            endedAt: null,
+            lastEventAt: "2026-08-06T01:15:15.500Z",
+            owners: [],
+            customerMatch: null,
+            answerCommand: null,
+          },
+        ],
+      };
+    },
+  } as unknown as TelephonyService;
+  const authService = {
+    authorize: async () => realtimeActor,
+  } as unknown as StaffAuthService;
+  const server = createGatewayServer({
+    authService,
+    internalApiKey: "test-internal-key",
+    telephonyService,
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const denied = await fetch(
+    `http://127.0.0.1:${address.port}/v1/telephony-inbound-calls`,
+  );
+  assert.equal(denied.status, 401);
+
+  const accepted = await fetch(
+    `http://127.0.0.1:${address.port}/v1/telephony-inbound-calls`,
+    {
+      headers: {
+        "x-lawand-internal-key": "test-internal-key",
+        "x-lawand-staff-session": "test-session",
+      },
+    },
+  );
+  assert.equal(accepted.status, 200);
+  assert.equal(requested, true);
+  const body = await accepted.text();
+  assert.match(body, /01012345678/);
+  assert.match(body, /0212345678/);
+  assert.doesNotMatch(body, /callerNumber|remotePhoneCiphertext/);
+});
+
+test("직원 전화데스크 목록은 권한 확인 뒤 통합 원장을 반환한다", async (context) => {
+  let receivedLimit = 0;
+  const telephonyService = {
+    getPhoneDeskCalls: async (limit: number) => {
+      receivedLimit = limit;
+      return {
+        snapshotAt: "2026-08-06T06:00:00.000Z",
+        items: [
+          {
+            id: "019fa6a4-6834-7782-aa0b-4e71ffb8a2f1",
+            observedCallId: "019fa6a4-6834-7782-aa0b-4e71ffb8a2f1",
+            direction: "outbound" as const,
+            source: "click_to_call" as const,
+            state: "ended" as const,
+            remotePhone: "01012345678",
+          },
+        ],
+      };
+    },
+  } as unknown as TelephonyService;
+  const authService = {
+    authorize: async () => realtimeActor,
+  } as unknown as StaffAuthService;
+  const server = createGatewayServer({
+    authService,
+    internalApiKey: "test-internal-key",
+    telephonyService,
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const denied = await fetch(
+    `http://127.0.0.1:${address.port}/v1/phone-desk/calls?limit=100`,
+  );
+  assert.equal(denied.status, 401);
+  const accepted = await fetch(
+    `http://127.0.0.1:${address.port}/v1/phone-desk/calls?limit=100`,
+    {
+      headers: {
+        "x-lawand-internal-key": "test-internal-key",
+        "x-lawand-staff-session": "test-session",
+      },
+    },
+  );
+  assert.equal(accepted.status, 200);
+  assert.equal(receivedLimit, 100);
+  const body = await accepted.text();
+  assert.match(body, /click_to_call/);
+  assert.match(body, /01012345678/);
+  assert.doesNotMatch(body, /remotePhoneCiphertext/);
+});
+
+test("전화데스크 후처리와 재통화 완료 API는 통합 계약과 현재 직원을 전달한다", async (context) => {
+  const callId = "019fa6a4-6834-7782-aa0b-4e71ffb8a301";
+  const taskId = "019fa6a4-6834-7782-aa0b-4e71ffb8a302";
+  let savedResult = "";
+  let savedAssignee = "";
+  let completedBy = "";
+  const telephonyService = {
+    getPhoneDeskCall: async () => ({
+      snapshotAt: "2026-08-07T05:00:00.000Z",
+      call: { id: callId, aftercare: null },
+      staffOptions: [],
+      recommendedAssigneeUserIds: [],
+    }),
+    savePhoneDeskAftercare: async (
+      receivedCallId: string,
+      input: { result: string; followUp: { enabled: boolean; assigneeUserId?: string } },
+      actor: StaffPrincipal,
+    ) => {
+      assert.equal(receivedCallId, callId);
+      assert.equal(actor.id, realtimeActor.id);
+      savedResult = input.result;
+      savedAssignee = input.followUp.assigneeUserId ?? "";
+      return { call: { id: callId, aftercare: { result: input.result } } };
+    },
+    completePhoneDeskFollowUp: async (
+      receivedTaskId: string,
+      actor: StaffPrincipal,
+    ) => {
+      assert.equal(receivedTaskId, taskId);
+      completedBy = actor.id;
+      return {
+        id: receivedTaskId,
+        state: "completed" as const,
+        completedAt: "2026-08-07T05:30:00.000Z",
+      };
+    },
+  } as unknown as TelephonyService;
+  const authService = {
+    authorize: async () => realtimeActor,
+  } as unknown as StaffAuthService;
+  const server = createGatewayServer({
+    authService,
+    internalApiKey: "test-internal-key",
+    telephonyService,
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const headers = {
+    "content-type": "application/json",
+    "x-lawand-internal-key": "test-internal-key",
+    "x-lawand-staff-session": "test-session",
+  };
+
+  const detail = await fetch(
+    `http://127.0.0.1:${address.port}/v1/phone-desk/calls/${callId}`,
+    { headers },
+  );
+  assert.equal(detail.status, 200);
+
+  const saved = await fetch(
+    `http://127.0.0.1:${address.port}/v1/phone-desk/calls/${callId}/aftercare`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        result: "manager_callback_requested",
+        memo: "담당자 확인 후 재통화",
+        consultation: { mode: "none" },
+        followUp: {
+          enabled: true,
+          dueAt: "2026-08-08T14:30:00+09:00",
+          assigneeUserId: realtimeActor.id,
+        },
+      }),
+    },
+  );
+  assert.equal(saved.status, 200);
+  assert.equal(savedResult, "manager_callback_requested");
+  assert.equal(savedAssignee, realtimeActor.id);
+
+  const completed = await fetch(
+    `http://127.0.0.1:${address.port}/v1/phone-desk/follow-ups/${taskId}/complete`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ completed: true }),
+    },
+  );
+  assert.equal(completed.status, 200);
+  assert.equal(completedBy, realtimeActor.id);
+});
+
+test("직원 전화데스크 SSE는 전화번호 없이 수신·발신 변경을 전달한다", async (context) => {
+  const entityId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2f2";
+  const authService = {
+    authorize: async () => realtimeActor,
+  } as unknown as StaffAuthService;
+  const server = createGatewayServer({
+    authService,
+    internalApiKey: "test-internal-key",
+    telephonyDeskEvents: {
+      subscribe: (listener) => {
+        queueMicrotask(() => {
+          listener({
+            kind: "changed",
+            notification: {
+              eventType: "click_to_call.linked",
+              entityId,
+              direction: "outbound",
+              occurredAt: "2026-08-06T06:00:00.000Z",
+            },
+          });
+        });
+        return () => undefined;
+      },
+    },
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const controller = new AbortController();
+  const response = await fetch(
+    `http://127.0.0.1:${address.port}/v1/phone-desk/events/stream`,
+    {
+      headers: {
+        "x-lawand-internal-key": "test-internal-key",
+        "x-lawand-staff-session": "test-session",
+      },
+      signal: controller.signal,
+    },
+  );
+  assert.equal(response.status, 200);
+  assert.ok(response.body);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let received = "";
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    received += decoder.decode(chunk.value, { stream: true });
+    if (received.includes(entityId)) break;
+  }
+  assert.match(received, /event: telephony\.desk\.sync/);
+  assert.match(received, /event: telephony\.desk\.changed/);
+  assert.match(received, new RegExp(entityId));
+  assert.doesNotMatch(received, /remotePhone|callerNumber|01012345678/);
+  await reader.cancel();
+  controller.abort();
 });
 
 test("공개 상담 쓰기 경계는 홈페이지 서버의 접수 전용 키 없이 열리지 않는다", async (context) => {
@@ -67,6 +1059,89 @@ test("공개 상담 쓰기 경계는 홈페이지 서버의 접수 전용 키 �
     },
   );
   assert.equal(response.status, 401);
+});
+
+test("자가진단은 접수 전용 키와 전화번호 한도를 거쳐 상담 서비스에 전달한다", async (context) => {
+  let receivedPhone = "";
+  let protectionChecked = false;
+  const service = {
+    submitSelfDiagnosis: async (input: { phone: string }) => {
+      receivedPhone = input.phone;
+      return {
+        publicReceiptCode: "LA-260803-23456789",
+        acceptedAt: "2026-08-03T06:40:00.000Z",
+        dedupeOutcome: "new" as const,
+        replayed: false,
+        assessment: { matches: [] },
+      };
+    },
+  } as unknown as ConsultationService;
+  const server = createGatewayServer({
+    service,
+    publicIntakeApiKey: "test-public-intake-key",
+    intakeProtection: {
+      check: () => {
+        protectionChecked = true;
+        return { allowed: true };
+      },
+      checkKakaoEntry: () => ({ allowed: true }),
+    },
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const endpoint = `http://127.0.0.1:${address.port}/v1/self-diagnoses`;
+  const body = JSON.stringify({
+    source: "homepage",
+    idempotencyKey: "01984c7d-8500-7000-8000-000000000001",
+    phone: "010-1234-5678",
+    name: "로앤 고객",
+    privacyNoticeVersion: "2026-08-03.1",
+    consentAgreedAt: "2026-08-03T15:40:00+09:00",
+    attribution: {
+      journeySessionId: "01984c7d-8500-7000-8000-000000000002",
+      startedAt: "2026-08-03T15:35:00+09:00",
+      firstLandingPath: "/bank",
+      source: {},
+      journey: [],
+      submittedFromPath: "/bank/self-diagnosis",
+    },
+    answers: {
+      residenceRegion: "seoul",
+      courtIdx: 1,
+      monthlyIncome: 3_000_000,
+      incomeType: 1,
+      residenceType: 3,
+      marriageState: 2,
+      minorChildCount: 0,
+      unsecuredDebt: 80_000_000,
+      securedDebt: 0,
+      liquidationValue: 5_000_000,
+      priorityDebt: false,
+    },
+  });
+
+  const denied = await fetch(endpoint, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body,
+  });
+  assert.equal(denied.status, 401);
+
+  const accepted = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-lawand-public-intake-key": "test-public-intake-key",
+    },
+    body,
+  });
+  assert.equal(accepted.status, 201);
+  assert.equal(protectionChecked, true);
+  assert.equal(receivedPhone, "01012345678");
 });
 
 test("홈페이지 카카오 진입은 접수 전용 키와 별도 익명 한도를 거쳐 저장한다", async (context) => {
@@ -364,7 +1439,7 @@ test("공개 상담 한도 초과는 저장 전에 429와 재시도 시간을 �
         mode: "quick",
         phone: "010-1234-5678",
         contact: { preference: "as_soon_as_possible" },
-        privacyNoticeVersion: "2026-07-28.1",
+        privacyNoticeVersion: "2026-08-03.1",
         consentAgreedAt: "2026-07-29T09:00:00+09:00",
         attribution: {
           journeySessionId: "01984c7d-8500-7000-8000-000000000002",
@@ -589,6 +1664,139 @@ test("관리자는 직원의 리걸프렌즈 아이디를 연결한다", async (
   assert.equal(received?.staffUserId, staffUserId);
   assert.equal(received?.legalFriendsId, "lawandfirm_s");
   assert.equal(received?.legalFriendsMemberIdx, 138);
+});
+
+test("관리자는 직원의 전체 센트릭스 회선번호를 저장한다", async (context) => {
+  const staffUserId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2a4";
+  const actor = {
+    id: "019fa6a4-6834-7782-aa0b-4e71ffb8a2b1",
+    email: "admin@lawand.test",
+    displayName: "로앤 관리자",
+    primaryMembership: {
+      id: "019fa6a4-6834-7782-aa0b-4e71ffb8a2b2",
+      organization: { key: "lawand", name: "법무법인 로앤" },
+      region: { key: "seoul", name: "서울" },
+      department: "관리팀",
+      jobTitle: "관리자",
+      role: "admin",
+      isPrimary: true,
+    },
+    memberships: [],
+    roles: ["admin"],
+  } satisfies StaffPrincipal;
+  let received:
+    | {
+        staffUserId: string;
+        centrexLineNumber: string | null;
+        centrexExtension: string | null;
+        centrexPassword: string | null;
+      }
+    | undefined;
+  const authService = {
+    authorize: async () => actor,
+    updateCentrexLineNumber: async (
+      _actor: StaffPrincipal,
+      receivedStaffUserId: string,
+      input: {
+        centrexLineNumber: string | null;
+        centrexExtension: string | null;
+        centrexPassword: string | null;
+      },
+    ) => {
+      received = {
+        staffUserId: receivedStaffUserId,
+        centrexLineNumber: input.centrexLineNumber,
+        centrexExtension: input.centrexExtension,
+        centrexPassword: input.centrexPassword,
+      };
+      return input;
+    },
+  } as unknown as StaffAuthService;
+  const server = createGatewayServer({
+    authService,
+    internalApiKey: "test-internal-key",
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const response = await fetch(
+    `http://127.0.0.1:${address.port}/v1/staff-auth/users/${staffUserId}/centrex-line`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-lawand-internal-key": "test-internal-key",
+        "x-lawand-staff-session": "s".repeat(43),
+      },
+      body: JSON.stringify({
+        centrexLineNumber: "070-4607-4591",
+        centrexExtension: "4591",
+        centrexPassword: "per-user-secret",
+      }),
+    },
+  );
+  assert.equal(response.status, 200);
+  assert.equal(received?.staffUserId, staffUserId);
+  assert.equal(received?.centrexLineNumber, "07046074591");
+  assert.equal(received?.centrexExtension, "4591");
+  assert.equal(received?.centrexPassword, "per-user-secret");
+});
+
+test("관리자는 실패한 센트릭스 bridge를 유휴 슬롯으로 재배정한다", async (context) => {
+  const staffUserId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2a4";
+  const actor = {
+    ...realtimeActor,
+    roles: ["admin" as const],
+    primaryMembership: {
+      ...realtimeActor.primaryMembership,
+      role: "admin" as const,
+    },
+  } satisfies StaffPrincipal;
+  let receivedStaffUserId = "";
+  const authService = {
+    authorize: async () => actor,
+    reassignCentrexBridge: async (
+      _actor: StaffPrincipal,
+      receivedId: string,
+    ) => {
+      receivedStaffUserId = receivedId;
+      return {
+        previousBridgeId: "lawand-slot-002",
+        replacementBridgeId: "lawand-slot-008",
+        previousQuarantined: true,
+      };
+    },
+  } as unknown as StaffAuthService;
+  const server = createGatewayServer({
+    authService,
+    internalApiKey: "test-internal-key",
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const response = await fetch(
+    `http://127.0.0.1:${address.port}/v1/staff-auth/users/${staffUserId}/centrex-bridge-reassign`,
+    {
+      method: "POST",
+      headers: {
+        "x-lawand-internal-key": "test-internal-key",
+        "x-lawand-staff-session": "s".repeat(43),
+      },
+    },
+  );
+  assert.equal(response.status, 200);
+  assert.equal(receivedStaffUserId, staffUserId);
+  assert.deepEqual(await response.json(), {
+    previousBridgeId: "lawand-slot-002",
+    replacementBridgeId: "lawand-slot-008",
+    previousQuarantined: true,
+  });
 });
 
 test("상담하기는 인증된 직원을 본인 담당 배정 서비스에 전달한다", async (context) => {

@@ -12,7 +12,7 @@
 고객 전 생애주기를 **최대한 사람 손이 안 타는 자동화**로 흐르게 한다. (상세: `PROJECT_PLAN.md`)
 
 ## 현재 상태
-- **홈페이지 초안 + 상담 접수 기반 스캐폴딩 완료.**
+- **홈페이지·ERP·gateway AWS 운영 배포 완료, 정식 도메인 전환 전.**
 - 스택 전제: Next.js 16(App Router) · React 19 · TypeScript · Tailwind 4 · shadcn/ui ·
   TanStack Query, **모노레포(pnpm workspaces + Turborepo)**.
 - 이 WSL 환경: node **v22.22.2**, pnpm **11.17.0**(Corepack + 로컬 shim).
@@ -54,6 +54,1127 @@
 ---
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
+
+### 2026-08-10 — 평문 자동 로그온 없는 Windows 실제 재부팅 canary 완료
+- 재부팅 직전 진행 중 수신·발신·받기·프로비저닝 0건, 배정 6+warm 5, 프로세스 11, 오프라인·
+  로그인 실패·DPAPI 큐 0을 확인하고 13:49 KST Windows를 재부팅했다. 38초 뒤 SSM이
+  복구됐고 SYSTEM `Lawand Centrex Bridge Health Monitor`는 boot trigger로 정상 실행됐다.
+  Administrator 로그인 전에는 예상대로 bridge 프로세스 0, 배정 오프라인 6, warm 0,
+  감독기 비정상이었으며 CloudWatch 배정 오프라인·감독기 이상·warm 부족 세 경보가 실제
+  `ALARM`으로 전환됐다.
+- 사용자가 14:10 KST `Administrator`로 RDP 로그인하자 별도 수동 작업 없이 logon trigger의
+  supervisor가 성공했고 배정 6개+warm 5개, 총 11개 프로세스가 복구됐다. 최종 health는
+  설치 51, 배정 6, 실행 11, warm 5, 배정 오프라인·로그인 실패·활성 큐·dead-letter 0,
+  감독기 정상이고 CloudWatch 5종 경보가 모두 `OK`로 돌아왔다. 한 회선은 복구 약 2분 뒤
+  일시 `NotFound(-1)`을 반환했지만 기존 지수 backoff가 47초 뒤 같은 회선으로 정상 로그인해
+  2회 연속 로그인 실패 경보에는 걸리지 않았다. 진행 중 통화·명령·프로비저닝은 최종 0,
+  gateway·Caddy 컨테이너와 외부 health/login도 정상이다.
+- `AutoAdminLogon`과 평문 암호는 끝까지 도입하지 않았다. 운영 한계는 재부팅마다 관리자가
+  RDP 로그인해야 OCX interactive session이 생긴다는 점이며, 이후 RDP는 로그아웃하지 않고
+  연결만 끊는다. 코드 서명은 조직용 Authenticode 인증서가 없어 별도 잔여 작업이다.
+  `PROJECT_PLAN.md`는 v0.92다.
+
+### 2026-08-10 — Windows 다중 bridge 운영 안정화·10→25→50 실부하 canary 완료
+- 배정 직원 6명과 실제 업무 수·발신이 섞이는 상태에서 Windows bridge v0.7.0.0을 배포했다.
+  감독기는 배정 슬롯 전부와 유휴 warm 5개를 정확히 유지하고, 작업 스케줄러의 프로세스
+  강제 종료 canary는 유휴 슬롯을 38초 안에 새 PID로 복구했다. SYSTEM health monitor는
+  heartbeat·로그인 실패·DPAPI 큐·감독기·warm pool을 1분마다 비식별 CloudWatch metric으로
+  발행한다. 최종 상태는 설치 51, 배정 6, 실행 11, warm 5, 배정 오프라인·로그인 실패·큐·
+  dead-letter 0, 감독기 정상이다.
+- 실제 통화 중 orphan `inbound.connected/ended`가 gateway 409로 계속 재시도되어 뒤 정상
+  발신 이벤트까지 막는 현상을 발견했다. v0.7.0은 400/404/409/422를 1분 재시도한 뒤 현재
+  사용자 DPAPI 암호문 dead-letter로 격리해 후속 이벤트를 계속 보낸다. 조사한 암호문 3건은
+  삭제하지 않고 인스턴스별 `gateway-dead-letter-archive`에 보존했고 최종 활성 큐와
+  dead-letter는 0건이다. Windows x86 self-test 16개가 통과했고 실행 파일 SHA-256은
+  `E3D4FCB197F8AF36726B7C60F5473D6129214DB4C06715C078F04D1505A5EE30`이다.
+- t3.medium에서 10개 600초·25개 600초·50개 1800초를 5초 간격 측정했다. CPU p95는
+  59%/61%/58%, 최대 76%/100%/100%, 최소 여유 메모리 1411.63/1185.99/939.47MB였고
+  프로세스 유실은 없었다. 50개 최대 working set 1347.29MB·private memory 1208.95MB로
+  768MB 중단선 대비 여유가 171.47MB뿐이므로 실제 배정 50개 근처에서는 t3.large 상향을
+  우선 검토한다. 결과 CSV는 Windows
+  `C:\ProgramData\Lawand\CentrexBridge\load-canary\bridge-load-20260810T024019Z.csv`다.
+- migration `0039_chemical_captain_flint.sql`과 gateway·ERP 릴리스
+  `20260810T012042Z-centrex-stability-v1`을 암호화 스냅샷
+  `lawand-prod-pre-centrex-stability-20260810` 뒤 배포했다. 직원관리는
+  `정상/연결 중/연결 실패/브리지 오프라인`을 구분하고, 관리자는 온라인 유휴 슬롯으로
+  원자 재배정한 뒤 기존 슬롯을 reset·격리할 수 있다. 실제 활성 직원 재배정은 현재 비밀번호
+  재입력이 필요하고 통화를 끊을 수 있어 단위·route 검증까지만 수행했다. core 55개·gateway
+  78개 테스트, typecheck·lint·schema check와 ERP/gateway production build가 통과했다.
+- CloudWatch 경보 5종(배정 오프라인·로그인 실패·DPAPI 적체·감독기 이상·warm 부족)을 만들고
+  실제 DPAPI 적체의 ALARM→OK 전환을 확인했다. 현재 SNS topic/subscription이 없어 사람 통지는
+  수신처를 정한 뒤 연결해야 한다. Windows 역할에는 metric 발행 최소권한만 남기고 임시
+  artifact 정책을 제거했다. gateway·ERP·Caddy active, 컨테이너 재시작 0, 외부 health/login
+  200이다.
+- bridge와 감독기는 OCX 때문에 Administrator interactive logon 작업이고 SYSTEM health만
+  부팅 시 자동 복구된다. `AutoAdminLogon`은 없고 평문 자동 로그온을 도입하지 않았다.
+  따라서 실제 재부팅 canary는 관리자가 즉시 RDP 로그인 가능한 시간에 수행해 로그인 전
+  오프라인 ALARM과 로그인 뒤 배정 6+warm 5 복구를 확인해야 한다. 운영 exe는 아직
+  `NotSigned`이며 빌드·설치의 서명 강제는 구현됐지만 조직용 Authenticode 인증서 발급이
+  별도 남았다. `PROJECT_PLAN.md`는 v0.91이다.
+
+### 2026-08-07 — 다음 세션 우선 작업 확정: 센트릭스 운영 안정화·1208 실제 통화 검증
+- 사용자는 이번 세션을 종료하고 다음 세션의 최우선 작업을 **단일 Windows 다중 bridge 풀의
+  운영 안정화**로 확정했다. 구현 전 `PROJECT_PLAN.md` v0.90과 바로 아래 다중 bridge 풀
+  완료 로그를 다시 읽고 현재 운영 원장을 먼저 재확인한다. 이번 메모 작성에서는 코드·DB·AWS
+  런타임을 변경하지 않았다.
+- 다음 세션 1순위 범위는 Windows 재부팅 뒤 감독기·배정 슬롯·유휴 warm 슬롯 자동 복구,
+  프로세스 비정상 종료 자동 재시작, 10→25→50개 단계별 프로세스 CPU·메모리 실부하 canary,
+  heartbeat 단절·로그인 실패·DPAPI 큐 적체 경보, 직원관리의 `정상/연결 중/연결 실패/브리지
+  오프라인` 상태 구분, bridge 코드 서명 검토와 관리자용 유휴 슬롯 복구/재배정 흐름이다.
+  OCX가 interactive desktop을 요구하므로 재부팅 무인 복구는 보안이 약한 평문 자동 로그온을
+  임의 도입하지 말고 현재 작업 스케줄러·로그온 세션 제약을 실제 재부팅 canary로 먼저 확정한다.
+- 안정화 뒤 1208 회선에서 실제 ERP 클릭투콜, 휴대전화 수신→ERP 실시간 표시→명시적 받기,
+  통화 종료 반영, 실물 전화기 직접 발신→전화데스크 기록→공용 후처리 모달을 각각 한 번씩
+  검증한다. 현재 1208은 U+ REST·OCX 로그인·endpoint/binding·ERP 연결 상태까지만 검증됐고
+  실제 전화는 만들지 않았다. 실제 발신/수신은 사용자가 통제할 수 있는 시간에 함께 수행한다.
+- 그다음 제품 우선순위는 전화데스크·수신 카드에 담당자의 근무현황과 회선 실시간 상태를 합쳐
+  `근무 중·통화 가능/근무 중·통화 중/자리 비움/퇴근/센트릭스 연결 끊김`을 표시하는 것이다.
+  이후 재통화 큐에 오늘 예정·지연·내 업무·담당자 필터, 예정 알림, 원클릭 발신, 통화 종료 시
+  업무 완료/재예약, 반복 부재 시도 횟수를 연결한다.
+
+### 2026-08-07 — 단일 Windows 센트릭스 다중 bridge 풀·신규 직원 자동 배정 운영 완료
+- 직원별 서버를 만들지 않고 기존 `lawand-centrex-canary` 한 대에서 회선별 x86 OCX
+  프로세스를 격리하는 풀을 구현했다. migration `0038_mute_wild_pack.sql`은 직원 없는
+  `idle` bridge 배정과 소유권 제약을 추가한다. 암호화 스냅샷
+  `lawand-prod-pre-centrex-bridge-pool-20260807` 뒤 운영 RDS에 적용했고, Secrets Manager
+  registry에는 기존 검증 bridge 1개와 `lawand-slot-001..050`의 placeholder endpoint·서로
+  다른 HMAC secret만 저장했다. 센트릭스 ID·비밀번호는 registry에 없다.
+- gateway는 직원 저장 시 U+ `userinfo` 검증 뒤 최근 heartbeat가 있는 idle 슬롯을 advisory
+  lock으로 하나만 점유하고 암호화 단기 명령을 보낸다. 신규 배정의 DB 저장·로그인 실패 시
+  current/pending endpoint가 없는 같은 슬롯만 다시 idle로 반환해 `failed` 고착을 막았다.
+  Windows v0.6.2는 설정·로그·DPAPI 큐·mutex·작업을 인스턴스별로 격리하고 감독기가 배정된
+  슬롯 전부 + idle warm 5개만 실행한다. 전체 풀 작업 50개는 설치됐지만 현재 Running은
+  배정 1 + idle 5개이고 기존 4591을 합친 프로세스는 7개다.
+- 사용자가 제공한 1208 현재 비밀번호는 파일·DB·명령행·로그에 남기지 않고 echo를 끈
+  대화형 stdin으로 운영 직원 저장 API에 한 번씩 전달했다. REST 검증은 처음부터 통과했지만
+  OCX가 전체 070 ID에 `-1(NotFound)`을 반환해 `-2(PasswdErr)`와 구분했고, 비동기 disconnect
+  뒤 내선 PBX ID로 한 번만 재시도하는 fallback과 1초 지연을 보강했다. 최종 canary는
+  `LOGIN_RESULT STATUS=1`, 회선·내선 1208, endpoint·주 binding, 직원 API
+  `connected/bridgeOnline/credentialConfigured=true`까지 성공했고 실제 발신은 만들지 않았다.
+  대화에 노출된 비밀번호는 교체해야 한다.
+- gateway·ERP 릴리스 `20260807T090502Z-centrex-bridge-pool-v2`를 운영 배포했다. private S3
+  AES256 앱 아티팩트 SHA-256은
+  `b052f48d33601acef9f7be7ba6b490fbcb58a9d1a9285df668c47a07f1b776b4`다. Windows v0.6.2.0
+  x86 실행 파일 SHA-256은
+  `9A055AE97909290C2B7BE0A943C5C9D11D4111BBD3E526253A224634540BA8CB`, AES256 ZIP SHA-256은
+  `FBB7A2FC43945799F5DED99CF16B9D061EE005C7FCA4D7EDC2439139C0CEE836`이고 self-test 13개를
+  통과했다. gateway 76개 테스트·typecheck·lint, ERP 운영 build도 통과했다.
+- 최종 원장은 총 51, 연결 2, idle 49, 온라인 idle 5, 소유권 이상 0이며 DPAPI 큐와 임시
+  직원 세션은 0건이다. gateway·ERP·Caddy active, 이미지 재시작 0, 외부 health/login 정상,
+  error journal·CloudWatch ALARM·진행 중 통화/받기/클릭투콜 명령은 0건이다. 설치용 Windows
+  IAM inline policy와 성공한 일회성 bootstrap task를 제거했다. 7개 프로세스 working set은
+  약 169.3MB였고, 50개 회선을 모두 실제 배정하기 전 메모리 실부하 canary 후 필요하면 단일
+  Windows EC2 사양을 높인다. `PROJECT_PLAN.md`는 v0.90이다.
+
+### 2026-08-07 — 전화데스크 후처리 UX·상담/사건 문맥 운영 보강
+- 후처리 모달이 sticky `backdrop-filter` 헤더의 fixed containing block 안에서 열려 상단이
+  잘리던 원인을 확인했다. 모달을 `document.body` portal로 옮기고 열릴 때 내부 스크롤을
+  0으로 초기화하며 body scroll 잠금·Escape/배경 닫기를 적용했다. 673px 실제 로컬 Chrome에서
+  제목·전화번호와 열 가지 결과의 첫 행부터 보이는 것을 확인했다. 결과·선택지와 각 영역의
+  간격도 소폭 넓혔다.
+- 기존 상담 연결 카드에 등록일·최근 요청일·현재 담당자를 추가했다. 상담데스크가 먼저
+  일치하더라도 비공개 리걸프렌즈 전화 디렉터리를 별도로 조회해 최근 사건 최대 8건의 유형·
+  상태·종결/폐지·주/부 담당·법원·등록일·갱신일을 상세와 모달에 표시한다. migration
+  `0037_phone_desk_directory_context.sql`은 기존 security-definer 함수 반환만 확장하며
+  `lawand_app`은 함수 실행만, `PUBLIC`은 실행 불가이고 `CB` 직접 권한은 없다.
+- 재통화 일시의 native datetime 입력을 홈페이지 상담 요청과 같은 평일 날짜 카드 5개·다른
+  날짜·08:00~18:30 시작의 30분 시간 카드로 교체했다. 기본 재통화 결과를 고르면 일정 영역이
+  아래로 펼쳐지고 기존 담당자를 기본 선택한다. 전화데스크 상세의 목록 링크 버튼 스타일을
+  복구했으며 상세에서 후처리 저장·수정하면 `/phone-desk`로 바로 이동한다.
+- core 54개·gateway 75개 테스트, gateway/ERP typecheck·lint·production build, DB schema
+  check와 `git diff --check`가 통과했다. 로컬 실제 상담·리걸프렌즈 양쪽 일치 데이터와 합성
+  종료 통화로 모달·확장 정보·일정 UI를 확인하고 합성 통화·이벤트를 0건으로 정리했다.
+- 운영 변경 전 진행 중 통화·클릭투콜·받기·회선전환은 0건이었다. 암호화 스냅샷
+  `lawand-prod-pre-phone-aftercare-ux-20260807` 뒤 migration과 gateway·ERP 릴리스
+  `20260807T072916Z-phone-aftercare-ux`를 배포했다. private S3 AES256 아티팩트 SHA-256은
+  `f22baba6b09d28d090bf294c3cdb9c078791f238e5d8193c3a46905473a78d19`다.
+- 인증 운영 canary는 전화데스크 28건 중 실제 상담·리걸프렌즈 양쪽 일치 건의 목록·상세·
+  페이지를 모두 200으로 읽고 상담 날짜·담당자, 사건 8건의 법원·등록/갱신일, 상세 목록 버튼과
+  후처리 렌더를 확인했다. 임시 세션 잔존 0건, gateway·ERP·Caddy active, 컨테이너 재시작·
+  error journal·CloudWatch ALARM·진행 중 전화 명령 0건, 활성 bridge heartbeat 정상이다.
+  `PROJECT_PLAN.md`는 v0.89다.
+
+### 2026-08-07 — 전화 디렉터리 일일 동기화를 크론 전용 EC2로 이관·운영 시작
+- `Office_idx=56` 전화 디렉터리 동기화를 크론 전용 EC2(`/opt/ai-agents`, 잡 `jobs/lf_phone_directory`)에서
+  매일 03:30 Asia/Seoul systemd timer(`lawand-phone-directory-sync.timer`, `Persistent=true`, 랜덤 지연
+  180초) → oneshot service → 그 서버의 cronctl 래퍼 경유로 돌린다. 구현 기준은
+  `scripts/import-legalfriends-phone-directory.mjs`와 `scripts/verify-legalfriends-phone-directory.sql`이고
+  복제 필드·필터·consistent snapshot 방식은 넓히지 않았다.
+- 대상 DB URL은 Secrets Manager `lawand/prod/database`의 `migrationDatabaseUrl`만 프로세스 메모리로 읽어
+  자식 프로세스 env로 넘기고, 자식 출력은 URL·엔드포인트·비밀번호 패턴을 살균한 뒤에만 기록한다. 원본
+  MySQL은 ERP 서버 SSH(개인키 mode 400) 경유로 원격 `.env` 자격증명을 써서 읽어 크론 서버에 원본 DB
+  비밀번호를 두지 않는다.
+- 교체 게이트: 원본↔staging 행 수·키 범위·최종 수정시각·null 수·행별 digest 일치, 사건-고객 누락 0,
+  타 사무소 0, `phone_search` 정규화 불일치 0, 이전 성공(=현재 운영 테이블) 대비 급격한 행 감소(기본
+  10%) 차단. 교체 후 같은 트랜잭션에서 소유자 `lawand_migrator`, `PUBLIC`·`lawand_app` 권한 0,
+  `lawand_viewer` SELECT 전용, gateway `resolve_inbound_phone_directory(text)` security-definer +
+  `lawand_app` EXECUTE 유지를 단정하고 어긋나면 롤백한다. 삭제된 담당자 참조 1건은 미해결로 보존한다.
+- 실측 검증: dry-run 통과 → 실패 canary 전후 운영 `CB` 세 테이블 논리 요약 digest 완전 동일 → 실교체
+  성공(61,024/61,024/69행, 7.9초, TLS1.3) → 검증 SQL과 행 수·키 범위·최종 수정시각 대조 일치 → 접근 경계
+  canary(`lawand_app` 세 테이블 SELECT SQLSTATE 42501 차단·gateway 실행 가능, `lawand_viewer` 읽기 전용)
+  → systemd service 수동 1회 성공 → 실패 통지 실발송 확인 → timer enable(다음 실행 2026-08-08 03:30 KST).
+- 주의(다음 세션): `pg`는 connectionString의 `sslmode` 파싱값이 명시 `ssl` 옵션을 **덮어써** CA가
+  무시된다(RDS 루트 CA는 Node 기본 신뢰저장소에 없어 `SELF_SIGNED_CERT_IN_CHAIN`으로 죽는다) → URL을
+  분해해 개별 필드 + `ssl.ca`로 넘겨야 `verify-full`이 실제로 걸린다. 또
+  `pg_get_function_identity_arguments()`는 인자명(`requested_phone text`)까지 포함하므로 gateway 함수
+  조회는 `pronargs`+`proargtypes[0]` 기준으로 해야 한다. `CB` 스키마에는 다른 동기화 산출물
+  (`TblCBCase`·`TblCaseMemo`·`TblMoClientStatement`)이 공존하므로 권한·DDL은 세 테이블만 대상으로 한다.
+- 남은 것: 크론 EC2 인스턴스 역할에 CloudWatch 쓰기 권한이 없어(Secrets Manager GetSecretValue만 허용)
+  구조화 로그·metric·경보는 코드·설정만 준비됐다. 크론 EC2의 `jobs/lf_phone_directory/IAM_POLICY.md`
+  최소권한 정책을 역할에 부착한 뒤 `run_sync.py setup-cloudwatch --email ...` 1회로 활성화한다.
+
+### 2026-08-07 — 브리지 회선전환 오류 수정·전화데스크 후처리/재통화 큐 운영 배포
+- 직원관리 회선 저장의 `centrex_network_error`를 Windows 안전 로그로 대사했다. 새 회선
+  로그인 성공 `LOGIN_RESULT` 직전에 회선 교체용 `DisconnectServer()`의 비동기
+  `NetworkError`가 도착했고, bridge v0.5.0이 이를 새 로그인 실패로 먼저 확정·rollback한
+  것이 원인이었다. v0.5.1은 프로비저닝 중 network error를 비결정 재접속 신호로만 처리하고
+  실제 `LoginResult`/timeout만 최종 판정한다. Windows x86 build와 self-test 11개를 통과한
+  v0.5.1.0(SHA-256
+  `D0A730F1FE60A7983663EE1C521494302F6A5F2C5BA4BE728D26525226821C5A`)을 canary 서버에
+  배포했다. 작업 Running, 프로세스·응답 프로세스 각 1개, 현재 회선 로그인 성공, DPAPI
+  큐 0건이다. 소스 아티팩트 SHA-256은
+  `40324ee44e77d9a3a4619a4566b428024d2181688b167fe408c06d826e463688`이다. 사용자가
+  직원관리에서 다음 회선 저장을 실행하면 실제 회선 전환 canary를 다시 확인한다.
+- migration `0036_phone_desk_aftercare.sql`로 통화 사실과 분리된
+  `telephony_call_aftercare`, `telephony_follow_up_tasks`를 추가했다. 결과는 상담완료·
+  재상담필요·부재 및 무응답·통화중·담당자 연결 요청·거절·법원 등 관공서·채권자 등·
+  잘못 걸린 전화·기타 열 가지다. 기타 설명·메모는 AES-GCM 암호화하고 후처리·재통화
+  `NOTIFY`는 식별자·방향·시각만 보낸다. 미완료 재통화는 후처리당 하나이며 미래 30분 단위
+  일시와 활성 담당자가 필수다. 재상담필요·부재·통화중·담당자 연결 요청·거절은 UI 기본
+  체크지만 해제할 수 있고 기존 담당자를 기본값, 복수 담당자를 선택지로 제공한다.
+- ERP `/phone-desk/[id]` 상세, 목록의 미완료 재통화 큐와 완료 동작, 기존 같은 전화 HMAC
+  상담 연결, 리걸프렌즈 고객명/담당자 기반 신건 생성, 전화데스크 단독 저장을 구현했다.
+  신건은 `staff_recorded_phone_interaction` 처리 근거를 쓰고 명시적 동의 시각을 꾸미지
+  않으며 전화 HMAC이 다른 상담 연결을 거부한다. 수신 바와 클릭투콜은 통화 종료 후 같은
+  공용 후처리 화면을 열고 기존 상담목록·상세도 최신 후처리 결과를 조회한다.
+- core 54개·gateway 75개 테스트, gateway/ERP typecheck·lint·production build, DB schema
+  check와 `git diff --check`가 통과했다. 로컬 실제 DB에서 기존 통화 후처리·재통화 생성/
+  완료와 미확인 수신→신건상담 생성 두 수직 canary를 수행하고 임시행을 모두 정리했다.
+- 배포 전 진행 중 통화·클릭투콜·받기·회선전환은 0건이었다. 암호화 스냅샷
+  `lawand-prod-pre-phone-aftercare-20260807` 뒤 migration을 적용하고 두 신규 테이블·결과
+  enum 10개·처리 근거·`lawand_app` CRUD 권한을 확인했다. gateway·ERP 릴리스
+  `20260807T055854Z-phone-aftercare`의 private S3 AES256 아티팩트 SHA-256은
+  `c3008c1ee3b1dd0f69a14df23bd58705b8ce84148c05b8e504ce03669cdd1778`이다.
+- 운영 합성 직접발신 canary는 후처리 저장 200·상세 200·재통화 완료 200을 반환했고 통화·
+  후처리·업무·감사·임시 세션 잔존은 모두 0건이다. ERP same-origin 페이지·목록·상세·SSE도
+  모두 200과 `telephony.desk.sync`를 확인했으며 임시 세션은 0건이다. gateway·ERP·Caddy
+  active, 컨테이너 재시작·배포 뒤 error journal·CloudWatch ALARM 0, RDS·스냅샷 available,
+  진행 중 전화 명령 0건이다. 크론 전용 EC2의 리걸프렌즈 일일 동기화는 이 작업에 포함하지
+  않았고 `docs/LEGALFRIENDS_PHONE_DIRECTORY_CRON_HANDOFF.md`에 별도 실행 지시를 남겼다.
+  `PROJECT_PLAN.md`는 v0.88이다.
+- 최종 범위 대조에서 수신과 ERP 클릭투콜은 자동 후처리되지만 실물 전화기·비즈콜 앱의
+  `centrex_direct` 종료는 상세 수동 진입만 가능했던 누락을 발견해 전역 직원 바에 전화데스크
+  SSE observer를 추가했다. 페이지 진입 전 과거 종료는 기준선으로만 처리하고 로그인 직원
+  소유 회선의 새 직접발신 종료·미처리 건만 자동으로 열며, 동시 종료는 큐잉하고 공용
+  session key로 중복 창을 막는다. ERP lint·typecheck·build 뒤 최종 릴리스
+  `20260807T063043Z-phone-aftercare-direct`를 배포했다. private S3 AES256 아티팩트 SHA-256은
+  `92576babd191066cb5b15692e6d2551ef9c5888797433800660647bdc80e6f03`이다. 실행 bundle의
+  observer 포함, 페이지·목록·SSE 200, `telephony.desk.sync`, 임시 세션 0, 컨테이너 재시작·
+  최종 error journal 0을 확인했다.
+
+### 2026-08-07 — 비즈콜 현재 제품 범위 확정
+- 사용자 결정으로 비즈콜 앱의 실시간 벨 표시, ERP 받기와 ERP 원격 발신은 현재 범위에서
+  제외했다. 비즈콜 앱에서 직접 한 발신과 앱으로 받은 수신이 종료 뒤 통합 전화데스크에
+  기록되는 것을 완료 기준으로 삼는다. Android 알림 브리지, U+ 기업 webhook과 동시착신은
+  실제 업무 필요가 다시 생길 때만 검토한다.
+- 다음 주요 제품 작업은 전화데스크 상세를 중심으로 통화 결과·메모, 재통화 일시·담당자
+  작업 큐, 기존 상담 연결과 신건상담 전환을 하나의 흐름으로 만드는 것이다. 통화 사실의
+  원장은 전화데스크에 한 번만 두고 상담데스크는 같은 통화·향후 녹취를 연결 조회한다.
+  `PROJECT_PLAN.md`는 v0.87이다.
+
+### 2026-08-07 — 비즈콜 실시간 callback 한계 확정·HTTP Host 호환 교정
+- 운영 실제 비즈콜 앱 통화 여러 건은 벨·통화 중 U+ `setringcallback` 요청이 0건이고
+  `channelstatus`도 계속 `4004/NO CHANNEL`이었으며, 종료 뒤에만 `getinboundcall`의
+  `CANCEL/NO_ANSWER/ANSWERED`가 생성됐다. U+ `getringcallback`에 저장된 4535 회선,
+  gateway EIP, 비밀 경로, 80 포트, ring 종류 1은 모두 실제 설정과 정확히 일치해 등록
+  오류를 배제했다. 따라서 공개 REST callback·채널 조회는 AI비즈콜 앱 leg를 관측하지 않는다.
+- 별도로 기존 Caddy의 `http://EIP` site가 IP Host에서만 비밀 callback 경로를 전달하고
+  임의 Host·HTTP/1.0 Host 없음에는 308을 반환하는 구형 클라이언트 호환 결함을 발견했다.
+  운영 Caddy listener를 `:80`으로 바꿔 정확한 `/v1/centrex-ring/*.html`만 Host와 무관하게
+  gateway에 전달하고 일반 HTTP는 계속 HTTPS 301로 보낸다. IP Host·임의 Host·Host 없음이
+  모두 앱의 필드 검증 400까지 도달하며 gateway·Caddy 컨테이너 재시작은 0이다. 같은 변경을
+  `infra/aws/instance-deploy.sh`에도 반영해 다음 배포에서 유지한다.
+- Host 교정 후 실제 `ANSWERED` canary도 callback 없이 종료 54초 뒤 이력으로만 생성돼
+  서버 REST만으로 비즈콜 벨 시점을 얻을 수 없음을 최종 확인했다. 종료 이력·고객 해석·
+  전화데스크 기록은 정상 유지한다. 즉시 ERP 표시는 Android라면 알림/통화 이벤트를 HMAC
+  gateway로 보내는 최소권한 모바일 bridge, iPhone이면 U+ 기업 webhook 또는 사무실 전화
+  동시착신 제공 여부 확인이 다음 분기다. `PROJECT_PLAN.md`는 v0.86이다.
+
+### 2026-08-07 — U+ 비즈콜·망 수신 통합 운영 배포
+- 재택 비즈콜 앱 수신은 휴대전화에서 울리지만 Windows OCX 이벤트가 없어 ERP에 없던 원인을
+  확정했다. 운영 실제 누락 시각은 U+ `getinboundcall`에 `FAILED`·`CANCEL`로 존재했고 기존
+  `getringcallback`은 미설정이었다. 공식 `setringcallback`의 HTTP-only 제약에 맞춰 gateway
+  EIP 80번은 긴 비밀 `.html` 경로만 reverse proxy하고 나머지는 기존 HTTPS redirect를
+  유지한다. callback은 필드·전체 회선·내선을 검증한 뒤 발신번호를 즉시 AES-GCM 암호화·
+  HMAC 지문화하며 URL·로그·SSE에 원문을 남기지 않는다.
+- callback ring과 Windows bridge ring은 endpoint·발신번호 advisory lock과 짧은 시각창으로
+  한 통화에 병합한다. 활성 직원 회선을 15초마다 U+ `getinboundcall`로 대사해 종료 상태를
+  확정하고 callback 누락 통화도 기존 암호화 원장에 보강한다. ERP는 `U+ 앱/망 수신` 배지를
+  표시하고 물리 bridge가 없는 통화에는 `전화 받기`를 노출하지 않는다. U+ `clickdial`은
+  실제 시험에서 비즈콜 앱을 울리지 않았고 공개 앱 deep link·원격 발신 API가 없어 ERP
+  클릭투콜은 물리 전화기 전용, 비즈콜 발신은 앱 직접 발신으로 확정했다.
+- gateway 73개 테스트·typecheck와 ERP/gateway lint·build, DB schema check, 로컬 실제 DB
+  callback replay·bridge 병합·이력 종료 보정·임시행 0 검증을 통과했다. 암호화 스냅샷
+  `lawand-prod-pre-centrex-bizcall-20260807` 뒤 릴리스
+  `20260807T034220Z-centrex-bizcall`을 gateway·ERP에 배포했다. private S3 AES256 아티팩트
+  SHA-256은 `7df317a47e0a4f144e0bfeb1a86c0ce6de6813a0d516a541ef25acefabebda7e`다.
+- 운영 시작 시 4535 callback 등록과 누락 이력 4건 보강이 성공했다. 기존 물리 bridge 통화
+  1건은 중복 없이 유지됐고 같은 발신번호·분 단위 중복은 0건이다. 인증된 전화데스크는
+  `U+ 앱/망 수신` 4건을 반환했고 임시 세션 잔존은 0건이다. 일반 HTTP 301·잘못된 callback
+  404·비밀 경로 불완전 요청 400, gateway·ERP·Caddy active, 컨테이너 재시작·error journal·
+  CloudWatch ALARM 0, Windows 작업 Running·프로세스 1개다. 다음 실제 비즈콜 앱 수신으로
+  즉시 ERP 표시와 종료 후 15초 이내 전환을 최종 canary한다. `PROJECT_PLAN.md`는 v0.85다.
+
+### 2026-08-07 — 직원별 센트릭스 원클릭 통합 연결 운영 배포
+- 사용자 결정에 따라 `직원 1명 = 활성 Windows bridge 1개`를 확정했다. 회선 변경은 새
+  bridge를 추가 점유하지 않고 같은 bridge 슬롯을 재설정한다. migration
+  `0035_natural_greymalkin.sql`의 `staff_telephony_bridge_assignments`는 직원·bridge 각각
+  활성 1개를 강제하고 현재·대기 endpoint, 프로비저닝 명령·만료, heartbeat와 실제 로그인
+  결과를 보존한다. 운영 secret의 기존 bridge에는 현재 직원 ID만 추가했고 HMAC secret과
+  endpoint는 바꾸지 않았다.
+- 직원관리 `회선 테스트 및 저장`은 U+ `userinfo` 정확 일치와 클릭투콜 SHA-512 암호문
+  저장 뒤 기존 bridge에 단기 `provision` 명령을 보낸다. raw 비밀번호는 DB·로그·감사
+  원장·Secrets Manager에 저장하지 않고, bridge HMAC secret에서 파생한 AES-256-CBC·
+  HMAC-SHA256 envelope로 전달한다. bridge v0.5.0은 활성 통화가 없을 때 Windows 자격증명과
+  endpoint 설정을 교체하고 실제 OCX 로그인 회선·내선이 일치해야 성공으로 보고한다.
+  거부·불일치·네트워크 오류·시간초과에는 Windows 설정과 ERP 프로필·binding을 모두 이전
+  값으로 보상한다. heartbeat가 온라인이어도 실제 로그인 전에는 `브리지 설정 대기`, 성공
+  뒤에만 `전체 전화 연결 완료`로 표시한다.
+- 로컬 migration·schema check, 전체 typecheck·lint, core 53개·gateway 70개 테스트,
+  ERP/gateway build, Windows x86 self-test 10개를 통과했다. 암호화 운영 스냅샷
+  `lawand-prod-pre-centrex-oneclick-20260807` 뒤 migration을 적용하고 ERP 릴리스
+  `20260807T022953Z-centrex-oneclick`, gateway 최종 릴리스
+  `20260807T023907Z-centrex-oneclick-status`, Windows bridge v0.5.0.0을 배포했다. 최종
+  S3 SHA-256은 `61d34cc11ee7d5499dff9ee57605526fc2ee0eb4f98dd913d07d728a01f5d302`,
+  Windows exe는 `226ebc46aa380a1385e75ea40faa5923a6b4470880f9a2b6b0c94e30f2fb4339`다.
+- 운영 비식별 canary는 4591을 `bridge_pending`, bridge 설정·heartbeat 온라인,
+  `state=assigned`로 반환했고 임시 세션 잔존은 0건이다. gateway·ERP·Caddy active,
+  컨테이너 재시작·error journal·CloudWatch ALARM 0, Windows 작업 Running·프로세스 1·큐
+  0건이다. 현재 bridge Windows 자격증명이 변경 전 값이라 OCX Connect는 실패 중이다.
+  사용자가 직원관리에서 현재 4591 비밀번호를 다시 입력해 저장하면 원클릭 실제 로그인과
+  수신·받기 canary를 최종 확인한다. `PROJECT_PLAN.md`는 v0.84다.
+
+### 2026-08-07 — 직원별 센트릭스 비밀번호 검증·운영 배포
+- 직원관리의 센트릭스 입력을 전체 회선번호·내선번호·비밀번호 한 세트로 확장했다. 저장 시
+  회선번호를 U+ 로그인 ID로 사용해 `userinfo`를 호출하고 반환 회선·내선의 정확 일치가
+  확인될 때만 endpoint와 주 회선 binding을 생성·교체한다. 실패하면 기존 프로필·배정을
+  변경하지 않는다. 비밀번호 원문은 요청 메모리에서만 쓰고 즉시 SHA-512로 변환한다.
+- `telephony_endpoint_credentials`에는 SHA-512만 endpoint ID AAD의 AES-256-GCM 암호문으로
+  저장한다. `lawand_app`만 CRUD 가능하고 viewer·PUBLIC 조회는 차단했으며 기존 Secrets
+  Manager 자격증명은 DB 값이 없는 endpoint의 읽기 fallback이다. 입력은 저장 후 비우고
+  다시 표시하지 않는다. 직원관리 필터·회선·내선·비밀번호 CSS도 673px 운영 Chrome에서
+  정상 폭·다크 테마로 확인했다.
+- 암호화 스냅샷 `lawand-prod-pre-centrex-credentials-20260807` 뒤 migration 0033·0034와
+  gateway·ERP 릴리스 `20260807T011028Z-centrex-staff-credentials`를 배포했다. private S3
+  아티팩트 SHA-256은 `6102a8e8b7049be7c0820651cb94333db31486a64a52efe612c51075f68b4477`이다.
+  core 53개·gateway 68개 테스트와 typecheck/lint/build/schema check를 통과했고 컨테이너
+  재시작·error journal·CloudWatch ALARM·진행 중 전화 명령은 0건이다. 운영 화면은 직원
+  지정 4535와 기존 실제 endpoint 4591을 `배정 불일치`로 표시한다. 사용자가 4535의 현재
+  비밀번호로 저장해 `userinfo`·클릭투콜을 canary하고, 수신·받기·직접 관측용 4535 Windows
+  bridge는 별도로 등록해야 한다.
+
+### 2026-08-07 — 직원관리 입력·필터 CSS 충돌 수정
+- 직원관리 신규 필드가 높이만 지정되고 ERP 공통 폼의 배경·테두리·글자색 규칙에는 포함되지
+  않아, 다크 테마에서 브라우저 네이티브 회색 입력창이 노출되는 문제를 수정했다. 직원검색,
+  지역·전화 연결 select, 센트릭스 전체 회선번호·내선번호와 리걸프렌즈 입력에 동일한 너비,
+  surface 배경, 테두리, placeholder, hover·focus 스타일을 명시했다.
+- Orca computer-use로 실제 673px Chrome에서 필터 세 개와 회선·내선 입력을 스크롤해 수정
+  전후를 비교했으며 일관된 다크 테마 렌더를 확인했다. ERP typecheck·lint·production build와
+  `git diff --check`가 통과했다. 개발서버는 사용자 확인을 위해 계속 실행 중이고 운영에는
+  아직 배포하지 않았다.
+
+### 2026-08-07 — 직원관리 회선·내선·검증 endpoint 자동배정 로컬 출시 후보
+- 직원관리 페이지를 활성 직원 지표, 이름·이메일·회선·리걸프렌즈 ID 검색, 지역·전화 연결
+  필터, 직원별 계정·조직·센트릭스·리걸프렌즈 상태 카드와 접이식 초대 양식을 갖춘 운영형
+  화면으로 개편했다. 센트릭스 전체 회선번호와 내선번호는 초대·직원 수정에서 별도 입력하되
+  항상 한 쌍으로 저장·해제하고 core와 DB 제약에서 형식을 이중 검증한다. Orca computer-use로
+  실제 로그인된 로컬 ERP를 673px·1936px Chrome에서 확인하고 검색 0건·복원 동작을 검증했다.
+- 직원 프로필은 지정 소유자 원장, endpoint·binding은 검증된 물리 전화 제어 권한이라는
+  분리를 유지했다. 저장한 회선·내선이 `userinfo` 성공 이력이 있는 활성 Centrex endpoint와
+  정확히 일치할 때만 주 회선 binding을 자동 생성·교체한다. 일치 endpoint가 없으면 지정값은
+  보존하되 기존 활성 binding을 해제해 잘못된 전화기가 열리지 않으며, 두 값을 비우면 배정도
+  해제한다. UI는 endpoint와 gateway bridge 설정·배정 상태를 구분해 보여주고, heartbeat가
+  없는 현재는 프로세스 실시간 온라인으로 표현하지 않는다. 자격증명·bridge secret은 직원
+  프로필이나 브라우저에 합치지 않는다.
+- migration `0033_icy_starfox.sql`은 기존 회선의 내선을 활성 endpoint 정확 일치 또는
+  마지막 4자리로 한 번 백필하고 회선·내선 동시 설정 제약을 추가했다. 로컬 migration과
+  exact-match 자동배정·unknown-line 기존 binding 해제 canary를 통과했고 임시 원장은 모두
+  정리했다. core 52개·gateway 67개 테스트, 네 패키지 typecheck·lint, DB schema check,
+  gateway·ERP production build와 `git diff --check`가 통과했다. 실제 전화 명령은 만들지
+  않았고 운영에는 아직 배포하지 않았다. 다음은 운영 스냅샷·migration·릴리스 후 신규 4535
+  endpoint와 Windows bridge를 등록하고 직원관리에서 배정 상태를 확인하는 작업이다.
+
+### 2026-08-06 — 운영 센트릭스 클릭투콜 워커 활성화
+- 사용자의 명시적 승인으로 현재 센트릭스 자격증명을 대화형 프로세스 메모리에서만 받아
+  `userinfo`를 재호출했고 실제 070 회선과 내선 4591이 모두 일치했다. 비밀번호 원문은
+  파일·DB·Git·AWS에 저장하지 않고 SHA-512 값만 운영 gateway Secrets Manager의
+  `office-main-4591` 키에 저장했으며 `LAWAND_CENTREX_WORKER_ENABLED=true`로 바꿨다.
+- 활성화 직전 두 차례 확인에서 클릭투콜 명령·대기 이벤트·진행 중 명령은 모두 0건이었다.
+  기존 릴리스 `20260806T072225Z-phone-desk`로 gateway 환경을 다시 만들고 재기동했으며,
+  워커 시작 로그와 운영 컨테이너의 `userinfo` HTTP 200·회선/내선 일치를 확인했다. 작업
+  전후 통화 명령·대기 이벤트·전송 시도는 계속 0건이라 실제 전화는 걸리지 않았다.
+- gateway·Caddy active, 재시작 0회, 내부·외부 health 200, 최근 error journal과
+  CloudWatch ALARM 0건이다. 실제 운영 ERP 클릭투콜과 OpenAPI 관측 발신 중복 연결 canary는
+  사용자가 사무실에 복귀한 뒤 수행한다. 센트릭스 비밀번호를 변경하면 다음 발신 전에
+  운영 secret의 SHA-512도 갱신하고 `userinfo`를 다시 검증해야 한다. `PROJECT_PLAN.md`는
+  v0.81이다.
+
+### 2026-08-06 — 통합 전화데스크·클릭투콜 관측 연결 운영 배포
+- 암호화 수동 스냅샷 `lawand-prod-pre-phone-desk-20260806`을 available까지 확인하고 운영
+  RDS에 migration `0032_brown_ronan.sql`을 적용했다. 연결 테이블·제약 5개·개인정보 없는
+  전화데스크 알림 trigger 3개·migration hash와 `lawand_app` SELECT/INSERT 권한이
+  정상이다. 배포 전 관측 발신·클릭투콜 명령은 모두 0건이라 backfill 변경은 없었다.
+- private S3 AES256 아티팩트 SHA-256
+  `02a0d8f40fd50c5b7531d7bc53f57d98051959b1ebb19764ea409504f01018c5`의 gateway·ERP
+  릴리스 `20260806T072225Z-phone-desk`를 배포했다. 인증 없는 gateway 목록·SSE는 401,
+  ERP `/phone-desk`는 로그인 307이며, 5분 임시 세션 canary에서 페이지·목록 API 200과
+  SSE `telephony.desk.sync`를 확인한 뒤 세션을 삭제해 잔존 0건을 확인했다.
+- 운영 기존 수신 6건이 전체 번호·고객·담당자·회선·통화시간과 함께 표시된다. 673px 실제
+  운영 Chrome에서 실시간 연결과 ERP 발신 필터 빈 상태를 확인했다. console 403 세 건은
+  모두 설치된 Monica 확장 프로그램 `background.js` 요청이고 hydration·앱 오류는 없다.
+  gateway·ERP·Caddy 재시작, error journal, CloudWatch ALARM은 모두 0이며 bridge v0.4.0.0은
+  작업 Running·프로세스 1개·큐 0건이다. 운영 gateway secret에는 클릭투콜 활성 플래그와
+  REST 자격증명이 없어 워커는 비활성이다. 실물 발신은 사용자가 사무실에 복귀한 뒤,
+  클릭투콜은 노출된 비밀번호 교체·secret 연결 뒤, U+ 비즈콜은 직원 회선 등록 뒤
+  canary한다. `PROJECT_PLAN.md`는 v0.80이다.
+
+### 2026-08-06 — 통합 전화데스크·클릭투콜 관측 중복 연결 로컬 출시 후보
+- 센트릭스 관측 수신·ERP 클릭투콜·센트릭스 직접 발신을 한 목록에서 관리하는 ERP
+  `/phone-desk`를 구현했다. 전체 전화번호, 고객·사건·담당자 해석, 회선·내선, 상태·호출/
+  통화 시간과 상담 상세 이동을 표시하고 전체·수신·ERP 발신·직접 발신 필터와 검색을
+  제공한다. PostgreSQL 별도 알림 → gateway 인증 SSE → ERP same-origin 프록시로 변경
+  시에만 snapshot을 다시 읽으며 주기적 polling은 사용하지 않는다.
+- migration `0032_brown_ronan.sql`에 `telephony_call_observation_links`를 추가했다.
+  발신 명령과 관측 원장은 분리 보존하고 같은 endpoint·상대번호 HMAC 지문, 요청 대비
+  -5초~+120초 시각창의 최소 시각차 후보만 1:1 연결한다. 기존 원장 backfill은 양쪽 상호
+  최근접 조건도 적용한다. 연결된 ERP 클릭투콜은 목록에서 한 행으로 접고 미연결 관측
+  발신은 단말을 추정하지 않고 `센트릭스 직접 발신`으로 둔다.
+  실시간 `lawand_telephony_desk_events` payload는 eventType·entityId·direction·occurredAt
+  네 필드만 허용해 전화번호와 고객 정보를 싣지 않는다.
+- DB schema check, db·gateway·ERP typecheck, gateway·ERP ESLint·프로덕션 빌드, core
+  50개·gateway 67개 테스트가 통과했다. 로컬 실제 DB에서 수신 2건·직접 발신 1건과 기존
+  성공 클릭투콜 명령에 임시 관측 발신을 연결한 단일 행을 검증했고 임시 event·call·link는
+  모두 0건으로 정리했다. 실제 전화는 걸지 않았고 운영 RDS·gateway·ERP에는 아직 배포하지
+  않았다. 사용자가 사무실로 복귀한 뒤 클릭투콜·실물 발신 canary, 직원 초대 뒤 U+ 비즈콜
+  canary를 수행한다. `PROJECT_PLAN.md`는 v0.79다.
+
+### 2026-08-06 — 센트릭스 직접 발신 관측 원장·운영 배포
+- 실물 전화기 내선 4591의 통제 발신에서 `RINGEVENT(ISDIAL=1) → CHANNELLIST →
+  CHANNELOUT(HCAUSE=16)`을 확인했다. `CALLERID`는 상대 번호, `AGENT`는 내선,
+  `INEXTEN`은 빈 값이었고 약 8.6초 호출 뒤 연결·약 16.4초 통화 뒤 종료됐다. 공식 문서와
+  실제 값은 일치했으며 기존 bridge는 안전 로그만 남기고 발신을 gateway로 보내지 않았다.
+- bridge v0.4.0은 직접 발신을 `outbound.ringing/connected/ended` 최소 계약으로 DPAPI 큐와
+  HMAC gateway 경로에 전달한다. 수신·발신 활성 channel ID를 따로 추적해 ERP 받기 동작과
+  수신 종료 보강을 유지한다. Windows x86 build와 self-test 9개가 통과했고 SHA-256
+  `50c6c3b3cc92f73be936162c6ede379a41758f1bb611ea0af1f09b5e83d807a0`인 v0.4.0.0을
+  배포했다. 작업 스케줄러 Running, 프로세스 1개, 로그인 성공, DPAPI 큐 0건이다.
+- migration `0031_groovy_stellaris.sql`은 호환 테이블 `telephony_inbound_calls/events`에
+  `direction`을 추가하고 발신 이벤트 3종을 허용한다. 기존 행은 전부 inbound이며 상대
+  번호는 방향과 무관하게 AES-GCM 암호화·HMAC 지문으로 저장한다. 발신 이벤트는 수신 전용
+  DB 알림에서 조기 반환하고 gateway snapshot도 inbound만 조회하므로 ERP 상단 수신 바에
+  섞이지 않는다. 로컬 실제 DB에서 수신 알림·발신 비알림과 발신 3단계 원장·정리를 검증했다.
+- 운영 스냅샷 `lawand-prod-pre-centrex-outbound-20260806` 뒤 gateway 릴리스
+  `20260806T054920Z-centrex-observed-outbound`를 배포했다. private S3 아티팩트 SHA-256은
+  `0699b7e6176354670f8c04c6317f249e6cbbb563ebbb6e621284c5671756f935`이고 AES256이다.
+  gateway·Caddy active, 외부 health 200, 컨테이너 재시작·최근 error journal·CloudWatch
+  ALARM은 0건이다. core 50개·gateway 61개 테스트, 관련 typecheck/lint/build와 DB schema
+  check가 통과했다. post-deploy 실물 발신 canary와 직원 초대·회선 등록 뒤 U+ 비즈콜 앱
+  발신 canary가 남아 있다. 전화데스크는 관측 발신을 ERP 클릭투콜 명령에 연결해 중복을
+  제거하고 미연결 발신을 `센트릭스 직접 발신`으로 관리한다. `PROJECT_PLAN.md`는 v0.78이다.
+
+### 2026-08-06 — ERP 받기 통화 종료 channel leg 보강·운영 복구
+- 실제 운영 받기 통화는 `ringing → connected`까지 정상이고 물리 전화기 스피커폰 양방향
+  통화도 성공했지만 종료 뒤 ERP가 `통화 중`을 유지했다. gateway 원장에는 ended가 없었고
+  Windows 안전 로그에는 `CHANNELOUT(HCAUSE=16)`이 정상 도착해 있어 bridge ID 매칭 결함으로
+  범위를 좁혔다. 최초 수신 ID와 전화기 쪽 연결 channel ID의 prefix·sequence가 모두 달라
+  기존 최초 ID·인접 sequence 비교가 종료를 버린 것이 원인이었다.
+- bridge가 `CHANNELLIST`의 양쪽 ID를 활성 통화에 모두 보존하고 어느 쪽 `CHANNELOUT`도
+  최초 수신 통화의 ended로 처리하도록 고쳤다. 3분 제한은 무응답 수신에만 적용하고 이미
+  연결된 통화에는 적용하지 않아 장시간 통화도 종료된다. 실제 관측 ID 쌍 회귀 검사를
+  추가했으며 Windows x86 빌드와 self-test 8개를 통과했다.
+- Windows bridge v0.3.1.0(SHA-256 `b1127e1e573e7cfe937e9ec7c86026c8ec6f98c9d5b97763f4f346d8fcf9de0a`)
+  을 canary 서버에 배포했다. 작업 스케줄러 Running, 프로세스 1개, 센트릭스 로그인 성공,
+  DPAPI 큐 0건이다. 이미 누락된 종료는 원본 `CHANNELOUT` 시각·원인 16으로 bridge와 같은
+  HMAC gateway 경로에서 복구해 운영 원장을 `ringing → connected → ended` 3건으로 완결했고
+  DB는 직접 수정하지 않았다. 다음 실제 받기 통화로 자동 ended·ERP `통화 종료` 전환을
+  최종 재확인하면 된다. `PROJECT_PLAN.md`를 v0.77로 갱신했다.
+
+### 2026-08-06 — 직원관리 센트릭스 전체 회선번호 운영 배포
+- 직원 초대에 `센트릭스 전체 회선번호`를 선택 입력으로 추가했다. `07046074591` 같은
+  전체 11자리를 저장하며 하이픈 입력은 숫자로 정규화하고 내선 4자리·010 번호·길이 오류는
+  core와 DB 제약에서 거부한다. 초대 조회에서 지정값을 확인하고 가입 완료 시
+  `staff_profiles.centrex_line_number`로 전달한다. 기존 직원은 직원관리에서 수정·해제할 수
+  있으며 감사 원장에는 설정 여부와 마지막 4자리만 남긴다.
+- 이 필드는 직원 원장의 지정 전체 번호이고 `staff_telephony_bindings`와 분리했다. 이번
+  작업은 자동 매핑이나 전화 제어 권한을 변경하지 않는다. migration
+  `0030_outgoing_garia.sql`은 기존 활성 주 회선 binding의 전체 번호를 프로필에 한 번
+  백필하며, 운영에서 김충환 프로필과 활성 endpoint가 정확히 일치하는 1건을 확인했다.
+- 암호화 스냅샷 `lawand-prod-pre-staff-centrex-line-20260806` 뒤 gateway·ERP 릴리스
+  `20260806T045120Z-staff-centrex-line`을 배포했다. private S3 아티팩트는 AES256,
+  SHA-256은 `ad25594371681d4eb4c22ee89ad045222b93b54b9a78ae6da915276063786742`다.
+  core 49개·gateway 61개 테스트, 두 앱 typecheck/lint/build, DB schema check와 로컬·운영
+  migration을 통과했다. ERP·gateway 재시작 0회, 외부 HTTPS 200, error journal·CloudWatch
+  ALARM·answer 명령 0건이다. 673px 실제 운영 Chrome에서 초대 필드와 기존 직원 전체 번호
+  렌더를 확인했고 저장 버튼은 누르지 않았다. 다음은 지정 번호↔검증 endpoint 관리자 승인
+  매핑 UI다.
+
+### 2026-08-06 — 운영 직원–센트릭스 4591 회선 매핑 복구
+- 고객명은 표시되지만 `전화 받기`가 없는 실제 수신을 진단했다. 운영 활성 세션은 김충환
+  직원으로 정상이었고 수신 endpoint도 대표전화 내선 4591로 정상이나,
+  `staff_telephony_bindings`가 0건이라 ERP의 `isOwner` 판정이 false였다. 최신 통화도
+  `active_owners=NULL`인 채 ringing 후 ended로 남아 버튼 미표시 원인을 확정했다.
+- 정확히 하나인 활성 김충환 직원과 정확히 하나인 활성 Centrex 내선 4591을 검증하고,
+  다른 활성 소유자가 없을 때만 단일 트랜잭션으로 주 회선·활성 매핑을 만들었다. 결과는
+  `primary=true`, `active=true`이고 `telephony.centrex_endpoint.linked` 감사 원장에
+  `production_answer_mapping_completion` 사유를 남겼다. 자격증명·전체 전화번호는
+  조회하거나 변경하지 않았다. 다음 실제 수신부터 같은 직원 ID의 ERP 세션에만
+  `전화 받기`가 표시된다. 장기적으로 직원 관리 화면에 회선 배정 UI가 필요하다.
+
+### 2026-08-06 — 수신 고객 매칭 확인·ERP 전화 받기 운영 배포
+- 고객명 미표시 제보 시각의 실제 운영 수신을 PII 원문 없이 대사했다. 암호화 번호·검색
+  지문은 정상이고 상담데스크 우선 일치로 `김충환3_테스트`가 반환됐다. 배포 뒤 시각으로
+  같은 snapshot을 재현해 `matchSource=consultation`을 확인했으므로 서버 매칭 결함이
+  아니라 고객 해석 배포 전부터 열려 있던 ERP 탭의 이전 JavaScript bundle이 원인이다.
+  새 ERP 배포 뒤 기존 탭은 한 번 강력 새로고침해야 한다.
+- migration `0029_powerful_captain_stacy.sql`로 `telephony_inbound_commands`와
+  queued/dispatching/succeeded/failed/expired 상태 원장을 추가했다. 회선 담당 직원만
+  ringing 통화의 20초 유효 `answer` 명령을 만들며 통화별 활성 명령은 하나다. bridge의
+  GET poll·POST result는 method·정확한 path·body hash까지 HMAC 서명하고 5분 시각창,
+  in-memory nonce 재사용 방지, 고정 bridge/endpoint 연결을 검증한다. 결과와 직원·시각은
+  감사 원장에 남는다.
+- Windows bridge v0.3.0.0은 750ms signed pull, UI STA에서 OCX `Answer()` 실행, 결과
+  재전송 시 명령 비재실행을 구현했다. 운영 RDS 스냅샷
+  `lawand-prod-pre-centrex-answer-20260806` 뒤 migration을 적용하고 gateway·ERP 릴리스
+  `20260806T035011Z-centrex-answer`와 Windows 실행 파일을 배포했다. ERP·gateway·Caddy·
+  bridge task/process, 내부/외부 HTTPS와 health, 서명 없는 poll 401, error journal 0건,
+  CloudWatch ALARM 0건, 운영 answer 명령 0건을 확인했다. core 47개·gateway 60개 테스트,
+  두 앱 typecheck/lint/build, DB schema check, Windows x86 self-test/build가 통과했다.
+  실제 수신 중 ERP 버튼→물리 전화기 스피커폰 연결 canary만 사용자 통화로 확인하면 된다.
+
+### 2026-08-06 — 수신전화 고객 해석 gateway·ERP 운영 배포 완료
+- 운영 RDS의 암호화 스냅샷 `lawand-prod-pre-inbound-directory-20260806`이 available인
+  상태에서 migration `0028_inbound_phone_directory_resolver.sql`을 적용했다. 함수는
+  security-definer이고 `lawand_app`은 실행만 가능하며 `CB.TblCSClient` 직접 SELECT는
+  계속 불가하다.
+- gateway와 ERP를 릴리스 `20260806T031115Z-inbound-directory`로 배포했다. private S3
+  아티팩트는 AES256, SHA-256은
+  `08e0364be3f5a1b1ad3d40d15b7114ea52ca7d997a576aead1ba30bfb02f2107`이다. gateway health와
+  ERP 외부 HTTPS 로그인 200, ERP·Caddy active, ERP 컨테이너 재시작 0회, 최근 error
+  journal 0건, CloudWatch ALARM 0건을 확인했다.
+- 이제 신규 수신에서 ERP 상담데스크 우선·리걸프렌즈 차선·미확인 세 분기를 실제 화면으로
+  검증할 수 있다. 실제 고객 정보 표시 canary와 `Answer()` 버튼 연결은 아직 남아 있다.
+
+### 2026-08-06 — 수신전화 상담데스크 우선·리걸프렌즈 차선 해석 및 canary 고정 IP
+- `lawand-centrex-canary`(`i-057d0e55cf9b4de92`)에 탄력적 IP `15.165.2.138`을
+  할당·연결했다. 기존 ENI·RDP 보안 그룹은 바꾸지 않았고 Windows SSM은 `Online`을
+  확인했다. bridge canary는 재시작 뒤에도 바뀌지 않는 주소를 갖는다.
+- 수신 snapshot은 복호화한 번호의 HMAC으로 ERP 상담데스크를 먼저 조회하고, 일치가 없을
+  때에만 비공개 `CB`의 고객·사건·담당자를 찾도록 구현했다. `0028`은
+  `public.resolve_inbound_phone_directory(text)` security-definer 함수를 만들며,
+  `lawand_app`에는 함수 실행만 주고 `CB.TblCSClient` 직접 SELECT는 계속 차단한다.
+  함수는 고객명, 사건유형·진행상태·종결 여부와 주/부 담당자 이름만 최대 8건 반환하며
+  전화·사건번호·내부 ID·다른 비공개 필드는 반환하지 않는다.
+- ERP 수신 바는 상담데스크 일치 시 상세로 가는 링크와 고객·상태·담당자를, 리걸프렌즈
+  일치 시 고객·사건·담당자를, 미일치 시 `발신자 정보 없음`을 표시한다. gateway·ERP
+  typecheck/lint/build, gateway 57개 테스트, 로컬 migration·함수 권한 검증을 통과했다.
+  운영 RDS 반영 전 암호화 스냅샷 `lawand-prod-pre-inbound-directory-20260806`을 생성했고,
+  운영 migration·gateway/ERP 릴리스와 실제 수신 canary가 다음 단계다.
+
+### 2026-08-06 — 수신전화 리걸프렌즈 고객·사건·담당자 로컬·운영 동기화
+- 리걸프렌즈 전체 SaaS 데이터가 아니라 로앤 사무소 `Office_idx=56`만 선별했다.
+  MySQL `CONTENT.TblCase`와 연결된 `CONTENT.TblCSClient`, 같은 사무소
+  `ACCOUNT.TblMember`를 하나의 repeatable-read consistent snapshot으로 읽어 로컬
+  PostgreSQL 비공개 `CB.TblCase`·`CB.TblCSClient`·`CB.TblMember`에 원자적으로 적재했다.
+  고객·사건 각 60,947건, 담당자 69건이며 사건-고객 누락·타 사무소 행·전화 검색값 오류는
+  0건이다. 원본에서 이미 삭제된 담당자 참조 1건은 오연결하지 않고 미해결로 보존했다.
+- 전화 조회에 필요한 최소필드만 복제했다. 고객은 이름·전화·검색값과 연결키, 사건은
+  유형·상태·주/부 담당자와 표시 필드, 담당자는 식별자·이름·직책만 보존한다. 회원
+  비밀번호·생년월일·개인 이메일/전화, 사건 계좌 발급기관·계좌번호와 다른 사무소 데이터는
+  대상에 없다. `scripts/import-legalfriends-phone-directory.mjs`와 pnpm 명령,
+  비식별 논리 해시 검증 SQL, 운영 단일 트랜잭션 복원 스크립트를 추가했다.
+- 운영 이관 전 암호화 RDS 스냅샷 `lawand-prod-pre-phone-directory-20260806`을 만들고,
+  SHA-256 `740fe491d3ee4f8fee57ad59960727d4ad1fd17ecedd908bae13f5fdbc4cb72a`인 AES256
+  비공개 S3 덤프를 gateway SSM 경로에서 복원했다. 로컬·운영의 세 테이블 행별 논리 해시가
+  모두 일치한다. 운영 소유자는 `lawand_migrator`, `lawand_viewer`는 SELECT 전용이며
+  `lawand_app`·`PUBLIC`은 접근할 수 없다. 임시 평문 덤프는 로컬·서버에서 삭제했다.
+  gateway health와 ERP 로그인은 정상, RDS `available`, CloudWatch ALARM은 0건이다.
+  `PROJECT_PLAN.md`를 v0.71로 갱신했다. 다음은 상담데스크 우선·이 비공개 원천 차선의
+  고객 조회 API와 전화데스크 상세 연결이며, 일일 자동 실행 스케줄은 아직 구성하지 않았다.
+
+### 2026-08-06 — 센트릭스 실제 ERP 표시 확인·전체 번호·복수 수신 운영 배포
+- 사용자가 운영 ERP에서 실제 신규 수신과 종료 표시를 확인했다. 최신 원장은 약 13.6초
+  울린 뒤 연결 이벤트 없이 `inbound.ringing → inbound.ended(HCAUSE=16)` 두 이벤트로
+  자연 종료됐고 Windows 작업은 실행 중, 프로세스 1개·DPAPI 큐 0건이다. 서버 내부에서만
+  복호화해 전화번호 형식·암호문·nonce·검색 지문 일치를 확인했으며 원문은 출력하지 않았다.
+- 사용자 운영 기준에 따라 인증된 ERP 스냅샷은 전체 발신번호를 반환하도록 바꿨다. DB의
+  AES-GCM 암호화·HMAC 검색 지문·마스킹 보조값은 유지하고 `NOTIFY`·SSE·로그에는 번호를
+  넣지 않는다. 스냅샷의 20행 제한을 제거하고 UI가 통화 ID별 카드를 모두 렌더해 동시에
+  울리는 여러 통화를 빠짐없이 표시한다. 시각적 강조 보강은 사용자 UI 피드백 뒤 진행한다.
+- gateway 57개 테스트와 typecheck·lint·build, ERP typecheck·lint·프로덕션 빌드, 서로
+  다른 두 수신의 실제 로컬 DB 스냅샷 복호화 검증을 통과했다. 릴리스
+  `20260806T022927Z-centrex-inbound-full-number`를 gateway·ERP에 배포했고 아티팩트
+  SHA-256은 `88ad7830b60688e854bb44ef00542212acf4155ab57c8a96a62526bf34290732`, S3는
+  AES256이다. 운영 과거 원장 전체 번호 계약과 ERP same-origin 프록시 200을 번호 출력 없이
+  확인했으며 두 컨테이너는 재시작 0·오류 0·health 정상, CloudWatch ALARM은 0건이다.
+  `PROJECT_PLAN.md`를 v0.70으로 갱신했다. 다음은 상담데스크 우선 고객 해석·리걸프렌즈
+  동기화 원천 차선과 전화데스크 상세 연결이며, `Answer()` 명령은 아직 연결하지 않았다.
+
+### 2026-08-06 — 센트릭스 ERP 전역 수신전화 표시 3단계 운영 배포
+- migration `0027_telephony_inbound_sse_notifications.sql`로 수신 이벤트 commit 뒤
+  event ID·call ID·상태·시각만 PostgreSQL `NOTIFY`하도록 했다. gateway는 전용
+  `LISTEN` 연결과 인증 SSE를 제공하고 ERP는 same-origin 프록시·재연결 스냅샷으로
+  현재 울림을 복구한다. 브라우저에는 마스킹 번호·내선·회선 담당자만 보내며 모든 인증
+  화면 상단에 `수신전화/통화 중/통화 종료`와 `내 전화/담당자 전화`를 표시한다.
+- 로컬 실제 trigger canary와 gateway 57개 테스트, 관련 typecheck·lint·gateway/ERP
+  프로덕션 빌드, DB schema check·`git diff --check`를 통과했다. 운영 암호화 스냅샷
+  `lawand-prod-pre-centrex-inbound-ui-20260806` 뒤 릴리스
+  `20260806T020118Z-centrex-inbound-step3`을 gateway·ERP에 배포했다. private S3 아티팩트
+  SHA-256은 `a5fa84d59a150c4db8d83d0412e7a87457e6f2e1915c920d4707454fec572ef5`이며 AES256이다.
+- 운영 비식별 canary에서 DB trigger→gateway `sync → changed`, ERP same-origin 스냅샷·SSE
+  200, PII 필드 0건과 임시 통화·이벤트 잔존 0건을 확인하고 임시 세션·스크립트를 제거했다.
+  gateway·ERP는 재시작 0·오류 0·health 정상, Windows bridge는 작업 실행·프로세스 1·큐
+  0건이다. 다음은 사용자가 ERP를 연 상태에서 실제 전화를 걸어 상단 표시와 bridge v0.2.1의
+  자연 `ended`를 확인하는 canary이며, 고객 해석과 `Answer()`는 아직 연결하지 않았다.
+
+### 2026-08-06 — 센트릭스 실제 수신 end-to-end 원장 canary 완료
+- 사용자가 새 수신전화를 약 10초 울린 뒤 받지 않고 끊었다. provider 시각 기준 12.896초였고
+  `RINGEVENT(ISDIAL=0) → CHANNELOUT(HCAUSE=16)`이 연결 이벤트 없이 수신됐다. 운영 원장은
+  통화 1건을 `ended`, 이벤트 2건을 `inbound.ringing → inbound.ended`로 보존한다. 암호문·
+  nonce·지문 길이와 gateway 내부 복호화 번호 형식·마스킹·HMAC 재계산이 모두 일치했고
+  전화번호 원문은 출력하지 않았다.
+- 첫 전송에서 .NET Framework 기본 proxy 경로의 `HttpRequestException`과 센트릭스가 종료를
+  같은 prefix·sequence +1인 sibling leg ID로 주는 현상을 발견했다. bridge v0.2.1은 gateway
+  고정 주소에 proxy 없이 TLS 1.2로 직접 연결하고, 활성 ring 3분 안에서 같은 ID 또는 같은
+  prefix의 인접 sequence만 같은 통화로 인정한다. 보존된 DPAPI ringing 큐는 201로 전달했고,
+  누락 ended는 원본 로그 시각·원인으로 HMAC gateway 경로에서만 복구했다. 같은 이벤트 replay는
+  약 3.6초 안에 200·큐 0건으로 끝나 DB 이벤트가 2건 그대로임을 확인했다.
+- Windows x86 7개 self-test와 실제 빌드·로그인 재시작을 통과했다. 최종 파일 버전은
+  `0.2.1.0`, SHA-256은
+  `df3e7d6a20cd9c4e01c32a4b74cd172305eb6507e1601ce526bbb728b33a43d4`이며 비공개 S3
+  checksum과 AES256 암호화를 확인했다. 임시 S3 쓰기 IAM은 즉시 제거했다. gateway는
+  재시작 0·최근 오류 0·health 정상이고 `PROJECT_PLAN.md`를 v0.68로 갱신했다. 다음은 ERP
+  전역 수신 표시와 상담데스크 우선 고객 해석이며, 그 실제 전화에서 자동 ended도 재확인한다.
+
+### 2026-08-06 — 센트릭스 bridge→gateway 실시간 수신 2단계 배포
+- Windows bridge에 `inbound.ringing/connected/ended` 최소 이벤트 계약, 현재 사용자 DPAPI
+  암호화 디스크 큐, HTTPS/HMAC-SHA256 서명, 순차 재시도와 성공 후 삭제를 추가했다.
+  gateway는 5분 시각창·nonce·본문 hash·bridge→endpoint 고정을 검증하고 발신번호를 즉시
+  AES-GCM 암호화·기존 상담과 같은 HMAC 지문화한다. raw OCX·전화 원문·응답 본문은
+  로그·DB·SSE에 넣지 않는다.
+- migration `0026_familiar_charles_xavier.sql`로 상담 연결 전 독립 원장
+  `telephony_inbound_calls/events`를 추가했다. event ID·provider call ID·nonce 중복과
+  payload 충돌을 막고 ringing→connected→ended를 보존한다. 로컬 migration과 실제 DB
+  수직 검증, 전체 typecheck·lint, core 46개·gateway 53개 테스트, DB schema check,
+  Windows x86 6개 self-test를 통과했다.
+- 운영 RDS 스냅샷 `lawand-prod-pre-centrex-inbound-20260806` 뒤 gateway 릴리스
+  `20260806T005200Z-centrex-inbound-step2`와 Windows bridge SHA-256
+  `e3910f2f7fd03d79ac499862d0719c6231b8b1f16a15c04717687e8805101fd7`을 배포했다.
+  bridge secret은 전용 Secrets Manager와 Windows Credential Manager에만 저장했고,
+  일회성 Windows secret 읽기 IAM·임시 task·임시 endpoint bootstrap secret은 제거하거나
+  7일 복구 삭제로 전환했다. gateway health·기존 worker·Windows 로그인은 정상이며
+  운영 수신 원장은 아직 0건이다. 사용자의 새 전화 한 건으로 실제 end-to-end 전송 확인이
+  남아 있고 `PROJECT_PLAN.md`를 v0.67로 갱신했다.
+
+### 2026-08-06 — 센트릭스 상시 Windows bridge 1단계 실제 수신 검증
+- 진단 HTA를 운영에 재사용하지 않는 `apps/centrex-bridge`를 추가했다. .NET Framework
+  4.8 x86 WinForms STA `AxHost`·메시지 루프에서 공식 OCX를 호스팅하고, 회선별 단일
+  프로세스·내선/회선 suffix 검증·재접속 backoff·14일 마스킹 로그·작업 스케줄러 재시작을
+  적용했다. 자동 받기 UI는 없고 `Answer()`는 아직 외부에 연결하지 않았다.
+- 센트릭스 아이디·비밀번호는 사용자가 EC2의 동일 Windows 사용자 자격 증명 관리자에
+  직접 저장했다. 설정·명령행·파일·DB·SSM·Git·로그에는 원문을 넣지 않았다. 공식 OCX의
+  BMLINK 서명과 x86 PE를 강제하고 브리지 서명을 검사하는 설치기를 추가했으며, 현재
+  실행 파일은 명시적으로 허용한 서명 없는 canary라 운영 배포 전 코드 서명이 필요하다.
+- 최신 빌드의 x86 여부와 5개 self-test, 설치 스크립트 parser, 로컬/비공개 S3/서버
+  SHA-256 일치를 확인했다. SSM으로 기존 HTA를 종료하고 interactive 작업을 시작해
+  `HOST_READY → LOGIN_RESULT STATUS=1 → RING_EVENT(ISDIAL=0) →
+  CHANNEL_OUT(HCAUSE=16)`을 실제 약 10초 수신에서 확인했다. 발신번호·회선은 끝 4자리만
+  기록됐고 작업과 프로세스는 계속 실행 중이다. gateway 인증 이벤트 전송이 다음 단계며
+  `PROJECT_PLAN.md`를 v0.66으로 갱신했다.
+
+### 2026-08-06 — 센트릭스 수신 RINGEVENT·Answer 실제 canary
+- 임시 EC2 `lawand-centrex-canary`(`i-057d0e55cf9b4de92`, Windows Server 2022 x64,
+  `t3.medium`)에 공식 32비트 OCX `1.0.1.21`을 WOW64로 등록했다. CAB·OCX의 BMLINK
+  Authenticode가 유효하고 로컬/서버 SHA-256이 일치했으며 최신 Defender 사용자 지정
+  검사에서 위협 0건이었다. SSM 전용 역할·instance profile을 연결했고 RDP ingress는
+  작업자 공인 IP `/32` 하나뿐이다.
+- 비밀번호를 저장하지 않는 진단 host `scripts/centrex-inbound-canary.hta`를 추가했다.
+  x86 MSHTA ActiveX host에서 `LOGINRESULT STATUS=1`을 확인하고, 사용자 통제 휴대전화
+  수신 한 건에서 `RINGEVENT(ISDIAL=0) → ANSWER_REQUEST(armed-ring) → CHANNELLIST →
+  CHANNELOUT` 순서를 확보했다. 사용자가 실제 센트릭스 전화기의 스피커폰 자동 열림과
+  양방향 통화를 확인했다. 발신번호 로그는 끝 4자리만 남고 1회 자동 받기는 실행 직후
+  자동 해제됐다.
+- 일반 x86 COM은 생성됐지만 ActiveX control site가 없는 session 0에서 `IsConnected()`가
+  `E_UNEXPECTED`였고, x86 MSHTA host에서는 `OCX_READY=1`이었다. 따라서 운영 구현은
+  HTA·서비스 COM 직접 생성이 아니라 32비트 STA·ActiveX host·메시지 루프를 갖춘 서명
+  bridge 실행 파일로 진행한다. `Answer()`는 PC 오디오가 아니라 물리 전화기를 제어하며
+  운영 자동 받기는 사용하지 않고 ERP의 명시적 사용자 동작으로 제한한다.
+- 임시 private S3 bucket `lawand-centrex-canary-319465435474-20260805`, SSM IAM
+  role/profile `lawand-centrex-canary-ssm-20260805`, RDP SG와 key pair가 남아 있다.
+  인스턴스와 RDP/HTA 세션도 현재 실행 중이며 다음 bridge 작업을 이어가거나 완료 뒤
+  중지·자원 정리해야 한다. 센트릭스·Windows 비밀번호와 private key는 Git·DB·SSM·문서에
+  저장하지 않았다. `PROJECT_PLAN.md`를 v0.65로 갱신했다.
+
+### 2026-08-05 — ERP 부재·재상담 필요 목록 작업 큐
+- 통화 종료 선택지에 `재상담 필요`를 추가하고 migration
+  `0025_thick_krista_starr.sql`로 로컬 `telephony_call_disposition` enum을 확장했다.
+  기존 결과와 마찬가지로 확정 직원·시각·변경 감사 원장을 사용하며 운영 DB에는 아직
+  적용하지 않았다.
+- gateway 상담 목록이 상담별 최신 확정 통화 결과를 함께 반환한다. 최신 결과가
+  `no_answer`이면 `부재`, `callback_required`이면 `재상담 필요` 배지를 표시하고 두 상태를
+  기존 `확인 필요` 지표·필터와 검색에 포함했다. 더 최신 통화 결과를 확정하면 최신값을
+  기준으로 배지와 작업 큐가 자연스럽게 해소된다.
+- 관련 typecheck·ESLint, core 45개·gateway 50개 테스트, gateway·ERP 프로덕션 빌드,
+  DB schema check와 `git diff --check`를 통과했다. 673px 폭 실제 Chrome에서 목록 API의
+  최신 통화 결과 계약, 좁은 목록 렌더와 SSE 재연결을 확인했고 기존 확정 결과는 변경하지
+  않았다. 로컬 ERP `3021`과 gateway `3022`는 계속 실행 중이며 `PROJECT_PLAN.md`를
+  v0.64로 갱신했다.
+
+### 2026-08-05 — 센트릭스 통화 종료 자동 팝업·결과 원장
+- A타입 `callhistory` 발신 이력을 ERP 클릭투콜 원장과 요청 시각·마스킹 수신번호로 대사하는
+  gateway 워커를 추가했다. provider 상태·시작/종료·전체·연결·호출 시간을 보존하고, 같은
+  회선의 한 이력이 두 통화에 연결되지 않도록 고유 제약을 적용했다. migration
+  `0024_bored_viper.sql`은 로컬 DB에만 적용했으며 운영에는 배포하지 않았다.
+- 사용자 통제 실제 발신 5건을 모두 복원했다. 고객 통화는 `OK` 22초/연결 16초, 무응답 뒤
+  음성사서함은 `OK` 56초/10초, 거절 뒤 음성사서함은 `OK` 17초/8초였고, 수신 전 발신
+  취소와 상대 통화 중은 모두 `FAIL` 0초/0초였다. 따라서 연결·시간만 자동 판정하고 ERP
+  자동 팝업에서 담당자가 고객 상담·음성사서함·무응답·거절·통화 중·발신 취소 중 실제
+  결과를 확정하도록 했다. 선택값·직원·시각과 변경은 통화·감사 원장에 남는다.
+- core 45개·gateway 50개 테스트, 관련 전체 typecheck·ESLint·gateway/ERP 프로덕션 빌드,
+  DB schema check와 실제 5건 대사를 통과했다. 673px 폭 실제 Chrome에서 최신 미연결 통화의
+  팝업과 6개 선택지, 원장 시간을 확인했고 결과는 사용자가 시험할 수 있게 미확정으로
+  남겼다. 로컬 ERP `3021`, 자격증명을 파일에 저장하지 않은 gateway `3022`가 실행 중이다.
+  `PROJECT_PLAN.md`를 v0.63으로 갱신했다.
+
+### 2026-08-05 — 센트릭스 정정 계정 검증·로컬 직원 주 회선 연결
+- 사용자가 정정한 API 로그인으로 A타입 `userinfo`를 다시 호출해 요청한 실제 070
+  회선과 내선 4591이 모두 일치함을 확인했다. 검증이 성공한 뒤에만 로컬 활성 직원의
+  개인 주 회선으로 `telephony_endpoints` 1건과 `staff_telephony_bindings` 1건을
+  생성했고 `telephony.centrex_endpoint.linked` 감사 기록을 남겼다.
+- 비밀번호 원문과 SHA-512 값은 대화형 프로세스 메모리에서만 사용하고 파일·환경파일·
+  DB·Git에는 저장하지 않았다. 클릭투콜 워커는 계속 비활성이며 `telephony_calls`는
+  0건이라 실제 발신은 없었다. 운영 RDS migration·Secrets Manager 비밀 맵·본인 소유
+  수신 번호 canary·워커 활성화가 남아 있다. `PROJECT_PLAN.md`를 v0.62로 갱신했다.
+
+### 2026-08-05 — 센트릭스 A타입 ERP 클릭투콜 로컬 출시 후보
+- ERP 상담 상세에 현재 담당 직원만 사용할 수 있는 `센트릭스로 전화` 버튼과 최근 발신
+  원장을 추가했다. 버튼은 고객 번호를 브라우저에서 공급받지 않고 상담 ID만 gateway에
+  전달하며, gateway가 최신 암호화 접수에서 번호를 복호화한다. 30초 중복 방지와 확인
+  대화상자, 처리 상태 polling을 적용했고 실제 통화 테스트에서는 버튼을 누르지 않았다.
+- 센트릭스 A타입 `clickdial` POST 클라이언트와 직렬 worker, 계정별 SHA-512 자격증명
+  참조, 직원-회선 연결, 발신 원장·outbox·감사 기록을 구현했다. 타임아웃처럼 발신 여부를
+  단정할 수 없는 경우 `확인 필요`로 끝내며 자동 재발신하지 않는다. `userinfo`가 실제
+  회선과 내선을 모두 검증해야 연결 원장을 쓰는 `centrex:link` 명령도 추가했다. worker는
+  기본 비활성이며 자격증명·고객번호는 이벤트나 로그에 넣지 않는다.
+- 제공받은 로그인은 `userinfo` 인증에는 성공했지만 희망 회선·내선과 다른 회선을
+  반환했다. 따라서 비밀번호를 저장하거나 회선 연결·실제 발신·AWS 배포를 하지 않았고,
+  로컬 `telephony_endpoints`·`staff_telephony_bindings`·`telephony_calls`는 모두 0건이다.
+  희망 회선에 대응하는 정확한 API 로그인 확인과 채팅에 노출된 비밀번호 교체, 통제된
+  수신 번호 canary가 운영 활성화의 남은 게이트다.
+- migration `0023_serious_black_queen.sql`을 로컬에 적용하고 schema check와
+  `git diff --check`를 통과했다. 전체 5개 패키지 typecheck·ESLint·프로덕션 빌드,
+  core 44개·gateway 45개 테스트가 통과했다. 390×844 Chrome에서 버튼 렌더와 새로고침
+  hydration 경고 부재를 확인했으며, 콘솔의 403 세 건은 설치된 확장 프로그램
+  `content.js`에서 발생한 것으로 페이지 코드 오류가 아니다. 설계·활성화 순서는
+  `docs/CENTREX_CLICK_TO_CALL_V1.md`, authoritative 상태는 `PROJECT_PLAN.md` v0.61에
+  기록했다.
+
+### 2026-08-05 — 사례 생성 크론 AWS 권한·비공개 RDS 경로 구성
+- `ai-agent-prod-01`의 기본 VPC와 `lawand-prod` VPC 사이에 peering
+  `pcx-00d7e8bcf0be7a446`을 만들고 양방향 DNS와 route를 활성화했다. 운영 RDS는 계속
+  public access가 없으며 DB SG 5432에는 크론 서버 사설 IP `172.31.2.38/32` 하나만
+  추가했다. 서버에서 RDS hostname이 사설 IP로 해석되고 TCP 5432 연결이 성공했다.
+- `hub-cloudwatch-role`에 추가한 사례 생성 런타임 권한은
+  `lawand/prod/database`·`lawand/prod/gateway` 두 secret의 `GetSecretValue`,
+  `/lawand/prod/case-generator` 로그 쓰기, `Lawand/CaseGenerator` metric 쓰기로
+  제한했다. 로그 보존은 90일이며
+  `lawand-case-generator-run-failure` alarm은 `OK`다. 수신 채널은 아직 연결하지 않았다.
+- 운영 서버에서 비식별 `inspect`가 0.513초, DB INSERT 없는 Luna/high `dry-run`이
+  59.632초에 성공했다. published canary는 생성하지 않았고 systemd service와 timer는
+  계속 `inactive`, timer는 `disabled`다. 구성 스크립트가 실제 CloudFormation 논리 이름
+  `PrivateDatabaseSubnetA/B` 대신 `DatabaseSubnetA/B`를 참조하는 결함은 후속 수정이
+  필요하지만, 실제 AWS 구성과 런타임 권한 검증에는 영향이 없다.
+
+### 2026-08-05 — 운영 ERP 상담 SSE 실시간 갱신·배포
+- 상담 outbox가 커밋될 때 개인정보 없는 이벤트 식별자만 PostgreSQL
+  `LISTEN/NOTIFY`로 알리는 migration `0022_consultation_sse_notifications.sql`을
+  추가했다. gateway는 전용 연결로 이를 수신해 인증된 직원에게 SSE로 전달하고,
+  heartbeat·재연결·재연결 뒤 동기화를 지원한다. ERP는 내부 키를 브라우저에 노출하지
+  않는 same-origin 프록시를 구독하며 이벤트가 올 때만 목록을 다시 읽어 주기적 폴링을
+  사용하지 않는다.
+- 전체 5개 패키지 typecheck·ESLint·프로덕션 빌드, core 43개·gateway 40개 테스트,
+  로컬 DB trigger와 ERP 프록시 통합 검증을 통과했다. `PROJECT_PLAN.md`를 v0.59로,
+  상담 접수·운영 배포 문서를 실제 SSE 계약과 복구 동작으로 갱신했다.
+- 운영 RDS 스냅샷 `lawand-prod-pre-sse-20260805`를 만든 뒤 ERP·gateway를 릴리스
+  `20260805T013748Z-84e87082-sse`로 배포했다. 운영 ERP 프록시에서 임시 세션과
+  트랜잭션 내 canary 이벤트로 `consultation.sync`·`consultation.changed`를 모두
+  수신했고 상담·outbox는 0건을 유지해 실제 알림톡·리걸프렌즈 실행은 없었다. Chrome에서
+  `실시간 연결됨`을 확인했으며 두 서비스의 실패 unit·당일 error journal·CloudWatch
+  ALARM은 없다.
+
+### 2026-08-05 — 운영 RDS 비공개 CB 원천 이관·권한 단순화
+- 운영 사례 생성 크론의 선행 작업으로 로컬 PostgreSQL `lawand_dev`의 비공개
+  `CB.TblCBCase`, `CB.TblCaseMemo`, `CB.TblMoClientStatement`를 서울 리전 운영 RDS
+  `lawand`의 동일한 `CB` 스키마로 이관했다. 이관 전 암호화 수동 스냅샷
+  `lawand-prod-pre-cb-import-20260805`를 만들고, SHA-256을 확인한 압축 덤프를 gateway
+  EC2의 SSM 경로로 내려받아 단일 트랜잭션으로 복원했다.
+- 운영 행 수는 `TblCBCase` 9,598건, `TblCaseMemo` 202,772건,
+  `TblMoClientStatement` 9,402건이다. 세 테이블의 키 범위·최종 수정시각과 행 순서 기반
+  논리 해시가 로컬과 운영에서 모두 일치했고, 테이블 3개·인덱스 11개가
+  `lawand_migrator` 소유임을 확인했다. 기존 `public_case_studies` preview 3건과 public
+  원장은 변경되지 않았다.
+- 권한은 전용 동기화·생성 역할을 추가하지 않고 기존 역할로 단순화했다.
+  `lawand_migrator`가 CB 생성·동기화와 사례 초안 저장을 담당하고,
+  `lawand_viewer`는 기본 읽기 전용 상태로 CB를 조회한다. `lawand_app`과 `PUBLIC`에는
+  CB 스키마·테이블 권한이 없으며 앱의 `public_case_studies` SELECT는 유지했다.
+  재배포 기준을 `infra/aws/configure-database.sh`에 반영하고 `PROJECT_PLAN.md` v0.58,
+  공개 사례·운영 배포 문서를 실제 상태로 갱신했다.
+
+### 2026-08-04 — AWS 운영 인프라·3앱 최초 배포 v1
+- 서울 리전 `lawand-prod` CloudFormation 스택으로 전용 VPC와 2AZ 공개 앱 서브넷·비공개
+  DB 서브넷을 만들었다. homepage `t4g.small`·30GB, ERP `t4g.small`·30GB, gateway
+  `t4g.medium`·40GB EC2를 Amazon Linux 2023 ARM64로 각각 구성하고 암호화 gp3,
+  종료 방지, Docker·SSM·4GB swap을 적용했다. CloudFormation 스택 자체의 종료 방지도
+  활성화했다. SSH는 열지 않았고 세 EIP는 홈페이지
+  `15.165.23.84`, ERP `3.34.72.9`, gateway `3.36.255.226`이다.
+- PostgreSQL 16.14 `db.t4g.small` RDS를 public access 없이 private subnet에 배치했다.
+  30GB→100GB 자동확장 gp3, 암호화, 7일 자동백업·시점복구, Performance Insights,
+  삭제 방지를 적용했다. migration·app·viewer 역할을 분리하고 앱의 공개 사례 쓰기를
+  차단했으며 viewer 기본 읽기 전용을 확인했다. RDS 공식 CA를 이미지에 넣고 모든 Node
+  연결을 `sslmode=verify-full`로 바꿨다. 초기화용 마스터 시크릿 임시 권한은 완료 즉시
+  제거해 평상시 EC2 역할이 읽지 못한다.
+- 로컬 DB에서 후기 3,403건, 자가진단 읽기 모델 1,759건, preview 사례 3건, 활성 직원
+  1명과 필요한 참조 원장만 선별 이관했다. 상담·outbox·알림톡·리걸프렌즈 연결은 모두
+  0건이며 비공개 `CB` 원천 세 테이블은 운영 RDS·아티팩트에서 제외했다. 앱은 공개 사례
+  SELECT만 가능하고 INSERT는 불가하며, viewer `read_only=on`과 후기 3,403건을 확인했다.
+- 세 앱을 릴리스 `20260804T085006Z-84e8708`로 Docker 배포하고 systemd·Caddy 자동
+  기동을 구성했다. EIP HTTP는 동일 경로의 Let’s Encrypt `sslip.io` 임시 HTTPS로 301
+  전환되고 세 HTTPS 접속점은 모두 200이다. 실제 Chrome에서 홈페이지·ERP 로그인·
+  자가진단 반응형 화면을 검수했다. 런타임을 빌드 산출물 직접 실행으로 바꿔 재시작 후
+  홈페이지·ERP 약 1초, gateway 약 2초에 복구됐고 실패 unit·최근 error journal은 0건이다. 리걸프렌즈·알림톡·
+  네이버 IMAP 세 worker와 CloudWatch 기본 경보 `OK`를 확인했다.
+- `lawandfirm.com`과 `www`는 기존 `222.239.248.41`을 계속 바라보며 DNS를 변경하지
+  않았다. 정식 전환 전 Solapi 허용 IP를 gateway EIP 하나로 제한하고, ERP/API
+  서브도메인 확정, RDS Multi-AZ·복원 훈련, 경보 수신 채널과 운영 canary가 필요하다.
+  preview 사례는 계속 운영 미노출이다. 실제 구성·임시 URL·도메인 cutover/rollback은
+  `docs/PRODUCTION_DEPLOYMENT_V1.md`, 설계 기준은 `PROJECT_PLAN.md` v0.57에 기록했다.
+
+### 2026-08-04 — ERP 모바일 유사사례 절차일 한 줄 정리
+- 상담 상세의 자가진단 유사사례 카드가 720px 이하에서 절차일을 2열·2행으로 강제하던
+  예외를 제거했다. 신청서 접수·금지결정·개시결정·인가결정이 모바일에서도 하나의
+  연결선 위에 4열로 유지되며, 단계명과 실제 날짜에는 줄바꿈 방지와 작은 화면용
+  타이포그래피·패딩을 적용했다.
+- 실제 629px Chrome 상세 화면에서 네 단계와 날짜가 한 줄에 표시되는 것을 확인했다.
+  ERP typecheck·ESLint·프로덕션 빌드와 `git diff --check`를 통과했다.
+
+### 2026-08-04 — ERP 상담 데스크·상세 프로덕션 UI v1
+- 상담 목록을 배정 대기·내 담당·확인 필요·오늘 접수 지표, 이름·전화·접수번호 검색,
+  다섯 가지 작업 큐 필터가 있는 상담 데스크로 재구성했다. gateway 목록 응답에
+  `assigneeUserId`를 추가해 표시명 비교가 아니라 로그인 직원 ID로 `내 담당`을 판정한다.
+- 상담 상세 첫 화면에 고객 전화·출처·상담 유형·지역·연락 희망·중복 판정과 다음 행동,
+  담당자·알림톡·리걸프렌즈 실행 상태를 배치했다. 전화 걸기와 번호 복사를 제공하고,
+  요청별 입력·고객에게 실제 표시한 자가진단 유사사건 5건·실제 절차일·외부 실행 시도
+  원장을 순차적으로 확인하도록 정보 위계를 다시 잡았다. 기존 상담 배정·카카오 확인·
+  네이버 상세 링크·감사 기록 동작은 유지했다.
+- ERP 전역에 로컬 선호를 기억하는 라이트·다크 테마를 추가하고 첫 페인트 전에 테마를
+  적용해 깜빡임을 막았다. 720px 이하에서는 목록을 카드로, 상세를 한 열로 전환하며
+  미배정 상담의 `상담하기`를 safe-area 대응 하단 고정 동작으로 제공한다. 480px 이하
+  헤더는 브랜드·탐색·테마·로그아웃만 남겨 우선순위를 보장한다.
+- ERP typecheck·ESLint·프로덕션 빌드와 gateway typecheck·ESLint·37개 테스트를
+  통과했다. 실제 Chrome에서 993px 라이트·다크 목록과 629px 좁은 목록·상세를 검수했고,
+  390px 반응형 렌더에서 아이콘 중심 헤더·한 열 전환을 확인했다. 테스트 상담의
+  `상담하기`는 누르지 않아 외부 알림톡이나 리걸프렌즈 사건을 만들지 않았다.
+
+### 2026-08-04 — 상담 접수·담당 배정 외부 워커 동시 활성화
+- 전화번호가 있는 홈페이지 상담은 최초 접수 트랜잭션에서 ERP 상담과 접수 알림톡을
+  만들고, 직원이 ERP `상담하기`를 눌러 본인 배정할 때 담당자 배정 알림톡과
+  리걸프렌즈 `createForLawnV2` 신건 등록을 함께 요청하는 기존 계약을 재확인했다.
+  카카오 홈페이지 진입과 네이버 예약의 무전화 상담은 이 외부 실행에서 계속 제외한다.
+- 새 Solapi 자격증명을 Git 제외·권한 600인 `apps/gateway/.env.local`에만 연결하고
+  알림톡 워커를 활성화했다. 자격증명 값과 이메일 인증번호는 문서·Git·DB에 남기지
+  않았고 전달용 임시 파일도 즉시 제거했다. 사용자 지시에 따라 배포 전에는 새 키의
+  허용 범위를 `0.0.0.0/0`으로 두며, gateway EC2와 EIP 확정 후 운영 secret을 분리하고
+  해당 EIP만 허용하는 후속 게이트를 `PROJECT_PLAN.md` v0.54에 남겼다.
+- gateway를 재기동해 리걸프렌즈·알림톡·네이버 IMAP 워커 시작 로그와 health HTTP 200을
+  확인했다. 외부 실행 대기열·시도 이력은 모두 0건이라 소급 발송이나 사건 생성은 없었다.
+  활성 ERP 직원 1명은 리걸프렌즈 숫자형 `member_idx`까지 매핑되어 있다. core 43개와
+  gateway 37개, 총 80개 테스트가 통과했다.
+
+### 2026-08-04 — 파산·면책 사례 목록·상세 전용 구성
+- `/bank/cases`의 파산·면책 카드를 개인회생 수치표와 분리했다. 월 변제금·변제기간 대신
+  총채무와 `지급능력 → 재산 확인 → 면책심사` 흐름, 소득 상태·청산가치·실제
+  면책허가 경과일을 표시한다. `/bank` 추천 사례 카드도 소득 상태·청산가치·면책허가
+  기준으로 같은 구분을 유지한다.
+- 파산·면책 상세는 변제금 배분 그래프와 변제율을 제거하고 현재·장래 지급능력,
+  총채무·재산 및 최근 처분 확인, 파산선고와 별도 면책심사 순서로 재구성했다. 실제
+  파산선고 접수 후 26일·면책허가 303일을 절차에 표시하고, 면책불허가 사유와
+  비면책채권을 구분해 설명한다.
+- 파산 상세의 공식 근거를 채무자회생법 제305조·제564조·제566조와 대한민국 법원의
+  파산·면책 동시신청 안내로 분리했다. 390px 모바일 전체 화면과 1440px 목록·상세를
+  시각 검수해 파산 전용 카드·분석·3단계 절차와 가로 넘침이 없음을 확인했다.
+  홈페이지 typecheck·ESLint를 통과했고 `PROJECT_PLAN.md`를 v0.53으로 갱신했다.
+
+### 2026-08-04 — Luna medium 파산·면책 세 번째 사례
+- `personal_bankruptcy` 후보는 신청서 접수뿐 아니라 파산선고와 면책허가가 모두 원천
+  `progress_history`에 있는 경우로 제한했다. `gpt-5.6-luna`·`medium`으로 생성한
+  `소득 활동이 없고 생활비 부족으로 채무가 늘어난 기혼자의 파산·면책 사례`는 최소
+  집단 7건을 통과했고, 총 무담보채무 약 5,700만원·임차 거주·소득 없음의 비식별
+  조건을 사용한다. 실제 경과일은 파산선고 접수 후 26일, 면책허가 303일이다.
+- 사례 프롬프트·상세 화면을 분야별로 분리했다. 개인회생에서만 명목 총변제액과
+  현재가치 비교를 설명하고, 파산·면책에서는 청산가치를 재산 처분·배당 관점으로
+  설명한다. 새 파산 사례는 파산선고와 면책허가가 다른 단계이고 비면책채권은 별도라는
+  점을 명시한다. 제목·본문의 직접 식별 패턴은 0건이다.
+- 홈페이지 typecheck·ESLint, 생성 스크립트 문법·ESLint, `PROJECT_PLAN.md` v0.52와
+  공개 사례 운영 문서·README 갱신을 마쳤다. 사례는 여전히 로컬 `preview/pending`이며
+  운영에는 노출되지 않는다.
+
+### 2026-08-04 — 추가생계비·현재가치 중심 Luna medium 두 번째 사례
+- `--require-additional-living-cost` 옵션을 추가해 추가생계비 금액이 0보다 큰
+  `Office_idx=56` 개인회생 후보만 고르고, 그 안에서는 금액이 큰 후보부터 검토하게 했다.
+  새 사례 `생활비와 주거비 부담으로 채무가 늘어난 근로자의 개인회생 사례`는 주거비
+  추가생계비 약 10만원이 기록상 별도 반영된 다른 원천 사건이며, 최소 집단 5건을
+  통과했다. `gpt-5.6-luna`·`medium`으로 생성해 `preview/pending`으로 저장했다.
+- 프롬프트와 저장 전 검증을 강화했다. 추가생계비가 있는 사례는 핵심 쟁점·계산 설명에
+  `추가생계비`가 반드시 있어야 하고, 지출만으로 자동 인정되는 것이 아니라 필요성·
+  계속성·증빙을 심사한다는 문구를 포함해야 한다. 청산가치 설명에는 월 변제금×횟수의
+  명목 합계가 아니라 인가 시점 현재가치로 비교한다는 설명이 없으면 저장하지 않는다.
+  상세 계산 카드도 추가생계비 항목과 심사 기준을 별도 강조한다.
+- 새 사례의 실제 절차 경과일은 금지명령 접수 후 1일, 개시결정 307일, 변제계획 인가
+  432일이다. `README.md`, `docs/PUBLIC_CASE_STUDIES_V1.md`, `PROJECT_PLAN.md` v0.51에
+  후보 옵션과 검증 기준을 갱신했다.
+
+### 2026-08-04 — 첫 공개 사례 Terra medium 재작성
+- 사용자 요청으로 같은 안전 스냅샷·프롬프트 버전·JSON Schema를 유지한 채 첫
+  개인회생 preview를 Codex CLI `gpt-5.6-terra`, `medium`으로 다시 생성했다. 결과는
+  `public_case_studies`의 같은 행을 `--replace`로 갱신했고, 현재 제목은
+  `주거비 부담과 생활비 부족이 겹친 급여소득자의 개인회생 사례`다. 상태는 계속
+  `preview`, 개인정보·법률 검수 `pending`이며 공개 0건이다.
+- 생성 스크립트에 `--model`과 `--reasoning-effort` 옵션을 추가했다. 기본값은 기존
+  `gpt-5.6-luna`·`xhigh`를 유지하며, 실제 사용한 모델·추론 강도는 각 사례 행에
+  기록한다. Terra 결과도 직접 식별 패턴 검사 0을 확인했다. `README.md`,
+  `docs/PUBLIC_CASE_STUDIES_V1.md`, `PROJECT_PLAN.md` v0.50에 비교 명령을 남겼다.
+
+### 2026-08-04 — 공개 사례 자가진단 연결키·실제 절차 경과일
+- 사용자 요청으로 `public_case_studies.source_case_idx` 내부 연결 컬럼을 migration
+  `0021_unusual_sheva_callister.sql`로 추가하고, 기존 개인회생 preview에도 값을
+  저장했다. 홈페이지의 사례 조회 SQL과 응답에는 이 값을 선택하지 않으며, 이후
+  자가진단의 유사사례 5건과 서버에서 같은 원천 사건을 연결할 때만 사용한다.
+- 공개 사례 절차는 넓은 기간 구간 대신 원천 `progress_history`의 실제 날짜 차이로
+  계산한 `접수 후 N일`을 표시한다. 첫 사례는 신청서 접수일, 금지명령 접수 후 14일,
+  개시결정 113일, 변제계획 인가 229일이다. 달력 날짜 자체는 계속 저장·표시하지
+  않는다. 사례 생성기는 이후 모든 신규 preview에 `source_case_idx`와 `elapsedDays`를
+  함께 저장한다.
+- 개인정보처리방침·이용약관·공개 사례 운영 문서·README와 `PROJECT_PLAN.md` v0.49를
+  실제 경과일과 내부 연결키 기준으로 고쳤다. 정식 공개 전에는 여전히 개인정보·법률
+  검수 및 공개 근거 확인이 필요하다.
+
+### 2026-08-04 — 실제 사건 기반 `사례로 이해하기` 첫 preview
+- 비공개 `CB.TblCBCase`·`CB.TblCaseMemo`·`CB.TblMoClientStatement`를 `Case_idx`로
+  조인해 `Office_idx=56` 사건을 한 건씩 공개 후보로 만드는
+  `scripts/generate-public-case-study.mjs`를 추가했다. 이름·전화·사건번호·주소·직장명·
+  학교·금융기관·정확한 날짜를 코드에서 먼저 제거하고 월 금액은 10만원, 총액은
+  100만원 단위로 반올림한다. 메모·진술 원문은 Codex에 보내지 않고 필요한 넓은 사실
+  범주만 사용하며, 같은 공개 조합이 최소 5건인 후보만 허용한다. 메모나 진술서가 없는
+  사건도 제외하지 않고 자료가 있으면 후보 점수에 반영한다.
+- Codex CLI 구독 모델 `gpt-5.6-luna`, 추론 강도 `xhigh`로 `주거비 부담과 소득 변동을
+  함께 확인한 개인회생 사례` 한 건을 생성했다. 현재 최소 집단은 6건이고 DB에는
+  `preview`, 개인정보·법률 검수 `pending`, 공개 0건으로 저장했다. 새 slug는 이미 사용한
+  원천을 건너뛰고 다음 후보를 고르며, 같은 slug와 공개·철회 사례는 모델 호출 전에
+  차단한다. 기본 초안 재검사와 다음 미사용 후보의 안전한 스냅샷 검사가 모두 통과했다.
+- migration `0020_parallel_champions.sql`로 `public_case_studies`와 분야·공개·검수 enum을
+  추가했다. 원본 `Case_idx` 대신 HMAC 지문과 안전 스냅샷 해시, 익명화·프롬프트·모델
+  버전, 본문·재무·절차·태그를 보존한다. 최소 집단 5건과 개인정보·법률 이중 승인,
+  공개 근거·승인일·공개일이 없는 `published` 전환을 DB 제약으로 막는다. 실제 미승인
+  공개 전환은 check violation `23514`로 거부됐고 `lawand_app`은 이 원장을 SELECT만 하며
+  세 `CB` 원천은 모두 권한 오류 `42501`로 차단됨을 확인했다.
+- `/bank/cases` 목록과 `/bank/cases/[slug]` 상세를 추가하고 기존 `/bank`와 전역
+  `사례로 이해하기` 메뉴에 연결했다. 상세에는 출발 상황·핵심 쟁점·월 소득 배분·명목
+  총변제액과 청산가치 현재가치 원칙·자녀/인정 가구원 차이·실제 절차 구간·달라질 점을
+  쉬운 문장으로 구성했다. 개발 환경만 preview 배너와 `noindex, nofollow`로 노출하고
+  운영 빌드에서는 목록 제외, 상세 404, sitemap·Article JSON-LD 제외를 확인했다.
+- 공개 본문 직접 식별 패턴 0, 홈페이지 프로덕션 빌드, 전체 5개 패키지 typecheck·ESLint,
+  DB schema check와 `git diff --check`가 통과했다. 1440px 시각 검수와 390px 모바일
+  `scrollWidth=clientWidth=390`, console 오류 0을 확인했다. 개인정보처리방침·이용약관의
+  공개 사례 기준과 시행일, `README.md`, `docs/PUBLIC_CASE_STUDIES_V1.md`,
+  `PROJECT_PLAN.md` v0.48을 갱신했다. 운영 발행·EC2 크론은 공개 재이용 근거와 철회
+  범위, 개인정보 검수, 책임 변호사 승인, ERP 발행 감사 흐름을 만든 뒤 진행한다.
+
+### 2026-08-04 — 리걸프렌즈 TblMoClientStatement 원천 복제
+- 리걸프렌즈 RDS `CONTENT.TblMoClientStatement`의 구조를 확인했다. `idx` 기본키와
+  `Case_idx`·`phone` 인덱스를 포함한 18개 컬럼이며, 전화·주소·채무 사유·상담 희망 등
+  개인정보 가능 원문이 포함될 수 있어 기존 `CB` 원천 테이블과 같은 비공개 경계를
+  적용했다.
+- 로컬 PostgreSQL `lawand_dev`의 `CB.TblMoClientStatement`를 추가하고 2026-08-04
+  12:10:24 스냅샷 기준 9,402행을 적재했다. `idx` 범위 1~9,402, `Case_idx` 범위
+  344~203,067·고유 9,401건, JSON·텍스트 문자 수·NULL 수·두 부분 해시·최종 수정시각이
+  원본 스트림과 대상에서 일치함을 확인했다. 임시 동기화 테이블은 0건이다.
+- `scripts/import-legalfriends-client-statement.mjs`와 `legalfriends:client-statement`
+  명령을 추가했다. bigint 식별자는 문자열로 받아 정밀도를 보존하고, `--replace`는 새
+  임시 테이블에 먼저 적재·검증한 뒤 원자적으로 교체한다. `PUBLIC`·`lawand_app`에는
+  테이블 권한을 주지 않고 로컬 `lawand_viewer`만 확인 권한을 유지한다.
+- 스크립트 `node --check`·ESLint, `git diff --check`, 대상 18개 컬럼·3개 인덱스·역할
+  권한과 대상 행 수를 확인했다. `PROJECT_PLAN.md`를 v0.47로 갱신했다.
+
+### 2026-08-04 — 리걸프렌즈 TblCaseMemo 원천 복제
+- 리걸프렌즈 RDS `CONTENT.TblCaseMemo`의 구조를 확인했다. `Case_idx` 유일키,
+  `update_dt`, `memo` `TEXT` 3개 컬럼이며, 원천 메모는 사건 내용·개인정보가 포함될 수
+  있어 기존 `CB.TblCBCase`와 같은 비공개 원천 보관 경계를 적용했다.
+- 로컬 PostgreSQL `lawand_dev`의 `CB.TblCaseMemo`를 추가하고 RDS를 단일 스트림으로
+  읽어 2026-08-04 11:44:44 스냅샷 기준 202,772행을 적재했다. 행 수·키 범위·NULL 수·
+  메모 문자 수·두 부분 해시·최종 수정시각이 스트림과 대상에서 모두 일치했으며, 현재
+  `CB` 스키마에는 `TblCBCase`와 `TblCaseMemo` 두 원천 테이블이 있다.
+- `scripts/import-legalfriends-casememo.mjs`와 `legalfriends:case-memo` 명령을 추가했다.
+  `--replace`는 새 임시 테이블에 먼저 적재·검증한 뒤 기존 대상과 원자적으로 교체하고,
+  실패하면 기존 대상을 보존한다. RDS가 계속 갱신되므로 최신 스냅샷을 다시 반영할 때
+  같은 명령을 사용한다. `PUBLIC`·`lawand_app`에는 테이블 권한을 주지 않고 로컬
+  `lawand_viewer`에만 확인 권한을 부여했다.
+- 스크립트 `node --check`·ESLint, `git diff --check`와 대상 DDL·인덱스·권한·임시 테이블
+  부재를 확인했다. `PROJECT_PLAN.md`를 v0.45로 갱신했다.
+
+---
+
+### 2026-08-04 — ERP 상담요청 테스트 원장 초기화
+- 사용자 요청으로 로컬 `lawand_dev`의 테스트 상담 7건과 상담요청 7건을 단일
+  트랜잭션에서 초기화했다. 연결된 상태이력 7건, 알림톡 원장 7건, 발송 시도 7건,
+  outbox 20건과 배정·귀속·카카오·네이버·리걸프렌즈 연결 하위 원장도 함께 삭제해
+  관련 테이블을 모두 0건으로 확인했다.
+- 여정 세션 5건·이벤트 59건, 네이버 IMAP 메일함 기준점 1건, 직원 계정과 후기
+  원장은 보존했다. 이번 범위는 로컬 테스트 DB에만 적용했으며 운영 DB에는 실행하지
+  않았다. `PROJECT_PLAN.md`를 v0.46으로 갱신했다.
+
+---
+
+### 2026-08-04 — 자가진단 히어로 타이포그래피 통일
+- 자가진단 상단 `나의 상황과 유사한 사례 5건 찾아보기` 제목이 다른 안내 페이지보다
+  컸던 문제를 수정했다. 데스크톱은 일반 히어로와 같은 `clamp(46px, 5vw, 68px)`,
+  모바일은 공통 `clamp(38px, 10.6vw, 50px)`와 440px 이하 38px 기준으로 맞추고
+  굵기·자간·행높이도 비교 페이지·자격/절차 페이지와 통일했다.
+- 홈페이지 typecheck·ESLint·프로덕션 빌드와 자가진단 페이지 HTTP 200, `git diff --check`를
+  확인했다. `PROJECT_PLAN.md`를 v0.44로 갱신했다.
+
+---
+
+### 2026-08-04 — 자가진단 유사사례 ERP 보관·상세 표시
+- 자가진단 결과 화면에 고객에게 실제 표시한 유사사례 5건의 순서·유사도·비교값·주요
+  절차일을 비식별 카드 스냅샷으로 만들어 기존 AES-GCM 상담 intake에 함께 저장했다.
+  고객 응답과 ERP가 같은 만원 단위 반올림 결과를 보도록 저장 시점에 동일한 정규화를
+  적용했으며, 원본 사건 ID·사건번호·이름·전화번호는 저장하지 않는다. 이전 원장과의
+  읽기 호환을 위해 카드 필드는 선택적으로 읽고 신규 자가진단에서는 5건을 보장한다.
+- ERP 고객 상세의 자가진단 요청마다 `의뢰인이 본 유사사례` 전용 카드 영역을 추가했다.
+  개인회생·파산 구분, 월 변제금·변제기간, 법원·소득·채무·청산가치·가족 조건,
+  변제계획·절차일을 고객 표시 순서대로 확인할 수 있고, 카드가 없는 이전 접수는
+  별도 안내한다. 모바일에서는 카드가 1열로 전환된다.
+- `selfDiagnosisMatchSchema`와 intake·ERP 표시 흐름의 단위 검증을 추가하고 core·gateway·
+  ERP typecheck를 통과했다. 개인정보처리방침, `docs/SELF_DIAGNOSIS_V1.md`,
+  `docs/CONSULTATION_INTAKE_V1.md`, `PROJECT_PLAN.md` v0.43에 상담 준비 목적과
+  비식별 스냅샷 범위를 반영했다.
+
+---
+
+### 2026-08-04 — 자가진단 미성년 자녀 수 버튼 선택 UX
+- 자가진단 가족·거주 단계의 미성년 자녀 수 숫자 입력 필드를 `0명`, `1명`, `2명`,
+  `3명`, `4명`, `5명`, `6명 이상` 버튼 선택으로 변경했다. `6명 이상`은 기존 숫자형
+  입력 계약의 기준값 `6`으로 전송하며, 선택 상태와 키보드 포커스 접근성을 함께 제공한다.
+- 결과의 부양가족 조정 안내에서도 `6명 이상을`으로 표시해 선택 의미가 숫자 6명으로
+  오해되지 않도록 했다. 홈페이지 typecheck·ESLint·프로덕션 빌드와 자가진단 페이지
+  HTTP 200, `git diff --check`를 확인했다.
+
+---
+
+### 2026-08-03 — 자가진단 변제계획 시각화·전역 3 CTA 타이포그래피 통일
+- 전역의 `자가진단·카톡상담·상담요청` 표기를 띄어쓰기 없는 형태로 통일하고 세 CTA의
+  Pretendard 글꼴·크기·굵기·행높이를 동일하게 맞췄다. 헤더, 모바일 메뉴, 상담 섹션,
+  모바일 고정바에서 말풍선·화살표 아이콘을 제거했다. 993px에서는 세 버튼 모두 12px·
+  750, 390px에서는 14px·800이며 각 버튼 안 SVG가 0개임을 실제 Chrome으로 확인했다.
+- 자가진단 히어로를 `나의 상황과 유사한 사례 5건 찾아보기`로 바꾸고 검색 설명도 월
+  변제금·예상 지출·추가생계비·총변제금·변제율·주요 절차일을 반영하도록 고쳤다.
+- migration `0019_cultured_toro.sql`을 로컬에 적용하고 읽기 모델을 `office-56-v3`로
+  재구축했다. 원천 `estimated_spend`, `living_cost_type`, `living_cost_cost`를 추가했고
+  1,759건(회생 1,342·파산면책 417)을 유지했다. 회생 1,342건 모두 예상 지출이 있고
+  370건에는 0원 초과 추가생계비가 있다. 추가생계비 코드는 사용자 제공 명칭으로
+  변환하며 0은 `추가 인정 없음`으로 표시한다.
+- 회생 사례 카드에 월소득을 예상 지출과 월 변제금으로 나눈 배분 막대, 총변제금·변제율,
+  예상 지출금액과 추가생계비 유형·금액을 추가했다. 각 접수·결정일 오른쪽에는 신청서
+  접수일부터의 실제 날짜 차이를 `접수일로부터 +N일`로 표시하며 모바일에서는 다음 줄로
+  안전하게 배치한다. 목 응답과 실제 v3 읽기 모델에서 새 필드 다섯 건 반환을 확인했다.
+- `PROJECT_PLAN.md`를 v0.41로 올리고 개인정보처리방침과 자가진단 계약 문서의 필드·
+  재식별 출시 게이트를 갱신했다. 전체 5개 패키지 typecheck·ESLint·프로덕션 빌드,
+  core 42개·gateway 37개 테스트와 `git diff --check`가 통과했다. 390·993px에서 결과
+  카드, CTA, 가로 넘침 0, console 오류 0을 확인했다.
+
+### 2026-08-03 — 자가진단 가족 입력·유사도·실제 절차일 v2
+- 조세 등 우선권채권 `없음/있음` 선택지에 포인터·hover·focus 상태를 추가하고, 밋밋했던
+  `다음 조건`을 전역 녹색 CTA와 화살표가 있는 실제 버튼으로 정리했다. 고객에게 별도
+  부양가족 수를 단정해 입력받지 않고 미성년 자녀 수만 받으며, 이를 생계비 비교의 최초
+  값으로 사용한다. 390·993px Chrome에서 포인터, 버튼 배경·형태, 입력 제거, 가로 넘침
+  0과 console 오류 0을 확인했다.
+- 유사사건 선택은 미성년 자녀 수가 같은 후보를 우선 고정하고, 월소득 정확 일치 또는
+  5%·10만원 이내 후보가 다섯 건 이상이면 그 집단만 비교하도록 계층화했다. 그 뒤에도
+  월소득 가중치를 가장 크게 적용하며 희소 입력에서만 조건을 단계적으로 완화한다.
+  결과 카드의 `자녀·부양`은 `미성년 자녀 수`와 `인정된 부양가족 수(본인 포함)`로
+  분리했다. 같은 소득·자녀 사건 우선 선택 단위검사를 추가했다.
+- 진행기간 숫자 배지를 신청서 접수·금지·개시·인가 또는 파산선고·면책허가의 실제
+  `YYYY-MM-DD` 절차 목록으로 바꿨다. migration `0018_condemned_cerebro.sql`을 로컬에
+  적용하고 읽기 모델을 `office-56-v2`로 재구축했다. 실제 신청서 접수일과 필수 결정일이
+  있는 1,759건(회생 1,342·파산면책 417)이 적재됐고 필수 날짜 누락은 0건이다.
+- 실제 날짜는 직접 식별자가 없어도 희소 조합의 재식별 단서가 될 수 있어 개인정보처리
+  방침, `docs/SELF_DIAGNOSIS_V1.md`, `PROJECT_PLAN.md` v0.40의 출시 게이트를 강화했다.
+  전체 5개 패키지 typecheck·ESLint·프로덕션 빌드, core 42개·gateway 37개 테스트와
+  `git diff --check`가 통과했다. 목 응답을 사용한 결과 화면에서 두 가족 필드와 실제
+  날짜 `<time>` 네 개, 데스크톱·모바일 가로 넘침 0을 확인했으며 3020·3021·3022 서버는
+  계속 실행 중이다.
+
+### 2026-08-03 — 홈페이지 헤더 재정리·거주지역 기반 자가진단 관할 안내
+- 데스크톱 헤더의 개인파산 메뉴명을 줄이고 로고·메뉴·CTA 간격과 글자 크기 전환 구간을
+  재조정했다. 메뉴와 자가진단·카톡상담·상담 요청 CTA에는 줄바꿈 방지를 적용했으며,
+  801·820·880·993·1100·1101·1280·1281·1440px에서 헤더와 문서 가로 넘침이 0임을
+  확인했다. 800px 이하는 기존 모바일 메뉴와 하단 CTA 세 개를 유지한다.
+- 자가진단 첫 질문을 `예상 관할법원`에서 상담 요청과 같은 `현재 거주 중인 지역`으로
+  바꿨다. 국내 17개 시·도에서 단일 법원은 자동 표시하고 경기·강원 및 법률상 추가
+  관할이 있는 충북·울산·경남·전북·제주는 근거 설명이 붙은 법원 선택을 표시한다.
+  채무자회생법 제3조와 각 법원 공식 관할 페이지를 기준으로 했으며 실제 관할은 근무지·
+  영업소·재산 소재·관련 사건에 따라 달라질 수 있다는 한계를 함께 안내한다.
+- 클라이언트 표시만 바꾸지 않고 core 입력 계약과 gateway에서 거주지역·법원 조합을
+  재검증하며 ERP 암호화 자가진단 기록에도 현재 거주지역을 한글로 표시한다. core 41개
+  테스트, 홈페이지·gateway·ERP·core typecheck와 ESLint, 993px 실제 Chrome 및 390px
+  헤드리스 Chrome 화면에서 단일·복수 관할 전환, 가로 넘침 0, console 오류 0을
+  확인했다. `PROJECT_PLAN.md`를 v0.39로 갱신했다.
+
+### 2026-08-03 — 로앤 사건 5건 자가진단·ERP 접수 v1 로컬 구현
+- `/bank/self-diagnosis`에 법원·월소득·소득형태, 담보/무담보 채무·청산가치·우선권채권,
+  혼인·미성년 자녀·부양가족·거주형태와 연락정보를 받는 4단계 화면을 추가했다. 완료
+  시 로앤 유사사건 5건의 만원 단위 월 변제금·변제개월과 신청 후 금지·개시·인가 또는
+  파산선고·면책허가 경과일을 보여주고, 입력·서버 판정은 기존 암호화 intake로 ERP 상담에
+  등록한다. 전역 데스크톱과 모바일 고정바는 `자가진단·카톡상담·상담 요청` 세 행동을
+  함께 제공한다.
+- `CB.TblCBCase`를 런타임에서 직접 조회하지 않도록 `Office_idx=56`만 읽는
+  `self_diagnosis_case_profiles`와 재구축 스크립트를 만들었다. 이름·전화·사건번호·원본
+  사건 ID·원본 날짜를 SELECT/저장하지 않고 진행일은 경과일로 변환한다. 현재
+  1,764건(개인회생 1,342·개인파산면책 422)이며 `lawand_app`은 이 읽기 모델만 조회한다.
+- 회생 후보는 우선권채권 일치, 1~60개월, 변제율 3% 이상, 총변제금의 원천 청산가치와
+  고객 최소 필요 총변제액 충족을 제한조건으로 둔다. 2026년 기준 중위소득 60%로
+  가용소득을 참고하고 필요하면 부양가족 축소 시나리오를 계산하며, 1인 참고 생계비
+  이하 또는 60개월 제약 미충족 때만 파산·면책 사례로 분기한다. 회생 사례 부족만으로
+  파산을 표시하지 않는다. 소득·거주·혼인 코드는 사용자 제공 한글 명칭으로 중앙화했고,
+  정의 오류 가능성이 있는 `debt_reasons`와 미사용 `living_cost_type`은 제외했다.
+- 코어 4개 자가진단 단위검사와 gateway API 검사를 추가했다. 실제 읽기 모델의 일반
+  회생·우선권채권 회생·저소득 파산 시나리오가 각각 정확히 5건, 올바른 `case_type`,
+  원본 식별자 없이 반환되는 것을 확인했다. 법원·소득·소득형태·혼인·자녀·우선권·
+  채무·청산가치를 조합한 대표 입력 2,160개도 모두 회생 유사사건 5건을 구성했다.
+  390·993·1440 Chrome에서 입력 화면과 세 CTA를 검수했다. 이 구현은 로컬 출시
+  후보이며, 과거 사건 이용 근거·희소 조합 재식별 위험·공개 문구의 책임 변호사 심사
+  전에는 운영 배포하지 않는다. 상세 기준은
+  `docs/SELF_DIAGNOSIS_V1.md`, 설계 기준은 `PROJECT_PLAN.md` v0.38이다.
+
+### 2026-08-03 — 로컬 DBeaver 계정에 `CB` 전체 권한 부여
+- 사용자 요청으로 로컬 `lawand_dev`의 `lawand_viewer`에 `CB` 스키마 `USAGE/CREATE`,
+  현재 모든 테이블·시퀀스·함수의 전체 권한과 `lawand_migrator`가 앞으로 만드는
+  객체의 기본 전체 권한을 부여했다. 이 DB에서 해당 계정의 강제 읽기 전용 설정도
+  해제했다.
+- DBeaver와 같은 `lawand_viewer` 연결로 `default_transaction_read_only=off`, 스키마
+  전체 권한과 `CB.TblCBCase`의 SELECT·INSERT·UPDATE·DELETE·TRUNCATE·REFERENCES·TRIGGER
+  권한이 모두 적용된 것을 확인했다. `PUBLIC`과 홈페이지 앱 역할에는 권한을 추가하지
+  않았으며 운영 환경에는 이 로컬 편의 예외를 적용하지 않는다. `PROJECT_PLAN.md`를
+  v0.37로 갱신했다.
 
 ### 2026-08-03 — 리걸프렌즈 성공사례 원천을 `lawand_dev`로 이관
 - 사용자 요청으로 로컬 MySQL `CB.TblCBCase`의 35개 컬럼·9,598행을 로컬 PostgreSQL

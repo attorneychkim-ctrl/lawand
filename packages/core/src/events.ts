@@ -29,6 +29,7 @@ const requestedDataSchema = z
       "customer_initiated_channel_message",
       "customer_initiated_channel_entry",
       "customer_initiated_booking",
+      "staff_recorded_phone_interaction",
     ]),
     consentAgreedAt: z.iso.datetime({ offset: true }).optional(),
     dedupeOutcome: z.enum(["new", "suspected_duplicate"]),
@@ -99,6 +100,19 @@ const kakaoHomepageEntryReferenceDataSchema = requestReferenceDataSchema
   })
   .strict();
 
+const telephonyCallReferenceDataSchema = z
+  .object({
+    callId: z.uuid(),
+    consultationId: z.uuid(),
+    requestId: z.uuid(),
+    endpointId: z.uuid(),
+    staffUserId: z.uuid(),
+    provider: z.literal("centrex"),
+    direction: z.literal("outbound"),
+    command: z.literal("clickdial"),
+  })
+  .strict();
+
 const assignedDataSchema = assignmentReferenceDataSchema
   .extend({
     assigneeUserId: z.uuid(),
@@ -161,6 +175,13 @@ export const legalfriendsRegistrationRequestedEventSchema =
     })
     .strict();
 
+export const telephonyCallRequestedEventSchema = eventEnvelopeSchema
+  .extend({
+    eventType: z.literal("telephony.call.requested"),
+    data: telephonyCallReferenceDataSchema,
+  })
+  .strict();
+
 export const alimtalkRequestNotificationRequestedEventSchema =
   eventEnvelopeSchema
     .extend({
@@ -192,6 +213,7 @@ export const platformEventSchema = z.discriminatedUnion("eventType", [
   consultationAssignedEventSchema,
   consultationKakaoChatConfirmedEventSchema,
   consultationKakaoEntryInvalidatedEventSchema,
+  telephonyCallRequestedEventSchema,
   legalfriendsRegistrationRequestedEventSchema,
   alimtalkRequestNotificationRequestedEventSchema,
   alimtalkAssignmentNotificationRequestedEventSchema,
@@ -217,6 +239,9 @@ export type ConsultationKakaoEntryInvalidatedEvent = z.infer<
 >;
 export type LegalfriendsRegistrationRequestedEvent = z.infer<
   typeof legalfriendsRegistrationRequestedEventSchema
+>;
+export type TelephonyCallRequestedEvent = z.infer<
+  typeof telephonyCallRequestedEventSchema
 >;
 export type AlimtalkRequestNotificationRequestedEvent = z.infer<
   typeof alimtalkRequestNotificationRequestedEventSchema

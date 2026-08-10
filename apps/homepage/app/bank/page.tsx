@@ -1,4 +1,7 @@
 import type { Metadata } from "next";
+import Link from "next/link";
+
+import { getCaseStudies } from "@/lib/case-studies";
 
 import {
   ArrowIcon,
@@ -10,6 +13,8 @@ import {
 } from "./_components/site-chrome";
 
 const siteUrl = "https://lawandfirm.com";
+
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "개인회생·개인파산, 무엇부터 확인해야 할까",
@@ -135,7 +140,21 @@ const websiteJsonLd = {
   },
 };
 
-export default function BankHomePage() {
+function formatCaseMoney(value: number) {
+  return `약 ${(value / 10_000).toLocaleString("ko-KR")}만원`;
+}
+
+function formatCaseIncome(value: number) {
+  return value > 0 ? formatCaseMoney(value) : "소득 활동 없음";
+}
+
+function formatCaseLiquidationValue(value: number) {
+  return value > 0 ? formatCaseMoney(value) : "기록상 0원";
+}
+
+export default async function BankHomePage() {
+  const featuredCases = await getCaseStudies(2);
+
   return (
     <>
       <a className="skip-link" href="#main-content">
@@ -381,58 +400,105 @@ export default function BankHomePage() {
                 <h2>결과보다, 무엇을 확인했는지를 봅니다</h2>
               </div>
               <p>
-                아래 사례는 기존 공개자료에서 핵심 맥락만 정리한 것입니다.
+                로앤이 진행한 실제 사건에서 식별정보를 없애고 금액·시점을 일반화했습니다.
                 <br />
                 다른 사건의 결과를 보장하지 않습니다.
               </p>
             </div>
 
-            <div className="case-grid">
-              <article className="case-card">
-                <div className="case-topline">
-                  <span>개인회생</span>
-                  <span>급여소득 · 1인 가구</span>
-                </div>
-                <h3>매달 들어오는 소득으로 변제계획을 세운 경우</h3>
-                <p>
-                  월 소득만 보지 않고 재산 가치와 가구 상황, 채무 구성을 함께 확인한 뒤
-                  개인회생으로 진행한 사례입니다.
-                </p>
-                <div className="case-point">
-                  <span>핵심 확인</span>
-                  소득이 이어질 수 있는지, 매달 얼마를 갚을 수 있는지
-                </div>
-                <a
-                  href="/bank/consultation"
-                  data-consultation-cta="home-case-rehabilitation"
-                >
-                  내 상황은 어떤지 물어보기
-                  <ArrowIcon />
-                </a>
-              </article>
+            {featuredCases.length === 0 ? (
+              <div className="case-grid case-grid-empty">
+                <article className="case-card">
+                  <div className="case-topline">
+                    <span>사례 검수 중</span>
+                  </div>
+                  <h3>실제 사건을 공개 가능한 설명으로 정리하고 있습니다.</h3>
+                  <p>
+                    개인정보와 희소한 조건을 지우고 법률 설명을 검토한 사례부터 한 건씩
+                    공개합니다.
+                  </p>
+                  <Link href="/bank/cases">
+                    사례 공개 원칙 보기
+                    <ArrowIcon />
+                  </Link>
+                </article>
+              </div>
+            ) : (
+              <div className="case-grid">
+                {featuredCases.map((item) => {
+                  const isPersonalRehabilitation =
+                    item.practiceArea === "personal_rehabilitation";
+                  const dischargeTiming = item.timeline.find(
+                    (step) => step.label === "면책허가",
+                  )?.timing;
 
-              <article className="case-card">
-                <div className="case-topline">
-                  <span>개인파산 · 면책</span>
-                  <span>건강 악화 · 소득활동 곤란</span>
-                </div>
-                <h3>건강 문제로 일을 계속하기 어려워진 경우</h3>
-                <p>
-                  지금 일할 수 있는 여력과 병원비로 늘어난 채무의 경위, 남은 재산을 함께
-                  확인한 뒤 파산·면책으로 진행한 사례입니다.
-                </p>
-                <div className="case-point">
-                  <span>핵심 확인</span>
-                  채무를 갚을 수 없는 상태인지, 면책 심사에서 무엇을 보는지
-                </div>
-                <a
-                  href="/bank/consultation"
-                  data-consultation-cta="home-case-bankruptcy"
-                >
-                  내 상황은 어떤지 물어보기
-                  <ArrowIcon />
-                </a>
-              </article>
+                  return (
+                    <article
+                      className={`case-card${
+                        isPersonalRehabilitation ? "" : " is-bankruptcy"
+                      }`}
+                      key={item.id}
+                    >
+                    <div className="case-topline">
+                      <span>
+                        {isPersonalRehabilitation ? "개인회생" : "개인파산 · 면책"}
+                      </span>
+                      <span>{item.tags.slice(1, 3).join(" · ")}</span>
+                    </div>
+                    <h3>{item.title}</h3>
+                    <p>{item.dek}</p>
+                    <div className="case-card-figures">
+                      <div>
+                        <span>
+                          {isPersonalRehabilitation ? "월 소득" : "소득 상태"}
+                        </span>
+                        <strong>
+                          {formatCaseIncome(item.financialSnapshot.monthlyIncome)}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>
+                          {isPersonalRehabilitation ? "월 변제금" : "청산가치"}
+                        </span>
+                        <strong>
+                          {isPersonalRehabilitation
+                            ? formatCaseMoney(item.financialSnapshot.monthlyPayment)
+                            : formatCaseLiquidationValue(
+                                item.financialSnapshot.liquidationValue,
+                              )}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>
+                          {isPersonalRehabilitation ? "변제기간" : "면책허가"}
+                        </span>
+                        <strong>
+                          {isPersonalRehabilitation
+                            ? `${item.financialSnapshot.paymentCount}개월`
+                            : dischargeTiming ?? "별도 심사"}
+                        </strong>
+                      </div>
+                    </div>
+                    <div className="case-point">
+                      <span>핵심 확인</span>
+                      {item.content.keyIssues[0]?.title}
+                    </div>
+                    <a href={`/bank/cases/${item.slug}`}>
+                      {isPersonalRehabilitation
+                        ? "변제금과 절차 자세히 보기"
+                        : "파산선고와 면책 과정 보기"}
+                      <ArrowIcon />
+                    </a>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+            <div className="cases-section-more">
+              <Link href="/bank/cases">
+                사례로 이해하기 전체 보기
+                <ArrowIcon />
+              </Link>
             </div>
           </div>
         </section>

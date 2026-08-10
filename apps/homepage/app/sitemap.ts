@@ -4,15 +4,27 @@ export default function sitemap(): MetadataRoute.Sitemap {
   return [
     {
       url: "https://lawandfirm.com/bank",
-      lastModified: new Date("2026-07-26"),
+      lastModified: new Date("2026-08-04"),
       changeFrequency: "weekly",
       priority: 1,
+    },
+    {
+      url: "https://lawandfirm.com/bank/cases",
+      lastModified: new Date("2026-08-04"),
+      changeFrequency: "weekly",
+      priority: 0.9,
     },
     {
       url: "https://lawandfirm.com/bank/reviews",
       lastModified: new Date("2026-07-29"),
       changeFrequency: "weekly",
       priority: 0.9,
+    },
+    {
+      url: "https://lawandfirm.com/bank/self-diagnosis",
+      lastModified: new Date("2026-08-03"),
+      changeFrequency: "weekly",
+      priority: 1,
     },
     {
       url: "https://lawandfirm.com/about",

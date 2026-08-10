@@ -40,6 +40,8 @@ export type StaffInvitation = {
   department: string;
   jobTitle: string;
   role: StaffRole;
+  centrexLineNumber: string | null;
+  centrexExtension: string | null;
   legalFriendsId: string | null;
   legalFriendsMemberIdx: number | null;
   expiresAt: string;
@@ -55,6 +57,34 @@ export type StaffDirectoryItem = {
   department: string;
   jobTitle: string;
   role: StaffRole;
+  centrexLineNumber: string | null;
+  centrexExtension: string | null;
+  centrexConnection: {
+    status:
+      | "unconfigured"
+      | "incomplete"
+      | "pending_endpoint"
+      | "pending_assignment"
+      | "credential_pending"
+      | "bridge_pending"
+      | "bridge_provisioning"
+      | "bridge_failed"
+      | "bridge_offline"
+      | "connected"
+      | "mismatch";
+    assignedEndpoint: {
+      id: string;
+      label: string;
+      lineNumber: string;
+      extension: string;
+      credentialConfigured: boolean;
+      bridgeConfigured: boolean;
+      bridgeOnline: boolean;
+      bridgeState: string | null;
+      bridgeLastSeenAt: string | null;
+      lastAuthSucceededAt: string | null;
+    } | null;
+  };
   legalFriendsId: string | null;
   legalFriendsMemberIdx: number | null;
 };
@@ -181,6 +211,8 @@ export async function createStaffInvitation(
     department: string;
     jobTitle: string;
     role: StaffRole;
+    centrexLineNumber?: string;
+    centrexExtension?: string;
     legalFriendsId?: string;
     legalFriendsMemberIdx?: number;
   },
@@ -217,6 +249,40 @@ export async function updateStaffLegalFriendsAccount(
     {
       method: "POST",
       body: { legalFriendsId, legalFriendsMemberIdx },
+      sessionToken,
+    },
+  );
+}
+
+export async function updateStaffCentrexLineNumber(
+  sessionToken: string,
+  staffUserId: string,
+  centrexLineNumber: string | null,
+  centrexExtension: string | null,
+  centrexPassword: string | null,
+): Promise<{ credentialUpdated: boolean; bridgeConnected: boolean }> {
+  const response = await authFetch(
+    `/v1/staff-auth/users/${staffUserId}/centrex-line`,
+    {
+      method: "POST",
+      body: { centrexLineNumber, centrexExtension, centrexPassword },
+      sessionToken,
+    },
+  );
+  return (await response.json()) as {
+    credentialUpdated: boolean;
+    bridgeConnected: boolean;
+  };
+}
+
+export async function reassignStaffCentrexBridge(
+  sessionToken: string,
+  staffUserId: string,
+): Promise<void> {
+  await authFetch(
+    `/v1/staff-auth/users/${staffUserId}/centrex-bridge-reassign`,
+    {
+      method: "POST",
       sessionToken,
     },
   );

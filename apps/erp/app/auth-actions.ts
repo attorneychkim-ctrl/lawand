@@ -8,8 +8,10 @@ import {
   createStaffInvitation,
   loginStaff,
   logoutStaff,
+  reassignStaffCentrexBridge,
   StaffGatewayError,
   type StaffRole,
+  updateStaffCentrexLineNumber,
   updateStaffLegalFriendsAccount,
 } from "../lib/staff-auth";
 import {
@@ -32,6 +34,14 @@ export type InvitationActionState = {
 export type LegalFriendsAccountActionState = {
   error: string;
   saved: boolean;
+};
+
+export type CentrexLineActionState = {
+  error: string;
+  saved: boolean;
+  verified: boolean;
+  bridgeConnected: boolean;
+  reassigned: boolean;
 };
 
 function field(formData: FormData, name: string): string {
@@ -112,6 +122,14 @@ export async function createInvitationAction(
       formData,
       "legalFriendsMemberIdx",
     ).trim();
+    const centrexLineNumber = field(
+      formData,
+      "centrexLineNumber",
+    ).trim();
+    const centrexExtension = field(
+      formData,
+      "centrexExtension",
+    ).trim();
     const invitation = await createStaffInvitation(token, {
       email: field(formData, "email"),
       name: field(formData, "name"),
@@ -125,6 +143,12 @@ export async function createInvitationAction(
       department: field(formData, "department"),
       jobTitle: field(formData, "jobTitle"),
       role: field(formData, "role") as StaffRole,
+      ...(centrexLineNumber || centrexExtension
+        ? {
+            centrexLineNumber,
+            centrexExtension,
+          }
+        : {}),
       ...(legalFriendsId
         ? {
             legalFriendsId,
@@ -144,6 +168,77 @@ export async function createInvitationAction(
       error: errorMessage(error),
       invitationUrl: "",
       expiresAt: "",
+    };
+  }
+}
+
+export async function updateCentrexLineAction(
+  _previousState: CentrexLineActionState,
+  formData: FormData,
+): Promise<CentrexLineActionState> {
+  await requireAdmin();
+  const token = await readStaffSessionToken();
+  if (!token) {
+    return {
+      error: "로그인이 만료되었습니다.",
+      saved: false,
+      verified: false,
+      bridgeConnected: false,
+      reassigned: false,
+    };
+  }
+
+  if (field(formData, "intent") === "reassign") {
+    try {
+      await reassignStaffCentrexBridge(
+        token,
+        field(formData, "staffUserId"),
+      );
+      revalidatePath("/staff");
+      return {
+        error: "",
+        saved: false,
+        verified: false,
+        bridgeConnected: false,
+        reassigned: true,
+      };
+    } catch (error) {
+      return {
+        error: errorMessage(error),
+        saved: false,
+        verified: false,
+        bridgeConnected: false,
+        reassigned: false,
+      };
+    }
+  }
+
+  const lineNumber = field(formData, "centrexLineNumber").trim();
+  const extension = field(formData, "centrexExtension").trim();
+  const password = field(formData, "centrexPassword");
+  try {
+    const result = await updateStaffCentrexLineNumber(
+      token,
+      field(formData, "staffUserId"),
+      lineNumber || null,
+      extension || null,
+      password || null,
+    );
+    revalidatePath("/staff");
+    return {
+      error: "",
+      saved: true,
+      verified: result.credentialUpdated,
+      bridgeConnected: result.bridgeConnected,
+      reassigned: false,
+    };
+  } catch (error) {
+    return {
+      error: errorMessage(error),
+      saved: false,
+      verified: false,
+      bridgeConnected: false,
+      reassigned: false,
     };
   }
 }

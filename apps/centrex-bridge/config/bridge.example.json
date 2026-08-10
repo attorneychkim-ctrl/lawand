@@ -1,0 +1,18 @@
+{
+  "bridgeId": "seoul-phone-01",
+  "endpointId": "replace-with-telephony-endpoint-id",
+  "credentialTarget": "Lawand/Centrex/seoul-phone-01",
+  "gatewayUrl": "https://gateway.example.com/v1/centrex-bridge/events",
+  "gatewayCredentialTarget": "Lawand/CentrexGateway/seoul-phone-01",
+  "expectedExtension": "0000",
+  "expectedLineLast4": "0000",
+  "autoReconnectSeconds": 20,
+  "healthCheckSeconds": 15,
+  "logRetentionDays": 14,
+  "gatewayTimeoutSeconds": 10,
+  "gatewayRetrySeconds": 5,
+  "gatewayCommandPollMilliseconds": 750,
+  "gatewayEventRetentionHours": 168,
+  "showTrayIcon": true,
+  "poolSlotPending": false
+}

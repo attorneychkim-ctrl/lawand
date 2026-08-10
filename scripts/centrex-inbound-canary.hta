@@ -1,0 +1,221 @@
+<!doctype html>
+<html>
+<head>
+  <meta http-equiv="X-UA-Compatible" content="IE=9" />
+  <meta charset="utf-8" />
+  <title>Lawand Centrex inbound canary</title>
+  <hta:application
+    id="app"
+    applicationname="LawandCentrexInboundCanary"
+    border="thin"
+    caption="yes"
+    maximizebutton="yes"
+    minimizebutton="yes"
+    singleinstance="yes"
+  />
+  <style>
+    body { font-family: "Malgun Gothic", sans-serif; margin: 20px; color: #16202a; }
+    h1 { font-size: 20px; margin: 0 0 16px; }
+    label { display: block; margin: 10px 0 4px; }
+    input[type=text], input[type=password] { box-sizing: border-box; width: 360px; padding: 7px; }
+    button { margin: 12px 8px 12px 0; padding: 8px 14px; }
+    #status { margin: 10px 0; padding: 10px; background: #eef3f8; }
+    #events { box-sizing: border-box; width: 100%; height: 300px; font-family: Consolas, monospace; }
+    .warning { color: #8a2d16; }
+  </style>
+</head>
+<body>
+  <h1>센트릭스 수신·받기 canary</h1>
+  <p class="warning">이 도구는 시험용입니다. 비밀번호와 발신번호 원문은 로그에 저장하지 않습니다.</p>
+
+  <label for="loginId">센트릭스 ID</label>
+  <input id="loginId" type="text" autocomplete="off" />
+
+  <label for="loginPassword">센트릭스 비밀번호</label>
+  <input id="loginPassword" type="password" autocomplete="off" />
+
+  <div>
+    <button id="connectButton" type="button" onclick="connectCentrex()">연결</button>
+    <button id="disconnectButton" type="button" onclick="disconnectCentrex()">연결 해제</button>
+    <button id="answerButton" type="button" onclick="answerCall('manual')">전화 받기</button>
+  </div>
+
+  <label>
+    <input id="answerNextRing" type="checkbox" />
+    다음 수신전화 한 번만 자동으로 받기
+  </label>
+
+  <div id="status">초기화 중</div>
+  <textarea id="events" readonly="readonly"></textarea>
+
+  <object
+    id="EventClientCtrl"
+    classid="CLSID:86019F2F-2899-4C4C-A6FE-24CFF7CD6D4C"
+    width="1"
+    height="1"
+  ></object>
+
+  <script language="JScript">
+    var logDirectory = "C:\\Lawand\\CentrexCanary\\logs";
+    var logPath = logDirectory + "\\events.log";
+
+    function nowIso() {
+      var d = new Date();
+      function pad(value) { return value < 10 ? "0" + value : String(value); }
+      return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
+        "T" + pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+    }
+
+    function ensureLogDirectory(fso) {
+      if (!fso.FolderExists("C:\\Lawand")) fso.CreateFolder("C:\\Lawand");
+      if (!fso.FolderExists("C:\\Lawand\\CentrexCanary")) fso.CreateFolder("C:\\Lawand\\CentrexCanary");
+      if (!fso.FolderExists(logDirectory)) fso.CreateFolder(logDirectory);
+    }
+
+    function writeLog(message) {
+      var line = nowIso() + "|" + message;
+      document.getElementById("events").value += line + "\r\n";
+      document.getElementById("events").scrollTop = document.getElementById("events").scrollHeight;
+      try {
+        var fso = new ActiveXObject("Scripting.FileSystemObject");
+        ensureLogDirectory(fso);
+        var stream = fso.OpenTextFile(logPath, 8, true, 0);
+        stream.WriteLine(line);
+        stream.Close();
+      } catch (error) {
+        document.getElementById("status").innerText = "로그 기록 실패: " + error.message;
+      }
+    }
+
+    function parseEvent(raw) {
+      var result = {};
+      var parts = String(raw || "").split("|");
+      result.EVENT = parts.length ? parts[0] : "UNKNOWN";
+      for (var i = 1; i < parts.length; i += 1) {
+        var separator = parts[i].indexOf(":");
+        if (separator > 0) result[parts[i].slice(0, separator)] = parts[i].slice(separator + 1);
+      }
+      return result;
+    }
+
+    function safeToken(value) {
+      return String(value || "").replace(/[^A-Za-z0-9_.-]/g, "").slice(0, 80);
+    }
+
+    function maskPhone(value) {
+      var digits = String(value || "").replace(/\D/g, "");
+      if (!digits) return "unknown";
+      return "***" + digits.slice(Math.max(0, digits.length - 4));
+    }
+
+    function setStatus(message) {
+      document.getElementById("status").innerText = message;
+    }
+
+    function connectCentrex() {
+      var loginId = document.getElementById("loginId").value;
+      var passwordInput = document.getElementById("loginPassword");
+      var password = passwordInput.value;
+      if (!loginId || !password) {
+        setStatus("ID와 비밀번호를 입력하세요.");
+        return;
+      }
+      setStatus("로그인 요청 중");
+      writeLog("LOGIN_REQUEST");
+      EventClientCtrl.SetAutoReconnect(20);
+      EventClientCtrl.LoginServer(loginId, password, "");
+      passwordInput.value = "";
+      password = "";
+    }
+
+    function disconnectCentrex() {
+      try { EventClientCtrl.DisconnectServer(); } catch (error) {}
+      setStatus("연결 해제됨");
+      writeLog("DISCONNECT_REQUEST");
+    }
+
+    function answerCall(source) {
+      writeLog("ANSWER_REQUEST|SOURCE=" + safeToken(source));
+      try {
+        EventClientCtrl.Answer();
+      } catch (error) {
+        setStatus("전화 받기 호출 실패");
+        writeLog("ANSWER_EXCEPTION|CODE=" + safeToken(error.number));
+      }
+    }
+
+    function handleRing(raw) {
+      var eventData = parseEvent(raw);
+      writeLog(
+        "RINGEVENT|ISDIAL=" + safeToken(eventData.ISDIAL) +
+        "|INEXTEN=" + safeToken(eventData.INEXTEN) +
+        "|CALLER=" + maskPhone(eventData.CALLERID) +
+        "|UNIQUEID=" + safeToken(eventData.UNIQUEID)
+      );
+      setStatus("수신전화 감지: " + maskPhone(eventData.CALLERID));
+      var answerNextRing = document.getElementById("answerNextRing");
+      if (answerNextRing.checked) {
+        answerNextRing.checked = false;
+        window.setTimeout(function () { answerCall("armed-ring"); }, 250);
+      }
+    }
+
+    function handleLoginResult(raw) {
+      var eventData = parseEvent(raw);
+      var ok = String(eventData.STATUS) === "1";
+      setStatus(ok ? "센트릭스 연결됨" : "센트릭스 로그인 실패");
+      writeLog("LOGINRESULT|STATUS=" + safeToken(eventData.STATUS) + "|EXTEN=" + safeToken(eventData.EXTEN));
+    }
+
+    function handleChannelList(raw) {
+      var eventData = parseEvent(raw);
+      writeLog(
+        "CHANNELLIST|UNIQUEID1=" + safeToken(eventData.UNIQUEID1) +
+        "|UNIQUEID2=" + safeToken(eventData.UNIQUEID2)
+      );
+      setStatus("통화 연결 이벤트 수신");
+    }
+
+    function handleChannelOut(raw) {
+      var eventData = parseEvent(raw);
+      writeLog(
+        "CHANNELOUT|UNIQUEID=" + safeToken(eventData.UNIQUEID) +
+        "|SRCUNIQUEID=" + safeToken(eventData.SRCUNIQUEID)
+      );
+      setStatus("통화 종료 이벤트 수신");
+    }
+
+    function handleCommandResult(raw) {
+      var eventData = parseEvent(raw);
+      writeLog("COMMANDRESULT|EVENT=" + safeToken(eventData.EVENT) + "|CMD=" + safeToken(eventData.CMD) + "|STATUS=" + safeToken(eventData.STATUS));
+    }
+
+    window.onload = function () {
+      var ready = EventClientCtrl && EventClientCtrl.readyState === 4;
+      setStatus(ready ? "OCX 준비됨" : "OCX 초기화 확인 필요");
+      writeLog("HOST_READY|OCX_READY=" + (ready ? "1" : "0"));
+      document.getElementById("loginId").focus();
+    };
+
+    window.onbeforeunload = function () {
+      try { EventClientCtrl.DisconnectServer(); } catch (error) {}
+    };
+  </script>
+
+  <script language="JScript" for="EventClientCtrl" event="SendRingEvent(bstrRingEvent)">
+    handleRing(bstrRingEvent);
+  </script>
+  <script language="JScript" for="EventClientCtrl" event="SendLoginResultEvent(bstrLoginResult)">
+    handleLoginResult(bstrLoginResult);
+  </script>
+  <script language="JScript" for="EventClientCtrl" event="SendChannelListEvent(bstrChannelList)">
+    handleChannelList(bstrChannelList);
+  </script>
+  <script language="JScript" for="EventClientCtrl" event="SendChannelOutEvent(bstrChannelOut)">
+    handleChannelOut(bstrChannelOut);
+  </script>
+  <script language="JScript" for="EventClientCtrl" event="SendCommandResultEvent(bstrCommandResult)">
+    handleCommandResult(bstrCommandResult);
+  </script>
+</body>
+</html>

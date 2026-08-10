@@ -12,17 +12,21 @@ import {
   count,
   eq,
   gt,
+  inArray,
   isNull,
+  isNotNull,
   lt,
   or,
 } from "drizzle-orm";
 
 import {
+  staffCentrexLineUpdateSchema,
   staffInvitationAcceptanceSchema,
   staffInvitationCreationSchema,
   staffExternalAccountUpdateSchema,
   staffLoginSchema,
   staffSessionTokenSchema,
+  type StaffCentrexLineUpdate,
   type StaffInvitationAcceptance,
   type StaffInvitationCreation,
   type StaffExternalAccountUpdate,
@@ -38,11 +42,33 @@ import {
   staffProfiles,
   staffRegions,
   staffSessions,
+  staffTelephonyBindings,
+  staffTelephonyBridgeAssignments,
   staffUsers,
+  telephonyCalls,
+  telephonyEndpointCredentials,
+  telephonyEndpoints,
+  telephonyInboundCalls,
+  telephonyInboundCommands,
 } from "@lawand/db";
 import type { createDatabaseClient } from "@lawand/db";
 
+import { CentrexDeliveryError, type CentrexClient } from "./centrex.js";
+import {
+  createCentrexCredentialVault,
+  encryptCentrexCredential,
+} from "./centrex-credential-vault.js";
+import type { DataProtection } from "./crypto.js";
+import {
+  CentrexBridgeProvisioningError,
+  type CentrexBridgeAssignmentReservation,
+  type CentrexBridgeProvisioningService,
+} from "./centrex-bridge-provisioning.js";
+
 type Database = ReturnType<typeof createDatabaseClient>["db"];
+type DatabaseTransaction = Parameters<
+  Parameters<Database["transaction"]>[0]
+>[0];
 
 const PASSWORD_KEY_LENGTH = 64;
 const SCRYPT_COST = 32_768;
@@ -100,10 +126,25 @@ export type StaffInvitationInfo = {
   department: string;
   jobTitle: string;
   role: StaffRole;
+  centrexLineNumber: string | null;
+  centrexExtension: string | null;
   legalFriendsId: string | null;
   legalFriendsMemberIdx: number | null;
   expiresAt: string;
 };
+
+export type StaffCentrexConnectionStatus =
+  | "unconfigured"
+  | "incomplete"
+  | "pending_endpoint"
+  | "pending_assignment"
+  | "credential_pending"
+  | "bridge_pending"
+  | "bridge_provisioning"
+  | "bridge_failed"
+  | "bridge_offline"
+  | "connected"
+  | "mismatch";
 
 export type StaffDirectoryItem = {
   id: string;
@@ -115,9 +156,63 @@ export type StaffDirectoryItem = {
   department: string;
   jobTitle: string;
   role: StaffRole;
+  centrexLineNumber: string | null;
+  centrexExtension: string | null;
+  centrexConnection: {
+    status: StaffCentrexConnectionStatus;
+    assignedEndpoint: {
+      id: string;
+      label: string;
+      lineNumber: string;
+      extension: string;
+      credentialConfigured: boolean;
+      bridgeConfigured: boolean;
+      bridgeOnline: boolean;
+      bridgeState: string | null;
+      bridgeLastSeenAt: string | null;
+      lastAuthSucceededAt: string | null;
+    } | null;
+  };
   legalFriendsId: string | null;
   legalFriendsMemberIdx: number | null;
 };
+
+export function resolveStaffCentrexConnectionStatus(input: {
+  centrexLineNumber: string | null;
+  centrexExtension: string | null;
+  requestedEndpointExists: boolean;
+  assignedEndpointExists: boolean;
+  assignedEndpointMatches: boolean;
+  credentialConfigured: boolean;
+  bridgeExists: boolean;
+  bridgeMatches: boolean;
+  bridgeOnline: boolean;
+  bridgeState: string | null;
+  legacyBridgeConfigured: boolean;
+}): StaffCentrexConnectionStatus {
+  if (!input.centrexLineNumber && !input.centrexExtension) {
+    return input.assignedEndpointExists ? "mismatch" : "unconfigured";
+  }
+  if (!input.centrexLineNumber || !input.centrexExtension) {
+    return "incomplete";
+  }
+  if (!input.requestedEndpointExists) {
+    return input.assignedEndpointExists ? "mismatch" : "pending_endpoint";
+  }
+  if (!input.assignedEndpointExists) return "pending_assignment";
+  if (!input.assignedEndpointMatches) return "mismatch";
+  if (!input.credentialConfigured) return "credential_pending";
+  if (!input.bridgeExists) {
+    return input.legacyBridgeConfigured ? "connected" : "bridge_pending";
+  }
+  if (!input.bridgeOnline) return "bridge_offline";
+  if (input.bridgeState === "provisioning") return "bridge_provisioning";
+  if (input.bridgeState === "failed") return "bridge_failed";
+  if (input.bridgeMatches && input.bridgeState === "connected") {
+    return "connected";
+  }
+  return "bridge_pending";
+}
 
 export class StaffAuthError extends Error {
   constructor(
@@ -130,7 +225,15 @@ export class StaffAuthError extends Error {
       | "legalfriends_id_already_registered"
       | "staff_not_found"
       | "forbidden"
-      | "bootstrap_already_completed",
+      | "bootstrap_already_completed"
+      | "centrex_verification_failed"
+      | "centrex_line_mismatch"
+      | "centrex_provisioning_unavailable"
+      | "centrex_endpoint_conflict"
+      | "centrex_bridge_unassigned"
+      | "centrex_bridge_busy"
+      | "centrex_bridge_active_call"
+      | "centrex_bridge_failed",
     message: string,
   ) {
     super(message);
@@ -230,8 +333,159 @@ function hasRole(principal: StaffPrincipal, roles: StaffRole[]): boolean {
   return principal.roles.some((role) => roles.includes(role));
 }
 
-export function createStaffAuthService(options: { db: Database }) {
+export function createStaffAuthService(options: {
+  db: Database;
+  protection?: DataProtection;
+  centrexClient?: CentrexClient;
+  centrexFallbackCredentials?: Readonly<Record<string, string>>;
+  centrexBridgeEndpointIds?: ReadonlySet<string>;
+  centrexBridgeProvisioning?: CentrexBridgeProvisioningService;
+}) {
   const { db } = options;
+  const credentialVault = options.protection
+    ? createCentrexCredentialVault({
+        db,
+        protection: options.protection,
+        ...(options.centrexFallbackCredentials
+          ? { fallbackCredentials: options.centrexFallbackCredentials }
+          : {}),
+      })
+    : null;
+  const centrexBridgeEndpointIds =
+    options.centrexBridgeEndpointIds ?? new Set<string>();
+
+  async function reconcileStaffCentrexBinding(
+    tx: DatabaseTransaction,
+    input: {
+      staffUserId: string;
+      actorUserId: string | null;
+      lineNumber: string | null;
+      extension: string | null;
+      now: Date;
+    },
+  ): Promise<{
+    changed: boolean;
+    endpointId: string | null;
+    status: "unconfigured" | "pending_endpoint" | "assigned";
+  }> {
+    const currentBindings = await tx
+      .select({
+        id: staffTelephonyBindings.id,
+        endpointId: staffTelephonyBindings.endpointId,
+        isPrimary: staffTelephonyBindings.isPrimary,
+      })
+      .from(staffTelephonyBindings)
+      .where(
+        and(
+          eq(staffTelephonyBindings.staffUserId, input.staffUserId),
+          eq(staffTelephonyBindings.isActive, true),
+        ),
+      )
+      .for("update");
+
+    const [endpoint] =
+      input.lineNumber && input.extension
+        ? await tx
+            .select({ id: telephonyEndpoints.id })
+            .from(telephonyEndpoints)
+            .where(
+              and(
+                eq(telephonyEndpoints.provider, "centrex"),
+                eq(telephonyEndpoints.lineNumber, input.lineNumber),
+                eq(telephonyEndpoints.extension, input.extension),
+                eq(telephonyEndpoints.isActive, true),
+                isNotNull(telephonyEndpoints.lastAuthSucceededAt),
+              ),
+            )
+            .limit(1)
+            .for("update")
+        : [];
+
+    const alreadyAssigned = Boolean(
+      endpoint &&
+        currentBindings.length === 1 &&
+        currentBindings[0]?.endpointId === endpoint.id &&
+        currentBindings[0]?.isPrimary,
+    );
+    if (alreadyAssigned) {
+      return { changed: false, endpointId: endpoint!.id, status: "assigned" };
+    }
+
+    if (currentBindings.length > 0) {
+      await tx
+        .update(staffTelephonyBindings)
+        .set({ isActive: false, isPrimary: false, updatedAt: input.now })
+        .where(
+          and(
+            eq(staffTelephonyBindings.staffUserId, input.staffUserId),
+            eq(staffTelephonyBindings.isActive, true),
+          ),
+        );
+    }
+
+    if (!endpoint) {
+      return {
+        changed: currentBindings.length > 0,
+        endpointId: null,
+        status:
+          input.lineNumber && input.extension
+            ? "pending_endpoint"
+            : "unconfigured",
+      };
+    }
+
+    const [existingBinding] = await tx
+      .select({ id: staffTelephonyBindings.id })
+      .from(staffTelephonyBindings)
+      .where(
+        and(
+          eq(staffTelephonyBindings.staffUserId, input.staffUserId),
+          eq(staffTelephonyBindings.endpointId, endpoint.id),
+        ),
+      )
+      .limit(1)
+      .for("update");
+    if (existingBinding) {
+      await tx
+        .update(staffTelephonyBindings)
+        .set({
+          isActive: true,
+          isPrimary: true,
+          assignedAt: input.now,
+          assignedByUserId: input.actorUserId,
+          updatedAt: input.now,
+        })
+        .where(eq(staffTelephonyBindings.id, existingBinding.id));
+    } else {
+      await tx.insert(staffTelephonyBindings).values({
+        id: randomUUID(),
+        staffUserId: input.staffUserId,
+        endpointId: endpoint.id,
+        isActive: true,
+        isPrimary: true,
+        assignedAt: input.now,
+        assignedByUserId: input.actorUserId,
+        createdAt: input.now,
+        updatedAt: input.now,
+      });
+    }
+    await tx.insert(staffAuditLogs).values({
+      id: randomUUID(),
+      actorUserId: input.actorUserId,
+      action: "telephony.centrex_endpoint.assignment_reconciled",
+      targetType: "staff_user",
+      targetId: input.staffUserId,
+      metadata: {
+        endpointId: endpoint.id,
+        lineLast4: input.lineNumber?.slice(-4) ?? null,
+        extension: input.extension,
+        source: "verified_staff_centrex_profile",
+      },
+      occurredAt: input.now,
+      createdAt: input.now,
+    });
+    return { changed: true, endpointId: endpoint.id, status: "assigned" };
+  }
 
   async function membershipsForUser(
     userId: string,
@@ -532,6 +786,8 @@ export function createStaffAuthService(options: { db: Database }) {
         regionName: staffRegions.name,
         department: staffInvitations.department,
         jobTitle: staffInvitations.jobTitle,
+        centrexLineNumber: staffInvitations.centrexLineNumber,
+        centrexExtension: staffInvitations.centrexExtension,
         legalFriendsId: staffInvitations.legalFriendsAccountId,
         legalFriendsMemberIdx: staffInvitations.legalFriendsMemberIdx,
         expiresAt: staffInvitations.expiresAt,
@@ -574,6 +830,8 @@ export function createStaffAuthService(options: { db: Database }) {
       department: invitation.department,
       jobTitle: invitation.jobTitle,
       role: invitation.role,
+      centrexLineNumber: invitation.centrexLineNumber,
+      centrexExtension: invitation.centrexExtension,
       legalFriendsId: invitation.legalFriendsId,
       legalFriendsMemberIdx: invitation.legalFriendsMemberIdx,
       expiresAt: invitation.expiresAt.toISOString(),
@@ -611,6 +869,8 @@ export function createStaffAuthService(options: { db: Database }) {
             regionKey: staffInvitations.regionKey,
             department: staffInvitations.department,
             jobTitle: staffInvitations.jobTitle,
+            centrexLineNumber: staffInvitations.centrexLineNumber,
+            centrexExtension: staffInvitations.centrexExtension,
             legalFriendsId: staffInvitations.legalFriendsAccountId,
             legalFriendsMemberIdx:
               staffInvitations.legalFriendsMemberIdx,
@@ -644,6 +904,8 @@ export function createStaffAuthService(options: { db: Database }) {
         await tx.insert(staffProfiles).values({
           userId,
           displayName: invitation.displayName,
+          centrexLineNumber: invitation.centrexLineNumber,
+          centrexExtension: invitation.centrexExtension,
         });
         await tx.insert(staffMemberships).values({
           id: randomUUID(),
@@ -696,6 +958,13 @@ export function createStaffAuthService(options: { db: Database }) {
             updatedAt: now,
           });
         }
+        const centrexAssignment = await reconcileStaffCentrexBinding(tx, {
+          staffUserId: userId,
+          actorUserId: invitation.invitedByUserId,
+          lineNumber: invitation.centrexLineNumber,
+          extension: invitation.centrexExtension,
+          now,
+        });
         await tx.insert(staffAuditLogs).values({
           id: randomUUID(),
           actorUserId: userId,
@@ -707,6 +976,11 @@ export function createStaffAuthService(options: { db: Database }) {
             role: invitation.role,
             organization: invitation.organizationKey,
             region: invitation.regionKey,
+            centrexLineConfigured: Boolean(invitation.centrexLineNumber),
+            centrexExtensionConfigured: Boolean(
+              invitation.centrexExtension,
+            ),
+            centrexAssignmentStatus: centrexAssignment.status,
             legalFriendsConnected: Boolean(invitation.legalFriendsId),
             legalFriendsMemberIdx: invitation.legalFriendsMemberIdx,
           },
@@ -820,6 +1094,8 @@ export function createStaffAuthService(options: { db: Database }) {
       department: input.department,
       jobTitle: input.jobTitle,
       role: input.role,
+      centrexLineNumber: input.centrexLineNumber ?? null,
+      centrexExtension: input.centrexExtension ?? null,
       legalFriendsAccountId: input.legalFriendsId ?? null,
       legalFriendsMemberIdx: input.legalFriendsMemberIdx ?? null,
       tokenHash: tokenHash(token),
@@ -871,6 +1147,8 @@ export function createStaffAuthService(options: { db: Database }) {
           role: input.role,
           organization: input.organization,
           region: input.region,
+          centrexLineConfigured: Boolean(input.centrexLineNumber),
+          centrexExtensionConfigured: Boolean(input.centrexExtension),
           legalFriendsConnected: Boolean(input.legalFriendsId),
           legalFriendsMemberIdx: input.legalFriendsMemberIdx ?? null,
         },
@@ -899,6 +1177,8 @@ export function createStaffAuthService(options: { db: Database }) {
       department: input.department,
       jobTitle: input.jobTitle,
       role: input.role,
+      centrexLineNumber: input.centrexLineNumber ?? null,
+      centrexExtension: input.centrexExtension ?? null,
       legalFriendsId: input.legalFriendsId ?? null,
       legalFriendsMemberIdx: input.legalFriendsMemberIdx ?? null,
       token,
@@ -932,8 +1212,14 @@ export function createStaffAuthService(options: { db: Database }) {
     if (!hasRole(actor, ["admin"])) {
       throw new StaffAuthError("forbidden", "직원 조회 권한이 없습니다.");
     }
-    const rows = await db
-      .select({
+    const [
+      rows,
+      verifiedEndpoints,
+      activePrimaryBindings,
+      storedCredentialRows,
+      activeBridgeAssignments,
+    ] = await Promise.all([
+      db.select({
         id: staffUsers.id,
         email: staffUsers.email,
         displayName: staffProfiles.displayName,
@@ -945,6 +1231,8 @@ export function createStaffAuthService(options: { db: Database }) {
         department: staffMemberships.department,
         jobTitle: staffMemberships.jobTitle,
         role: staffMemberships.role,
+        centrexLineNumber: staffProfiles.centrexLineNumber,
+        centrexExtension: staffProfiles.centrexExtension,
         legalFriendsId: staffExternalAccounts.externalAccountId,
         legalFriendsMemberIdx: staffExternalAccounts.externalMemberIdx,
       })
@@ -974,24 +1262,166 @@ export function createStaffAuthService(options: { db: Database }) {
           eq(staffExternalAccounts.isActive, true),
         ),
       )
-      .orderBy(asc(staffProfiles.displayName), asc(staffUsers.email));
+      .orderBy(asc(staffProfiles.displayName), asc(staffUsers.email)),
+      db
+        .select({
+          id: telephonyEndpoints.id,
+          label: telephonyEndpoints.label,
+          lineNumber: telephonyEndpoints.lineNumber,
+          extension: telephonyEndpoints.extension,
+          credentialKey: telephonyEndpoints.credentialKey,
+          lastAuthSucceededAt: telephonyEndpoints.lastAuthSucceededAt,
+        })
+        .from(telephonyEndpoints)
+        .where(
+          and(
+            eq(telephonyEndpoints.provider, "centrex"),
+            eq(telephonyEndpoints.isActive, true),
+            isNotNull(telephonyEndpoints.lastAuthSucceededAt),
+          ),
+        ),
+      db
+        .select({
+          staffUserId: staffTelephonyBindings.staffUserId,
+          endpointId: telephonyEndpoints.id,
+          label: telephonyEndpoints.label,
+          lineNumber: telephonyEndpoints.lineNumber,
+          extension: telephonyEndpoints.extension,
+          credentialKey: telephonyEndpoints.credentialKey,
+          lastAuthSucceededAt: telephonyEndpoints.lastAuthSucceededAt,
+        })
+        .from(staffTelephonyBindings)
+        .innerJoin(
+          telephonyEndpoints,
+          eq(telephonyEndpoints.id, staffTelephonyBindings.endpointId),
+        )
+        .where(
+          and(
+            eq(staffTelephonyBindings.isActive, true),
+            eq(staffTelephonyBindings.isPrimary, true),
+            eq(telephonyEndpoints.isActive, true),
+          ),
+        ),
+      db
+        .select({ endpointId: telephonyEndpointCredentials.endpointId })
+        .from(telephonyEndpointCredentials),
+      db
+        .select({
+          staffUserId: staffTelephonyBridgeAssignments.staffUserId,
+          currentEndpointId:
+            staffTelephonyBridgeAssignments.currentEndpointId,
+          pendingEndpointId:
+            staffTelephonyBridgeAssignments.pendingEndpointId,
+          state: staffTelephonyBridgeAssignments.state,
+          lastSeenAt: staffTelephonyBridgeAssignments.lastSeenAt,
+          lastLoginSucceededAt:
+            staffTelephonyBridgeAssignments.lastLoginSucceededAt,
+          lastResultCode: staffTelephonyBridgeAssignments.lastResultCode,
+        })
+        .from(staffTelephonyBridgeAssignments)
+        .where(eq(staffTelephonyBridgeAssignments.isActive, true)),
+    ]);
+    const storedCredentialEndpointIds = new Set(
+      storedCredentialRows.map(({ endpointId }) => endpointId),
+    );
+    const credentialConfigured = (endpoint: {
+      endpointId?: string;
+      id?: string;
+      credentialKey: string;
+    }) =>
+      storedCredentialEndpointIds.has(
+        endpoint.endpointId ?? endpoint.id ?? "",
+      ) ||
+      credentialVault?.hasFallback(endpoint.credentialKey) === true;
+    const endpointByLineAndExtension = new Map(
+      verifiedEndpoints.map((endpoint) => [
+        `${endpoint.lineNumber}:${endpoint.extension}`,
+        endpoint,
+      ]),
+    );
+    const bindingByStaff = new Map(
+      activePrimaryBindings.map((binding) => [binding.staffUserId, binding]),
+    );
+    const bridgeByStaff = new Map(
+      activeBridgeAssignments.map((bridge) => [bridge.staffUserId, bridge]),
+    );
+    const bridgeOnlineAfter = Date.now() - 45_000;
     return {
-      items: rows.map((row) => ({
-        id: row.id,
-        email: row.email,
-        displayName: row.displayName,
-        status: row.status,
-        organization: {
-          key: row.organizationKey,
-          name: row.organizationName,
-        },
-        region: { key: row.regionKey, name: row.regionName },
-        department: row.department,
-        jobTitle: row.jobTitle,
-        role: row.role,
-        legalFriendsId: row.legalFriendsId,
-        legalFriendsMemberIdx: row.legalFriendsMemberIdx,
-      })),
+      items: rows.map((row) => {
+        const assigned = bindingByStaff.get(row.id) ?? null;
+        const requested =
+          row.centrexLineNumber && row.centrexExtension
+            ? endpointByLineAndExtension.get(
+                `${row.centrexLineNumber}:${row.centrexExtension}`,
+              ) ?? null
+            : null;
+        const bridge = bridgeByStaff.get(row.id) ?? null;
+        const bridgeMatches = Boolean(
+          assigned && bridge?.currentEndpointId === assigned.endpointId,
+        );
+        const bridgeOnline = Boolean(
+          bridge?.lastSeenAt &&
+            bridge.lastSeenAt.getTime() >= bridgeOnlineAfter,
+        );
+        const connectionStatus = resolveStaffCentrexConnectionStatus({
+          centrexLineNumber: row.centrexLineNumber,
+          centrexExtension: row.centrexExtension,
+          requestedEndpointExists: Boolean(requested),
+          assignedEndpointExists: Boolean(assigned),
+          assignedEndpointMatches: Boolean(
+            assigned && requested && assigned.endpointId === requested.id,
+          ),
+          credentialConfigured: Boolean(
+            assigned && credentialConfigured(assigned),
+          ),
+          bridgeExists: Boolean(bridge),
+          bridgeMatches,
+          bridgeOnline,
+          bridgeState: bridge?.state ?? null,
+          legacyBridgeConfigured: Boolean(
+            assigned && centrexBridgeEndpointIds.has(assigned.endpointId),
+          ),
+        });
+        return {
+          id: row.id,
+          email: row.email,
+          displayName: row.displayName,
+          status: row.status,
+          organization: {
+            key: row.organizationKey,
+            name: row.organizationName,
+          },
+          region: { key: row.regionKey, name: row.regionName },
+          department: row.department,
+          jobTitle: row.jobTitle,
+          role: row.role,
+          centrexLineNumber: row.centrexLineNumber,
+          centrexExtension: row.centrexExtension,
+          centrexConnection: {
+            status: connectionStatus,
+            assignedEndpoint: assigned
+              ? {
+                  id: assigned.endpointId,
+                  label: assigned.label,
+                  lineNumber: assigned.lineNumber,
+                  extension: assigned.extension,
+                  credentialConfigured: credentialConfigured(assigned),
+                  bridgeConfigured:
+                    bridgeMatches ||
+                    centrexBridgeEndpointIds.has(assigned.endpointId),
+                  bridgeOnline,
+                  bridgeState: bridge?.state ?? null,
+                  bridgeLastSeenAt:
+                    bridge?.lastSeenAt?.toISOString() ?? null,
+                  lastAuthSucceededAt:
+                    assigned.lastAuthSucceededAt?.toISOString() ?? null,
+                }
+              : null,
+          },
+          legalFriendsId: row.legalFriendsId,
+          legalFriendsMemberIdx: row.legalFriendsMemberIdx,
+        } satisfies StaffDirectoryItem;
+      }),
     };
   }
 
@@ -1143,6 +1573,534 @@ export function createStaffAuthService(options: { db: Database }) {
     };
   }
 
+  async function updateCentrexLineNumber(
+    actor: StaffPrincipal,
+    staffUserId: string,
+    rawInput: StaffCentrexLineUpdate,
+  ): Promise<{
+    centrexLineNumber: string | null;
+    centrexExtension: string | null;
+    assignmentStatus: "unconfigured" | "pending_endpoint" | "assigned";
+    credentialUpdated: boolean;
+    bridgeConnected: boolean;
+  }> {
+    if (!hasRole(actor, ["admin"])) {
+      throw new StaffAuthError(
+        "forbidden",
+        "센트릭스 회선번호 변경 권한이 없습니다.",
+      );
+    }
+    const input = staffCentrexLineUpdateSchema.parse(rawInput);
+    const now = new Date();
+    let provisioned:
+      | {
+          endpointId: string;
+          credentialKey: string;
+          label: string;
+          encrypted: ReturnType<typeof encryptCentrexCredential>;
+        }
+      | undefined;
+    let bridgeReservation: CentrexBridgeAssignmentReservation | undefined;
+
+    if (
+      input.centrexLineNumber &&
+      input.centrexExtension &&
+      input.centrexPassword
+    ) {
+      if (!options.centrexClient || !options.protection) {
+        throw new StaffAuthError(
+          "centrex_provisioning_unavailable",
+          "센트릭스 회선 검증 기능이 준비되지 않았습니다.",
+        );
+      }
+      if (!options.centrexBridgeProvisioning) {
+        throw new StaffAuthError(
+          "centrex_provisioning_unavailable",
+          "Windows bridge 통합 연결 기능이 준비되지 않았습니다.",
+        );
+      }
+      const [staff] = await db
+        .select({
+          id: staffProfiles.userId,
+          displayName: staffProfiles.displayName,
+        })
+        .from(staffProfiles)
+        .where(eq(staffProfiles.userId, staffUserId))
+        .limit(1);
+      if (!staff) {
+        throw new StaffAuthError(
+          "staff_not_found",
+          "직원 계정을 찾을 수 없습니다.",
+        );
+      }
+      const passwordSha512 = createHash("sha512")
+        .update(input.centrexPassword, "utf8")
+        .digest("hex");
+      let verified: Awaited<ReturnType<CentrexClient["getUserInfo"]>>;
+      try {
+        verified = await options.centrexClient.getUserInfo({
+          apiLoginId: input.centrexLineNumber,
+          passwordSha512,
+        });
+      } catch (error) {
+        throw new StaffAuthError(
+          "centrex_verification_failed",
+          error instanceof CentrexDeliveryError
+            ? error.message
+            : "센트릭스 회선 정보를 확인하지 못했습니다.",
+        );
+      }
+      if (
+        verified.lineNumber !== input.centrexLineNumber ||
+        verified.extension !== input.centrexExtension
+      ) {
+        throw new StaffAuthError(
+          "centrex_line_mismatch",
+          `센트릭스 확인 결과가 입력값과 다릅니다. 확인된 회선은 ${verified.lineNumber}, 내선은 ${verified.extension}입니다.`,
+        );
+      }
+      const existingEndpoints = await db
+        .select({
+          id: telephonyEndpoints.id,
+          credentialKey: telephonyEndpoints.credentialKey,
+        })
+        .from(telephonyEndpoints)
+        .where(
+          and(
+            eq(telephonyEndpoints.provider, "centrex"),
+            or(
+              eq(
+                telephonyEndpoints.lineNumber,
+                input.centrexLineNumber,
+              ),
+              eq(telephonyEndpoints.apiLoginId, input.centrexLineNumber),
+            ),
+          ),
+        );
+      if (existingEndpoints.length > 1) {
+        throw new StaffAuthError(
+          "centrex_endpoint_conflict",
+          "회선번호와 로그인 ID가 서로 다른 기존 endpoint에 연결되어 있습니다.",
+        );
+      }
+      const endpointId = existingEndpoints[0]?.id ?? randomUUID();
+      const credentialKey =
+        existingEndpoints[0]?.credentialKey ?? `endpoint-${endpointId}`;
+      provisioned = {
+        endpointId,
+        credentialKey,
+        label: `${staff.displayName} 내선 ${input.centrexExtension}`,
+        encrypted: encryptCentrexCredential(
+          options.protection,
+          endpointId,
+          passwordSha512,
+        ),
+      };
+      try {
+        bridgeReservation =
+          await options.centrexBridgeProvisioning.ensureAssignmentForStaff(
+            staffUserId,
+            actor.id,
+          );
+      } catch (error) {
+        if (error instanceof CentrexBridgeProvisioningError) {
+          throw new StaffAuthError(
+            error.code === "bridge_busy"
+              ? "centrex_bridge_busy"
+              : error.code === "bridge_unassigned" ||
+                  error.code === "bridge_unavailable"
+                ? "centrex_bridge_unassigned"
+                : "centrex_bridge_failed",
+            error.message,
+          );
+        }
+        throw new StaffAuthError(
+          "centrex_bridge_failed",
+          "Windows bridge 자동 배정을 완료하지 못했습니다.",
+        );
+      }
+    }
+
+    const updateResult = await (async () => {
+      try {
+        return await db.transaction(async (tx) => {
+      const [profile] = await tx
+        .select({
+          userId: staffProfiles.userId,
+          centrexLineNumber: staffProfiles.centrexLineNumber,
+          centrexExtension: staffProfiles.centrexExtension,
+        })
+        .from(staffProfiles)
+        .where(eq(staffProfiles.userId, staffUserId))
+        .limit(1)
+        .for("update");
+      if (!profile) {
+        throw new StaffAuthError(
+          "staff_not_found",
+          "직원 계정을 찾을 수 없습니다.",
+        );
+      }
+      if (provisioned && input.centrexLineNumber && input.centrexExtension) {
+        const matchingEndpoints = await tx
+          .select({ id: telephonyEndpoints.id })
+          .from(telephonyEndpoints)
+          .where(
+            and(
+              eq(telephonyEndpoints.provider, "centrex"),
+              or(
+                eq(
+                  telephonyEndpoints.lineNumber,
+                  input.centrexLineNumber,
+                ),
+                eq(telephonyEndpoints.apiLoginId, input.centrexLineNumber),
+              ),
+            ),
+          )
+          .for("update");
+        if (
+          matchingEndpoints.length > 1 ||
+          (matchingEndpoints[0] &&
+            matchingEndpoints[0].id !== provisioned.endpointId)
+        ) {
+          throw new StaffAuthError(
+            "centrex_endpoint_conflict",
+            "회선 검증 중 기존 endpoint가 변경되었습니다. 다시 시도해 주세요.",
+          );
+        }
+        if (matchingEndpoints[0]) {
+          await tx
+            .update(telephonyEndpoints)
+            .set({
+              label: provisioned.label,
+              lineNumber: input.centrexLineNumber,
+              extension: input.centrexExtension,
+              apiLoginId: input.centrexLineNumber,
+              credentialKey: provisioned.credentialKey,
+              isActive: true,
+              lastAuthSucceededAt: now,
+              lastAuthFailedAt: null,
+              updatedAt: now,
+            })
+            .where(eq(telephonyEndpoints.id, provisioned.endpointId));
+        } else {
+          await tx.insert(telephonyEndpoints).values({
+            id: provisioned.endpointId,
+            provider: "centrex",
+            endpointType: "personal",
+            label: provisioned.label,
+            lineNumber: input.centrexLineNumber,
+            extension: input.centrexExtension,
+            apiLoginId: input.centrexLineNumber,
+            credentialKey: provisioned.credentialKey,
+            isActive: true,
+            lastAuthSucceededAt: now,
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+        await tx
+          .insert(telephonyEndpointCredentials)
+          .values({
+            endpointId: provisioned.endpointId,
+            passwordSha512Ciphertext: provisioned.encrypted.ciphertext,
+            passwordSha512Nonce: provisioned.encrypted.nonce,
+            passwordSha512KeyVersion: provisioned.encrypted.keyVersion,
+            verifiedAt: now,
+            verifiedByUserId: actor.id,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .onConflictDoUpdate({
+            target: telephonyEndpointCredentials.endpointId,
+            set: {
+              passwordSha512Ciphertext: provisioned.encrypted.ciphertext,
+              passwordSha512Nonce: provisioned.encrypted.nonce,
+              passwordSha512KeyVersion: provisioned.encrypted.keyVersion,
+              verifiedAt: now,
+              verifiedByUserId: actor.id,
+              updatedAt: now,
+            },
+          });
+      }
+      const profileChanged =
+        profile.centrexLineNumber !== input.centrexLineNumber ||
+        profile.centrexExtension !== input.centrexExtension;
+      if (profileChanged) {
+        await tx
+          .update(staffProfiles)
+          .set({
+            centrexLineNumber: input.centrexLineNumber,
+            centrexExtension: input.centrexExtension,
+            updatedAt: now,
+          })
+          .where(eq(staffProfiles.userId, staffUserId));
+      }
+      const assignment = await reconcileStaffCentrexBinding(tx, {
+        staffUserId,
+        actorUserId: actor.id,
+        lineNumber: input.centrexLineNumber,
+        extension: input.centrexExtension,
+        now,
+      });
+      if (profileChanged || assignment.changed || provisioned) {
+        await tx.insert(staffAuditLogs).values({
+          id: randomUUID(),
+          actorUserId: actor.id,
+          action: "staff.centrex_line.updated",
+          targetType: "staff_user",
+          targetId: staffUserId,
+          metadata: {
+            previousConfigured: Boolean(profile.centrexLineNumber),
+            previousLineLast4:
+              profile.centrexLineNumber?.slice(-4) ?? null,
+            previousExtension: profile.centrexExtension,
+            newConfigured: Boolean(input.centrexLineNumber),
+            newLineLast4: input.centrexLineNumber?.slice(-4) ?? null,
+            newExtension: input.centrexExtension,
+            assignmentStatus: assignment.status,
+            assignedEndpointId: assignment.endpointId,
+            credentialVerified: Boolean(provisioned),
+          },
+          occurredAt: now,
+        });
+      }
+          return {
+            assignment,
+            previousLineNumber: profile.centrexLineNumber,
+            previousExtension: profile.centrexExtension,
+          };
+        });
+      } catch (error) {
+        if (bridgeReservation?.newlyAssigned) {
+          try {
+            await options.centrexBridgeProvisioning?.releaseNewAssignment({
+              staffUserId,
+              bridgeId: bridgeReservation.assignment.bridgeId,
+            });
+          } catch {
+            throw new StaffAuthError(
+              "centrex_bridge_failed",
+              "회선 저장 실패 후 Windows bridge 슬롯을 복구하지 못했습니다.",
+            );
+          }
+        }
+        throw error;
+      }
+    })();
+
+    let bridgeConnected = false;
+    if (
+      provisioned &&
+      input.centrexLineNumber &&
+      input.centrexExtension &&
+      input.centrexPassword &&
+      options.centrexBridgeProvisioning
+    ) {
+      try {
+        const bridgeResult = await options.centrexBridgeProvisioning.provision({
+          staffUserId,
+          endpointId: provisioned.endpointId,
+          loginId: input.centrexLineNumber,
+          password: input.centrexPassword,
+          expectedExtension: input.centrexExtension,
+          expectedLineLast4: input.centrexLineNumber.slice(-4),
+        });
+        bridgeConnected = true;
+        await addAudit({
+          actorUserId: actor.id,
+          action: "telephony.centrex_bridge.provisioned",
+          targetType: "staff_user",
+          targetId: staffUserId,
+          metadata: {
+            endpointId: provisioned.endpointId,
+            lineLast4: input.centrexLineNumber.slice(-4),
+            extension: input.centrexExtension,
+            resultCode: bridgeResult.resultCode,
+          },
+        });
+      } catch (error) {
+        await db.transaction(async (tx) => {
+          await tx
+            .update(staffProfiles)
+            .set({
+              centrexLineNumber: updateResult.previousLineNumber,
+              centrexExtension: updateResult.previousExtension,
+              updatedAt: new Date(),
+            })
+            .where(eq(staffProfiles.userId, staffUserId));
+          await reconcileStaffCentrexBinding(tx, {
+            staffUserId,
+            actorUserId: actor.id,
+            lineNumber: updateResult.previousLineNumber,
+            extension: updateResult.previousExtension,
+            now: new Date(),
+          });
+          await tx.insert(staffAuditLogs).values({
+            id: randomUUID(),
+            actorUserId: actor.id,
+            action: "telephony.centrex_bridge.provisioning_failed",
+            targetType: "staff_user",
+            targetId: staffUserId,
+            metadata: {
+              attemptedEndpointId: provisioned.endpointId,
+              attemptedLineLast4: input.centrexLineNumber!.slice(-4),
+              attemptedExtension: input.centrexExtension,
+              restoredPreviousAssignment: true,
+              reason:
+                error instanceof CentrexBridgeProvisioningError
+                  ? error.code
+                  : "unexpected_bridge_error",
+            },
+            occurredAt: new Date(),
+          });
+        });
+        if (bridgeReservation?.newlyAssigned) {
+          try {
+            await options.centrexBridgeProvisioning.releaseNewAssignment({
+              staffUserId,
+              bridgeId: bridgeReservation.assignment.bridgeId,
+            });
+          } catch {
+            throw new StaffAuthError(
+              "centrex_bridge_failed",
+              "회선 연결 실패 후 Windows bridge 슬롯을 복구하지 못했습니다.",
+            );
+          }
+        }
+        if (error instanceof CentrexBridgeProvisioningError) {
+          const code =
+            error.code === "bridge_unassigned"
+              ? "centrex_bridge_unassigned"
+              : error.code === "bridge_busy"
+                ? "centrex_bridge_busy"
+                : "centrex_bridge_failed";
+          throw new StaffAuthError(code, error.message);
+        }
+        throw new StaffAuthError(
+          "centrex_bridge_failed",
+          "Windows bridge 회선 연결을 완료하지 못했습니다.",
+        );
+      }
+    }
+    return {
+      centrexLineNumber: input.centrexLineNumber,
+      centrexExtension: input.centrexExtension,
+      assignmentStatus: updateResult.assignment.status,
+      credentialUpdated: Boolean(provisioned),
+      bridgeConnected,
+    };
+  }
+
+  async function reassignCentrexBridge(
+    actor: StaffPrincipal,
+    staffUserId: string,
+  ) {
+    if (!hasRole(actor, ["admin"])) {
+      throw new StaffAuthError(
+        "forbidden",
+        "센트릭스 bridge 재배정 권한이 없습니다.",
+      );
+    }
+    const provisioning = options.centrexBridgeProvisioning;
+    if (!provisioning) {
+      throw new StaffAuthError(
+        "centrex_provisioning_unavailable",
+        "Windows bridge 재배정 기능이 준비되지 않았습니다.",
+      );
+    }
+    const assignment = provisioning.assignmentForStaff(staffUserId);
+    if (!assignment) {
+      throw new StaffAuthError(
+        "centrex_bridge_unassigned",
+        "이 직원에게 재배정할 Windows bridge가 없습니다.",
+      );
+    }
+    if (assignment.currentEndpointId) {
+      const [activeInbound, activeAnswer, activeOutbound] = await Promise.all([
+        db
+          .select({ id: telephonyInboundCalls.id })
+          .from(telephonyInboundCalls)
+          .where(
+            and(
+              eq(
+                telephonyInboundCalls.endpointId,
+                assignment.currentEndpointId,
+              ),
+              inArray(telephonyInboundCalls.state, ["ringing", "connected"]),
+            ),
+          )
+          .limit(1),
+        db
+          .select({ id: telephonyInboundCommands.id })
+          .from(telephonyInboundCommands)
+          .where(
+            and(
+              eq(
+                telephonyInboundCommands.endpointId,
+                assignment.currentEndpointId,
+              ),
+              inArray(telephonyInboundCommands.status, [
+                "queued",
+                "dispatching",
+              ]),
+            ),
+          )
+          .limit(1),
+        db
+          .select({ id: telephonyCalls.id })
+          .from(telephonyCalls)
+          .where(
+            and(
+              eq(telephonyCalls.endpointId, assignment.currentEndpointId),
+              inArray(telephonyCalls.commandStatus, [
+                "queued",
+                "dispatching",
+              ]),
+            ),
+          )
+          .limit(1),
+      ]);
+      if (activeInbound[0] || activeAnswer[0] || activeOutbound[0]) {
+        throw new StaffAuthError(
+          "centrex_bridge_active_call",
+          "진행 중인 통화 또는 전화 명령이 있어 bridge를 재배정할 수 없습니다.",
+        );
+      }
+    }
+
+    try {
+      const result = await provisioning.prepareReassignmentForStaff(
+        staffUserId,
+        actor.id,
+      );
+      await addAudit({
+        actorUserId: actor.id,
+        action: "telephony.centrex_bridge.reassigned",
+        targetType: "staff_user",
+        targetId: staffUserId,
+        metadata: {
+          previousBridgeId: result.previousBridgeId,
+          replacementBridgeId: result.replacementBridgeId,
+          previousQuarantined: result.previousQuarantined,
+        },
+      });
+      return result;
+    } catch (error) {
+      if (error instanceof CentrexBridgeProvisioningError) {
+        throw new StaffAuthError(
+          error.code === "bridge_busy"
+            ? "centrex_bridge_busy"
+            : error.code === "bridge_unassigned" ||
+                error.code === "bridge_unavailable"
+              ? "centrex_bridge_unassigned"
+              : "centrex_bridge_failed",
+          error.message,
+        );
+      }
+      throw error;
+    }
+  }
+
   async function authorize(
     rawToken: string,
     roles: StaffRole[],
@@ -1194,6 +2152,8 @@ export function createStaffAuthService(options: { db: Database }) {
     login,
     logout,
     recordConsultationAccess,
+    reassignCentrexBridge,
+    updateCentrexLineNumber,
     updateLegalFriendsAccount,
   };
 }

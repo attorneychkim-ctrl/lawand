@@ -19,6 +19,8 @@ coverage/
 playwright-report/
 test-results/
 *.tsbuildinfo
+apps/homepage/C:\\Users\\*/AppData/Local/lighthouse.*/
+apps/homepage/C:*/
 
 # editors and OS
 .DS_Store

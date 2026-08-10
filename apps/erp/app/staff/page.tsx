@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { StaffBar } from "../_components/staff-bar";
+import { StaffDirectoryWorkspace } from "../_components/staff-directory-workspace";
 import { StaffInviteForm } from "../_components/staff-invite-form";
-import { LegalFriendsAccountForm } from "../_components/legalfriends-account-form";
 import { getStaffDirectory } from "../../lib/staff-auth";
 import {
   readStaffSessionToken,
@@ -30,47 +30,46 @@ export default async function StaffPage() {
         </Link>
         <header className="detail-header">
           <div>
-            <p className="eyebrow">ERP ACCESS CONTROL</p>
+            <p className="eyebrow">PEOPLE &amp; INTEGRATIONS</p>
             <h1>직원 관리</h1>
-            <p>공개 회원가입 없이 초대받은 직원만 계정을 만들 수 있습니다.</p>
+            <p>
+              직원 계정과 업무 시스템 연결 상태를 한곳에서 확인하고 관리합니다.
+            </p>
+          </div>
+          <div className="staff-header-note">
+            <strong>관리자 전용</strong>
+            <span>변경 내용은 감사 원장에 기록됩니다.</span>
           </div>
         </header>
-        <section className="erp-panel staff-panel">
-          <StaffInviteForm />
-        </section>
         <section className="erp-panel staff-directory">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">LEGALFRIENDS ACCOUNT</p>
-              <h2>직원별 리걸프렌즈 계정</h2>
+              <p className="eyebrow">ACTIVE DIRECTORY</p>
+              <h2>직원 및 업무 연동 현황</h2>
               <p>
-                상담을 배정받는 직원의 리걸프렌즈 로그인 아이디를 연결합니다.
-                아이디를 비우고 저장하면 연결이 해제됩니다.
+                센트릭스 번호·내선과 실제 Windows bridge 배정을 대조하고,
+                리걸프렌즈 계정을 함께 관리합니다.
               </p>
             </div>
           </div>
-          <div className="staff-directory-list">
-            {staffDirectory.map((member) => (
-              <article key={member.id}>
-                <div className="staff-directory-profile">
-                  <h3>{member.displayName}</h3>
-                  <p>{member.email}</p>
-                  <p>
-                    {member.organization.name} · {member.region.name} ·{" "}
-                    {member.department} · {member.jobTitle}
-                  </p>
-                </div>
-                <LegalFriendsAccountForm
-                  legalFriendsId={member.legalFriendsId}
-                  legalFriendsMemberIdx={
-                    member.legalFriendsMemberIdx
-                  }
-                  staffUserId={member.id}
-                />
-              </article>
-            ))}
-          </div>
+          <StaffDirectoryWorkspace items={staffDirectory} />
         </section>
+        <details className="erp-panel staff-panel staff-invite-disclosure">
+          <summary>
+            <span>
+              <span className="eyebrow">INVITE STAFF</span>
+              <strong>새 직원 초대</strong>
+            </span>
+            <span>초대 양식 열기</span>
+          </summary>
+          <div className="staff-invite-body">
+            <p>
+              공개 회원가입은 사용하지 않습니다. 이메일·소속·권한과 필요한 업무
+              연동 정보를 회사가 먼저 지정합니다.
+            </p>
+            <StaffInviteForm />
+          </div>
+        </details>
       </main>
     </>
   );
