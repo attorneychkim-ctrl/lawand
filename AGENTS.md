@@ -71,6 +71,22 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-10 — SOLAPI MMS 등록 발신번호 운영 설정
+- 운영·로컬 gateway의 SOLAPI API 키 지문이 같은 계정임을 확인하고, 공식 활성 발신번호
+  목록에서 유일한 `010-****-1382`를 확인했다. 센트릭스 SMS가 표시하는 `02-555-7455`는
+  SOLAPI 계정에 등록된 번호가 아니므로 MMS에는 사용하지 않았다.
+- `LAWAND_SOLAPI_MMS_SENDER`를 운영 Secrets Manager와 현재 gateway 권한 600 환경파일에
+  추가했다. 향후 비밀값 재구성에서도 기존 운영값을 보존하도록
+  `configure-production-secrets.mjs`에도 로컬 설정 우선·기존 secret 차선 계약을 추가했다.
+- 변경 전 활성 통화·queued/dispatching 문자·pending 문자 outbox는 모두 0건이었다. 아직
+  운영에 미배포된 migration `0042`와 gateway·ERP 코드는 섞지 않고 기존 customer-messaging
+  gateway 이미지 그대로 재시작했다. gateway·Caddy active, 내부·외부 health `ok`, 컨테이너
+  재시작·error journal 0을 확인했다.
+- HERDR 워크트리와 모든 `origin/worktree/*`를 다시 대조했고 각 HEAD는 현재 `main`의
+  ancestor다. 실제 명함 JPG MMS는 통제 수신자와 발송 내용을 이번 설정 변경에서 새로
+  확정하지 않아 보내지 않았으며, ERP에서 다음 통제 발송 1건의 제공자 접수와 단말 수신을
+  확인한다. `PROJECT_PLAN.md`는 v1.00이다.
+
 ### 2026-08-10 — ERP 문자 템플릿 개인 전용·실삭제 출시 후보
 - 기본 제공 템플릿과 `상담 화면에서 이 템플릿 사용` 체크를 제거했다. 템플릿은 이제
   `owner_user_id`가 반드시 있는 직원 개인 설정이며, 만든 직원의 모든 템플릿이 상담 상세

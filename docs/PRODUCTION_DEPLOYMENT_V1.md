@@ -182,9 +182,10 @@ systemd 앱 단위와 Caddy edge 단위는 부팅 시 자동 시작한다. 최�
   발송했다. API 201, 42바이트 SMS, 제공자 코드 `0000`, outbox published, 1회 delivery
   HTTP 200·succeeded를 확인했다. 통제 상담은 실제 발송 감사 원장을 보존한 채 `closed`
   처리했으며 전화번호·본문은 로그와 문서에 남기지 않았다.
-- 운영 secret에는 `LAWAND_SOLAPI_MMS_SENDER`가 아직 없다. 따라서 텍스트 SMS/LMS는
-  활성이고 이미지 MMS만 명시적으로 비활성이다. SOLAPI 등록 발신번호 확정 뒤 명함 JPG
-  MMS 실제 canary가 남았다.
+- 2026-08-10 SOLAPI 활성 발신번호 목록에서 운영 계정의 `010-****-1382`를 확인하고
+  `LAWAND_SOLAPI_MMS_SENDER`로 Secrets Manager와 실행 중 gateway에 적용했다. 기존 gateway
+  이미지 그대로 재시작해 내부·외부 health와 worker 대기열을 확인했으며 명함 JPG MMS 실제
+  수신 canary만 남았다.
 - 최종 gateway·ERP·각 Caddy는 active, 컨테이너 재시작·릴리스 뒤 error journal 0,
   외부 health/login 200이고 CloudWatch ALARM은 없다. Windows bridge는 배정 11·warm 5,
   v0.7.1.0 프로세스 16개, 오프라인·로그인 실패·DPAPI 큐·dead-letter 0이며 감독기와

@@ -8,8 +8,9 @@
 - 사용자 지정 통제 수신자에게 정상 담당자 API와 outbox를 거쳐 SMS 한 건을 실제 발송했다.
   API 201, 42바이트 SMS, 센트릭스 코드 `0000`, outbox published, 1회 delivery HTTP 200을
   확인했다. 전화번호와 본문은 운영 로그·문서에 기록하지 않았다.
-- `LAWAND_SOLAPI_MMS_SENDER`는 아직 운영에 없으므로 이미지 MMS만 비활성이다. SOLAPI에
-  등록된 발신번호를 확정한 뒤 명함 JPG MMS canary를 별도로 수행한다.
+- SOLAPI 활성 발신번호 목록에서 운영 계정의 등록 번호 `010-****-1382`를 확인하고
+  `LAWAND_SOLAPI_MMS_SENDER`로 Secrets Manager와 실행 중 gateway에 적용했다. 따라서
+  이미지 MMS 발송 경계는 활성화됐고, 명함 JPG 실제 수신 canary만 별도로 남아 있다.
 - 기본 템플릿·활성화 체크 제거와 개인 템플릿 삭제를 위한 migration
   `0042_bright_midnight.sql` 및 gateway·ERP 변경은 출시 후보이며 아직 운영에 배포하지 않았다.
 
@@ -70,5 +71,5 @@
   build와 운영 스키마·권한 검증을 통과했다.
 - 고객 찾기 `0040`을 보존하고 문자 스키마를 `0041`로 재생성·적용했다. 센트릭스 SMS의
   제공자 접수까지 검증했으며 단말 최종 수신은 수신자 확인 영역이다.
-- SOLAPI MMS는 등록 발신번호 설정과 실제 JPG canary가 남았다. API 접수 뒤 최종 단말
-  결과를 자동 수집하는 웹훅/조회 소비자도 후속 범위다.
+- SOLAPI MMS 등록 발신번호 설정은 완료했고 실제 JPG canary가 남았다. API 접수 뒤 최종
+  단말 결과를 자동 수집하는 웹훅/조회 소비자도 후속 범위다.
