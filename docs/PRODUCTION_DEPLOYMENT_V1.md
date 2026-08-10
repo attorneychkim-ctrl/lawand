@@ -191,6 +191,25 @@ systemd 앱 단위와 Caddy edge 단위는 부팅 시 자동 시작한다. 최�
   v0.7.1.0 프로세스 16개, 오프라인·로그인 실패·DPAPI 큐·dead-letter 0이며 감독기와
   health task 결과도 0이다. 활성 통화와 회선별 활성 중복은 최종 읽기 시점에 모두 0이다.
 
+후속 개인 템플릿 단순화와 ERP 내 정보 기능은 같은 날 릴리스
+`20260810T135657Z-profile-message-templates-v1`로 gateway·ERP에 함께 배포했다.
+
+- `main`/`origin/main` `adf6f51`과 모든 HERDR·`origin/worktree/*` HEAD의 포함을 확인했다.
+  전체 typecheck·lint·build, core 61개·gateway 87개 테스트와 migration 검사를 통과했다.
+- 암호화 스냅샷 `lawand-prod-pre-profile-message-templates-20260810t135657z`, private S3
+  AES256 아티팩트 SHA-256
+  `e573a078437bd7a0b69d8d83c7f03ecccbfc7bfb77c37af02eea65b14af39d53`을 확보했다. gateway
+  이미지 ID는 `sha256:41ee1ea5ff2bec02ca858085ef630b7a0492e5b3c2d3f87775f5f3470aba5e8a`, ERP 이미지
+  ID는 `sha256:ee0af07f59132c2c225669e2627dfc6dc6f8e7f48377a5a4a6a430cce4f052ed`다.
+- migration `0042_bright_midnight.sql` 적용 뒤 운영 원장은 43개이고 Git 해시와 일치한다.
+  기본 템플릿 0·개인 템플릿 7, 소유자 `NOT NULL`, `is_active` 제거, 발송 FK `SET NULL`,
+  `lawand_app` CRUD·viewer 읽기 전용·PUBLIC 권한 0을 확인했다.
+- 인증 ERP `/profile`, `/message-templates`, `/staff`는 200이고 임시 세션은 0건이다.
+  최종 활성 통화·회선 중복·통화/문자 명령·문자 pending/dead/실패는 모두 0이다. gateway·
+  ERP·Caddy active, 재시작·error journal·CloudWatch ALARM 0, 외부 health/login 200이다.
+  Windows bridge는 재시작하지 않았고 v0.7.1.0 프로세스 16, 배정/연결 11, warm 5,
+  오프라인·로그인 실패·DPAPI 큐·dead-letter 0을 유지한다. 실제 JPG MMS canary는 별도다.
+
 ## ERP 리걸프렌즈 고객 찾기 운영 배포
 
 2026-08-10 메인 누적 작업을 릴리스 `20260810T082342Z-client-directory-v1`로 묶어

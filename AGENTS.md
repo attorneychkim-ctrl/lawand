@@ -71,6 +71,36 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-10 — HERDR 전수 통합·내 정보/개인 문자 템플릿 운영 배포
+- `herdr worktree list`, 모든 로컬 `worktree/*`와 `origin/worktree/*`를 갱신·대조했다. 현재
+  HERDR 작업트리 `clear-field-5d52`, `clear-harbor-c5e2`, `rapid-field-d8d6`를 포함한 모든
+  작업 브랜치 HEAD가 `main`의 ancestor였고 `git pull --ff-only origin main`도 이미 최신이라
+  추가 merge commit은 만들지 않았다. 배포 소스는 `main`/`origin/main`이 일치한
+  `adf6f51`이다.
+- 전체 5개 패키지 typecheck·lint·production build, core 61개·gateway 87개 테스트,
+  Drizzle schema check와 `git diff --check`를 다시 통과했다. 활성 수·발신 통화, 통화·문자
+  실행 명령, 문자 outbox와 회선별 활성 중복이 모두 0인 것을 두 번 확인하고 Windows bridge는
+  재시작하지 않았다.
+- 암호화 RDS 스냅샷
+  `lawand-prod-pre-profile-message-templates-20260810t135657z`을 available까지 확인한 뒤
+  migration `0042_bright_midnight.sql`, gateway와 ERP를 릴리스
+  `20260810T135657Z-profile-message-templates-v1`로 운영 배포했다. private S3 AES256
+  아티팩트 SHA-256은
+  `e573a078437bd7a0b69d8d83c7f03ecccbfc7bfb77c37af02eea65b14af39d53`이고 gateway 이미지
+  ID는 `sha256:41ee1ea5ff2bec02ca858085ef630b7a0492e5b3c2d3f87775f5f3470aba5e8a`, ERP 이미지
+  ID는 `sha256:ee0af07f59132c2c225669e2627dfc6dc6f8e7f48377a5a4a6a430cce4f052ed`다.
+- 운영 migration은 43개이며 `0042` 해시가 Git과 일치한다. 기본 템플릿은 0건,
+  기존 직원 개인 템플릿 7건은 보존됐고 소유자 `NOT NULL`, `is_active` 제거, 과거 발송 FK
+  `ON DELETE SET NULL`, `lawand_app` CRUD·viewer SELECT 전용·PUBLIC 권한 0을 확인했다.
+  인증 ERP `/profile`, `/message-templates`, `/staff`는 모두 200이고 내 정보·비밀번호 변경·
+  업무 연결·개인 문자 화면을 렌더했다. 임시 세션은 0건으로 정리했다.
+- 최종 gateway·ERP·각 Caddy는 active, systemd·컨테이너 재시작 0, 릴리스 뒤 error journal
+  0, 내외부 health/login 200, CloudWatch ALARM 0이다. 문자 queued/dispatching·실패·pending/
+  dead outbox는 0이며 기존 일반 업무 pending outbox 8건은 변경하지 않았다. Windows는
+  v0.7.1.0 프로세스 16, 배정 11·연결 11·warm 5, 오프라인·로그인 실패·DPAPI 큐·dead-letter
+  0이고 감독기·health task도 정상이다. SOLAPI MMS 발신번호 설정은 유지됐지만 통제 수신자와
+  이미지가 새로 확정되지 않아 실제 JPG MMS는 보내지 않았다. `PROJECT_PLAN.md`는 v1.01이다.
+
 ### 2026-08-10 — SOLAPI MMS 등록 발신번호 운영 설정
 - 운영·로컬 gateway의 SOLAPI API 키 지문이 같은 계정임을 확인하고, 공식 활성 발신번호
   목록에서 유일한 `010-****-1382`를 확인했다. 센트릭스 SMS가 표시하는 `02-555-7455`는

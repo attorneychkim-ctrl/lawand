@@ -12,7 +12,9 @@
   `LAWAND_SOLAPI_MMS_SENDER`로 Secrets Manager와 실행 중 gateway에 적용했다. 따라서
   이미지 MMS 발송 경계는 활성화됐고, 명함 JPG 실제 수신 canary만 별도로 남아 있다.
 - 기본 템플릿·활성화 체크 제거와 개인 템플릿 삭제를 위한 migration
-  `0042_bright_midnight.sql` 및 gateway·ERP 변경은 출시 후보이며 아직 운영에 배포하지 않았다.
+  `0042_bright_midnight.sql` 및 gateway·ERP 변경을 릴리스
+  `20260810T135657Z-profile-message-templates-v1`로 운영 배포했다. 운영에는 기본 템플릿 0건,
+  직원 개인 템플릿 7건이 있으며 과거 발송 snapshot과 역할별 권한 경계도 유지된다.
 
 ## 범위
 
@@ -61,7 +63,7 @@
 6. 발송 전후 대기 outbox, 실패 원장, 센트릭스 잔여 건수와 SOLAPI 내역을 확인한다.
 
 개인 템플릿 단순화 릴리스는 운영 RDS 암호화 스냅샷 뒤
-`0042_bright_midnight.sql` → gateway·ERP 동시 배포 순서로 반영한다. migration은 기본
+`0042_bright_midnight.sql` → gateway·ERP 동시 배포 순서로 반영했다. migration은 기본
 템플릿 세 건과 `is_active`를 제거하며, 참조 중인 발송 이력은 `template_id`만 비우고
 템플릿명·본문·이미지 스냅샷을 유지한다.
 
@@ -71,5 +73,8 @@
   build와 운영 스키마·권한 검증을 통과했다.
 - 고객 찾기 `0040`을 보존하고 문자 스키마를 `0041`로 재생성·적용했다. 센트릭스 SMS의
   제공자 접수까지 검증했으며 단말 최종 수신은 수신자 확인 영역이다.
+- `0042` 적용 뒤 운영 migration 43개와 Git 해시 일치, 기본 템플릿 0·개인 템플릿 7,
+  소유자 `NOT NULL`, `is_active` 제거, FK `SET NULL`, 앱/조회자/PUBLIC 권한을 확인했다.
+  인증 ERP 문자 화면은 200이고 문자 대기·실패·dead 원장은 모두 0이다.
 - SOLAPI MMS 등록 발신번호 설정은 완료했고 실제 JPG canary가 남았다. API 접수 뒤 최종
   단말 결과를 자동 수집하는 웹훅/조회 소비자도 후속 범위다.

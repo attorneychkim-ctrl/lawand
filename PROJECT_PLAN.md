@@ -1,4 +1,4 @@
-# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.00)
+# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.01)
 
 > 이 문서는 새 로앤 홈페이지 + 새 ERP + 리걸플로/리걸프렌즈 연동을 하나의 플랫폼으로
 > 묶기 위한 **저장소 구조·아키텍처 설계 초안**이다. 코덱스/클로드코드 세션이 번갈아
@@ -697,7 +697,11 @@ HTTP 200, outbox published를 확인했으며 통제 상담은 감사 원장을 
 후속 migration `0042_bright_midnight.sql`은 기본 템플릿 세 건과 `is_active`를 제거하고
 개인 템플릿만 허용한다. 템플릿 삭제 시 `telephony_messages.template_id`는 `SET NULL`로
 해제하되 발송 당시 템플릿명·본문·이미지 스냅샷은 유지한다. 이 migration과 gateway·ERP
-변경은 아직 운영에 배포하지 않았다.
+변경은 암호화 스냅샷 뒤 릴리스
+`20260810T135657Z-profile-message-templates-v1`로 운영 배포했다. 운영 migration은 43개이고
+기본 템플릿 0건·개인 템플릿 7건, 소유자 `NOT NULL`, `is_active` 제거, 과거 발송 FK
+`SET NULL`과 역할별 권한을 확인했다. 같은 릴리스에 ERP `/profile` 내 정보·본인 센트릭스/
+리걸프렌즈 연결·현재 비밀번호 확인 기반 변경과 최소 직원 초대도 함께 배포했다.
 
 수신전화는 REST polling이 아니라 Windows bridge가 센트릭스 OpenAPI의 `RINGEVENT`,
 `CHANNELLIST`, `CHANNELOUT`을 장수명 연결로 받아 gateway에 전달한다. 2026-08-06 실제
@@ -1398,6 +1402,8 @@ Manager와 별도 역할·보안그룹·TLS 기준을 적용한다.
 - [x] 고객 문자 로컬 출시 후보: 센트릭스 SMS/LMS, SOLAPI JPG MMS, 담당자 개인 템플릿·
   변수 치환·휴대전화 미리보기·상담별 암호화 발송 원장
 - [x] 운영 migration `0041`·gateway·ERP 통합 배포 → 통제 센트릭스 SMS 실제 발송 canary
+- [x] 운영 migration `0042`·gateway·ERP 통합 배포 → 기본 템플릿/활성화 제거, 개인 템플릿
+  실삭제·과거 발송 snapshot 보존, ERP 내 정보·본인 업무 연결 운영 활성화
 - [x] SOLAPI 등록 MMS 발신번호를 운영 Secrets Manager·gateway에 적용
 - [ ] 200KB 이하 명함 JPG MMS 실제 발송·단말 수신 canary
 - [x] 임시 Windows Server 2022 x64 + 32비트 OpenAPI OCX 수신 canary:
