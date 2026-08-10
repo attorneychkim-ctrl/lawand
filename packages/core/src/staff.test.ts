@@ -9,6 +9,8 @@ import {
   staffInvitationAcceptanceSchema,
   staffInvitationCreationSchema,
   staffLoginSchema,
+  staffPasswordChangeSchema,
+  staffProfileUpdateSchema,
 } from "./staff.js";
 
 test("센트릭스 직원 회선은 전체 070 번호만 숫자로 정규화한다", () => {
@@ -127,18 +129,65 @@ test("초대 비밀번호는 길이와 네 가지 문자 종류를 모두 요구
   );
 });
 
-test("직원 초대는 회사가 소속·지역·부서·직책을 모두 지정한다", () => {
-  const result = staffInvitationCreationSchema.safeParse({
+test("직원 초대는 이메일과 이름만으로 기본 프로필을 만든다", () => {
+  const result = staffInvitationCreationSchema.parse({
+    email: "staff@lawand.test",
+    name: "로앤 직원",
+  });
+
+  assert.deepEqual(result, {
     email: "staff@lawand.test",
     name: "로앤 직원",
     organization: "lawand",
     region: "seoul",
-    department: "",
-    jobTitle: "상담 담당자",
+    department: "미입력",
+    jobTitle: "미입력",
     role: "full_time",
   });
+});
 
-  assert.equal(result.success, false);
+test("직원 프로필은 소속·지역·부서·직책을 수정하고 역할은 선택 입력한다", () => {
+  assert.deepEqual(
+    staffProfileUpdateSchema.parse({
+      organization: "legalflow",
+      region: "busan",
+      department: "사건관리팀",
+      jobTitle: "매니저",
+    }),
+    {
+      organization: "legalflow",
+      region: "busan",
+      department: "사건관리팀",
+      jobTitle: "매니저",
+    },
+  );
+  assert.equal(
+    staffProfileUpdateSchema.safeParse({
+      organization: "lawand",
+      region: "seoul",
+      department: "상담팀",
+      jobTitle: "상담 담당자",
+      role: "owner",
+    }).success,
+    false,
+  );
+});
+
+test("비밀번호 변경은 현재 비밀번호와 다른 강한 새 비밀번호를 요구한다", () => {
+  assert.equal(
+    staffPasswordChangeSchema.safeParse({
+      currentPassword: "OldSecurePass1!",
+      newPassword: "NewSecurePass2@",
+    }).success,
+    true,
+  );
+  assert.equal(
+    staffPasswordChangeSchema.safeParse({
+      currentPassword: "SameSecurePass1!",
+      newPassword: "SameSecurePass1!",
+    }).success,
+    false,
+  );
 });
 
 test("리걸프렌즈 아이디와 member_idx는 관리자 초대에서 함께 받는다", () => {

@@ -206,15 +206,6 @@ export async function createStaffInvitation(
   input: {
     email: string;
     name: string;
-    organization: "lawand" | "legalflow";
-    region: "seoul" | "daejeon" | "busan";
-    department: string;
-    jobTitle: string;
-    role: StaffRole;
-    centrexLineNumber?: string;
-    centrexExtension?: string;
-    legalFriendsId?: string;
-    legalFriendsMemberIdx?: number;
   },
 ): Promise<StaffInvitation & { token: string }> {
   const response = await authFetch("/v1/staff-auth/invitations", {
@@ -226,6 +217,50 @@ export async function createStaffInvitation(
     invitation: StaffInvitation & { token: string };
   };
   return body.invitation;
+}
+
+export async function getOwnStaffProfile(
+  sessionToken: string,
+): Promise<StaffDirectoryItem> {
+  const response = await authFetch("/v1/staff-auth/profile", {
+    sessionToken,
+  });
+  const body = (await response.json()) as { profile: StaffDirectoryItem };
+  return body.profile;
+}
+
+export async function updateStaffProfile(
+  sessionToken: string,
+  staffUserId: string,
+  input: {
+    organization: "lawand" | "legalflow";
+    region: "seoul" | "daejeon" | "busan";
+    department: string;
+    jobTitle: string;
+    role?: StaffRole;
+  },
+): Promise<StaffDirectoryItem> {
+  const response = await authFetch(
+    `/v1/staff-auth/users/${staffUserId}/profile`,
+    {
+      method: "POST",
+      body: input,
+      sessionToken,
+    },
+  );
+  const body = (await response.json()) as { profile: StaffDirectoryItem };
+  return body.profile;
+}
+
+export async function changeStaffPassword(
+  sessionToken: string,
+  input: { currentPassword: string; newPassword: string },
+): Promise<void> {
+  await authFetch("/v1/staff-auth/password", {
+    method: "POST",
+    body: input,
+    sessionToken,
+  });
 }
 
 export async function getStaffDirectory(

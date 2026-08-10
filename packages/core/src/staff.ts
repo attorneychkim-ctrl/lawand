@@ -104,19 +104,21 @@ export const staffInvitationCreationSchema = z
       .trim()
       .min(2, "이름은 2자 이상이어야 합니다.")
       .max(50, "이름은 50자 이하여야 합니다."),
-    organization: staffOrganizationSchema,
-    region: staffRegionSchema,
+    organization: staffOrganizationSchema.default("lawand"),
+    region: staffRegionSchema.default("seoul"),
     department: z
       .string()
       .trim()
       .min(1, "부서를 입력해 주세요.")
-      .max(100, "부서는 100자 이하여야 합니다."),
+      .max(100, "부서는 100자 이하여야 합니다.")
+      .default("미입력"),
     jobTitle: z
       .string()
       .trim()
       .min(1, "직책을 입력해 주세요.")
-      .max(100, "직책은 100자 이하여야 합니다."),
-    role: staffRoleSchema,
+      .max(100, "직책은 100자 이하여야 합니다.")
+      .default("미입력"),
+    role: staffRoleSchema.default("full_time"),
     centrexLineNumber: centrexLineNumberSchema.optional(),
     centrexExtension: centrexExtensionSchema.optional(),
     legalFriendsId: legalFriendsAccountIdSchema.optional(),
@@ -136,6 +138,24 @@ export const staffInvitationCreationSchema = z
       });
     }
   });
+
+export const staffProfileUpdateSchema = z
+  .object({
+    organization: staffOrganizationSchema,
+    region: staffRegionSchema,
+    department: z
+      .string()
+      .trim()
+      .min(1, "부서를 입력해 주세요.")
+      .max(100, "부서는 100자 이하여야 합니다."),
+    jobTitle: z
+      .string()
+      .trim()
+      .min(1, "직책을 입력해 주세요.")
+      .max(100, "직책은 100자 이하여야 합니다."),
+    role: staffRoleSchema.optional(),
+  })
+  .strict();
 
 export const staffExternalAccountUpdateSchema = z
   .object({
@@ -185,7 +205,7 @@ export const staffInvitationTokenSchema = z
   .string()
   .regex(/^[A-Za-z0-9_-]{43}$/, "초대 토큰 형식이 올바르지 않습니다.");
 
-const staffPasswordSchema = z
+export const staffPasswordSchema = z
   .string()
   .min(12, "비밀번호는 12자 이상이어야 합니다.")
   .max(128, "비밀번호는 128자 이하여야 합니다.")
@@ -193,6 +213,20 @@ const staffPasswordSchema = z
   .regex(/[a-z]/, "비밀번호에 영문 소문자를 포함해 주세요.")
   .regex(/[0-9]/, "비밀번호에 숫자를 포함해 주세요.")
   .regex(/[^A-Za-z0-9]/, "비밀번호에 특수문자를 포함해 주세요.");
+
+export const staffPasswordChangeSchema = z
+  .object({
+    currentPassword: z
+      .string()
+      .min(1, "현재 비밀번호를 입력해 주세요.")
+      .max(128, "현재 비밀번호는 128자 이하여야 합니다."),
+    newPassword: staffPasswordSchema,
+  })
+  .strict()
+  .refine((value) => value.currentPassword !== value.newPassword, {
+    path: ["newPassword"],
+    message: "새 비밀번호는 현재 비밀번호와 다르게 설정해 주세요.",
+  });
 
 export const staffInvitationAcceptanceSchema = z
   .object({
@@ -214,6 +248,10 @@ export type StaffInvitationCreation = z.infer<
 >;
 export type StaffInvitationAcceptance = z.infer<
   typeof staffInvitationAcceptanceSchema
+>;
+export type StaffProfileUpdate = z.infer<typeof staffProfileUpdateSchema>;
+export type StaffPasswordChange = z.infer<
+  typeof staffPasswordChangeSchema
 >;
 export type StaffExternalAccountUpdate = z.infer<
   typeof staffExternalAccountUpdateSchema

@@ -521,6 +521,13 @@ a.inbound-customer:hover { text-decoration: underline; }
 .staff-identity {
   gap: 9px;
   padding-left: 4px;
+  border-radius: 10px;
+  text-decoration: none;
+}
+
+.staff-identity:hover .staff-avatar,
+.staff-identity:focus-visible .staff-avatar {
+  background: color-mix(in srgb, var(--brand) 20%, var(--surface));
 }
 
 .staff-avatar {
@@ -2736,6 +2743,16 @@ a.inbound-customer:hover { text-decoration: underline; }
 .staff-panel { padding: 26px; }
 .invite-form { max-width: 760px; }
 
+.invite-form-note {
+  margin: 0;
+  padding: 13px 14px;
+  border-radius: 10px;
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: .7rem;
+  line-height: 1.6;
+}
+
 .staff-header-note {
   display: grid;
   flex: 0 0 auto;
@@ -2855,6 +2872,161 @@ a.inbound-customer:hover { text-decoration: underline; }
   color: var(--muted);
   font-size: .63rem;
   font-weight: 780;
+}
+
+.staff-profile-editor {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.staff-profile-editor > summary {
+  color: var(--brand-strong);
+  cursor: pointer;
+  font-size: .68rem;
+  font-weight: 800;
+}
+
+.staff-profile-editor[open] > summary {
+  margin-bottom: 14px;
+}
+
+.staff-profile-form {
+  display: grid;
+  gap: 12px;
+}
+
+.staff-profile-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.staff-profile-form label > span {
+  color: var(--muted);
+  font-size: .64rem;
+  font-weight: 760;
+}
+
+.staff-profile-form label > small,
+.profile-permission-note {
+  color: var(--muted-2);
+  font-size: .61rem;
+  line-height: 1.5;
+}
+
+.staff-profile-form input,
+.staff-profile-form select {
+  width: 100%;
+  min-height: 42px;
+}
+
+.staff-profile-form > .secondary-button {
+  justify-self: end;
+}
+
+.profile-shell {
+  max-width: 1100px;
+}
+
+.profile-header {
+  align-items: center;
+}
+
+.profile-identity-card {
+  display: flex;
+  min-width: 250px;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-subtle);
+}
+
+.profile-identity-card > span {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+  font-weight: 850;
+}
+
+.profile-identity-card > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.profile-identity-card strong {
+  color: var(--ink);
+  font-size: .83rem;
+}
+
+.profile-identity-card small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: .64rem;
+  text-overflow: ellipsis;
+}
+
+.profile-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.12fr) minmax(320px, .88fr);
+  align-items: start;
+  gap: 18px;
+}
+
+.profile-section {
+  padding: 24px;
+}
+
+.profile-fixed-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 18px;
+}
+
+.profile-fixed-fields > div {
+  display: grid;
+  gap: 4px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-subtle);
+}
+
+.profile-fixed-fields dt {
+  color: var(--muted);
+  font-size: .61rem;
+}
+
+.profile-fixed-fields dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink-soft);
+  font-size: .72rem;
+  font-weight: 750;
+}
+
+.password-change-form .secondary-button {
+  justify-self: end;
+}
+
+.profile-connections {
+  margin-top: 18px;
+}
+
+.auth-success {
+  margin-bottom: 18px;
+  padding: 11px 12px;
+  border-radius: 9px;
+  background: var(--brand-soft);
+  line-height: 1.5;
 }
 
 .staff-account-badge.is-active,
@@ -4164,6 +4336,7 @@ a.inbound-customer:hover { text-decoration: underline; }
   .staff-search-field { grid-column: 1 / -1; }
   .message-compose-grid,
   .message-template-editor-grid { grid-template-columns: minmax(0, 1fr) 250px; gap: 20px; }
+  .profile-layout { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 720px) {
@@ -4446,6 +4619,8 @@ a.inbound-customer:hover { text-decoration: underline; }
   .integration-form-actions .secondary-button { width: 100%; }
   .external-account-form { grid-template-columns: 1fr; }
   .staff-invite-disclosure > summary { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .profile-header { align-items: flex-start; }
+  .profile-identity-card { width: 100%; min-width: 0; }
 }
 
 @media (max-width: 480px) {
@@ -4456,8 +4631,11 @@ a.inbound-customer:hover { text-decoration: underline; }
   .staff-brand-product { padding-left: 6px; font-size: .6rem; }
   .staff-primary-nav a { padding-inline: 7px; }
   .staff-primary-nav a span { display: none; }
-  .staff-identity { display: none; }
+  .staff-identity { display: flex; padding-left: 0; }
+  .staff-identity .staff-avatar { width: 31px; height: 31px; }
   .text-button { font-size: .62rem; }
+  .profile-fixed-fields { grid-template-columns: 1fr; }
+  .profile-section { padding: 19px 16px; }
 
   .inbound-call-card {
     grid-template-columns: 32px minmax(0, 1fr);

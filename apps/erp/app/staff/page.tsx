@@ -64,8 +64,8 @@ export default async function StaffPage() {
           </summary>
           <div className="staff-invite-body">
             <p>
-              공개 회원가입은 사용하지 않습니다. 이메일·소속·권한과 필요한 업무
-              연동 정보를 회사가 먼저 지정합니다.
+              공개 회원가입은 사용하지 않습니다. 이름과 이메일로 초대하고, 직원이
+              가입 후 업무 정보와 연결을 직접 완성할 수 있습니다.
             </p>
             <StaffInviteForm />
           </div>

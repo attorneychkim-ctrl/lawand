@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 
 import {
   acceptStaffInvitation,
+  changeStaffPassword,
   createStaffInvitation,
   loginStaff,
   logoutStaff,
@@ -13,11 +14,13 @@ import {
   type StaffRole,
   updateStaffCentrexLineNumber,
   updateStaffLegalFriendsAccount,
+  updateStaffProfile,
 } from "../lib/staff-auth";
 import {
   clearStaffSessionCookie,
   readStaffSessionToken,
   requireAdmin,
+  requireStaff,
   setStaffSessionCookie,
 } from "../lib/session";
 
@@ -32,6 +35,11 @@ export type InvitationActionState = {
 };
 
 export type LegalFriendsAccountActionState = {
+  error: string;
+  saved: boolean;
+};
+
+export type StaffProfileActionState = {
   error: string;
   saved: boolean;
 };
@@ -52,6 +60,14 @@ function field(formData: FormData, name: string): string {
 function errorMessage(error: unknown): string {
   if (error instanceof StaffGatewayError) return error.message;
   return "요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.";
+}
+
+function manageableStaffUserId(
+  staff: Awaited<ReturnType<typeof requireStaff>>,
+  formData: FormData,
+): string {
+  const requested = field(formData, "staffUserId");
+  return staff.roles.includes("admin") && requested ? requested : staff.id;
 }
 
 export async function loginAction(
@@ -117,44 +133,9 @@ export async function createInvitationAction(
     };
   }
   try {
-    const legalFriendsId = field(formData, "legalFriendsId").trim();
-    const legalFriendsMemberIdx = field(
-      formData,
-      "legalFriendsMemberIdx",
-    ).trim();
-    const centrexLineNumber = field(
-      formData,
-      "centrexLineNumber",
-    ).trim();
-    const centrexExtension = field(
-      formData,
-      "centrexExtension",
-    ).trim();
     const invitation = await createStaffInvitation(token, {
       email: field(formData, "email"),
       name: field(formData, "name"),
-      organization: field(formData, "organization") as
-        | "lawand"
-        | "legalflow",
-      region: field(formData, "region") as
-        | "seoul"
-        | "daejeon"
-        | "busan",
-      department: field(formData, "department"),
-      jobTitle: field(formData, "jobTitle"),
-      role: field(formData, "role") as StaffRole,
-      ...(centrexLineNumber || centrexExtension
-        ? {
-            centrexLineNumber,
-            centrexExtension,
-          }
-        : {}),
-      ...(legalFriendsId
-        ? {
-            legalFriendsId,
-            legalFriendsMemberIdx: Number(legalFriendsMemberIdx),
-          }
-        : {}),
     });
     const baseUrl =
       process.env.LAWAND_ERP_BASE_URL ?? "http://127.0.0.1:3021";
@@ -176,7 +157,7 @@ export async function updateCentrexLineAction(
   _previousState: CentrexLineActionState,
   formData: FormData,
 ): Promise<CentrexLineActionState> {
-  await requireAdmin();
+  const staff = await requireStaff();
   const token = await readStaffSessionToken();
   if (!token) {
     return {
@@ -192,9 +173,10 @@ export async function updateCentrexLineAction(
     try {
       await reassignStaffCentrexBridge(
         token,
-        field(formData, "staffUserId"),
+        manageableStaffUserId(staff, formData),
       );
       revalidatePath("/staff");
+      revalidatePath("/profile");
       return {
         error: "",
         saved: false,
@@ -219,12 +201,13 @@ export async function updateCentrexLineAction(
   try {
     const result = await updateStaffCentrexLineNumber(
       token,
-      field(formData, "staffUserId"),
+      manageableStaffUserId(staff, formData),
       lineNumber || null,
       extension || null,
       password || null,
     );
     revalidatePath("/staff");
+    revalidatePath("/profile");
     return {
       error: "",
       saved: true,
@@ -247,7 +230,7 @@ export async function updateLegalFriendsAccountAction(
   _previousState: LegalFriendsAccountActionState,
   formData: FormData,
 ): Promise<LegalFriendsAccountActionState> {
-  await requireAdmin();
+  const staff = await requireStaff();
   const token = await readStaffSessionToken();
   if (!token) return { error: "로그인이 만료되었습니다.", saved: false };
 
@@ -256,13 +239,74 @@ export async function updateLegalFriendsAccountAction(
   try {
     await updateStaffLegalFriendsAccount(
       token,
-      field(formData, "staffUserId"),
+      manageableStaffUserId(staff, formData),
       accountId || null,
       memberIdx ? Number(memberIdx) : null,
     );
     revalidatePath("/staff");
+    revalidatePath("/profile");
     return { error: "", saved: true };
   } catch (error) {
     return { error: errorMessage(error), saved: false };
   }
+}
+
+export async function updateStaffProfileAction(
+  _previousState: StaffProfileActionState,
+  formData: FormData,
+): Promise<StaffProfileActionState> {
+  const staff = await requireStaff();
+  const token = await readStaffSessionToken();
+  if (!token) return { error: "로그인이 만료되었습니다.", saved: false };
+
+  const role = field(formData, "role");
+  try {
+    await updateStaffProfile(
+      token,
+      manageableStaffUserId(staff, formData),
+      {
+        organization: field(formData, "organization") as
+          | "lawand"
+          | "legalflow",
+        region: field(formData, "region") as
+          | "seoul"
+          | "daejeon"
+          | "busan",
+        department: field(formData, "department"),
+        jobTitle: field(formData, "jobTitle"),
+        ...(staff.roles.includes("admin") && role
+          ? { role: role as StaffRole }
+          : {}),
+      },
+    );
+    revalidatePath("/staff");
+    revalidatePath("/profile");
+    revalidatePath("/");
+    return { error: "", saved: true };
+  } catch (error) {
+    return { error: errorMessage(error), saved: false };
+  }
+}
+
+export async function changePasswordAction(
+  _previousState: AuthActionState,
+  formData: FormData,
+): Promise<AuthActionState> {
+  await requireStaff();
+  const token = await readStaffSessionToken();
+  if (!token) return { error: "로그인이 만료되었습니다." };
+  const newPassword = field(formData, "newPassword");
+  if (newPassword !== field(formData, "newPasswordConfirmation")) {
+    return { error: "새 비밀번호 확인이 일치하지 않습니다." };
+  }
+  try {
+    await changeStaffPassword(token, {
+      currentPassword: field(formData, "currentPassword"),
+      newPassword,
+    });
+  } catch (error) {
+    return { error: errorMessage(error) };
+  }
+  await clearStaffSessionCookie();
+  redirect("/login?passwordChanged=1");
 }

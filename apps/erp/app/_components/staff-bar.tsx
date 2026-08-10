@@ -19,7 +19,11 @@ export function StaffBar({ staff }: { staff: StaffPrincipal }) {
         </div>
         <div className="staff-actions">
           <ThemeToggle />
-          <div className="staff-identity">
+          <Link
+            aria-label="내 정보 열기"
+            className="staff-identity"
+            href="/profile"
+          >
             <span aria-hidden="true" className="staff-avatar">
               {staff.displayName.slice(0, 1)}
             </span>
@@ -29,7 +33,7 @@ export function StaffBar({ staff }: { staff: StaffPrincipal }) {
                 {staff.primaryMembership.region.name} · {staff.primaryMembership.department}
               </small>
             </span>
-          </div>
+          </Link>
           <form action={logoutAction}>
             <button className="text-button" type="submit">
               로그아웃
