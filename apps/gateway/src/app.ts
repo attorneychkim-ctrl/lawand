@@ -24,6 +24,7 @@ import {
   centrexBridgeCommandResultSchema,
   phoneDeskAftercareSaveSchema,
   phoneDeskFollowUpCompletionSchema,
+  legalFriendsDirectoryClickToCallSchema,
   telephonyCallDispositionConfirmationSchema,
 } from "@lawand/core";
 
@@ -1280,6 +1281,84 @@ export function createGatewayServer(options?: {
         return;
       }
 
+      if (
+        request.method === "GET" &&
+        url.pathname === "/v1/client-directory"
+      ) {
+        if (
+          !options?.telephonyService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        sendJson(
+          response,
+          200,
+          await options.telephonyService.searchLegalFriendsClients(
+            url.searchParams.get("q") ?? "",
+            actor,
+            Number(url.searchParams.get("limit") ?? "30"),
+          ),
+        );
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        url.pathname === "/v1/client-directory/click-to-call"
+      ) {
+        if (
+          !options?.telephonyService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const parsed = legalFriendsDirectoryClickToCallSchema.safeParse(
+          await readJson(request),
+        );
+        if (!parsed.success) {
+          sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        const result =
+          await options.telephonyService.requestDirectoryClickToCall(
+            parsed.data,
+            actor,
+          );
+        sendJson(response, result.replayed ? 200 : 201, result);
+        return;
+      }
+
       const phoneDeskAftercareMatch = url.pathname.match(
         /^\/v1\/phone-desk\/calls\/([^/]+)\/aftercare$/,
       );
@@ -1734,6 +1813,7 @@ export function createGatewayServer(options?: {
       if (error instanceof TelephonyCallError) {
         const statusCode =
           error.code === "consultation_not_found" ||
+          error.code === "directory_target_not_found" ||
           error.code === "call_not_found" ||
           error.code === "aftercare_not_found" ||
           error.code === "follow_up_not_found" ||
@@ -1743,7 +1823,8 @@ export function createGatewayServer(options?: {
             : error.code === "call_owned_by_other_staff" ||
                 error.code === "inbound_call_owned_by_other_staff"
               ? 403
-              : error.code === "follow_up_due_invalid"
+              : error.code === "follow_up_due_invalid" ||
+                  error.code === "directory_query_invalid"
                 ? 400
               : error.code === "feature_disabled"
                 ? 503

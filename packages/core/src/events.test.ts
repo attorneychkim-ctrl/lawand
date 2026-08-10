@@ -243,6 +243,36 @@ test("클릭투콜 요청은 전화번호 대신 통화·상담·회선 참조�
   );
 });
 
+test("고객찾기 클릭투콜도 전화번호 없이 리걸프렌즈 식별자만 남긴다", () => {
+  const callEvent = {
+    ...assignmentEnvelope,
+    eventType: "telephony.call.requested",
+    data: {
+      callId: "01984c7d-8500-7000-8000-000000000022",
+      targetSource: "legal_friends_directory",
+      directoryClientIdx: 123,
+      directoryCaseIdx: 456,
+      endpointId: "01984c7d-8500-7000-8000-000000000021",
+      staffUserId: "01984c7d-8500-7000-8000-000000000006",
+      provider: "centrex",
+      direction: "outbound",
+      command: "clickdial",
+    },
+  } as const;
+
+  assert.equal(
+    telephonyCallRequestedEventSchema.safeParse(callEvent).success,
+    true,
+  );
+  assert.equal(
+    telephonyCallRequestedEventSchema.safeParse({
+      ...callEvent,
+      data: { ...callEvent.data, phone: "01012345678" },
+    }).success,
+    false,
+  );
+});
+
 test("귀속 입력은 허용된 광고값과 내부 경로만 받는다", () => {
   const result = consultationAttributionInputSchema.safeParse({
     journeySessionId: "01984c7d-8500-7000-8000-000000000003",

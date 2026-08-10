@@ -553,6 +553,86 @@ test("클릭투콜 API는 인증된 현재 담당자와 상담 ID를 서비스�
   assert.equal(received?.actor.id, realtimeActor.id);
 });
 
+test("고객찾기 API는 검색어와 리걸프렌즈 고객 식별자만 서비스에 전달한다", async (context) => {
+  let searchedQuery = "";
+  let clickTarget: { clientIdx: number; caseIdx: number } | undefined;
+  const telephonyService = {
+    searchLegalFriendsClients: async (
+      query: string,
+      actor: StaffPrincipal,
+    ) => {
+      searchedQuery = query;
+      assert.equal(actor.id, realtimeActor.id);
+      return { queryType: "name" as const, items: [] };
+    },
+    requestDirectoryClickToCall: async (
+      target: { clientIdx: number; caseIdx: number },
+      actor: StaffPrincipal,
+    ) => {
+      clickTarget = target;
+      assert.equal(actor.id, realtimeActor.id);
+      return {
+        id: "019fa6a4-6834-7782-aa0b-4e71ffb8a2e1",
+        targetSource: "legal_friends_directory" as const,
+        consultationId: null,
+        endpointId: "019fa6a4-6834-7782-aa0b-4e71ffb8a2e2",
+        commandStatus: "queued" as const,
+        outcome: "unknown" as const,
+        requestedAt: "2026-08-10T07:00:00.000Z",
+        dispatchedAt: null,
+        providerRespondedAt: null,
+        providerStatus: null,
+        providerStartedAt: null,
+        providerEndedAt: null,
+        providerDurationSeconds: null,
+        providerBillableSeconds: null,
+        providerRingSeconds: null,
+        reconciledAt: null,
+        disposition: null,
+        dispositionConfirmedAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        replayed: false,
+      };
+    },
+  } as unknown as TelephonyService;
+  const authService = {
+    authorize: async () => realtimeActor,
+  } as unknown as StaffAuthService;
+  const server = createGatewayServer({
+    authService,
+    internalApiKey: "test-internal-key",
+    telephonyService,
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+
+  const headers = {
+    "x-lawand-internal-key": "test-internal-key",
+    "x-lawand-staff-session": "s".repeat(43),
+  };
+  const searchResponse = await fetch(
+    `http://127.0.0.1:${address.port}/v1/client-directory?q=${encodeURIComponent("홍길동")}`,
+    { headers },
+  );
+  assert.equal(searchResponse.status, 200);
+  assert.equal(searchedQuery, "홍길동");
+
+  const clickResponse = await fetch(
+    `http://127.0.0.1:${address.port}/v1/client-directory/click-to-call`,
+    {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ clientIdx: 123, caseIdx: 456 }),
+    },
+  );
+  assert.equal(clickResponse.status, 201);
+  assert.deepEqual(clickTarget, { clientIdx: 123, caseIdx: 456 });
+});
+
 test("통화 결과 API는 허용된 분류와 현재 직원을 서비스에 전달한다", async (context) => {
   const callId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2d1";
   let received:

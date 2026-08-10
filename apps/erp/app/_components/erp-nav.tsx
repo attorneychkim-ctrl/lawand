@@ -3,11 +3,16 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-function NavIcon({ kind }: { kind: "consultations" | "phone" | "staff" }) {
+function NavIcon({ kind }: { kind: "consultations" | "clients" | "phone" | "staff" }) {
   return kind === "consultations" ? (
     <svg aria-hidden="true" viewBox="0 0 24 24">
       <path d="M7.5 6.5h9M7.5 10.5h9M7.5 14.5h5" />
       <path d="M5.5 3.5h13a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-8l-4.5 3v-3h-.5a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z" />
+    </svg>
+  ) : kind === "clients" ? (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <circle cx="9" cy="8" r="3" />
+      <path d="M3.5 19.5v-2A4.5 4.5 0 0 1 8 13h2a4.5 4.5 0 0 1 4.5 4.5v2M15.5 5.5h5M18 3v5M16 11.5h4.5M16 15h4.5" />
     </svg>
   ) : kind === "phone" ? (
     <svg aria-hidden="true" viewBox="0 0 24 24">
@@ -34,6 +39,14 @@ export function ErpNav({ showStaff }: { showStaff: boolean }) {
       >
         <NavIcon kind="consultations" />
         <span>상담</span>
+      </Link>
+      <Link
+        aria-current={pathname.startsWith("/clients") ? "page" : undefined}
+        className={pathname.startsWith("/clients") ? "is-active" : undefined}
+        href="/clients"
+      >
+        <NavIcon kind="clients" />
+        <span>고객 찾기</span>
       </Link>
       <Link
         aria-current={pathname.startsWith("/phone-desk") ? "page" : undefined}

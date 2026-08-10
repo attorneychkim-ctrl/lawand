@@ -51,7 +51,8 @@ export type ConsultationListItem = {
 
 export type TelephonyCall = {
   id: string;
-  consultationId: string;
+  targetSource: "consultation" | "legal_friends_directory";
+  consultationId: string | null;
   endpointId: string;
   commandStatus: "queued" | "dispatching" | "succeeded" | "failed" | "unknown";
   outcome: "unknown" | "answered" | "no_answer" | "busy" | "failed" | "cancelled";
@@ -181,7 +182,12 @@ export type PhoneDeskCall = {
       publicReceiptCode: string;
       displayName: string;
       state: string;
-    };
+    } | null;
+    directoryClient: {
+      clientIdx: number;
+      caseIdx: number;
+      displayName: string;
+    } | null;
     observationLink: {
       method: "endpoint_phone_time_v1";
       timeDeltaMs: number;
@@ -233,6 +239,31 @@ export type PhoneDeskCallSnapshot = {
   snapshotAt: string;
   items: PhoneDeskCall[];
   followUps: PhoneDeskFollowUp[];
+};
+
+export type LegalFriendsClientDirectoryItem = {
+  clientIdx: number;
+  caseIdx: number;
+  clientName: string;
+  phone: string | null;
+  callable: boolean;
+  caseType: number;
+  caseCategory: number;
+  caseState: number;
+  maxState: number;
+  isClosed: boolean;
+  isRepealed: boolean;
+  courtName: string | null;
+  caseNumber: string | null;
+  caseName: string | null;
+  staffNames: string[];
+  caseCreatedOn: string;
+  caseUpdatedOn: string;
+};
+
+export type LegalFriendsClientDirectorySearch = {
+  queryType: "name" | "phone";
+  items: LegalFriendsClientDirectoryItem[];
 };
 
 export type PhoneDeskStaffOption = {
@@ -496,6 +527,15 @@ export async function getPhoneDeskCalls(): Promise<PhoneDeskCallSnapshot> {
   return (await response.json()) as PhoneDeskCallSnapshot;
 }
 
+export async function searchLegalFriendsClientDirectory(
+  query: string,
+): Promise<LegalFriendsClientDirectorySearch> {
+  const params = new URLSearchParams({ q: query, limit: "30" });
+  return phoneDeskResponse<LegalFriendsClientDirectorySearch>(
+    await gatewayFetch(`/v1/client-directory?${params.toString()}`),
+  );
+}
+
 async function phoneDeskResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as {
@@ -612,6 +652,18 @@ export async function requestConsultationClickToCall(
       `/v1/consultations/${consultationId}/click-to-call`,
       { method: "POST" },
     ),
+  );
+}
+
+export async function requestDirectoryClickToCall(input: {
+  clientIdx: number;
+  caseIdx: number;
+}): Promise<TelephonyCall> {
+  return telephonyResponse(
+    await gatewayFetch("/v1/client-directory/click-to-call", {
+      method: "POST",
+      body: input,
+    }),
   );
 }
 

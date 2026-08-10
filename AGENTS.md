@@ -55,6 +55,25 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-10 — ERP 리걸프렌즈 고객 찾기·센트릭스 클릭투콜 구현
+- ERP 전역 내비게이션에 `/clients` 고객 찾기를 추가했다. 고객명 또는 전화번호로
+  `CB.TblCSClient`를 검색하고 `Case_idx = CB.TblCase.idx`를 반드시 조인해
+  `COALESCE(del_flag, 0) <> 1`인 사건만 표시한다. 결과에는 고객 연락처와 사건 유형·상태·
+  사건번호·법원·담당자·등록/수정일을 제공하며, 전화 가능한 결과는 기존 센트릭스
+  클릭투콜과 통화 종료 후 공용 후처리·재통화 흐름을 그대로 사용한다.
+- `lawand_app`과 브라우저에는 `CB` 직접 조회 권한을 열지 않았다. 검색은 길이·건수 제한이
+  있는 security-definer 함수만 실행하고, 감사로그에는 검색어 원문 대신 종류·길이·결과
+  건수만 남긴다. 전화 걸기는 브라우저가 전화번호를 보내지 않고 고객·사건 ID만 보내며,
+  gateway가 같은 조인과 삭제 조건으로 대상을 다시 확인한 뒤 이름·번호를 AES-GCM으로
+  별도 보존한다. outbox 이벤트·SSE·로그에는 전화번호 원문을 넣지 않는다. 기존 수신전화의
+  리걸프렌즈 차선 조회에도 삭제 사건 제외 조건을 적용했다.
+- migration `0040_wandering_lenny_balinger.sql`을 로컬 `lawand_dev`에 적용했다. 삭제 사건
+  4,994건이 있는 상태에서 검색 결과의 삭제 사건 0건, 삭제 사건 식별자의 직접 발신 대상
+  해석 0건, `lawand_app`의 두 함수 실행 가능·`CB.TblCSClient` 직접 SELECT 차단을 확인했다.
+  운영 RDS와 앱에는 아직 배포하지 않았다.
+- 전체 5개 패키지 typecheck·ESLint·production build, core 57개·gateway 79개 테스트,
+  Drizzle schema check와 `git diff --check`를 통과했다. `PROJECT_PLAN.md`는 v0.94다.
+
 ### 2026-08-10 — 홈페이지 출시 후보 EIP 배포·정식 도메인 안전 전환 준비
 - 기존 217개 워크트리 변경을 `d069eb6`으로 보존하고 뒤처진 `origin/main`을 병합한 뒤,
   실제 `/bank/self-diagnosis`에 단계 전환 스크롤·포커스 어텐션 UX를 적용했다. 운영 DB

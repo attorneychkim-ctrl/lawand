@@ -187,6 +187,11 @@ export const telephonyCallDirectionEnum = pgEnum(
   ["outbound", "inbound"],
 );
 
+export const telephonyCallTargetSourceEnum = pgEnum(
+  "telephony_call_target_source",
+  ["consultation", "legal_friends_directory"],
+);
+
 export const telephonyCommandStatusEnum = pgEnum(
   "telephony_command_status",
   ["queued", "dispatching", "succeeded", "failed", "unknown"],
@@ -2055,12 +2060,16 @@ export const telephonyCalls = pgTable(
     staffUserId: uuid("staff_user_id")
       .notNull()
       .references(() => staffUsers.id, { onDelete: "restrict" }),
-    consultationId: uuid("consultation_id")
-      .notNull()
-      .references(() => consultations.id, { onDelete: "restrict" }),
-    consultationRequestId: uuid("consultation_request_id")
-      .notNull()
-      .references(() => consultationRequests.id, { onDelete: "restrict" }),
+    targetSource: telephonyCallTargetSourceEnum("target_source")
+      .default("consultation")
+      .notNull(),
+    consultationId: uuid("consultation_id").references(() => consultations.id, {
+      onDelete: "restrict",
+    }),
+    consultationRequestId: uuid("consultation_request_id").references(
+      () => consultationRequests.id,
+      { onDelete: "restrict" },
+    ),
     outboxEventId: uuid("outbox_event_id")
       .notNull()
       .references(() => outboxEvents.id, { onDelete: "restrict" }),
@@ -2117,6 +2126,18 @@ export const telephonyCalls = pgTable(
       sql`octet_length(${table.remotePhoneFingerprint}) = 32`,
     ),
     check(
+      "telephony_calls_target_reference",
+      sql`(
+        ${table.targetSource} = 'consultation'
+        AND ${table.consultationId} IS NOT NULL
+        AND ${table.consultationRequestId} IS NOT NULL
+      ) OR (
+        ${table.targetSource} = 'legal_friends_directory'
+        AND ${table.consultationId} IS NULL
+        AND ${table.consultationRequestId} IS NULL
+      )`,
+    ),
+    check(
       "telephony_calls_dispatch_time_order",
       sql`${table.dispatchedAt} IS NULL OR ${table.dispatchedAt} >= ${table.requestedAt}`,
     ),
@@ -2168,6 +2189,45 @@ export const telephonyCalls = pgTable(
     check(
       "telephony_calls_disposition_after_reconciliation",
       sql`${table.disposition} IS NULL OR ${table.reconciledAt} IS NOT NULL`,
+    ),
+  ],
+);
+
+export const telephonyCallDirectoryTargets = pgTable(
+  "telephony_call_directory_targets",
+  {
+    telephonyCallId: uuid("telephony_call_id")
+      .primaryKey()
+      .references(() => telephonyCalls.id, { onDelete: "restrict" }),
+    clientIdx: integer("client_idx").notNull(),
+    caseIdx: integer("case_idx").notNull(),
+    clientNameCiphertext: bytea("client_name_ciphertext").notNull(),
+    clientNameNonce: bytea("client_name_nonce").notNull(),
+    clientNameKeyVersion: varchar("client_name_key_version", {
+      length: 50,
+    }).notNull(),
+    phoneCiphertext: bytea("phone_ciphertext").notNull(),
+    phoneNonce: bytea("phone_nonce").notNull(),
+    phoneKeyVersion: varchar("phone_key_version", { length: 50 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("telephony_call_directory_targets_client_case_idx").on(
+      table.clientIdx,
+      table.caseIdx,
+    ),
+    check(
+      "telephony_call_directory_targets_ids_positive",
+      sql`${table.clientIdx} > 0 AND ${table.caseIdx} > 0`,
+    ),
+    check(
+      "telephony_call_directory_targets_crypto",
+      sql`octet_length(${table.clientNameNonce}) = 12
+        AND octet_length(${table.clientNameCiphertext}) >= 17
+        AND octet_length(${table.phoneNonce}) = 12
+        AND octet_length(${table.phoneCiphertext}) >= 17`,
     ),
   ],
 );

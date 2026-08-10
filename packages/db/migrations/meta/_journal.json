@@ -281,6 +281,13 @@
       "when": 1786324144416,
       "tag": "0039_chemical_captain_flint",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1786345957730,
+      "tag": "0040_wandering_lenny_balinger",
+      "breakpoints": true
     }
   ]
 }

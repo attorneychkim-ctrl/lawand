@@ -6,9 +6,25 @@ import {
   centrexBridgeCommandResultSchema,
   centrexBridgeEventSchema,
   centrexBridgeResetCommandSchema,
+  legalFriendsDirectoryClickToCallSchema,
   phoneDeskAftercareSaveSchema,
   telephonyCallDispositionConfirmationSchema,
 } from "./telephony.js";
+
+test("고객찾기 발신은 양의 고객·사건 식별자만 받는다", () => {
+  assert.deepEqual(
+    legalFriendsDirectoryClickToCallSchema.parse({ clientIdx: 10, caseIdx: 20 }),
+    { clientIdx: 10, caseIdx: 20 },
+  );
+  assert.equal(
+    legalFriendsDirectoryClickToCallSchema.safeParse({
+      clientIdx: 10,
+      caseIdx: 20,
+      phone: "01012345678",
+    }).success,
+    false,
+  );
+});
 
 test("통화 종료 결과는 허용된 단일 분류만 받는다", () => {
   assert.deepEqual(

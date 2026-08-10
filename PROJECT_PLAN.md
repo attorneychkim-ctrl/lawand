@@ -1,4 +1,4 @@
-# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v0.93)
+# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v0.94)
 
 > 이 문서는 새 로앤 홈페이지 + 새 ERP + 리걸플로/리걸프렌즈 연동을 하나의 플랫폼으로
 > 묶기 위한 **저장소 구조·아키텍처 설계 초안**이다. 코덱스/클로드코드 세션이 번갈아
@@ -732,6 +732,22 @@ gateway security-definer 함수 EXECUTE 유지를 같은 트랜잭션에서 확�
 `run_sync.py setup-cloudwatch`로 켠다. 실행·검증 절차와 함정은 크론 EC2의
 `jobs/lf_phone_directory/AGENTS.md`에 있다.
 
+ERP `/clients`는 이 비공개 동기화 원천을 고객 찾기 읽기 모델로 사용한다. 검색은 gateway의
+`search_legalfriends_client_directory` security-definer 함수만 통과하며
+`CB.TblCSClient.Case_idx = CB.TblCase.idx`를 항상 조인하고
+`COALESCE(CB.TblCase.del_flag, 0) <> 1`을 강제한다. 고객명은 공백을 제외한 2자 이상,
+전화번호는 숫자 4자리 이상만 허용하고 한 번에 최대 50건만 반환한다. 브라우저와
+`lawand_app`에는 `CB` 테이블 직접 권한을 주지 않으며, 감사로그에는 검색어 원문 대신
+검색 종류·길이·결과 건수만 남긴다. 수신전화의 리걸프렌즈 차선 조회에도 같은 삭제 사건
+제외 조건을 적용한다.
+
+고객 찾기의 `전화 걸기`는 브라우저가 전화번호를 다시 보내지 않고 고객·사건 식별자만
+gateway에 보낸다. gateway는 `resolve_legalfriends_directory_call_target` 함수로 같은 조인과
+삭제 조건을 다시 검증한 뒤, 직원의 활성 센트릭스 주 회선으로 기존 click-to-call 명령을
+만든다. 발신 시점 고객명·전화번호는 별도 대상 원장에 AES-GCM 암호화하고 outbox·SSE·로그에는
+원문을 넣지 않는다. 이 통화는 기존 상담 클릭투콜과 함께 통합 전화데스크에 표시되며 통화
+종료 뒤 같은 후처리·재통화 흐름을 사용한다.
+
 ### 2-4. 기존 시스템은 어댑터 뒤로 (`packages/integrations`)
 리걸플로·리걸프렌즈·기존 Laravel ERP 호출을 앱 코드에 흩뿌리지 말고 어댑터 패키지에
 가둔다. 전환기 동안 기존 Laravel ERP는 계속 돌 테니(**strangler 방식**), 나중에 어느
@@ -1285,6 +1301,8 @@ Manager와 별도 역할·보안그룹·TLS 기준을 적용한다.
 - [x] 운영 RDS 비공개 `CB` 3개 원천 이관·논리 해시 검증·migrator/viewer 권한 적용
 - [x] 수신전화 리걸프렌즈 차선 원천: `Office_idx=56`의 `CB.TblCSClient`·`CB.TblCase`·
   `CB.TblMember` 최소필드 로컬·운영 동기화, 행별 논리 해시·권한·암호화 스냅샷 검증
+- [x] ERP 고객 찾기: `CB.TblCSClient.Case_idx = CB.TblCase.idx` 조인·삭제 사건 제외를
+  강제한 고객명/전화번호 검색과 식별자 재검증 기반 센트릭스 클릭투콜·통합 후처리
 - [x] 자가진단 런타임 읽기 모델: `Office_idx=56`·직접 식별자/원본 사건 ID 제외·금액 정규화·변제계획·주요 절차일
 - [x] 성공사례 로컬 preview 정제 원장: 내부 `source_case_idx` 연결키·HMAC 원천 지문·비식별 스냅샷·최소 집단 5건·검수/철회 상태
 - [x] 내부 사건 3개 원천 조인 → 코드 선비식별화 → Luna xhigh 사례 초안 생성

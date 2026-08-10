@@ -48,7 +48,8 @@ export default async function PhoneDeskDetailPage({
     notFound();
   }
   const call = detail.call;
-  const customerName = call.clickToCall?.consultation.displayName ??
+  const customerName = call.clickToCall?.consultation?.displayName ??
+    call.clickToCall?.directoryClient?.displayName ??
     (call.customerMatch?.source === "consultation"
       ? call.customerMatch.consultation.displayName
       : call.customerMatch?.source === "legal_friends"

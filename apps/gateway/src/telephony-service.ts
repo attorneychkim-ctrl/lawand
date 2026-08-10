@@ -38,6 +38,7 @@ import {
   staffTelephonyBindings,
   telephonyCallObservationLinks,
   telephonyCallAftercare,
+  telephonyCallDirectoryTargets,
   telephonyCalls,
   telephonyEndpoints,
   telephonyInboundCalls,
@@ -131,6 +132,53 @@ type LegalFriendsDirectoryRow = {
   case_updated_on: string;
 };
 
+type LegalFriendsClientSearchRow = {
+  client_idx: number;
+  case_idx: number;
+  client_name: string | null;
+  phone: string | null;
+  phone_search: string | null;
+  case_type: number;
+  case_category: number;
+  case_state: number;
+  max_state: number;
+  is_closed: number | null;
+  is_repealed: number | null;
+  court_name: string | null;
+  case_number: string | null;
+  case_name: string | null;
+  primary_staff_name: string | null;
+  secondary_staff_name: string | null;
+  tertiary_staff_name: string | null;
+  case_created_on: string;
+  case_updated_on: string;
+};
+
+type LegalFriendsDirectoryCallTargetRow = {
+  client_name: string;
+  phone: string;
+};
+
+export type LegalFriendsClientDirectoryItem = {
+  clientIdx: number;
+  caseIdx: number;
+  clientName: string;
+  phone: string | null;
+  callable: boolean;
+  caseType: number;
+  caseCategory: number;
+  caseState: number;
+  maxState: number;
+  isClosed: boolean;
+  isRepealed: boolean;
+  courtName: string | null;
+  caseNumber: string | null;
+  caseName: string | null;
+  staffNames: string[];
+  caseCreatedOn: string;
+  caseUpdatedOn: string;
+};
+
 export class TelephonyCallError extends Error {
   constructor(
     readonly code:
@@ -139,6 +187,9 @@ export class TelephonyCallError extends Error {
       | "consultation_not_assigned"
       | "consultation_assigned_to_other_staff"
       | "consultation_phone_not_collected"
+      | "directory_query_invalid"
+      | "directory_target_not_found"
+      | "directory_phone_not_callable"
       | "centrex_endpoint_not_linked"
       | "call_not_found"
       | "call_owned_by_other_staff"
@@ -184,7 +235,8 @@ function eventRow(event: PlatformEvent, callId: string) {
 
 function callResponse(call: {
   id: string;
-  consultationId: string;
+  targetSource: "consultation" | "legal_friends_directory";
+  consultationId: string | null;
   endpointId: string;
   commandStatus: "queued" | "dispatching" | "succeeded" | "failed" | "unknown";
   outcome: "unknown" | "answered" | "no_answer" | "busy" | "failed" | "cancelled";
@@ -204,6 +256,7 @@ function callResponse(call: {
 }) {
   return {
     id: call.id,
+    targetSource: call.targetSource,
     consultationId: call.consultationId,
     endpointId: call.endpointId,
     commandStatus: call.commandStatus,
@@ -275,6 +328,76 @@ export function createTelephonyService(options: {
           row.tertiary_staff_name,
         ].filter((name): name is string => Boolean(name)),
       })),
+    };
+  }
+
+  async function searchLegalFriendsClients(
+    query: string,
+    actor: StaffPrincipal,
+    limit = 30,
+  ) {
+    const normalizedQuery = query.trim();
+    const isPhoneQuery = /^[0-9() +.-]+$/.test(normalizedQuery);
+    const phoneDigits = normalizedQuery.replace(/[^0-9]/g, "");
+    const compactName = normalizedQuery.replace(/\s/g, "");
+    if (
+      (isPhoneQuery && (phoneDigits.length < 4 || phoneDigits.length > 15)) ||
+      (!isPhoneQuery && (compactName.length < 2 || compactName.length > 30))
+    ) {
+      throw new TelephonyCallError(
+        "directory_query_invalid",
+        isPhoneQuery
+          ? "전화번호는 숫자 4자리 이상 입력해 주세요."
+          : "고객명은 두 글자 이상 입력해 주세요.",
+      );
+    }
+    const normalizedLimit = Math.min(Math.max(Math.trunc(limit) || 30, 1), 50);
+    const result = await db.execute(
+      sql<LegalFriendsClientSearchRow>`SELECT * FROM public.search_legalfriends_client_directory(${normalizedQuery}, ${normalizedLimit})`,
+    );
+    const rows = result.rows as LegalFriendsClientSearchRow[];
+    const items: LegalFriendsClientDirectoryItem[] = rows.map((row) => ({
+      clientIdx: row.client_idx,
+      caseIdx: row.case_idx,
+      clientName: row.client_name ?? "이름 미확인",
+      phone: row.phone,
+      callable: /^[0-9]{9,15}$/.test(row.phone_search ?? ""),
+      caseType: row.case_type,
+      caseCategory: row.case_category,
+      caseState: row.case_state,
+      maxState: row.max_state,
+      isClosed: row.is_closed === 1,
+      isRepealed: row.is_repealed === 1,
+      courtName: row.court_name,
+      caseNumber: row.case_number,
+      caseName: row.case_name,
+      staffNames: [
+        row.primary_staff_name,
+        row.secondary_staff_name,
+        row.tertiary_staff_name,
+      ].filter((name): name is string => Boolean(name)),
+      caseCreatedOn: row.case_created_on,
+      caseUpdatedOn: row.case_updated_on,
+    }));
+    const searchedAt = now();
+    const auditId = createEventId();
+    await db.insert(staffAuditLogs).values({
+      id: auditId,
+      actorUserId: actor.id,
+      action: "legalfriends.client_directory.searched",
+      targetType: "legalfriends_client_directory",
+      targetId: auditId,
+      metadata: {
+        searchType: isPhoneQuery ? "phone" : "name",
+        queryLength: isPhoneQuery ? phoneDigits.length : compactName.length,
+        resultCount: items.length,
+      },
+      occurredAt: searchedAt,
+      createdAt: searchedAt,
+    });
+    return {
+      queryType: isPhoneQuery ? ("phone" as const) : ("name" as const),
+      items,
     };
   }
 
@@ -533,6 +656,7 @@ export function createTelephonyService(options: {
         linkedCallId: telephonyCallObservationLinks.telephonyCallId,
         linkMethod: telephonyCallObservationLinks.matchMethod,
         linkTimeDeltaMs: telephonyCallObservationLinks.timeDeltaMs,
+        clickTargetSource: telephonyCalls.targetSource,
         clickCommandStatus: telephonyCalls.commandStatus,
         clickOutcome: telephonyCalls.outcome,
         clickDisposition: telephonyCalls.disposition,
@@ -546,6 +670,13 @@ export function createTelephonyService(options: {
         consultationNameCiphertext: consultations.preferredNameCiphertext,
         consultationNameNonce: consultations.preferredNameNonce,
         consultationNameKeyVersion: consultations.preferredNameKeyVersion,
+        directoryClientIdx: telephonyCallDirectoryTargets.clientIdx,
+        directoryCaseIdx: telephonyCallDirectoryTargets.caseIdx,
+        directoryClientNameCiphertext:
+          telephonyCallDirectoryTargets.clientNameCiphertext,
+        directoryClientNameNonce: telephonyCallDirectoryTargets.clientNameNonce,
+        directoryClientNameKeyVersion:
+          telephonyCallDirectoryTargets.clientNameKeyVersion,
       })
       .from(telephonyInboundCalls)
       .innerJoin(
@@ -562,6 +693,13 @@ export function createTelephonyService(options: {
       .leftJoin(
         telephonyCalls,
         eq(telephonyCalls.id, telephonyCallObservationLinks.telephonyCallId),
+      )
+      .leftJoin(
+        telephonyCallDirectoryTargets,
+        eq(
+          telephonyCallDirectoryTargets.telephonyCallId,
+          telephonyCalls.id,
+        ),
       )
       .leftJoin(
         staffProfiles,
@@ -585,6 +723,7 @@ export function createTelephonyService(options: {
     const standaloneClickRows = await db
       .select({
         id: telephonyCalls.id,
+        targetSource: telephonyCalls.targetSource,
         consultationRequestId: telephonyCalls.consultationRequestId,
         endpointId: telephonyCalls.endpointId,
         commandStatus: telephonyCalls.commandStatus,
@@ -602,6 +741,16 @@ export function createTelephonyService(options: {
         phoneCiphertext: consultationRequests.phoneCiphertext,
         phoneNonce: consultationRequests.phoneNonce,
         phoneKeyVersion: consultationRequests.phoneKeyVersion,
+        directoryPhoneCiphertext: telephonyCallDirectoryTargets.phoneCiphertext,
+        directoryPhoneNonce: telephonyCallDirectoryTargets.phoneNonce,
+        directoryPhoneKeyVersion: telephonyCallDirectoryTargets.phoneKeyVersion,
+        directoryClientIdx: telephonyCallDirectoryTargets.clientIdx,
+        directoryCaseIdx: telephonyCallDirectoryTargets.caseIdx,
+        directoryClientNameCiphertext:
+          telephonyCallDirectoryTargets.clientNameCiphertext,
+        directoryClientNameNonce: telephonyCallDirectoryTargets.clientNameNonce,
+        directoryClientNameKeyVersion:
+          telephonyCallDirectoryTargets.clientNameKeyVersion,
         staffUserId: telephonyCalls.staffUserId,
         staffDisplayName: staffProfiles.displayName,
         consultationId: consultations.id,
@@ -617,7 +766,7 @@ export function createTelephonyService(options: {
         telephonyEndpoints,
         eq(telephonyEndpoints.id, telephonyCalls.endpointId),
       )
-      .innerJoin(
+      .leftJoin(
         consultationRequests,
         eq(consultationRequests.id, telephonyCalls.consultationRequestId),
       )
@@ -625,9 +774,16 @@ export function createTelephonyService(options: {
         staffProfiles,
         eq(staffProfiles.userId, telephonyCalls.staffUserId),
       )
-      .innerJoin(
+      .leftJoin(
         consultations,
         eq(consultations.id, telephonyCalls.consultationId),
+      )
+      .leftJoin(
+        telephonyCallDirectoryTargets,
+        eq(
+          telephonyCallDirectoryTargets.telephonyCallId,
+          telephonyCalls.id,
+        ),
       )
       .leftJoin(
         telephonyCallObservationLinks,
@@ -710,6 +866,20 @@ export function createTelephonyService(options: {
             `consultations.preferred_name:${row.consultationId}`,
           )
         : row.consultationAnonymousLabel;
+    const directoryClientDisplayName = (row: {
+      callId: string;
+      clientNameCiphertext: Buffer;
+      clientNameNonce: Buffer;
+      clientNameKeyVersion: string;
+    }) =>
+      protection.decrypt(
+        {
+          ciphertext: row.clientNameCiphertext,
+          nonce: row.clientNameNonce,
+          keyVersion: row.clientNameKeyVersion,
+        },
+        `telephony_call_directory_targets/${row.callId}/client_name`,
+      );
 
     const observedItems = await Promise.all(
       observedRows.map(async (row) => {
@@ -738,15 +908,31 @@ export function createTelephonyService(options: {
               ),
             )
           : null;
-        const hasClickToCall = Boolean(
-          row.linkedCallId &&
+        const hasConsultationTarget = Boolean(
+          row.clickTargetSource === "consultation" &&
             row.clickConsultationId &&
-            row.clickRequestedAt &&
-            row.clickStaffUserId &&
-            row.clickStaffDisplayName &&
             row.consultationReceiptCode &&
             row.consultationState &&
             row.consultationAnonymousLabel,
+        );
+        const hasDirectoryTarget = Boolean(
+          row.clickTargetSource === "legal_friends_directory" &&
+            row.directoryClientIdx &&
+            row.directoryCaseIdx &&
+            row.directoryClientNameCiphertext &&
+            row.directoryClientNameNonce &&
+            row.directoryClientNameKeyVersion,
+        );
+        const hasClickToCall = Boolean(
+          row.linkedCallId &&
+            row.clickRequestedAt &&
+            row.clickStaffUserId &&
+            row.clickStaffDisplayName &&
+            row.clickCommandStatus &&
+            row.clickOutcome &&
+            row.linkMethod &&
+            row.linkTimeDeltaMs !== null &&
+            (hasConsultationTarget || hasDirectoryTarget),
         );
         return {
           id: row.id,
@@ -793,21 +979,37 @@ export function createTelephonyService(options: {
                   staffUserId: row.clickStaffUserId!,
                   displayName: row.clickStaffDisplayName!,
                 },
-                consultation: {
-                  id: row.clickConsultationId!,
-                  publicReceiptCode: row.consultationReceiptCode!,
-                  state: row.consultationState!,
-                  displayName: consultationDisplayName({
-                    consultationId: row.clickConsultationId!,
-                    consultationAnonymousLabel:
-                      row.consultationAnonymousLabel!,
-                    consultationNameCiphertext:
-                      row.consultationNameCiphertext,
-                    consultationNameNonce: row.consultationNameNonce,
-                    consultationNameKeyVersion:
-                      row.consultationNameKeyVersion,
-                  }),
-                },
+                consultation: hasConsultationTarget
+                  ? {
+                      id: row.clickConsultationId!,
+                      publicReceiptCode: row.consultationReceiptCode!,
+                      state: row.consultationState!,
+                      displayName: consultationDisplayName({
+                        consultationId: row.clickConsultationId!,
+                        consultationAnonymousLabel:
+                          row.consultationAnonymousLabel!,
+                        consultationNameCiphertext:
+                          row.consultationNameCiphertext,
+                        consultationNameNonce: row.consultationNameNonce,
+                        consultationNameKeyVersion:
+                          row.consultationNameKeyVersion,
+                      }),
+                    }
+                  : null,
+                directoryClient: hasDirectoryTarget
+                  ? {
+                      clientIdx: row.directoryClientIdx!,
+                      caseIdx: row.directoryCaseIdx!,
+                      displayName: directoryClientDisplayName({
+                        callId: row.linkedCallId!,
+                        clientNameCiphertext:
+                          row.directoryClientNameCiphertext!,
+                        clientNameNonce: row.directoryClientNameNonce!,
+                        clientNameKeyVersion:
+                          row.directoryClientNameKeyVersion!,
+                      }),
+                    }
+                  : null,
                 observationLink: {
                   method: row.linkMethod!,
                   timeDeltaMs: row.linkTimeDeltaMs!,
@@ -820,16 +1022,43 @@ export function createTelephonyService(options: {
 
     const standaloneClickItems = await Promise.all(
       standaloneClickRows.map(async (row) => {
-        if (!row.phoneCiphertext || !row.phoneNonce || !row.phoneKeyVersion) {
+        const directoryTarget = row.targetSource === "legal_friends_directory";
+        const phoneCiphertext = directoryTarget
+          ? row.directoryPhoneCiphertext
+          : row.phoneCiphertext;
+        const phoneNonce = directoryTarget
+          ? row.directoryPhoneNonce
+          : row.phoneNonce;
+        const phoneKeyVersion = directoryTarget
+          ? row.directoryPhoneKeyVersion
+          : row.phoneKeyVersion;
+        if (!phoneCiphertext || !phoneNonce || !phoneKeyVersion) {
           throw new Error("phone_desk_click_to_call_phone_not_found");
         }
         const remotePhone = protection.decrypt(
           {
-            ciphertext: row.phoneCiphertext,
-            nonce: row.phoneNonce,
-            keyVersion: row.phoneKeyVersion,
+            ciphertext: phoneCiphertext,
+            nonce: phoneNonce,
+            keyVersion: phoneKeyVersion,
           },
-          `consultation_requests.phone:${row.consultationRequestId}`,
+          directoryTarget
+            ? `telephony_call_directory_targets/${row.id}/phone`
+            : `consultation_requests.phone:${row.consultationRequestId}`,
+        );
+        const hasConsultationTarget = Boolean(
+          !directoryTarget &&
+            row.consultationId &&
+            row.consultationReceiptCode &&
+            row.consultationState &&
+            row.consultationAnonymousLabel,
+        );
+        const hasDirectoryTarget = Boolean(
+          directoryTarget &&
+            row.directoryClientIdx &&
+            row.directoryCaseIdx &&
+            row.directoryClientNameCiphertext &&
+            row.directoryClientNameNonce &&
+            row.directoryClientNameKeyVersion,
         );
         const state = row.commandStatus === "failed"
           ? ("failed" as const)
@@ -886,18 +1115,37 @@ export function createTelephonyService(options: {
               staffUserId: row.staffUserId,
               displayName: row.staffDisplayName,
             },
-            consultation: {
-              id: row.consultationId,
-              publicReceiptCode: row.consultationReceiptCode,
-              state: row.consultationState,
-              displayName: consultationDisplayName({
-                consultationId: row.consultationId,
-                consultationAnonymousLabel: row.consultationAnonymousLabel,
-                consultationNameCiphertext: row.consultationNameCiphertext,
-                consultationNameNonce: row.consultationNameNonce,
-                consultationNameKeyVersion: row.consultationNameKeyVersion,
-              }),
-            },
+            consultation: hasConsultationTarget
+              ? {
+                  id: row.consultationId!,
+                  publicReceiptCode: row.consultationReceiptCode!,
+                  state: row.consultationState!,
+                  displayName: consultationDisplayName({
+                    consultationId: row.consultationId!,
+                    consultationAnonymousLabel:
+                      row.consultationAnonymousLabel!,
+                    consultationNameCiphertext:
+                      row.consultationNameCiphertext,
+                    consultationNameNonce: row.consultationNameNonce,
+                    consultationNameKeyVersion:
+                      row.consultationNameKeyVersion,
+                  }),
+                }
+              : null,
+            directoryClient: hasDirectoryTarget
+              ? {
+                  clientIdx: row.directoryClientIdx!,
+                  caseIdx: row.directoryCaseIdx!,
+                  displayName: directoryClientDisplayName({
+                    callId: row.id,
+                    clientNameCiphertext:
+                      row.directoryClientNameCiphertext!,
+                    clientNameNonce: row.directoryClientNameNonce!,
+                    clientNameKeyVersion:
+                      row.directoryClientNameKeyVersion!,
+                  }),
+                }
+              : null,
             observationLink: null,
           },
         };
@@ -2150,6 +2398,172 @@ export function createTelephonyService(options: {
     });
   }
 
+  async function requestDirectoryClickToCall(
+    input: { clientIdx: number; caseIdx: number },
+    actor: StaffPrincipal,
+  ) {
+    if (!dispatchEnabled) {
+      throw new TelephonyCallError(
+        "feature_disabled",
+        "센트릭스 클릭투콜이 아직 활성화되지 않았습니다.",
+      );
+    }
+    const requestedAt = now();
+    return db.transaction(async (tx) => {
+      const targetResult = await tx.execute(
+        sql<LegalFriendsDirectoryCallTargetRow>`SELECT * FROM public.resolve_legalfriends_directory_call_target(${input.clientIdx}, ${input.caseIdx})`,
+      );
+      const [target] = targetResult.rows as LegalFriendsDirectoryCallTargetRow[];
+      if (!target) {
+        throw new TelephonyCallError(
+          "directory_target_not_found",
+          "삭제되었거나 현재 조회할 수 없는 리걸프렌즈 고객입니다.",
+        );
+      }
+      if (!/^[0-9]{9,15}$/.test(target.phone)) {
+        throw new TelephonyCallError(
+          "directory_phone_not_callable",
+          "센트릭스로 연결할 수 있는 전화번호가 등록되어 있지 않습니다.",
+        );
+      }
+
+      const [endpoint] = await tx
+        .select({ id: telephonyEndpoints.id })
+        .from(staffTelephonyBindings)
+        .innerJoin(
+          telephonyEndpoints,
+          eq(telephonyEndpoints.id, staffTelephonyBindings.endpointId),
+        )
+        .where(
+          and(
+            eq(staffTelephonyBindings.staffUserId, actor.id),
+            eq(staffTelephonyBindings.isActive, true),
+            eq(staffTelephonyBindings.isPrimary, true),
+            eq(telephonyEndpoints.provider, "centrex"),
+            eq(telephonyEndpoints.isActive, true),
+          ),
+        )
+        .limit(1);
+      if (!endpoint) {
+        throw new TelephonyCallError(
+          "centrex_endpoint_not_linked",
+          "직원 계정에 활성 센트릭스 회선이 연결되지 않았습니다.",
+        );
+      }
+
+      const phoneFingerprint = protection.fingerprint(target.phone);
+      const [recentCall] = await tx
+        .select()
+        .from(telephonyCalls)
+        .where(
+          and(
+            eq(telephonyCalls.targetSource, "legal_friends_directory"),
+            eq(telephonyCalls.staffUserId, actor.id),
+            eq(telephonyCalls.remotePhoneFingerprint, phoneFingerprint),
+            or(
+              and(
+                inArray(telephonyCalls.commandStatus, ["queued", "dispatching"]),
+                gte(
+                  telephonyCalls.requestedAt,
+                  new Date(requestedAt.getTime() - DUPLICATE_COMMAND_WINDOW_MS),
+                ),
+              ),
+              and(
+                eq(telephonyCalls.commandStatus, "succeeded"),
+                isNull(telephonyCalls.reconciledAt),
+              ),
+            ),
+          ),
+        )
+        .orderBy(desc(telephonyCalls.requestedAt))
+        .limit(1);
+      if (recentCall) {
+        return { ...callResponse(recentCall), replayed: true };
+      }
+
+      const callId = createTelephonyCallId();
+      const eventId = createEventId();
+      const phoneEncrypted = protection.encrypt(
+        target.phone,
+        `telephony_call_directory_targets/${callId}/phone`,
+      );
+      const clientNameEncrypted = protection.encrypt(
+        target.client_name,
+        `telephony_call_directory_targets/${callId}/client_name`,
+      );
+      const event: PlatformEvent = {
+        eventId,
+        eventType: "telephony.call.requested",
+        eventVersion: 1,
+        occurredAt: requestedAt.toISOString(),
+        producer: "lawand.gateway",
+        correlationId: callId,
+        data: {
+          callId,
+          targetSource: "legal_friends_directory",
+          directoryClientIdx: input.clientIdx,
+          directoryCaseIdx: input.caseIdx,
+          endpointId: endpoint.id,
+          staffUserId: actor.id,
+          provider: "centrex",
+          direction: "outbound",
+          command: "clickdial",
+        },
+      };
+      assertPlatformEvent(event);
+      await tx.insert(outboxEvents).values(eventRow(event, callId));
+      const [call] = await tx
+        .insert(telephonyCalls)
+        .values({
+          id: callId,
+          provider: "centrex",
+          direction: "outbound",
+          targetSource: "legal_friends_directory",
+          endpointId: endpoint.id,
+          staffUserId: actor.id,
+          consultationId: null,
+          consultationRequestId: null,
+          outboxEventId: eventId,
+          remotePhoneFingerprint: phoneFingerprint,
+          commandStatus: "queued",
+          outcome: "unknown",
+          requestedAt,
+          createdAt: requestedAt,
+          updatedAt: requestedAt,
+        })
+        .returning();
+      if (!call) throw new Error("telephony_call_not_created");
+      await tx.insert(telephonyCallDirectoryTargets).values({
+        telephonyCallId: callId,
+        clientIdx: input.clientIdx,
+        caseIdx: input.caseIdx,
+        clientNameCiphertext: clientNameEncrypted.ciphertext,
+        clientNameNonce: clientNameEncrypted.nonce,
+        clientNameKeyVersion: clientNameEncrypted.keyVersion,
+        phoneCiphertext: phoneEncrypted.ciphertext,
+        phoneNonce: phoneEncrypted.nonce,
+        phoneKeyVersion: phoneEncrypted.keyVersion,
+        createdAt: requestedAt,
+      });
+      await tx.insert(staffAuditLogs).values({
+        id: createEventId(),
+        actorUserId: actor.id,
+        action: "telephony.directory_click_to_call.requested",
+        targetType: "legalfriends_directory_client",
+        targetId: String(input.clientIdx),
+        metadata: {
+          callId,
+          caseIdx: input.caseIdx,
+          endpointId: endpoint.id,
+          provider: "centrex",
+        },
+        occurredAt: requestedAt,
+        createdAt: requestedAt,
+      });
+      return { ...callResponse(call), replayed: false };
+    });
+  }
+
   async function getCall(callId: string, actor: StaffPrincipal) {
     const [call] = await db
       .select()
@@ -2245,7 +2659,9 @@ export function createTelephonyService(options: {
     getPhoneDeskCall,
     pollInboundAnswerCommand,
     requestClickToCall,
+    requestDirectoryClickToCall,
     requestInboundAnswer,
+    searchLegalFriendsClients,
     savePhoneDeskAftercare,
   };
 }

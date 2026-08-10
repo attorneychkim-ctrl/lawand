@@ -16,6 +16,7 @@ import {
   consultationRequests,
   outboxDeliveryAttempts,
   outboxEvents,
+  telephonyCallDirectoryTargets,
   telephonyCalls,
   telephonyEndpoints,
 } from "@lawand/db";
@@ -229,13 +230,19 @@ export function createCentrexWorker(options: {
     const [row] = await db
       .select({
         callId: telephonyCalls.id,
+        targetSource: telephonyCalls.targetSource,
         requestId: telephonyCalls.consultationRequestId,
         endpointId: telephonyCalls.endpointId,
         apiLoginId: telephonyEndpoints.apiLoginId,
         credentialKey: telephonyEndpoints.credentialKey,
-        phoneCiphertext: consultationRequests.phoneCiphertext,
-        phoneNonce: consultationRequests.phoneNonce,
-        phoneKeyVersion: consultationRequests.phoneKeyVersion,
+        consultationPhoneCiphertext: consultationRequests.phoneCiphertext,
+        consultationPhoneNonce: consultationRequests.phoneNonce,
+        consultationPhoneKeyVersion: consultationRequests.phoneKeyVersion,
+        directoryClientIdx: telephonyCallDirectoryTargets.clientIdx,
+        directoryCaseIdx: telephonyCallDirectoryTargets.caseIdx,
+        directoryPhoneCiphertext: telephonyCallDirectoryTargets.phoneCiphertext,
+        directoryPhoneNonce: telephonyCallDirectoryTargets.phoneNonce,
+        directoryPhoneKeyVersion: telephonyCallDirectoryTargets.phoneKeyVersion,
       })
       .from(telephonyCalls)
       .innerJoin(
@@ -246,20 +253,45 @@ export function createCentrexWorker(options: {
           eq(telephonyEndpoints.provider, "centrex"),
         ),
       )
-      .innerJoin(
+      .leftJoin(
         consultationRequests,
         eq(consultationRequests.id, telephonyCalls.consultationRequestId),
       )
+      .leftJoin(
+        telephonyCallDirectoryTargets,
+        eq(telephonyCallDirectoryTargets.telephonyCallId, telephonyCalls.id),
+      )
       .where(eq(telephonyCalls.id, event.callId))
       .limit(1);
+    if (!row || row.endpointId !== envelope.data.endpointId) {
+      throw new Error("telephony_call_reference_not_found");
+    }
+    let directoryEvent = false;
+    let referenceMatches = false;
+    let phoneCiphertext: Buffer | null = null;
+    let phoneNonce: Buffer | null = null;
+    let phoneKeyVersion: string | null = null;
     if (
-      !row ||
-      row.requestId !== envelope.data.requestId ||
-      row.endpointId !== envelope.data.endpointId ||
-      !row.phoneCiphertext ||
-      !row.phoneNonce ||
-      !row.phoneKeyVersion
+      "targetSource" in envelope.data &&
+      envelope.data.targetSource === "legal_friends_directory"
     ) {
+      directoryEvent = true;
+      referenceMatches =
+        row.targetSource === "legal_friends_directory" &&
+        row.directoryClientIdx === envelope.data.directoryClientIdx &&
+        row.directoryCaseIdx === envelope.data.directoryCaseIdx;
+      phoneCiphertext = row.directoryPhoneCiphertext;
+      phoneNonce = row.directoryPhoneNonce;
+      phoneKeyVersion = row.directoryPhoneKeyVersion;
+    } else {
+      referenceMatches =
+        row.targetSource === "consultation" &&
+        row.requestId === envelope.data.requestId;
+      phoneCiphertext = row.consultationPhoneCiphertext;
+      phoneNonce = row.consultationPhoneNonce;
+      phoneKeyVersion = row.consultationPhoneKeyVersion;
+    }
+    if (!referenceMatches || !phoneCiphertext || !phoneNonce || !phoneKeyVersion) {
       throw new Error("telephony_call_reference_not_found");
     }
     const passwordSha512 = await credentialVault.get({
@@ -274,11 +306,13 @@ export function createCentrexWorker(options: {
     }
     const destination = protection.decrypt(
       {
-        ciphertext: row.phoneCiphertext,
-        nonce: row.phoneNonce,
-        keyVersion: row.phoneKeyVersion,
+        ciphertext: phoneCiphertext,
+        nonce: phoneNonce,
+        keyVersion: phoneKeyVersion,
       },
-      `consultation_requests.phone:${row.requestId}`,
+      directoryEvent
+        ? `telephony_call_directory_targets/${row.callId}/phone`
+        : `consultation_requests.phone:${row.requestId}`,
     );
     return {
       endpointId: row.endpointId,
@@ -424,14 +458,18 @@ export function createCentrexWorker(options: {
     const [call] = await db
       .select({
         id: telephonyCalls.id,
+        targetSource: telephonyCalls.targetSource,
         endpointId: telephonyCalls.endpointId,
         requestId: telephonyCalls.consultationRequestId,
         requestedAt: telephonyCalls.requestedAt,
         apiLoginId: telephonyEndpoints.apiLoginId,
         credentialKey: telephonyEndpoints.credentialKey,
-        phoneCiphertext: consultationRequests.phoneCiphertext,
-        phoneNonce: consultationRequests.phoneNonce,
-        phoneKeyVersion: consultationRequests.phoneKeyVersion,
+        consultationPhoneCiphertext: consultationRequests.phoneCiphertext,
+        consultationPhoneNonce: consultationRequests.phoneNonce,
+        consultationPhoneKeyVersion: consultationRequests.phoneKeyVersion,
+        directoryPhoneCiphertext: telephonyCallDirectoryTargets.phoneCiphertext,
+        directoryPhoneNonce: telephonyCallDirectoryTargets.phoneNonce,
+        directoryPhoneKeyVersion: telephonyCallDirectoryTargets.phoneKeyVersion,
       })
       .from(telephonyCalls)
       .innerJoin(
@@ -442,9 +480,13 @@ export function createCentrexWorker(options: {
           eq(telephonyEndpoints.provider, "centrex"),
         ),
       )
-      .innerJoin(
+      .leftJoin(
         consultationRequests,
         eq(consultationRequests.id, telephonyCalls.consultationRequestId),
+      )
+      .leftJoin(
+        telephonyCallDirectoryTargets,
+        eq(telephonyCallDirectoryTargets.telephonyCallId, telephonyCalls.id),
       )
       .where(
         and(
@@ -456,11 +498,16 @@ export function createCentrexWorker(options: {
       .orderBy(asc(telephonyCalls.requestedAt))
       .limit(1);
     if (!call) return false;
-    if (
-      !call.phoneCiphertext ||
-      !call.phoneNonce ||
-      !call.phoneKeyVersion
-    ) {
+    const phoneCiphertext = call.targetSource === "legal_friends_directory"
+      ? call.directoryPhoneCiphertext
+      : call.consultationPhoneCiphertext;
+    const phoneNonce = call.targetSource === "legal_friends_directory"
+      ? call.directoryPhoneNonce
+      : call.consultationPhoneNonce;
+    const phoneKeyVersion = call.targetSource === "legal_friends_directory"
+      ? call.directoryPhoneKeyVersion
+      : call.consultationPhoneKeyVersion;
+    if (!phoneCiphertext || !phoneNonce || !phoneKeyVersion) {
       console.warn(
         JSON.stringify({
           event: "centrex_call_history_reconciliation_failed",
@@ -488,11 +535,13 @@ export function createCentrexWorker(options: {
     }
     const destination = protection.decrypt(
       {
-        ciphertext: call.phoneCiphertext,
-        nonce: call.phoneNonce,
-        keyVersion: call.phoneKeyVersion,
+        ciphertext: phoneCiphertext,
+        nonce: phoneNonce,
+        keyVersion: phoneKeyVersion,
       },
-      `consultation_requests.phone:${call.requestId}`,
+      call.targetSource === "legal_friends_directory"
+        ? `telephony_call_directory_targets/${call.id}/phone`
+        : `consultation_requests.phone:${call.requestId}`,
     );
     const usedRows = await db
       .select({ providerStartedAt: telephonyCalls.providerStartedAt })

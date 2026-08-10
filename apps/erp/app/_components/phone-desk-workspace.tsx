@@ -97,16 +97,18 @@ function caseTypeLabel(caseType: number) {
 }
 
 function customerSearchText(call: PhoneDeskCall) {
+  const clickTarget = call.clickToCall?.consultation?.displayName ??
+    call.clickToCall?.directoryClient?.displayName ?? "";
   const match = call.customerMatch;
-  if (!match) return "";
+  if (!match) return clickTarget;
   if (match.source === "consultation") {
-    return `${match.consultation.displayName} ${match.consultation.publicReceiptCode} ${match.consultation.assigneeDisplayName ?? ""}`;
+    return `${clickTarget} ${match.consultation.displayName} ${match.consultation.publicReceiptCode} ${match.consultation.assigneeDisplayName ?? ""}`;
   }
-  return `${match.clientName} ${match.cases.flatMap((item) => item.staffNames).join(" ")}`;
+  return `${clickTarget} ${match.clientName} ${match.cases.flatMap((item) => item.staffNames).join(" ")}`;
 }
 
 function CustomerSummary({ call }: { call: PhoneDeskCall }) {
-  if (call.clickToCall) {
+  if (call.clickToCall?.consultation) {
     const consultation = call.clickToCall.consultation;
     return (
       <Link
@@ -118,6 +120,16 @@ function CustomerSummary({ call }: { call: PhoneDeskCall }) {
           상담데스크 · {consultation.publicReceiptCode} · 담당 {call.clickToCall.requestedBy.displayName}
         </span>
       </Link>
+    );
+  }
+  if (call.clickToCall?.directoryClient) {
+    return (
+      <span className="phone-desk-customer">
+        <strong>{call.clickToCall.directoryClient.displayName}</strong>
+        <span>
+          리걸프렌즈 고객찾기 · 담당 {call.clickToCall.requestedBy.displayName}
+        </span>
+      </span>
     );
   }
   if (!call.customerMatch) {

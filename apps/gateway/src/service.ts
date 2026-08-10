@@ -2029,6 +2029,7 @@ export function createConsultationService(options: {
       }
     >();
     for (const call of telephonyRows) {
+      if (!call.consultationId) continue;
       if (!latestTelephonyByConsultation.has(call.consultationId)) {
         latestTelephonyByConsultation.set(call.consultationId, {
           disposition: call.disposition,

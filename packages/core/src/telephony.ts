@@ -16,6 +16,13 @@ export const telephonyCallDispositionConfirmationSchema = z
   })
   .strict();
 
+export const legalFriendsDirectoryClickToCallSchema = z
+  .object({
+    clientIdx: z.number().int().positive(),
+    caseIdx: z.number().int().positive(),
+  })
+  .strict();
+
 export type TelephonyCallDisposition = z.infer<
   typeof telephonyCallDispositionSchema
 >;

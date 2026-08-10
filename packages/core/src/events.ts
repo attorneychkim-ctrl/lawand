@@ -100,9 +100,10 @@ const kakaoHomepageEntryReferenceDataSchema = requestReferenceDataSchema
   })
   .strict();
 
-const telephonyCallReferenceDataSchema = z
+const consultationTelephonyCallReferenceDataSchema = z
   .object({
     callId: z.uuid(),
+    targetSource: z.literal("consultation").optional(),
     consultationId: z.uuid(),
     requestId: z.uuid(),
     endpointId: z.uuid(),
@@ -112,6 +113,25 @@ const telephonyCallReferenceDataSchema = z
     command: z.literal("clickdial"),
   })
   .strict();
+
+const legalFriendsDirectoryTelephonyCallReferenceDataSchema = z
+  .object({
+    callId: z.uuid(),
+    targetSource: z.literal("legal_friends_directory"),
+    directoryClientIdx: z.number().int().positive(),
+    directoryCaseIdx: z.number().int().positive(),
+    endpointId: z.uuid(),
+    staffUserId: z.uuid(),
+    provider: z.literal("centrex"),
+    direction: z.literal("outbound"),
+    command: z.literal("clickdial"),
+  })
+  .strict();
+
+const telephonyCallReferenceDataSchema = z.union([
+  consultationTelephonyCallReferenceDataSchema,
+  legalFriendsDirectoryTelephonyCallReferenceDataSchema,
+]);
 
 const assignedDataSchema = assignmentReferenceDataSchema
   .extend({

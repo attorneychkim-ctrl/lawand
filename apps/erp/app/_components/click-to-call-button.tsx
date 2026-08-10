@@ -52,13 +52,28 @@ function statusMessage(call: CallState | null, aftercareSaved: boolean) {
   return null;
 }
 
+type ClickToCallButtonProps = {
+  initialCall?: CallState | null;
+} & (
+  | {
+      consultationId: string;
+      directoryTarget?: never;
+    }
+  | {
+      consultationId?: never;
+      directoryTarget: {
+        clientIdx: number;
+        caseIdx: number;
+        clientName: string;
+      };
+    }
+);
+
 export function ClickToCallButton({
   consultationId,
+  directoryTarget,
   initialCall = null,
-}: {
-  consultationId: string;
-  initialCall?: CallState | null;
-}) {
+}: ClickToCallButtonProps) {
   const router = useRouter();
   const [call, setCall] = useState<CallState | null>(initialCall);
   const [requesting, setRequesting] = useState(false);
@@ -149,17 +164,28 @@ export function ClickToCallButton({
       setAftercareOpen(true);
       return;
     }
-    if (!window.confirm("센트릭스 전화기로 고객에게 전화를 걸까요?")) return;
+    const confirmation = directoryTarget
+      ? `${directoryTarget.clientName} 고객의 등록 전화번호로 센트릭스 전화를 걸까요?`
+      : "센트릭스 전화기로 고객에게 전화를 걸까요?";
+    if (!window.confirm(confirmation)) return;
     setRequesting(true);
     setError("");
     setPollCount(0);
     setAftercareSaved(false);
     setCheckedAftercareCallId(null);
     try {
-      const response = await fetch(
-        `/api/consultations/${consultationId}/click-to-call`,
-        { method: "POST" },
-      );
+      const response = directoryTarget
+        ? await fetch("/api/client-directory/click-to-call", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              clientIdx: directoryTarget.clientIdx,
+              caseIdx: directoryTarget.caseIdx,
+            }),
+          })
+        : await fetch(`/api/consultations/${consultationId}/click-to-call`, {
+            method: "POST",
+          });
       const body = (await response.json().catch(() => null)) as
         | (TelephonyCall & { message?: string })
         | null;
