@@ -1788,23 +1788,163 @@ test("직원 로그인 API는 ERP 내부 키를 요구한다", async (context) =
   assert.equal(result.sessionToken, "s".repeat(43));
 });
 
-test("관리자는 직원의 리걸프렌즈 아이디를 연결한다", async (context) => {
-  const staffUserId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2a4";
+test("인증된 직원은 내 프로필을 조회하고 기본 정보를 수정한다", async (context) => {
+  const profile = {
+    id: realtimeActor.id,
+    email: realtimeActor.email,
+    displayName: realtimeActor.displayName,
+    status: "active" as const,
+    organization: { key: "lawand", name: "법무법인 로앤" },
+    region: { key: "seoul", name: "서울" },
+    department: "상담팀",
+    jobTitle: "상담 담당자",
+    role: "full_time" as const,
+    centrexLineNumber: null,
+    centrexExtension: null,
+    centrexConnection: {
+      status: "unconfigured" as const,
+      assignedEndpoint: null,
+    },
+    legalFriendsId: null,
+    legalFriendsMemberIdx: null,
+  };
+  let updated:
+    | {
+        organization: string;
+        region: string;
+        department: string;
+        jobTitle: string;
+        role?: string;
+      }
+    | undefined;
+  const authService = {
+    authenticateSession: async () => realtimeActor,
+    getStaffProfile: async () => profile,
+    updateStaffProfile: async (
+      _actor: StaffPrincipal,
+      staffUserId: string,
+      input: typeof updated,
+    ) => {
+      assert.equal(staffUserId, realtimeActor.id);
+      updated = input;
+      return {
+        ...profile,
+        organization: { key: "legalflow", name: "리걸플로" },
+        region: { key: "busan", name: "부산" },
+        department: input?.department ?? profile.department,
+        jobTitle: input?.jobTitle ?? profile.jobTitle,
+      };
+    },
+  } as unknown as StaffAuthService;
+  const server = createGatewayServer({
+    authService,
+    internalApiKey: "test-internal-key",
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const headers = {
+    "content-type": "application/json",
+    "x-lawand-internal-key": "test-internal-key",
+    "x-lawand-staff-session": "s".repeat(43),
+  };
+  const ownProfile = await fetch(`${baseUrl}/v1/staff-auth/profile`, {
+    headers,
+  });
+  assert.equal(ownProfile.status, 200);
+  assert.equal(
+    ((await ownProfile.json()) as { profile: { email: string } }).profile.email,
+    realtimeActor.email,
+  );
+
+  const response = await fetch(
+    `${baseUrl}/v1/staff-auth/users/${realtimeActor.id}/profile`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        organization: "legalflow",
+        region: "busan",
+        department: "사건관리팀",
+        jobTitle: "매니저",
+      }),
+    },
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(updated, {
+    organization: "legalflow",
+    region: "busan",
+    department: "사건관리팀",
+    jobTitle: "매니저",
+  });
+});
+
+test("인증된 직원은 현재 비밀번호 확인을 거쳐 비밀번호를 변경한다", async (context) => {
+  let changed:
+    | { currentPassword: string; newPassword: string }
+    | undefined;
+  const authService = {
+    authenticateSession: async () => realtimeActor,
+    changePassword: async (
+      _actor: StaffPrincipal,
+      input: { currentPassword: string; newPassword: string },
+    ) => {
+      changed = input;
+    },
+  } as unknown as StaffAuthService;
+  const server = createGatewayServer({
+    authService,
+    internalApiKey: "test-internal-key",
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const response = await fetch(
+    `http://127.0.0.1:${address.port}/v1/staff-auth/password`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-lawand-internal-key": "test-internal-key",
+        "x-lawand-staff-session": "s".repeat(43),
+      },
+      body: JSON.stringify({
+        currentPassword: "OldSecurePass1!",
+        newPassword: "NewSecurePass2@",
+      }),
+    },
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(changed, {
+    currentPassword: "OldSecurePass1!",
+    newPassword: "NewSecurePass2@",
+  });
+});
+
+test("인증된 직원은 본인의 리걸프렌즈 아이디를 연결한다", async (context) => {
+  const staffUserId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2b1";
   const actor = {
-    id: "019fa6a4-6834-7782-aa0b-4e71ffb8a2b1",
-    email: "admin@lawand.test",
-    displayName: "로앤 관리자",
+    id: staffUserId,
+    email: "staff@lawand.test",
+    displayName: "로앤 직원",
     primaryMembership: {
       id: "019fa6a4-6834-7782-aa0b-4e71ffb8a2b2",
       organization: { key: "lawand", name: "법무법인 로앤" },
       region: { key: "seoul", name: "서울" },
-      department: "관리팀",
-      jobTitle: "관리자",
-      role: "admin",
+      department: "상담팀",
+      jobTitle: "상담 담당자",
+      role: "full_time",
       isPrimary: true,
     },
     memberships: [],
-    roles: ["admin"],
+    roles: ["full_time"],
   } satisfies StaffPrincipal;
   let received:
     | {
@@ -1814,7 +1954,7 @@ test("관리자는 직원의 리걸프렌즈 아이디를 연결한다", async (
       }
     | undefined;
   const authService = {
-    authorize: async () => actor,
+    authenticateSession: async () => actor,
     updateLegalFriendsAccount: async (
       _actor: StaffPrincipal,
       receivedStaffUserId: string,
@@ -1862,23 +2002,23 @@ test("관리자는 직원의 리걸프렌즈 아이디를 연결한다", async (
   assert.equal(received?.legalFriendsMemberIdx, 138);
 });
 
-test("관리자는 직원의 전체 센트릭스 회선번호를 저장한다", async (context) => {
-  const staffUserId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2a4";
+test("인증된 직원은 본인의 전체 센트릭스 회선번호를 저장한다", async (context) => {
+  const staffUserId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2b1";
   const actor = {
-    id: "019fa6a4-6834-7782-aa0b-4e71ffb8a2b1",
-    email: "admin@lawand.test",
-    displayName: "로앤 관리자",
+    id: staffUserId,
+    email: "staff@lawand.test",
+    displayName: "로앤 직원",
     primaryMembership: {
       id: "019fa6a4-6834-7782-aa0b-4e71ffb8a2b2",
       organization: { key: "lawand", name: "법무법인 로앤" },
       region: { key: "seoul", name: "서울" },
-      department: "관리팀",
-      jobTitle: "관리자",
-      role: "admin",
+      department: "상담팀",
+      jobTitle: "상담 담당자",
+      role: "full_time",
       isPrimary: true,
     },
     memberships: [],
-    roles: ["admin"],
+    roles: ["full_time"],
   } satisfies StaffPrincipal;
   let received:
     | {
@@ -1889,7 +2029,7 @@ test("관리자는 직원의 전체 센트릭스 회선번호를 저장한다", 
       }
     | undefined;
   const authService = {
-    authorize: async () => actor,
+    authenticateSession: async () => actor,
     updateCentrexLineNumber: async (
       _actor: StaffPrincipal,
       receivedStaffUserId: string,
@@ -1941,19 +2081,12 @@ test("관리자는 직원의 전체 센트릭스 회선번호를 저장한다", 
   assert.equal(received?.centrexPassword, "per-user-secret");
 });
 
-test("관리자는 실패한 센트릭스 bridge를 유휴 슬롯으로 재배정한다", async (context) => {
-  const staffUserId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2a4";
-  const actor = {
-    ...realtimeActor,
-    roles: ["admin" as const],
-    primaryMembership: {
-      ...realtimeActor.primaryMembership,
-      role: "admin" as const,
-    },
-  } satisfies StaffPrincipal;
+test("인증된 직원은 본인의 실패한 센트릭스 bridge를 재배정한다", async (context) => {
+  const staffUserId = realtimeActor.id;
+  const actor = realtimeActor;
   let receivedStaffUserId = "";
   const authService = {
-    authorize: async () => actor,
+    authenticateSession: async () => actor,
     reassignCentrexBridge: async (
       _actor: StaffPrincipal,
       receivedId: string,

@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import type { StaffDirectoryItem } from "../../lib/staff-auth";
 import { CentrexLineForm } from "./centrex-line-form";
 import { LegalFriendsAccountForm } from "./legalfriends-account-form";
+import { StaffProfileForm } from "./staff-profile-form";
 
 const roleLabels: Record<StaffDirectoryItem["role"], string> = {
   admin: "관리자",
@@ -194,6 +195,10 @@ export function StaffDirectoryWorkspace({
                 <span>{member.jobTitle}</span>
                 <span>{roleLabels[member.role]}</span>
               </div>
+              <details className="staff-profile-editor">
+                <summary>기본 정보·역할 수정</summary>
+                <StaffProfileForm allowRoleEdit profile={member} />
+              </details>
             </header>
             <div className="staff-directory-integrations">
               <CentrexLineForm

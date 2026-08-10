@@ -20,6 +20,8 @@ import {
   staffInvitationCreationSchema,
   staffInvitationTokenSchema,
   staffLoginSchema,
+  staffPasswordChangeSchema,
+  staffProfileUpdateSchema,
   centrexBridgeEventSchema,
   centrexBridgeCommandResultSchema,
   messageTemplateCreateSchema,
@@ -722,6 +724,45 @@ export function createGatewayServer(options?: {
 
       if (
         request.method === "GET" &&
+        url.pathname === "/v1/staff-auth/profile"
+      ) {
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const actor =
+          await options!.authService!.authenticateSession(sessionToken);
+        const profile = await options!.authService!.getStaffProfile(actor);
+        sendJson(response, 200, { profile });
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        url.pathname === "/v1/staff-auth/password"
+      ) {
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const parsed = staffPasswordChangeSchema.safeParse(
+          await readJson(request),
+        );
+        if (!parsed.success) {
+          sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+          return;
+        }
+        const actor =
+          await options!.authService!.authenticateSession(sessionToken);
+        await options!.authService!.changePassword(actor, parsed.data);
+        sendJson(response, 200, { changed: true });
+        return;
+      }
+
+      if (
+        request.method === "GET" &&
         url.pathname === "/v1/staff-auth/users"
       ) {
         const sessionToken = staffSessionToken(request);
@@ -733,6 +774,42 @@ export function createGatewayServer(options?: {
           "admin",
         ]);
         sendJson(response, 200, await options!.authService!.listStaff(actor));
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        url.pathname.startsWith("/v1/staff-auth/users/") &&
+        url.pathname.endsWith("/profile")
+      ) {
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const staffUserId = url.pathname.slice(
+          "/v1/staff-auth/users/".length,
+          -"/profile".length,
+        );
+        if (!validUuid(staffUserId)) {
+          sendJson(response, 400, { error: "invalid_staff_user_id" });
+          return;
+        }
+        const parsed = staffProfileUpdateSchema.safeParse(
+          await readJson(request),
+        );
+        if (!parsed.success) {
+          sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+          return;
+        }
+        const actor =
+          await options!.authService!.authenticateSession(sessionToken);
+        const profile = await options!.authService!.updateStaffProfile(
+          actor,
+          staffUserId,
+          parsed.data,
+        );
+        sendJson(response, 200, { profile });
         return;
       }
 
@@ -761,9 +838,8 @@ export function createGatewayServer(options?: {
           sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
           return;
         }
-        const actor = await options!.authService!.authorize(sessionToken, [
-          "admin",
-        ]);
+        const actor =
+          await options!.authService!.authenticateSession(sessionToken);
         const result =
           await options!.authService!.updateCentrexLineNumber(
             actor,
@@ -792,9 +868,8 @@ export function createGatewayServer(options?: {
           sendJson(response, 400, { error: "invalid_staff_user_id" });
           return;
         }
-        const actor = await options!.authService!.authorize(sessionToken, [
-          "admin",
-        ]);
+        const actor =
+          await options!.authService!.authenticateSession(sessionToken);
         const result =
           await options!.authService!.reassignCentrexBridge(
             actor,
@@ -829,9 +904,8 @@ export function createGatewayServer(options?: {
           sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
           return;
         }
-        const actor = await options!.authService!.authorize(sessionToken, [
-          "admin",
-        ]);
+        const actor =
+          await options!.authService!.authenticateSession(sessionToken);
         const result =
           await options!.authService!.updateLegalFriendsAccount(
             actor,
@@ -2008,6 +2082,8 @@ export function createGatewayServer(options?: {
         const statusCode =
           error.code === "forbidden"
             ? 403
+            : error.code === "invalid_current_password"
+              ? 400
             : error.code === "centrex_provisioning_unavailable"
               ? 503
               : error.code === "email_already_registered" ||

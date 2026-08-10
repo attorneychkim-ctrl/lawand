@@ -13,34 +13,18 @@ if (existsSync(localEnvPath)) {
 
 const email = process.argv[2];
 const name = process.argv[3];
-const organization = process.argv[4];
-const region = process.argv[5];
-const department = process.argv[6];
-const jobTitle = process.argv[7];
 const erpBaseUrl = process.env.LAWAND_ERP_BASE_URL ?? "http://127.0.0.1:3021";
 const databaseUrl = process.env.LAWAND_APP_DATABASE_URL;
 
-if (
-  !email ||
-  !name ||
-  !organization ||
-  !region ||
-  !department ||
-  !jobTitle ||
-  !databaseUrl
-) {
+if (!email || !name || !databaseUrl) {
   throw new Error(
-    '사용법: pnpm staff:bootstrap <이메일> "<이름>" <lawand|legalflow> <seoul|daejeon|busan> "<부서>" "<직책>"',
+    '사용법: pnpm staff:bootstrap <이메일> "<이름>"',
   );
 }
 
 const input = staffInvitationCreationSchema.parse({
   email,
   name,
-  organization,
-  region,
-  department,
-  jobTitle,
   role: "admin",
 });
 const database = createDatabaseClient(databaseUrl);

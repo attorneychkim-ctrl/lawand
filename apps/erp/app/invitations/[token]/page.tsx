@@ -11,19 +11,6 @@ export const metadata: Metadata = {
   title: "직원 초대 | 로앤 ERP",
 };
 
-const roleLabels = {
-  admin: "관리자",
-  full_time: "정규직",
-  part_time: "아르바이트",
-  separate_accounting: "별산",
-  civil_complaint_vendor: "민원업체",
-};
-
-function formatCentrexLine(value: string | null) {
-  if (!value) return "지정하지 않음";
-  return `${value.slice(0, 3)}-${value.slice(3, 7)}-${value.slice(7)}`;
-}
-
 export default async function InvitationPage({
   params,
 }: {
@@ -58,7 +45,8 @@ export default async function InvitationPage({
         <p className="eyebrow">LAWAND ERP · INVITATION</p>
         <h1>직원 계정 만들기</h1>
         <p className="auth-lead">
-          회사가 지정한 직원 정보를 확인한 뒤 비밀번호를 설정해 주세요.
+          이름과 로그인 이메일을 확인한 뒤 비밀번호를 설정해 주세요. 업무 정보와
+          전화·리걸프렌즈 연결은 가입 후 직접 입력할 수 있습니다.
         </p>
         <dl className="invitation-summary">
           <div>
@@ -68,39 +56,6 @@ export default async function InvitationPage({
           <div>
             <dt>이름</dt>
             <dd>{invitation.displayName}</dd>
-          </div>
-          <div>
-            <dt>소속·지역</dt>
-            <dd>
-              {invitation.organization.name} · {invitation.region.name}
-            </dd>
-          </div>
-          <div>
-            <dt>부서·직책</dt>
-            <dd>
-              {invitation.department} · {invitation.jobTitle}
-            </dd>
-          </div>
-          <div>
-            <dt>역할·권한</dt>
-            <dd>{roleLabels[invitation.role]}</dd>
-          </div>
-          <div>
-            <dt>센트릭스 회선</dt>
-            <dd>
-              {formatCentrexLine(invitation.centrexLineNumber)}
-              {invitation.centrexExtension
-                ? ` · 내선 ${invitation.centrexExtension}`
-                : ""}
-            </dd>
-          </div>
-          <div>
-            <dt>리걸프렌즈 계정</dt>
-            <dd>{invitation.legalFriendsId ?? "연결하지 않음"}</dd>
-            <dt>리걸프렌즈 member_idx</dt>
-            <dd>
-              {invitation.legalFriendsMemberIdx ?? "연결하지 않음"}
-            </dd>
           </div>
         </dl>
         <InvitationForm token={token} />

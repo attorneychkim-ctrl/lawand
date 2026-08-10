@@ -25,12 +25,16 @@ import {
   staffInvitationCreationSchema,
   staffExternalAccountUpdateSchema,
   staffLoginSchema,
+  staffPasswordChangeSchema,
+  staffProfileUpdateSchema,
   staffSessionTokenSchema,
   type StaffCentrexLineUpdate,
   type StaffInvitationAcceptance,
   type StaffInvitationCreation,
   type StaffExternalAccountUpdate,
   type StaffLogin,
+  type StaffPasswordChange,
+  type StaffProfileUpdate,
   type StaffRole,
 } from "@lawand/core";
 import {
@@ -218,6 +222,7 @@ export class StaffAuthError extends Error {
   constructor(
     readonly code:
       | "invalid_credentials"
+      | "invalid_current_password"
       | "account_locked"
       | "invalid_session"
       | "invalid_invitation"
@@ -331,6 +336,13 @@ function newToken(): string {
 
 function hasRole(principal: StaffPrincipal, roles: StaffRole[]): boolean {
   return principal.roles.some((role) => roles.includes(role));
+}
+
+export function canManageStaff(
+  actor: StaffPrincipal,
+  staffUserId: string,
+): boolean {
+  return actor.id === staffUserId || hasRole(actor, ["admin"]);
 }
 
 export function createStaffAuthService(options: {
@@ -1206,12 +1218,9 @@ export function createStaffAuthService(options: {
     return createInvitationRecord(input, null);
   }
 
-  async function listStaff(
-    actor: StaffPrincipal,
-  ): Promise<{ items: StaffDirectoryItem[] }> {
-    if (!hasRole(actor, ["admin"])) {
-      throw new StaffAuthError("forbidden", "직원 조회 권한이 없습니다.");
-    }
+  async function staffDirectory(): Promise<{
+    items: StaffDirectoryItem[];
+  }> {
     const [
       rows,
       verifiedEndpoints,
@@ -1425,6 +1434,199 @@ export function createStaffAuthService(options: {
     };
   }
 
+  async function listStaff(
+    actor: StaffPrincipal,
+  ): Promise<{ items: StaffDirectoryItem[] }> {
+    if (!hasRole(actor, ["admin"])) {
+      throw new StaffAuthError("forbidden", "직원 조회 권한이 없습니다.");
+    }
+    return staffDirectory();
+  }
+
+  async function getStaffProfile(
+    actor: StaffPrincipal,
+    staffUserId = actor.id,
+  ): Promise<StaffDirectoryItem> {
+    if (!canManageStaff(actor, staffUserId)) {
+      throw new StaffAuthError(
+        "forbidden",
+        "다른 직원의 프로필을 조회할 권한이 없습니다.",
+      );
+    }
+    const { items } = await staffDirectory();
+    const profile = items.find((item) => item.id === staffUserId);
+    if (!profile) {
+      throw new StaffAuthError(
+        "staff_not_found",
+        "직원 계정을 찾을 수 없습니다.",
+      );
+    }
+    return profile;
+  }
+
+  async function updateStaffProfile(
+    actor: StaffPrincipal,
+    staffUserId: string,
+    rawInput: StaffProfileUpdate,
+  ): Promise<StaffDirectoryItem> {
+    if (!canManageStaff(actor, staffUserId)) {
+      throw new StaffAuthError(
+        "forbidden",
+        "다른 직원의 프로필을 변경할 권한이 없습니다.",
+      );
+    }
+    const input = staffProfileUpdateSchema.parse(rawInput);
+    const actorIsAdmin = hasRole(actor, ["admin"]);
+    if (input.role !== undefined && !actorIsAdmin) {
+      throw new StaffAuthError(
+        "forbidden",
+        "역할과 권한은 관리자만 변경할 수 있습니다.",
+      );
+    }
+
+    const now = new Date();
+    await db.transaction(async (tx) => {
+      const [membership] = await tx
+        .select({
+          id: staffMemberships.id,
+          organizationKey: staffMemberships.organizationKey,
+          regionKey: staffMemberships.regionKey,
+          department: staffMemberships.department,
+          jobTitle: staffMemberships.jobTitle,
+          role: staffMemberships.role,
+        })
+        .from(staffMemberships)
+        .where(
+          and(
+            eq(staffMemberships.userId, staffUserId),
+            eq(staffMemberships.isPrimary, true),
+            eq(staffMemberships.isActive, true),
+          ),
+        )
+        .limit(1)
+        .for("update");
+      if (!membership) {
+        throw new StaffAuthError(
+          "staff_not_found",
+          "직원 계정을 찾을 수 없습니다.",
+        );
+      }
+
+      const nextRole = input.role ?? membership.role;
+      const changed =
+        membership.organizationKey !== input.organization ||
+        membership.regionKey !== input.region ||
+        membership.department !== input.department ||
+        membership.jobTitle !== input.jobTitle ||
+        membership.role !== nextRole;
+      if (!changed) return;
+
+      await tx
+        .update(staffMemberships)
+        .set({
+          organizationKey: input.organization,
+          regionKey: input.region,
+          department: input.department,
+          jobTitle: input.jobTitle,
+          role: nextRole,
+        })
+        .where(eq(staffMemberships.id, membership.id));
+      await tx.insert(staffAuditLogs).values({
+        id: randomUUID(),
+        actorUserId: actor.id,
+        action: "staff.profile.updated",
+        targetType: "staff_user",
+        targetId: staffUserId,
+        metadata: {
+          changedBySelf: actor.id === staffUserId,
+          previousOrganization: membership.organizationKey,
+          newOrganization: input.organization,
+          previousRegion: membership.regionKey,
+          newRegion: input.region,
+          departmentChanged: membership.department !== input.department,
+          jobTitleChanged: membership.jobTitle !== input.jobTitle,
+          previousRole: membership.role,
+          newRole: nextRole,
+        },
+        occurredAt: now,
+      });
+    });
+    return getStaffProfile(actor, staffUserId);
+  }
+
+  async function changePassword(
+    actor: StaffPrincipal,
+    rawInput: StaffPasswordChange,
+  ): Promise<void> {
+    const input = staffPasswordChangeSchema.parse(rawInput);
+    const [user] = await db
+      .select({ passwordHash: staffUsers.passwordHash })
+      .from(staffUsers)
+      .where(eq(staffUsers.id, actor.id))
+      .limit(1);
+    if (
+      !user ||
+      !(await verifyStaffPassword(input.currentPassword, user.passwordHash))
+    ) {
+      await addAudit({
+        actorUserId: actor.id,
+        action: "staff.password.change_failed",
+        targetType: "staff_user",
+        targetId: actor.id,
+        metadata: { reason: "current_password_mismatch" },
+      });
+      throw new StaffAuthError(
+        "invalid_current_password",
+        "현재 비밀번호가 일치하지 않습니다.",
+      );
+    }
+
+    const now = new Date();
+    const nextPasswordHash = await hashStaffPassword(input.newPassword);
+    await db.transaction(async (tx) => {
+      const [updated] = await tx
+        .update(staffUsers)
+        .set({
+          passwordHash: nextPasswordHash,
+          passwordChangedAt: now,
+          failedLoginCount: 0,
+          lockedUntil: null,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(staffUsers.id, actor.id),
+            eq(staffUsers.passwordHash, user.passwordHash),
+          ),
+        )
+        .returning({ id: staffUsers.id });
+      if (!updated) {
+        throw new StaffAuthError(
+          "invalid_current_password",
+          "비밀번호가 이미 변경되었습니다. 다시 로그인해 주세요.",
+        );
+      }
+      await tx
+        .update(staffSessions)
+        .set({ revokedAt: now })
+        .where(
+          and(
+            eq(staffSessions.userId, actor.id),
+            isNull(staffSessions.revokedAt),
+          ),
+        );
+      await tx.insert(staffAuditLogs).values({
+        id: randomUUID(),
+        actorUserId: actor.id,
+        action: "staff.password.changed",
+        targetType: "staff_user",
+        targetId: actor.id,
+        metadata: { allSessionsRevoked: true },
+        occurredAt: now,
+      });
+    });
+  }
+
   async function updateLegalFriendsAccount(
     actor: StaffPrincipal,
     staffUserId: string,
@@ -1433,7 +1635,7 @@ export function createStaffAuthService(options: {
     legalFriendsId: string | null;
     legalFriendsMemberIdx: number | null;
   }> {
-    if (!hasRole(actor, ["admin"])) {
+    if (!canManageStaff(actor, staffUserId)) {
       throw new StaffAuthError(
         "forbidden",
         "리걸프렌즈 계정 연결 권한이 없습니다.",
@@ -1584,7 +1786,7 @@ export function createStaffAuthService(options: {
     credentialUpdated: boolean;
     bridgeConnected: boolean;
   }> {
-    if (!hasRole(actor, ["admin"])) {
+    if (!canManageStaff(actor, staffUserId)) {
       throw new StaffAuthError(
         "forbidden",
         "센트릭스 회선번호 변경 권한이 없습니다.",
@@ -1995,7 +2197,7 @@ export function createStaffAuthService(options: {
     actor: StaffPrincipal,
     staffUserId: string,
   ) {
-    if (!hasRole(actor, ["admin"])) {
+    if (!canManageStaff(actor, staffUserId)) {
       throw new StaffAuthError(
         "forbidden",
         "센트릭스 bridge 재배정 권한이 없습니다.",
@@ -2144,9 +2346,11 @@ export function createStaffAuthService(options: {
     acceptInvitation,
     authenticateSession,
     authorize,
+    changePassword,
     createBootstrapInvitation,
     createInvitation,
     deleteExpiredSessions,
+    getStaffProfile,
     inspectInvitation,
     listStaff,
     login,
@@ -2155,6 +2359,7 @@ export function createStaffAuthService(options: {
     reassignCentrexBridge,
     updateCentrexLineNumber,
     updateLegalFriendsAccount,
+    updateStaffProfile,
   };
 }
 

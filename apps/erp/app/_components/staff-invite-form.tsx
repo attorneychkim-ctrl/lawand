@@ -29,102 +29,11 @@ export function StaffInviteForm() {
         <span>이름</span>
         <input autoComplete="off" maxLength={50} minLength={2} name="name" required />
       </label>
-      <div className="form-row">
-        <label>
-          <span>소속</span>
-          <select defaultValue="lawand" name="organization">
-            <option value="lawand">법무법인 로앤</option>
-            <option value="legalflow">리걸플로</option>
-          </select>
-        </label>
-        <label>
-          <span>지역</span>
-          <select defaultValue="seoul" name="region">
-            <option value="seoul">서울</option>
-            <option value="daejeon">대전</option>
-            <option value="busan">부산</option>
-          </select>
-        </label>
-      </div>
-      <div className="form-row">
-        <label>
-          <span>부서</span>
-          <input maxLength={100} name="department" required />
-        </label>
-        <label>
-          <span>직책</span>
-          <input maxLength={100} name="jobTitle" required />
-        </label>
-      </div>
-      <label>
-        <span>역할·권한</span>
-        <select defaultValue="full_time" name="role">
-          <option value="admin">관리자</option>
-          <option value="full_time">정규직</option>
-          <option value="part_time">아르바이트</option>
-          <option value="separate_accounting">별산</option>
-          <option value="civil_complaint_vendor">민원업체</option>
-        </select>
-      </label>
-      <div className="form-row centrex-invite-row">
-        <label>
-          <span>센트릭스 전체 회선번호</span>
-          <input
-            autoComplete="off"
-            inputMode="tel"
-            maxLength={13}
-            name="centrexLineNumber"
-            pattern="070-?[0-9]{4}-?[0-9]{4}"
-            placeholder="예: 07046074535"
-            type="tel"
-          />
-        </label>
-        <label>
-          <span>내선번호</span>
-          <input
-            autoComplete="off"
-            inputMode="numeric"
-            maxLength={10}
-            name="centrexExtension"
-            pattern="[0-9]{2,10}"
-            placeholder="예: 4535"
-            type="text"
-          />
-        </label>
-      </div>
-      <small>
-        두 값을 함께 입력합니다. 가입 시 검증된 전화 endpoint와 정확히 일치하면
-        자동 배정되고, 아직 준비되지 않은 회선은 연결 대기로 저장됩니다.
-      </small>
-      <div className="form-row">
-        <label>
-          <span>리걸프렌즈 아이디</span>
-          <input
-            autoCapitalize="none"
-            autoComplete="off"
-            maxLength={100}
-            name="legalFriendsId"
-            placeholder="예: lawandfirm_s"
-            spellCheck={false}
-          />
-        </label>
-        <label>
-          <span>리걸프렌즈 member_idx</span>
-          <input
-            autoComplete="off"
-            inputMode="numeric"
-            min={1}
-            name="legalFriendsMemberIdx"
-            placeholder="예: 138"
-            step={1}
-            type="number"
-          />
-        </label>
-      </div>
-      <small>
-        상담 담당자로 배정될 직원만 아이디와 member_idx를 함께 입력합니다.
-        가입 후 관리자 화면에서도 연결하거나 변경할 수 있습니다.
-      </small>
+      <p className="invite-form-note">
+        초대받은 직원은 가입 후 내 정보에서 소속·지역·부서·직책과 센트릭스·
+        리걸프렌즈 연결을 직접 입력할 수 있습니다. 역할·권한은 관리자가 직원
+        관리에서 변경합니다.
+      </p>
       {state.error ? (
         <p className="form-error" role="alert">
           {state.error}
