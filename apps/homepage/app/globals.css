@@ -8034,6 +8034,7 @@ svg {
 
 .consultation-entry-heading {
   margin-top: 58px;
+  scroll-margin-top: 96px;
   text-align: center;
 }
 
@@ -8264,6 +8265,7 @@ svg {
   border-radius: 30px;
   background: rgba(255, 255, 255, 0.92);
   box-shadow: var(--shadow-lg);
+  scroll-margin-top: 96px;
 }
 
 .consultation-step-card fieldset {
@@ -8903,6 +8905,7 @@ svg {
   max-width: 820px;
   padding-top: 72px;
   padding-bottom: 120px;
+  scroll-margin-top: 96px;
   text-align: center;
 }
 
@@ -9017,6 +9020,7 @@ svg {
 
   .consultation-entry-heading {
     margin-top: 42px;
+    scroll-margin-top: 76px;
   }
 
   .consultation-entry-heading h2 {
@@ -9078,6 +9082,7 @@ svg {
     margin-top: 24px;
     padding: 30px 22px;
     border-radius: 22px;
+    scroll-margin-top: 76px;
   }
 
   .consultation-step-card legend,
@@ -9125,6 +9130,7 @@ svg {
   .consultation-complete {
     padding-top: 32px;
     padding-bottom: 90px;
+    scroll-margin-top: 76px;
   }
 
   .complete-mark {
