@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   ConsultationSubmission,
@@ -10,14 +10,9 @@ import type {
 import { CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION } from "@lawand/core";
 
 import { KakaoConsultationEntry } from "@/app/_components/kakao-consultation-entry";
+import { moveAttention } from "@/lib/move-attention";
 
-import {
-  getConsultationAttribution,
-  getConsultationCtaContext,
-  getConsultationJourney,
-  type ConsultationCtaContext,
-  type JourneyEntry,
-} from "../../_components/journey-tracker";
+import { getConsultationAttribution } from "../../_components/journey-tracker";
 import {
   ArrowIcon,
   CheckIcon,
@@ -383,14 +378,16 @@ export function ConsultationForm() {
   const [data, setData] = useState<FormData>(initialData);
   const [error, setError] = useState("");
   const [receipt, setReceipt] = useState("");
-  const [journey, setJourney] = useState<JourneyEntry[]>([]);
-  const [ctaContext, setCtaContext] = useState<ConsultationCtaContext | null>(null);
   const [now, setNow] = useState(() => new Date());
   const [customDateOpen, setCustomDateOpen] = useState(false);
   const [idempotencyKey, setIdempotencyKey] = useState(() =>
     window.crypto.randomUUID(),
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const completeRef = useRef<HTMLElement>(null);
+  const entryRef = useRef<HTMLElement>(null);
+  const stepCardRef = useRef<HTMLDivElement>(null);
+  const attentionRequestedRef = useRef(false);
 
   const steps = mode === "detailed" ? DETAIL_STEPS : QUICK_STEPS;
   const currentStep = steps[stepIndex];
@@ -405,6 +402,28 @@ export function ConsultationForm() {
     const timer = window.setInterval(() => setNow(new Date()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!attentionRequestedRef.current) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      attentionRequestedRef.current = false;
+      const scrollTarget = receipt
+        ? completeRef.current
+        : mode
+          ? stepCardRef.current
+          : entryRef.current;
+      if (!scrollTarget) return;
+
+      moveAttention(scrollTarget, {
+        focusTarget: scrollTarget.querySelector<HTMLElement>(
+          "[data-attention-heading]",
+        ),
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [mode, receipt, stepIndex]);
 
   const update = <Key extends keyof FormData>(key: Key, value: FormData[Key]) => {
     setData((current) => ({ ...current, [key]: value }));
@@ -489,21 +508,22 @@ export function ConsultationForm() {
     }
 
     setError("");
+    attentionRequestedRef.current = true;
     setStepIndex((current) => Math.min(current + 1, steps.length - 1));
-    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const goBack = () => {
     setError("");
+    attentionRequestedRef.current = true;
     if (stepIndex === 0) {
       setMode(null);
       return;
     }
     setStepIndex((current) => current - 1);
-    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const start = (selectedMode: FormMode) => {
+    attentionRequestedRef.current = true;
     setMode(selectedMode);
     setStepIndex(0);
     setError("");
@@ -581,10 +601,8 @@ export function ConsultationForm() {
             : "상담 요청을 접수하지 못했습니다.",
         );
       }
-      setJourney(getConsultationJourney());
-      setCtaContext(getConsultationCtaContext());
+      attentionRequestedRef.current = true;
       setReceipt(result.publicReceiptCode);
-      window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (submissionError) {
       setError(
         submissionError instanceof Error
@@ -597,6 +615,7 @@ export function ConsultationForm() {
   };
 
   const restart = () => {
+    attentionRequestedRef.current = true;
     setMode(null);
     setStepIndex(0);
     setData(initialData);
@@ -612,12 +631,16 @@ export function ConsultationForm() {
         : `${formatDateLabel(data.callbackDate)} ${formatTimeRange(data.callbackTime)} 사이`;
 
     return (
-      <section className="consultation-complete shell" aria-labelledby="complete-title">
+      <section
+        className="consultation-complete shell"
+        aria-labelledby="complete-title"
+        ref={completeRef}
+      >
         <div className="complete-mark" aria-hidden="true">
           <CheckIcon />
         </div>
         <p className="eyebrow">상담 요청 접수 완료</p>
-        <h1 id="complete-title">
+        <h1 data-attention-heading id="complete-title" tabIndex={-1}>
           남겨주신 내용을 확인하고
           <br />
           전화드리겠습니다.
@@ -656,20 +679,9 @@ export function ConsultationForm() {
         <div className="complete-expectation">
           <span>연락 안내</span>
           <p>
-            빠른 연락 요청은 운영시간 내 접수 순서대로 확인합니다. 시간대를
-            선택했다면 해당 30분 구간 안에 연락드릴 예정입니다.
+            빠른 연락을 요청하셨다면 운영시간에 접수된 순서대로 확인합니다.
+            시간대를 선택하셨다면 그 30분 구간 안에 연락드립니다.
           </p>
-        </div>
-
-        <div className="complete-journey">
-          <strong>브라우저 세션 확인</strong>
-          <p>
-            내부 방문 경로 {Math.max(journey.length, 1)}개와 광고 유입 정보를 이 접수에
-            연결했습니다.
-          </p>
-          {ctaContext && ctaContext.path !== "/bank/consultation" ? (
-            <span>이 세션에서 상담 요청을 누른 페이지: {ctaContext.path}</span>
-          ) : null}
         </div>
 
         <div className="complete-actions">
@@ -712,13 +724,19 @@ export function ConsultationForm() {
           </div>
         </section>
 
-        <section className="consultation-entry shell" aria-labelledby="entry-title">
-          <div className="prototype-notice" role="status">
-            상담 요청을 완료하면 입력 내용이 안전하게 암호화되어 접수됩니다.
+        <section
+          className="consultation-entry shell"
+          aria-labelledby="entry-title"
+          ref={entryRef}
+        >
+          <div className="intake-notice" role="status">
+            상담 요청을 완료하면 입력 내용이 암호화되어 안전하게 접수됩니다.
           </div>
           <div className="consultation-entry-heading">
             <p className="eyebrow">시작 방법</p>
-            <h2 id="entry-title">어떤 방식이 편하신가요?</h2>
+            <h2 data-attention-heading id="entry-title" tabIndex={-1}>
+              어떤 방식이 편하신가요?
+            </h2>
             <p>선택한 뒤에도 이전 화면으로 돌아와 바꿀 수 있습니다.</p>
           </div>
           <div className="consultation-entry-options">
@@ -775,8 +793,8 @@ export function ConsultationForm() {
 
   return (
     <section className="consultation-flow shell">
-      <div className="prototype-notice" role="status">
-        입력 내용은 제출 전까지 이 화면에만 있으며, 완료 버튼을 누르면 암호화해
+      <div className="intake-notice" role="status">
+        입력 내용은 제출 전까지 이 화면에만 남으며, 완료 버튼을 누르면 암호화해
         접수합니다.
       </div>
 
@@ -792,10 +810,12 @@ export function ConsultationForm() {
         </span>
       </div>
 
-      <div className="consultation-step-card">
+      <div className="consultation-step-card" ref={stepCardRef}>
         {currentStep === "topic" ? (
           <fieldset>
-            <legend>어떤 도움이 가장 필요하신가요?</legend>
+            <legend data-attention-heading tabIndex={-1}>
+              어떤 도움이 가장 필요하신가요?
+            </legend>
             <p className="step-description">
               아직 정하지 못했다면 ‘잘 모르겠어요’를 선택해도 됩니다.
             </p>
@@ -815,7 +835,9 @@ export function ConsultationForm() {
 
         {currentStep === "urgency" ? (
           <fieldset>
-            <legend>현재 채무와 절차는 어디까지 진행됐나요?</legend>
+            <legend data-attention-heading tabIndex={-1}>
+              현재 채무와 절차는 어디까지 진행됐나요?
+            </legend>
             <p className="step-description">해당하는 항목을 모두 선택해 주세요.</p>
             <div className="consultation-option-grid">
               {URGENCY_OPTIONS.map((option) => (
@@ -839,7 +861,9 @@ export function ConsultationForm() {
 
         {currentStep === "income" ? (
           <fieldset>
-            <legend>현재 어떤 소득이 있나요?</legend>
+            <legend data-attention-heading tabIndex={-1}>
+              현재 어떤 소득이 있나요?
+            </legend>
             <p className="step-description">두 가지 이상이면 모두 선택해 주세요.</p>
             <div className="consultation-option-grid">
               {INCOME_OPTIONS.map((option) => (
@@ -862,7 +886,9 @@ export function ConsultationForm() {
 
         {currentStep === "debts" ? (
           <fieldset>
-            <legend>채무는 대략 어느 정도인가요?</legend>
+            <legend data-attention-heading tabIndex={-1}>
+              채무는 대략 어느 정도인가요?
+            </legend>
             <p className="step-description">
               정확하지 않아도 괜찮습니다. 담보 여부에 따라 나누어 선택해 주세요.
             </p>
@@ -911,7 +937,9 @@ export function ConsultationForm() {
 
         {currentStep === "assets" ? (
           <fieldset>
-            <legend>담보채무를 뺀 재산은 대략 얼마인가요?</legend>
+            <legend data-attention-heading tabIndex={-1}>
+              담보채무를 뺀 재산은 대략 얼마인가요?
+            </legend>
             <p className="step-description">
               주택·보증금·차량·예금·보험 해약환급금 등에서 관련 담보채무를 뺀
               대략적인 순재산입니다.
@@ -936,7 +964,9 @@ export function ConsultationForm() {
 
         {currentStep === "discharge" ? (
           <fieldset>
-            <legend>과거에 면책결정이 확정된 적이 있나요?</legend>
+            <legend data-attention-heading tabIndex={-1}>
+              과거에 면책결정이 확정된 적이 있나요?
+            </legend>
             <p className="step-description">
               개인회생이나 개인파산 절차를 마친 적이 있는지 알려주세요.
             </p>
@@ -976,7 +1006,9 @@ export function ConsultationForm() {
 
         {currentStep === "concern" ? (
           <fieldset>
-            <legend>가장 걱정되거나 먼저 묻고 싶은 것이 있나요?</legend>
+            <legend data-attention-heading tabIndex={-1}>
+              가장 걱정되거나 먼저 묻고 싶은 것이 있나요?
+            </legend>
             <p className="step-description">
               적지 않아도 다음 단계로 갈 수 있습니다.
             </p>
@@ -1000,7 +1032,9 @@ export function ConsultationForm() {
 
         {currentStep === "schedule" ? (
           <fieldset>
-            <legend>언제 연락드릴까요?</legend>
+            <legend data-attention-heading tabIndex={-1}>
+              언제 연락드릴까요?
+            </legend>
             <p className="step-description">
               빠르게 연락받거나 편한 30분 구간을 선택할 수 있습니다.
             </p>
@@ -1016,7 +1050,7 @@ export function ConsultationForm() {
               >
                 <span>가능한 빨리</span>
                 <strong>{callbackExpectation}</strong>
-                <small>연락이 늦어지면 지연 안내를 보내는 흐름으로 연결할 예정입니다.</small>
+                <small>운영시간에 접수된 순서대로 확인해 연락드립니다.</small>
               </button>
               <button
                 type="button"
@@ -1104,7 +1138,9 @@ export function ConsultationForm() {
 
         {currentStep === "contact" ? (
           <fieldset>
-            <legend>거주 지역과 연락처를 알려주세요.</legend>
+            <legend data-attention-heading tabIndex={-1}>
+              거주 지역과 연락처를 알려주세요.
+            </legend>
             <p className="step-description">
               이름이나 편하게 불릴 호칭은 적지 않아도 됩니다.
             </p>
@@ -1144,7 +1180,9 @@ export function ConsultationForm() {
                   value={data.nickname}
                   onChange={(event) => update("nickname", event.target.value)}
                 />
-                <small>미입력 시 내부에서 익명 이름이 자동으로 만들어집니다.</small>
+                <small>
+                  입력하지 않으면 접수번호를 기준으로 한 익명 표기로 접수됩니다.
+                </small>
               </label>
               <label>
                 <span>휴대전화 번호</span>
@@ -1242,7 +1280,9 @@ export function ConsultationForm() {
         {currentStep === "review" ? (
           <div className="consultation-review">
             <p className="eyebrow">제출 전 확인</p>
-            <h1>이 내용으로 상담을 요청할까요?</h1>
+            <h1 data-attention-heading tabIndex={-1}>
+              이 내용으로 상담을 요청할까요?
+            </h1>
             <p className="step-description">
               특히 거주 지역, 전화번호와 연락받을 시간을 한 번 더 확인해 주세요.
             </p>
@@ -1254,7 +1294,7 @@ export function ConsultationForm() {
               </div>
               <div>
                 <dt>이름 또는 호칭</dt>
-                <dd>{data.nickname.trim() || "익명 이름 자동 생성"}</dd>
+                <dd>{data.nickname.trim() || "입력하지 않음 · 익명으로 접수"}</dd>
               </div>
               <div>
                 <dt>거주 지역</dt>
@@ -1317,8 +1357,8 @@ export function ConsultationForm() {
               </p>
             </div>
 
-            <div className="prototype-submit-note">
-              완료하면 실제 상담 요청으로 접수되며 접수번호가 발급됩니다.
+            <div className="consultation-submit-note">
+              완료를 누르면 상담 요청이 접수되고 접수번호가 발급됩니다.
             </div>
           </div>
         ) : null}

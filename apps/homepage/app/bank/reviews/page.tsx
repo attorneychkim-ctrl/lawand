@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
 
 import {
+  formatReviewDate,
   getReviewPage,
   parseReviewFilters,
+  reviewAreaLabel,
   reviewAreaOptions,
   reviewKeywordOptions,
+  reviewStageLabel,
   reviewStageOptions,
   type ReviewFilters,
 } from "@/lib/reviews";
@@ -18,13 +21,6 @@ import {
 } from "../_components/site-chrome";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
-
-const areaLabels = new Map<string, string>(
-  reviewAreaOptions.map((option) => [option.value, option.label]),
-);
-const stageLabels = new Map<string, string>(
-  reviewStageOptions.map((option) => [option.value, option.label]),
-);
 
 function firstValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
@@ -42,16 +38,6 @@ function filterHref(
   if (next.page > 1) params.set("page", String(next.page));
   const query = params.toString();
   return query ? `/bank/reviews?${query}` : "/bank/reviews";
-}
-
-function formatDate(value: Date) {
-  return new Intl.DateTimeFormat("ko-KR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  })
-    .format(value)
-    .replaceAll(" ", "");
 }
 
 function pageNumbers(current: number, count: number) {
@@ -294,12 +280,12 @@ export default async function ReviewsPage({
             {data.items.length > 0 ? (
               <div className="reviews-list">
                 {data.items.map((review) => {
-                  const area =
-                    areaLabels.get(review.practiceArea) ?? "회생·파산";
-                  const stage =
-                    stageLabels.get(review.progressStage) ?? "진행 과정";
+                  const area = reviewAreaLabel(review.practiceArea);
+                  const stage = reviewStageLabel(review.progressStage);
                   const longReview = review.content.length > 360;
-                  const formattedDate = formatDate(review.originalCreatedAt);
+                  const formattedDate = formatReviewDate(
+                    review.originalCreatedAt,
+                  );
 
                   return (
                     <article className="review-story" key={review.id}>
@@ -418,8 +404,8 @@ export default async function ReviewsPage({
                 <div>
                   <h3>고객이 남긴 원문</h3>
                   <p>
-                    문장과 표현을 임의로 미화하지 않습니다. 명백한 개인정보를
-                    가린 경우에는 편집 사실을 표시합니다.
+                    문장과 표현을 임의로 미화하지 않습니다. 개인정보가 드러나는
+                    부분만 가리고 나머지는 원문 그대로 싣습니다.
                   </p>
                 </div>
               </article>

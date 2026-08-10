@@ -158,6 +158,75 @@ function whereClause(filters: ReviewFilters) {
   return { sql: clauses.join(" AND "), values };
 }
 
+const areaLabels = new Map<string, string>(
+  reviewAreaOptions.map((option) => [option.value, option.label]),
+);
+const stageLabels = new Map<string, string>(
+  reviewStageOptions.map((option) => [option.value, option.label]),
+);
+
+export function reviewAreaLabel(value: PublicReview["practiceArea"]) {
+  return areaLabels.get(value) ?? "회생·파산";
+}
+
+export function reviewStageLabel(value: PublicReview["progressStage"]) {
+  return stageLabels.get(value) ?? "진행 과정";
+}
+
+export function formatReviewDate(value: Date) {
+  return new Intl.DateTimeFormat("ko-KR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  })
+    .format(value)
+    .replaceAll(" ", "");
+}
+
+const PUBLIC_REVIEW_COLUMNS = `
+  id,
+  author_display,
+  content,
+  practice_area,
+  progress_stage,
+  experience_keywords,
+  original_created_at`;
+
+type PublicReviewRow = {
+  author_display: string;
+  content: string;
+  experience_keywords: string[];
+  id: string;
+  original_created_at: Date;
+  practice_area: PublicReview["practiceArea"];
+  progress_stage: PublicReview["progressStage"];
+};
+
+function toPublicReview(row: PublicReviewRow): PublicReview {
+  return {
+    authorDisplay: row.author_display,
+    content: row.content,
+    experienceKeywords: row.experience_keywords,
+    id: row.id,
+    originalCreatedAt: row.original_created_at,
+    practiceArea: row.practice_area,
+    progressStage: row.progress_stage,
+  };
+}
+
+export async function getRecentReviews(limit: number): Promise<PublicReview[]> {
+  const pool = databasePool();
+  const result = await pool.query<PublicReviewRow>(
+    `SELECT ${PUBLIC_REVIEW_COLUMNS}
+     FROM customer_reviews
+     WHERE publication_status = 'published'
+     ORDER BY original_created_at DESC, legacy_id DESC
+     LIMIT $1`,
+    [limit],
+  );
+  return result.rows.map(toPublicReview);
+}
+
 export async function getReviewPage(
   filters: ReviewFilters,
 ): Promise<ReviewPageData> {
@@ -211,23 +280,8 @@ export async function getReviewPage(
   ];
   const limitParameter = where.values.length + 1;
   const offsetParameter = where.values.length + 2;
-  const listResult = await pool.query<{
-    author_display: string;
-    content: string;
-    experience_keywords: string[];
-    id: string;
-    original_created_at: Date;
-    practice_area: PublicReview["practiceArea"];
-    progress_stage: PublicReview["progressStage"];
-  }>(
-    `SELECT
-      id,
-      author_display,
-      content,
-      practice_area,
-      progress_stage,
-      experience_keywords,
-      original_created_at
+  const listResult = await pool.query<PublicReviewRow>(
+    `SELECT ${PUBLIC_REVIEW_COLUMNS}
      FROM customer_reviews
      WHERE ${where.sql}
      ORDER BY original_created_at DESC, legacy_id DESC
@@ -246,15 +300,7 @@ export async function getReviewPage(
     },
     filters: { ...filters, page },
     filteredCount: totalCount,
-    items: listResult.rows.map((row) => ({
-      authorDisplay: row.author_display,
-      content: row.content,
-      experienceKeywords: row.experience_keywords,
-      id: row.id,
-      originalCreatedAt: row.original_created_at,
-      practiceArea: row.practice_area,
-      progressStage: row.progress_stage,
-    })),
+    items: listResult.rows.map(toPublicReview),
     oldestYear: Number(aggregate?.oldest_year ?? new Date().getFullYear()),
     pageCount,
     topKeywords: keywordResult.rows.map((row) => ({

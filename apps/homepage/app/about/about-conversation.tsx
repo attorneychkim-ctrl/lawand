@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import { moveAttention } from "@/lib/move-attention";
+
 import { ArrowIcon, CheckIcon } from "../bank/_components/site-chrome";
 
 type QuestionKey = "visit" | "curiosity" | "priority" | "discovery";
@@ -64,7 +66,7 @@ const questions: Question[] = [
         description: "사건 진행과 소통 방식을 다시 확인하고 싶어요.",
         answerTitle: "진행이 조용하면 불안한 것이 당연합니다.",
         answer:
-          "담당자에게 지금 단계, 다음 제출 또는 법원 일정, 내가 준비할 일을 세 가지로 나눠 물어보세요. 로앤은 상담 접수와 담당 배정 기록을 남기고, 계약 뒤 사건 정보는 리걸프렌즈로 이어지게 하는 방향으로 운영합니다.",
+          "담당자에게 지금 단계, 다음 제출 또는 법원 일정, 내가 준비할 일을 세 가지로 나눠 물어보세요. 로앤은 상담 접수와 담당 배정을 기록으로 남기고, 계약 뒤 사건 정보는 리걸프렌즈로 이어서 확인합니다.",
         answerCheck:
           "현재 단계가 보이지 않거나 담당 연락이 이어지지 않으면 접수번호나 사건정보와 함께 다시 확인해 주세요.",
       },
@@ -101,7 +103,7 @@ const questions: Question[] = [
         description: "담당이 바뀌거나 진행을 놓치는 것이 걱정돼요.",
         answerTitle: "담당자 이름만 아는 것으로는 충분하지 않습니다.",
         answer:
-          "현재 단계, 다음 기한, 고객이 할 일, 담당자가 확인할 일을 함께 기록해야 담당 변경이나 연락 공백이 생겨도 사건이 이어집니다. 로앤은 접수, 담당 배정, 외부 사건 인계를 각각 원장으로 남기는 구조를 만들고 있습니다.",
+          "현재 단계, 다음 기한, 고객이 할 일, 담당자가 확인할 일을 함께 기록해야 담당 변경이나 연락 공백이 생겨도 사건이 이어집니다. 로앤은 상담 접수, 담당 배정, 외부 사건 인계를 각각 기록으로 남깁니다.",
         answerCheck:
           "계약 전에는 진행 알림을 어디서 받고, 질문이 생기면 어느 채널을 쓰는지 먼저 확인하세요.",
       },
@@ -109,7 +111,8 @@ const questions: Question[] = [
         value: "evidence",
         label: "실제 경험과 사무소가 있는지",
         description: "직접 확인할 수 있는 자료를 보고 싶어요.",
-        answerTitle: "3,359건은 ‘성공 건수’가 아니라 공개 중인 후기 수입니다.",
+        answerTitle:
+          "이 페이지의 후기 숫자는 ‘성공 건수’가 아니라 현재 공개 중인 후기 수입니다.",
         answer:
           "좋은 결과를 보장하는 숫자로 쓰지 않습니다. 후기마다 작성일과 상담·개시·면책 같은 작성 당시 단계를 함께 보여주고, 개인정보 검수 대기·삭제 글은 공개 집계에서 제외합니다.",
         answerCheck:
@@ -279,12 +282,8 @@ export function AboutConversation() {
         `[data-about-answer][data-index="${questionIndex}"]`,
       );
       if (!response) return;
-      const reducedMotion = window.matchMedia(
-        "(prefers-reduced-motion: reduce)",
-      ).matches;
-      response.scrollIntoView({
-        behavior: reducedMotion ? "auto" : "smooth",
-        block: "center",
+      moveAttention(response, {
+        focusTarget: response.querySelector<HTMLElement>("h4"),
       });
     }, 80);
   }
@@ -297,12 +296,8 @@ export function AboutConversation() {
           )
         : document.querySelector<HTMLElement>(".about-conversation-result");
     if (!target) return;
-    const reducedMotion = window.matchMedia(
-      "(prefers-reduced-motion: reduce)",
-    ).matches;
-    target.scrollIntoView({
-      behavior: reducedMotion ? "auto" : "smooth",
-      block: "center",
+    moveAttention(target, {
+      focusTarget: target.querySelector<HTMLElement>("h3"),
     });
   }
 
@@ -319,8 +314,8 @@ export function AboutConversation() {
             듣겠습니다.
           </h2>
           <p>
-            네 번의 선택에 따라 마지막에 로앤을 바라볼 하나의 기준을
-            정리해드립니다.
+            네 번의 선택을 마치면, 로앤을 판단하실 기준 하나를 정리해
+            드립니다.
           </p>
           <div
             className="about-conversation-progress"
@@ -376,7 +371,7 @@ export function AboutConversation() {
                   <span>{String(questionIndex + 1).padStart(2, "0")}</span>
                   <p>{question.eyebrow}</p>
                 </header>
-                <h3>{question.question}</h3>
+                <h3 tabIndex={-1}>{question.question}</h3>
                 <div className="about-answer-options">
                   {question.options.map((option) => {
                     const isSelected =
@@ -412,7 +407,7 @@ export function AboutConversation() {
                     <p className="about-answer-response-label">
                       로앤의 솔직한 답
                     </p>
-                    <h4>{selected.answerTitle}</h4>
+                    <h4 tabIndex={-1}>{selected.answerTitle}</h4>
                     <p className="about-answer-response-body">
                       {selected.answer}
                     </p>
@@ -449,7 +444,7 @@ export function AboutConversation() {
             {completedCount === questions.length && result ? (
               <>
                 <p className="eyebrow">YOUR LAW&amp; STANDARD</p>
-                <h3>{result.title}</h3>
+                <h3 tabIndex={-1}>{result.title}</h3>
                 <p>{result.body}</p>
                 <div>
                   <a className="button button-inverse" href="#evidence">
@@ -470,7 +465,7 @@ export function AboutConversation() {
                 <span>
                   {completedCount} / {questions.length}
                 </span>
-                <p>네 가지 답을 마치면, 선택하신 기준으로 로앤을 정리해드립니다.</p>
+                <p>네 가지 답을 마치면, 선택하신 기준으로 로앤을 정리해 드립니다.</p>
               </>
             )}
           </section>

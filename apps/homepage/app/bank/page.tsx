@@ -4,6 +4,14 @@ import Link from "next/link";
 import { getCaseStudies } from "@/lib/case-studies";
 
 import {
+  formatReviewDate,
+  getRecentReviews,
+  reviewAreaLabel,
+  reviewStageLabel,
+  type PublicReview,
+} from "@/lib/reviews";
+
+import {
   ArrowIcon,
   CheckIcon,
   ConsultationSection,
@@ -13,8 +21,6 @@ import {
 } from "./_components/site-chrome";
 
 const siteUrl = "https://lawandfirm.com";
-
-export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "개인회생·개인파산, 무엇부터 확인해야 할까",
@@ -66,26 +72,7 @@ const intents = [
   },
 ];
 
-const reviews = [
-  {
-    author: "황** 고객님",
-    category: "개인회생 · 개시결정",
-    date: "2026.07.22",
-    text: "회생 개시결정 어려울뻔 했는데 노하우로 조정하시더니 잘 풀려서 결정났습니다. 중간중간 꼼꼼하고 친절하게 설명해주셔서 감사합니다",
-  },
-  {
-    author: "박** 고객님",
-    category: "개인회생 · 개시결정",
-    date: "2023.12.05",
-    text: "막막한 마음으로 알아보다가 법무법인 로앤 이라는 곳을 알았습니다. 후기가좋아 상담을하고 진행을 하여 개인회생 개시결정을 받게 되었습니다 상담도 너무 친절하시고 꼼꼼하고 정확한 일처리 감사합니다",
-  },
-  {
-    author: "임** 고객님",
-    category: "개인회생 · 개시결정",
-    date: "2023.05.02",
-    text: "법무법인 로앤 관계자분들 덕분에 아무 문제없이 개인회생 개시결정문을 받았습니다. 10여년 전의 채무들이고 다른 어렵고 복잡한 문제들이 많았는데, 친절하고 자세하게 개인회생 업무를 진행시켜주셔서 생각보다 빨리 오늘 개시결정문을 받아볼 수 있었습니다. 감사합니다.",
-  },
-];
+const HOME_REVIEW_COUNT = 3;
 
 const legalServiceJsonLd = {
   "@context": "https://schema.org",
@@ -152,8 +139,36 @@ function formatCaseLiquidationValue(value: number) {
   return value > 0 ? formatCaseMoney(value) : "기록상 0원";
 }
 
+// 공개 후기 원장을 5분 주기로 다시 읽어, 첫 화면의 응답 속도를 유지하면서도
+// 새로 공개된 후기와 사례가 홈에 반영되게 한다.
+export const revalidate = 300;
+
 export default async function BankHomePage() {
-  const featuredCases = await getCaseStudies(2);
+  // 공개 데이터 조회가 실패해도 첫 화면의 안내와 상담 경로는 그대로 열려 있어야 한다.
+  let featuredCases: Awaited<ReturnType<typeof getCaseStudies>> = [];
+  let reviews: PublicReview[] = [];
+  try {
+    featuredCases = await getCaseStudies(2);
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "homepage_featured_cases_failed",
+        message: error instanceof Error ? error.message : "unknown_error",
+        occurredAt: new Date().toISOString(),
+      }),
+    );
+  }
+  try {
+    reviews = await getRecentReviews(HOME_REVIEW_COUNT);
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "homepage_recent_reviews_failed",
+        message: error instanceof Error ? error.message : "unknown_error",
+        occurredAt: new Date().toISOString(),
+      }),
+    );
+  }
 
   return (
     <>
@@ -222,7 +237,7 @@ export default async function BankHomePage() {
           </div>
 
           <div className="shell trust-row" aria-label="서비스 원칙">
-            <span>변호사가 검토한 정보</span>
+            <span>법령·법원 자료에 근거한 정보</span>
             <span>과장 없는 제도 비교</span>
             <span>꼭 필요한 정보만 수집</span>
           </div>
@@ -503,44 +518,53 @@ export default async function BankHomePage() {
           </div>
         </section>
 
-        <section className="section review-section" id="reviews">
-          <div className="shell">
-            <div className="section-heading heading-row">
-              <div>
-                <p className="eyebrow light-eyebrow">고객후기</p>
-                <h2>먼저 겪어본 분들의<br />말을 그대로 옮겼습니다</h2>
+        {reviews.length > 0 ? (
+          <section className="section review-section" id="reviews">
+            <div className="shell">
+              <div className="section-heading heading-row">
+                <div>
+                  <p className="eyebrow light-eyebrow">고객후기</p>
+                  <h2>먼저 겪어본 분들의<br />말을 그대로 옮겼습니다</h2>
+                </div>
+                <div className="review-heading-copy">
+                  <p>
+                    로앤 홈페이지에 고객이 직접 남긴 공개 후기 중 가장 최근의
+                    {" "}
+                    {reviews.length}건입니다. 표현을 다듬지 않고 원문 그대로, 작성
+                    당시의 진행 단계와 함께 싣습니다.
+                  </p>
+                  <span>개별 사건의 결과는 사실관계와 시점에 따라 달라질 수 있습니다.</span>
+                </div>
               </div>
-              <div className="review-heading-copy">
-                <p>
-                  로앤 홈페이지에 고객이 직접 남긴 공개 후기 중 일부입니다. 표현을
-                  다듬지 않고 원문 그대로, 작성 당시의 진행 단계와 함께 싣습니다.
-                </p>
-                <span>개별 사건의 결과는 사실관계와 시점에 따라 달라질 수 있습니다.</span>
+
+              <div className="review-grid">
+                {reviews.map((review) => (
+                  <figure className="review-card" key={review.id}>
+                    <div className="quote-mark" aria-hidden="true">
+                      “
+                    </div>
+                    <blockquote>{review.content}</blockquote>
+                    <figcaption>
+                      <span>{review.authorDisplay}</span>
+                      <span>
+                        {reviewAreaLabel(review.practiceArea)} ·{" "}
+                        {reviewStageLabel(review.progressStage)}
+                      </span>
+                      <time dateTime={review.originalCreatedAt.toISOString()}>
+                        {formatReviewDate(review.originalCreatedAt)}
+                      </time>
+                    </figcaption>
+                  </figure>
+                ))}
               </div>
-            </div>
 
-            <div className="review-grid">
-              {reviews.map((review) => (
-                <figure className="review-card" key={`${review.author}-${review.date}`}>
-                  <div className="quote-mark" aria-hidden="true">
-                    “
-                  </div>
-                  <blockquote>{review.text}</blockquote>
-                  <figcaption>
-                    <span>{review.author}</span>
-                    <span>{review.category}</span>
-                    <time dateTime={review.date.replaceAll(".", "-")}>{review.date}</time>
-                  </figcaption>
-                </figure>
-              ))}
+              <a className="review-migration-note" href="/bank/reviews">
+                고객이 직접 남긴 후기 전체 보기
+                <ArrowIcon />
+              </a>
             </div>
-
-            <a className="review-migration-note" href="/bank/reviews">
-              고객이 직접 남긴 후기 전체 보기
-              <ArrowIcon />
-            </a>
-          </div>
-        </section>
+          </section>
+        ) : null}
 
         <section className="section about-section" id="about">
           <div className="shell about-grid">

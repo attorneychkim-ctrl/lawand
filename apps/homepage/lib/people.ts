@@ -76,7 +76,7 @@ export const lawyers: readonly LawyerProfile[] = [
     education: "충남대학교 법학전문대학원",
     qualification: "제2회 변호사시험",
     registeredSpecialties: [],
-    practiceAreas: ["개인 파산·회생", "부동산", "민사", "채권추심", "가사"],
+    practiceAreas: ["개인회생·파산", "부동산", "민사", "채권추심", "가사"],
     profileUrl: "https://www.klaw.or.kr/info/lawnwoo",
     imageUrl: "/images/people/main_pc_lawyer_woojonghyeon.png",
     imageWidth: 269,

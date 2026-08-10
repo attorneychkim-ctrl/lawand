@@ -3589,10 +3589,16 @@ svg {
 }
 
 .review-card blockquote {
+  /* 원문 길이가 제각각이어도 세 카드의 높이가 크게 어긋나지 않게 한다.
+     잘린 후기는 `/bank/reviews`에서 전문을 볼 수 있다. */
+  display: -webkit-box;
+  overflow: hidden;
   margin: 16px 0 30px;
+  -webkit-box-orient: vertical;
   color: #f1f3f2;
   font-size: 15px;
   line-height: 1.85;
+  -webkit-line-clamp: 9;
 }
 
 .review-card figcaption {
@@ -10577,7 +10583,7 @@ svg {
   padding-bottom: 110px;
 }
 
-.prototype-notice {
+.intake-notice {
   padding: 12px 16px;
   border: 1px solid #e2c796;
   border-radius: 12px;
@@ -10590,6 +10596,7 @@ svg {
 
 .consultation-entry-heading {
   margin-top: 58px;
+  scroll-margin-top: 96px;
   text-align: center;
 }
 
@@ -10820,6 +10827,7 @@ svg {
   border-radius: 30px;
   background: rgba(255, 255, 255, 0.92);
   box-shadow: var(--shadow-lg);
+  scroll-margin-top: 96px;
 }
 
 .consultation-step-card fieldset {
@@ -11414,13 +11422,13 @@ svg {
 }
 
 .review-context-note p,
-.prototype-submit-note {
+.consultation-submit-note {
   margin: 0;
   color: var(--slate-700);
   font-size: 12px;
 }
 
-.prototype-submit-note {
+.consultation-submit-note {
   margin-top: 12px;
   color: var(--amber-700);
 }
@@ -11459,6 +11467,7 @@ svg {
   max-width: 820px;
   padding-top: 72px;
   padding-bottom: 120px;
+  scroll-margin-top: 96px;
   text-align: center;
 }
 
@@ -11502,46 +11511,24 @@ svg {
   text-align: left;
 }
 
-.complete-expectation,
-.complete-journey {
+.complete-expectation {
   margin-top: 18px;
   padding: 22px;
   border-radius: 16px;
+  background: var(--ink);
+  color: white;
   text-align: left;
 }
 
-.complete-expectation {
-  background: var(--ink);
-  color: white;
-}
-
-.complete-expectation span,
-.complete-journey strong {
+.complete-expectation span {
   display: block;
   font-size: 13px;
 }
 
-.complete-expectation p,
-.complete-journey p {
+.complete-expectation p {
   margin: 7px 0 0;
   color: #c3d0cb;
   font-size: 13px;
-}
-
-.complete-journey {
-  border: 1px solid var(--line);
-  background: var(--mint-050);
-}
-
-.complete-journey p {
-  color: var(--slate-700);
-}
-
-.complete-journey > span {
-  display: block;
-  margin-top: 8px;
-  color: var(--slate-600);
-  font-size: 11px;
 }
 
 .complete-actions {
@@ -11595,6 +11582,7 @@ svg {
 
   .consultation-entry-heading {
     margin-top: 42px;
+    scroll-margin-top: 76px;
   }
 
   .consultation-entry-heading h2 {
@@ -11656,6 +11644,7 @@ svg {
     margin-top: 24px;
     padding: 30px 22px;
     border-radius: 22px;
+    scroll-margin-top: 76px;
   }
 
   .consultation-step-card legend,
@@ -11703,6 +11692,7 @@ svg {
   .consultation-complete {
     padding-top: 32px;
     padding-bottom: 90px;
+    scroll-margin-top: 76px;
   }
 
   .complete-mark {

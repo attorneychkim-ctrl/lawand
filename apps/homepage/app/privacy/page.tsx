@@ -114,7 +114,7 @@ export default function PrivacyPage() {
                 </article>
                 <article>
                   <span>기본 보유기간</span>
-                  <strong>상담 요청과 후기 검수 원장은 접수일부터 1년간 보관합니다.</strong>
+                  <strong>상담 요청과 후기 검수 기록은 접수일부터 1년간 보관합니다.</strong>
                   <p>
                     목적 달성 또는 적법한 삭제 요청이 있으면 더 일찍 파기할 수
                     있습니다.
@@ -214,8 +214,8 @@ export default function PrivacyPage() {
                         </em>
                       </td>
                       <td>
-                        상담 요청일부터 1년. 미진입·무효 확인 시 운영 원장을
-                        제외한 불필요 정보는 지체 없이 파기
+                        상담 요청일부터 1년. 미진입·무효로 확인되면 운영 기록을
+                        제외한 불필요한 정보는 지체 없이 파기
                       </td>
                     </tr>
                     <tr>
@@ -266,7 +266,7 @@ export default function PrivacyPage() {
                         키워드, 후기 원문, 접수번호, 동의 버전·시각, 검수 상태
                       </td>
                       <td>
-                        검수 원장은 접수일부터 1년. 공개된 후기는 철회 또는
+                        검수 기록은 접수일부터 1년. 공개된 후기는 철회 또는
                         공개 목적 종료 시까지
                       </td>
                     </tr>
