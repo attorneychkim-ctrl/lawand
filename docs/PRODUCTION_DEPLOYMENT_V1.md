@@ -5,8 +5,8 @@ CloudFormation 스택: `lawand-prod`
 리전: 서울(`ap-northeast-2`)
 최초 배포 릴리스: `20260804T085006Z-84e8708`
 현재 홈페이지 릴리스: `20260810T064408Z-homepage-cutover-ready-v3`
-현재 ERP 릴리스: `20260807T072916Z-phone-aftercare-ux`
-현재 gateway 릴리스: `20260810T073937Z-centrex-active-call-v1`
+현재 ERP 릴리스: `20260810T082342Z-client-directory-v1`
+현재 gateway 릴리스: `20260810T082342Z-client-directory-v1`
 
 이 문서는 정식 도메인 전환 전까지의 실제 AWS 구성, 접속점, 데이터 이관 범위와
 운영 체크리스트를 기록한다. 비밀번호·API 키·AWS 계정 ID·RDS 마스터 시크릿 ARN은
@@ -61,9 +61,7 @@ A와 `www` CNAME만 다루고 NS·MX는 변경하지 않는다.
   만료 정책을 사용한다. 홈페이지 사용자 파일 저장소로 사용하지 않는다.
 - 기본 CloudWatch 경보는 세 EC2 상태, RDS CPU, RDS 여유 저장공간을 감시한다.
   SNS·PagerDuty·텔레그램 같은 실제 통지 대상은 아직 연결하지 않았다. 2026-08-10
-  홈페이지 배포와 RDS 계통 경보는 없으나, 직원 가입 중 4533의 기존 센트릭스 로그인과
-  Windows bridge 로그인이 충돌해 `lawand-centrex-login-failures` 한 건이 `ALARM`이다.
-  기존 로그인을 종료한 뒤 자동 재접속과 경보 `OK`를 확인한다.
+  최종 확인에서 센트릭스 5종을 포함한 CloudWatch 경보는 모두 `OK`다.
 
 ## RDS 기준선
 
@@ -82,7 +80,7 @@ A와 `www` CNAME만 다루고 NS·MX는 변경하지 않는다.
 - migration `0022_consultation_sse_notifications.sql`은 상담 outbox INSERT가 커밋될 때
   개인정보 없이 이벤트 ID·유형·상담 ID·발생시각만 PostgreSQL 채널로 알린다. gateway의
   전용 연결만 이 채널을 `LISTEN`하며 RDS를 인터넷에 노출하지 않는다.
-- 2026-08-10 기준 migration 40개는 모두 적용됐고 39개 파일 해시는 현재 Git과 일치한다.
+- 2026-08-10 기준 migration `0040`까지 41개는 모두 적용됐고 40개 파일 해시는 현재 Git과 일치한다.
   역사적으로 운영에 적용된 `0028_inbound_phone_directory_resolver.sql` 한 개만 현재 파일과
   해시가 다르다. 후속 `0037_phone_desk_directory_context.sql`이 같은 함수 계약을 대체했고
   현재 스키마·권한 검증은 통과한다. 이 예외를 이유로 migration 원장을 수정하거나 0028을
@@ -161,6 +159,33 @@ EC2에서 ARM64 네이티브 빌드한다. 서버 배포는
 systemd 앱 단위와 Caddy edge 단위는 부팅 시 자동 시작한다. 최종 검증에서 홈페이지·ERP는
 재기동 후 약 1초, gateway는 약 2초 안에 health를 회복했고 실패한 systemd unit과
 최근 error priority journal은 없었다.
+
+## ERP 리걸프렌즈 고객 찾기 운영 배포
+
+2026-08-10 메인 누적 작업을 릴리스 `20260810T082342Z-client-directory-v1`로 묶어
+migration `0040_wandering_lenny_balinger.sql`, gateway, ERP를 함께 운영 배포했다.
+홈페이지에는 영향이 없어 재배포하지 않았다.
+
+- 배포 전 암호화 수동 스냅샷 `lawand-prod-pre-client-directory-20260810t082342z`을
+  `available`까지 확인했다. private S3 AES256 아티팩트 SHA-256은
+  `b234c43f376b331c2527cd4f6b26f092e9491d1ed1f2440f076f7b0d3948c978`이다.
+- gateway 이미지 ID는
+  `sha256:60a791d7e6b70af332e99a3cb3da548f81bd3623077d5269cd5aa1fb03906546`,
+  ERP 이미지 ID는
+  `sha256:1a8217d9d0a51c8e7a67c6ed05ba657ef85860ef23d9aee21a841e4592420966`이다.
+- migration 적용 뒤 `lawand_app`의 고객 검색·발신 대상 함수 실행과 신규 대상 원장 접근,
+  `PUBLIC` 함수 실행 차단, `CB` 직접 조회 차단, 삭제 사건 발신 대상 제외를 확인했다.
+  인증된 ERP `/clients`는 200과 `고객 찾기`를 렌더했고, 한 글자 검색은 400으로 거부되며
+  검색 감사도 만들지 않았다. 임시 직원 세션은 삭제해 잔존 0건이다.
+- 실제 고객 찾기 발신은 실행하지 않았다. 배포 뒤 고객 찾기 발신·대상 원장과 알림톡
+  발송은 각각 0건이며 알림톡·리걸프렌즈 외부 실행 대기도 0건이다. 이 기능은 문자나
+  알림톡을 보내지 않고 센트릭스 전화 걸기만 명시적 사용자 동작으로 요청한다.
+- 긴 업무 통화가 진행 중이어서 Windows bridge나 전화기 세션은 재시작하지 않고 gateway만
+  교체했다. bridge의 DPAPI 큐·dead-letter는 0, 배정 11·warm 5·실행 16, 오프라인·로그인
+  실패 0, 감독기 정상이고 회선별 활성 통화 중복도 0이다. 최종 확인 시 새 업무 통화가
+  계속 유입돼 활성 통화 수는 동적 값이었으며 통화를 강제 종료하거나 원장을 보정하지 않았다.
+- gateway·ERP·Caddy는 active, systemd·컨테이너 재시작 0, 릴리스 뒤 error journal 0,
+  내부·외부 health 200이다. 센트릭스 5종과 나머지 CloudWatch 경보도 모두 `OK`다.
 
 ## ERP 상담 실시간 갱신
 

@@ -65,6 +65,30 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-10 — ERP 고객 찾기·migration 0040 통합 운영 배포
+- 기존 메인 고객 찾기 커밋 `5bb3087`, silver-stone 병합 결과와 메인 통합 배포 지침
+  `c464dae`를 현재 `main` HEAD 단일 아티팩트로 묶었다. 암호화 RDS 스냅샷
+  `lawand-prod-pre-client-directory-20260810t082342z`을 `available`까지 확인한 뒤 migration
+  `0040_wandering_lenny_balinger.sql`, gateway와 ERP를 같은 릴리스
+  `20260810T082342Z-client-directory-v1`로 운영 배포했다. 홈페이지는 영향이 없어 재배포하지
+  않았다.
+- private S3 AES256 아티팩트 SHA-256은
+  `b234c43f376b331c2527cd4f6b26f092e9491d1ed1f2440f076f7b0d3948c978`이다. gateway 이미지
+  ID는 `sha256:60a791d7e6b70af332e99a3cb3da548f81bd3623077d5269cd5aa1fb03906546`, ERP 이미지
+  ID는 `sha256:1a8217d9d0a51c8e7a67c6ed05ba657ef85860ef23d9aee21a841e4592420966`이다.
+- 운영 migration은 `0040`까지 41개다. 신규 대상 원장·enum·함수와 `lawand_app` 권한,
+  `PUBLIC` 함수 실행 0, `CB` 직접 조회 차단, 삭제 사건 발신 대상 제외를 확인했다. 인증된
+  ERP `/clients` 200·`고객 찾기` 렌더, 한 글자 검색 400·감사 미생성까지 no-call canary로
+  검증하고 임시 직원 세션은 0건으로 정리했다. 실제 고객 찾기 발신·대상 원장·알림톡 발송과
+  알림톡/리걸프렌즈 외부 실행 대기는 모두 0건이다.
+- 배포 시 실제 장시간 업무 통화가 계속되어 Windows bridge와 전화기 세션은 재시작하거나
+  강제 종료하지 않았다. gateway 교체 뒤 Windows는 배정 11·warm 5·실행 16, 오프라인·로그인
+  실패·DPAPI 큐·dead-letter 0, 감독기 정상이다. 천왕겸 통화 종료 뒤 최종 읽기 시점에도 다른
+  실제 업무 통화 수신 1·발신 1이 있었지만 회선별 활성 중복은 0이다. gateway·ERP·Caddy
+  active, systemd·컨테이너 재시작 0, error journal 0, 내외부 health 200, CloudWatch 경보는
+  모두 `OK`다. 통화 원장이나 기존 운영 데이터를 수동 보정하지 않았다. `PROJECT_PLAN.md`는
+  v0.95다.
+
 ### 2026-08-10 — silver-stone 메인 병합·기배포 상태 검증
 - 원격 `worktree/silver-stone-87f7`의 기능·운영 문서 커밋을 기존 고객 찾기 커밋이 있는
   `main`에 병합해 `3d41396`으로 만들고 `origin/main`에 푸시했다. 최신 인수인계 로그 충돌은
