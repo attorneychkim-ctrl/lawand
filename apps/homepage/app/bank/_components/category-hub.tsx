@@ -221,8 +221,8 @@ export function CategoryHub({
             <div className="shell">
               <p>
                 <span>{source.organization}</span>
-                이 허브의 제도 설명은 공식 공개자료를 기준으로 구성했습니다. 구체적인
-                법률 근거와 예외는 각 상세페이지에서 확인할 수 있습니다.
+                이 페이지의 제도 설명은 공식 공개자료를 기준으로 정리했습니다. 구체적인
+                법률 근거와 예외는 각 상세 안내에서 확인할 수 있습니다.
               </p>
               <a href={source.href} target="_blank" rel="noreferrer">
                 {source.label}

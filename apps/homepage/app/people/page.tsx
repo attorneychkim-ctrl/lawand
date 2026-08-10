@@ -182,7 +182,7 @@ export default function PeoplePage() {
   return (
     <>
       <a className="skip-link" href="#main-content">
-        본문으로 건너뛰기
+        본문으로 바로가기
       </a>
       <SiteHeader />
 
@@ -551,9 +551,9 @@ export default function PeoplePage() {
                     <header className="people-office-team-heading">
                       <div>
                         <span>0{officeIndex + 1}</span>
-                        <h3>{office} 오피스</h3>
+                        <h3>{office} 사무소</h3>
                       </div>
-              <p>{officeDescriptions[office]}</p>
+                      <p>{officeDescriptions[office]}</p>
                     </header>
 
                     {teamOrder.map((team) => {

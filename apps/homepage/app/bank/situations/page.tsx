@@ -64,7 +64,7 @@ export default function SituationsHubPage() {
           입구를 선택하세요
         </>
       }
-      pagesDescription="상황별 페이지는 서로 다른 분류를 URL로 깊게 나누지 않습니다. 긴급 문제·채무 원인·직업과 소득이라는 표시로 구분하고 상세주소는 한 단계로 유지합니다."
+      pagesDescription="긴급 문제, 채무가 생긴 원인, 직업과 소득이라는 세 가지 기준으로 나눴습니다. 여러 상황에 걸쳐 있다면 지금 가장 급한 쪽부터 확인하세요."
       pages={pages}
       startEyebrow="정리 원칙"
       startTitle={

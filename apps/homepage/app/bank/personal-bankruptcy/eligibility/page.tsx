@@ -519,7 +519,7 @@ export default function PersonalBankruptcyEligibilityPage() {
           <div className="shell">
             <div className="related-heading">
               <p className="eyebrow">다음으로 읽을 내용</p>
-              <h2 id="related-title">아직 어느 절차인지 어렵다면</h2>
+              <h2 id="related-title">아직 어느 절차인지 판단하기 어렵다면</h2>
             </div>
             <div className="related-links">
               <a href="/bank/compare">
