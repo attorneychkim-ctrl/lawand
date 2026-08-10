@@ -139,9 +139,9 @@ function formatCaseLiquidationValue(value: number) {
   return value > 0 ? formatCaseMoney(value) : "기록상 0원";
 }
 
-// 공개 후기 원장을 5분 주기로 다시 읽어, 첫 화면의 응답 속도를 유지하면서도
-// 새로 공개된 후기와 사례가 홈에 반영되게 한다.
-export const revalidate = 300;
+// 운영 이미지 빌드에는 DB 비밀값을 주입하지 않는다. 공개 후기와 사례는
+// 요청 시점에 읽어 배포 직후에도 빈 빌드 결과가 캐시되지 않게 한다.
+export const dynamic = "force-dynamic";
 
 export default async function BankHomePage() {
   // 공개 데이터 조회가 실패해도 첫 화면의 안내와 상담 경로는 그대로 열려 있어야 한다.
