@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 
 export default async function MessageTemplatesPage() {
   const staff = await requireStaff();
-  const templates = await getMessageTemplates(true);
+  const templates = await getMessageTemplates();
   return (
     <>
       <StaffBar staff={staff} />

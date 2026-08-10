@@ -2289,40 +2289,23 @@ export function createTelephonyService(options: {
     });
   }
 
-  async function listMessageTemplates(
-    actor: StaffPrincipal,
-    includeInactive = false,
-  ) {
+  async function listMessageTemplates(actor: StaffPrincipal) {
     const rows = await db
       .select()
       .from(messageTemplates)
-      .where(
-        and(
-          or(
-            isNull(messageTemplates.ownerUserId),
-            eq(messageTemplates.ownerUserId, actor.id),
-          ),
-          includeInactive ? undefined : eq(messageTemplates.isActive, true),
-        ),
-      )
-      .orderBy(asc(messageTemplates.ownerUserId), asc(messageTemplates.name));
+      .where(eq(messageTemplates.ownerUserId, actor.id))
+      .orderBy(asc(messageTemplates.name));
     return {
-      items: rows.map((template) => templateResponse(template, actor)),
+      items: rows.map(templateResponse),
     };
   }
 
-  function templateResponse(
-    template: typeof messageTemplates.$inferSelect,
-    actor: StaffPrincipal,
-  ) {
+  function templateResponse(template: typeof messageTemplates.$inferSelect) {
     return {
       id: template.id,
       name: template.name,
       body: template.body,
       bodyByteLength: template.bodyByteLength,
-      isActive: template.isActive,
-      scope: template.ownerUserId ? ("personal" as const) : ("built_in" as const),
-      editable: template.ownerUserId === actor.id,
       image:
         template.imageFileId &&
         template.imageUrl &&
@@ -2417,7 +2400,6 @@ export function createTelephonyService(options: {
         body: input.body,
         bodyByteLength: centrexMessageByteLength(input.body),
         ...imageValues,
-        isActive: true,
         createdByUserId: actor.id,
         updatedByUserId: actor.id,
         createdAt,
@@ -2443,7 +2425,7 @@ export function createTelephonyService(options: {
       occurredAt: createdAt,
       createdAt,
     });
-    return templateResponse(created, actor);
+    return templateResponse(created);
   }
 
   async function updateMessageTemplate(
@@ -2468,9 +2450,7 @@ export function createTelephonyService(options: {
       if (template.ownerUserId !== actor.id) {
         throw new TelephonyCallError(
           "message_template_owned_by_other_staff",
-          template.ownerUserId
-            ? "다른 직원의 개인 템플릿은 수정할 수 없습니다."
-            : "기본 템플릿은 수정할 수 없습니다. 내 템플릿으로 새로 만들어 주세요.",
+          "다른 직원의 개인 템플릿은 수정할 수 없습니다.",
         );
       }
       const [conflict] = await tx
@@ -2509,7 +2489,6 @@ export function createTelephonyService(options: {
           name: input.name,
           body: input.body,
           bodyByteLength: centrexMessageByteLength(input.body),
-          isActive: input.isActive,
           ...imageValues,
           updatedByUserId: actor.id,
           updatedAt,
@@ -2524,14 +2503,63 @@ export function createTelephonyService(options: {
         targetType: "message_template",
         targetId: templateId,
         metadata: {
-          previousActive: template.isActive,
-          isActive: updated.isActive,
           bodyByteLength: updated.bodyByteLength,
         },
         occurredAt: updatedAt,
         createdAt: updatedAt,
       });
-      return templateResponse(updated, actor);
+      return templateResponse(updated);
+    });
+  }
+
+  async function deleteMessageTemplate(
+    templateId: string,
+    actor: StaffPrincipal,
+  ) {
+    const deletedAt = now();
+    return db.transaction(async (tx) => {
+      const [template] = await tx
+        .select()
+        .from(messageTemplates)
+        .where(eq(messageTemplates.id, templateId))
+        .limit(1)
+        .for("update");
+      if (!template) {
+        throw new TelephonyCallError(
+          "message_template_not_found",
+          "문자 템플릿을 찾을 수 없습니다.",
+        );
+      }
+      if (template.ownerUserId !== actor.id) {
+        throw new TelephonyCallError(
+          "message_template_owned_by_other_staff",
+          "다른 직원의 개인 템플릿은 삭제할 수 없습니다.",
+        );
+      }
+      const [deleted] = await tx
+        .delete(messageTemplates)
+        .where(
+          and(
+            eq(messageTemplates.id, templateId),
+            eq(messageTemplates.ownerUserId, actor.id),
+          ),
+        )
+        .returning({ id: messageTemplates.id });
+      if (!deleted) throw new Error("message_template_not_deleted");
+      await tx.insert(staffAuditLogs).values({
+        id: createEventId(),
+        actorUserId: actor.id,
+        action: "telephony.message_template.deleted",
+        targetType: "message_template",
+        targetId: templateId,
+        metadata: {
+          bodyByteLength: template.bodyByteLength,
+          hadImage: template.imageFileId !== null,
+        },
+        occurredAt: deletedAt,
+        createdAt: deletedAt,
+      });
+      return { id: deleted.id, deleted: true as const };
     });
   }
 
@@ -2658,27 +2686,21 @@ export function createTelephonyService(options: {
           .select({
             id: messageTemplates.id,
             name: messageTemplates.name,
-            isActive: messageTemplates.isActive,
             ownerUserId: messageTemplates.ownerUserId,
             imageFileId: messageTemplates.imageFileId,
             imageOriginalName: messageTemplates.imageOriginalName,
           })
           .from(messageTemplates)
           .where(eq(messageTemplates.id, input.templateId))
-          .limit(1);
+          .limit(1)
+          .for("key share");
         if (!template) {
           throw new TelephonyCallError(
             "message_template_not_found",
             "선택한 문자 템플릿을 찾을 수 없습니다.",
           );
         }
-        if (!template.isActive) {
-          throw new TelephonyCallError(
-            "message_template_inactive",
-            "현재 사용하지 않는 문자 템플릿입니다.",
-          );
-        }
-        if (template.ownerUserId && template.ownerUserId !== actor.id) {
+        if (template.ownerUserId !== actor.id) {
           throw new TelephonyCallError(
             "message_template_owned_by_other_staff",
             "다른 직원의 개인 템플릿은 사용할 수 없습니다.",
@@ -3252,6 +3274,7 @@ export function createTelephonyService(options: {
     completeInboundAnswerCommand,
     confirmDisposition,
     createMessageTemplate,
+    deleteMessageTemplate,
     getCall,
     getInboundCallSnapshot,
     getMessage,

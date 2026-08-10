@@ -93,7 +93,6 @@ export const messageTemplateUpdateSchema = z
   .object({
     name: messageTemplateNameSchema,
     body: messageTemplateBodySchema,
-    isActive: z.boolean(),
     // 생략하면 기존 이미지를 유지하고, null이면 제거하며, 객체면 교체한다.
     image: messageTemplateImageSchema.nullable().optional(),
   })

@@ -10,6 +10,7 @@ import {
   centrexMessageKind,
   legalFriendsDirectoryClickToCallSchema,
   messageTemplateCreateSchema,
+  messageTemplateUpdateSchema,
   phoneDeskAftercareSaveSchema,
   renderMessageTemplate,
   telephonyCallDispositionConfirmationSchema,
@@ -66,6 +67,14 @@ test("센트릭스 SMS/LMS 바이트와 템플릿 변수를 검증한다", () =>
       name: "잘못된 이미지",
       body: "이미지 안내",
       image: { originalName: "명함.png", fileBase64: "data:image/png;base64,AAEC" },
+    }).success,
+    false,
+  );
+  assert.equal(
+    messageTemplateUpdateSchema.safeParse({
+      name: "부재 안내",
+      body: "부재 안내입니다.",
+      isActive: false,
     }).success,
     false,
   );

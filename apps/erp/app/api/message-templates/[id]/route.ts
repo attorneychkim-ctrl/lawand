@@ -4,6 +4,7 @@ import { messageTemplateUpdateSchema } from "@lawand/core";
 
 import {
   ConsultationGatewayError,
+  deleteMessageTemplate,
   updateMessageTemplate,
 } from "../../../../lib/gateway";
 
@@ -34,6 +35,27 @@ export async function POST(
     }
     return NextResponse.json(
       { error: "message_template_unavailable", message: "문자 템플릿을 저장하지 못했습니다." },
+      { status: 502 },
+    );
+  }
+}
+
+export async function DELETE(
+  _request: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  const { id } = await context.params;
+  try {
+    return NextResponse.json(await deleteMessageTemplate(id));
+  } catch (error) {
+    if (error instanceof ConsultationGatewayError) {
+      return NextResponse.json(
+        { error: "message_template_rejected", message: error.message },
+        { status: error.status },
+      );
+    }
+    return NextResponse.json(
+      { error: "message_template_unavailable", message: "문자 템플릿을 삭제하지 못했습니다." },
       { status: 502 },
     );
   }

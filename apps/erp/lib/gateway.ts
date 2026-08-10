@@ -78,9 +78,6 @@ export type MessageTemplate = {
   name: string;
   body: string;
   bodyByteLength: number;
-  isActive: boolean;
-  scope: "built_in" | "personal";
-  editable: boolean;
   image: {
     url: string;
     originalName: string;
@@ -491,7 +488,7 @@ export type ConsultationDetail = {
 async function gatewayFetch(
   path: string,
   options: {
-    method?: "GET" | "POST";
+    method?: "GET" | "POST" | "DELETE";
     body?: unknown;
     signal?: AbortSignal;
     streaming?: boolean;
@@ -728,13 +725,9 @@ async function messageResponse<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function getMessageTemplates(
-  includeInactive = false,
-): Promise<MessageTemplate[]> {
+export async function getMessageTemplates(): Promise<MessageTemplate[]> {
   const body = await messageResponse<{ items: MessageTemplate[] }>(
-    await gatewayFetch(
-      `/v1/message-templates${includeInactive ? "?includeInactive=true" : ""}`,
-    ),
+    await gatewayFetch("/v1/message-templates"),
   );
   return body.items;
 }
@@ -758,7 +751,6 @@ export async function updateMessageTemplate(
   input: {
     name: string;
     body: string;
-    isActive: boolean;
     image?: { originalName: string; fileBase64: string } | null;
   },
 ): Promise<MessageTemplate> {
@@ -767,6 +759,16 @@ export async function updateMessageTemplate(
       method: "POST",
       body: input,
       timeoutMs: 20_000,
+    }),
+  );
+}
+
+export async function deleteMessageTemplate(
+  templateId: string,
+): Promise<{ id: string; deleted: true }> {
+  return messageResponse(
+    await gatewayFetch(`/v1/message-templates/${templateId}`, {
+      method: "DELETE",
     }),
   );
 }

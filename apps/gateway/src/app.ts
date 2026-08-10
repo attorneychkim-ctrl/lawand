@@ -1606,10 +1606,7 @@ export function createGatewayServer(options?: {
         sendJson(
           response,
           200,
-          await options.telephonyService.listMessageTemplates(
-            actor,
-            url.searchParams.get("includeInactive") === "true",
-          ),
+          await options.telephonyService.listMessageTemplates(actor),
         );
         return;
       }
@@ -1651,6 +1648,49 @@ export function createGatewayServer(options?: {
           201,
           await options.telephonyService.createMessageTemplate(
             parsed.data,
+            actor,
+          ),
+        );
+        return;
+      }
+
+      if (
+        request.method === "DELETE" &&
+        url.pathname.startsWith("/v1/message-templates/")
+      ) {
+        if (
+          !options?.telephonyService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const templateId = url.pathname.slice(
+          "/v1/message-templates/".length,
+        );
+        if (!validUuid(templateId)) {
+          sendJson(response, 400, { error: "invalid_template_id" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        sendJson(
+          response,
+          200,
+          await options.telephonyService.deleteMessageTemplate(
+            templateId,
             actor,
           ),
         );

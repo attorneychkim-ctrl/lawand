@@ -71,6 +71,24 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-10 — ERP 문자 템플릿 개인 전용·실삭제 출시 후보
+- 기본 제공 템플릿과 `상담 화면에서 이 템플릿 사용` 체크를 제거했다. 템플릿은 이제
+  `owner_user_id`가 반드시 있는 직원 개인 설정이며, 만든 직원의 모든 템플릿이 상담 상세
+  발송창에 표시된다. 전역 `문자` 화면에는 확인창을 거치는 실제 삭제 버튼과 빈 목록 안내를
+  추가했고, 다른 직원 템플릿의 조회·수정·사용·삭제 차단은 gateway에서 계속 강제한다.
+- migration `0042_bright_midnight.sql`은 기존 기본 템플릿 3건과 `is_active` 컬럼·인덱스를
+  제거한다. 삭제된 템플릿을 사용한 과거 발송은 `telephony_messages.template_id`만
+  `ON DELETE SET NULL`로 해제하며 템플릿명·암호화 본문·이미지 스냅샷과 감사 원장은
+  보존한다. 발송과 삭제가 경합하지 않도록 발송 트랜잭션은 템플릿에 key-share lock을 잡는다.
+- 현재 `lawand_dev`를 복제한 임시 DB에서 `lawand_migrator` 역할로 migration을 적용해
+  기본 템플릿 0건, 소유자 `NOT NULL`, `is_active` 0개, FK 삭제 동작 `SET NULL`, 완화된
+  스냅샷 제약을 확인한 뒤 임시 DB를 삭제했다. 실제 로컬·운영 DB migration과 운영 배포는
+  수행하지 않았다.
+- 최신 `main`의 직원 셀프서비스 프로필 작업과 통합한 전체 5개 패키지 typecheck·lint·
+  production build, core 61개·gateway 87개 테스트,
+  Drizzle schema check와 `git diff --check`를 통과했다. 운영 반영 시에는 암호화 RDS 스냅샷
+  뒤 migration `0042`와 gateway·ERP를 같은 릴리스로 배포한다. `PROJECT_PLAN.md`는 v0.99이다.
+
 ### 2026-08-10 — ERP 내 정보·본인 업무 연동·최소 초대 main 반영
 - ERP 우측 상단의 직원 이름·소속 영역을 `/profile` 내 정보 진입점으로 바꿨다. 이름과
   로그인 이메일은 고정하고, 소속·지역·부서·직책은 본인과 관리자가 수정한다. 역할·권한은

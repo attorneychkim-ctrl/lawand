@@ -633,12 +633,14 @@ test("고객찾기 API는 검색어와 리걸프렌즈 고객 식별자만 서�
   assert.deepEqual(clickTarget, { clientIdx: 123, caseIdx: 456 });
 });
 
-test("일반 직원은 자신의 문자 템플릿을 만들고 담당 상담에 문자를 요청한다", async (context) => {
+test("일반 직원은 자신의 문자 템플릿을 만들고 담당 상담에 문자를 요청한 뒤 삭제한다", async (context) => {
   const consultationId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2d8";
   const templateId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2d9";
   const messageId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2da";
   let templateActorId = "";
   let messageActorId = "";
+  let deletedTemplateId = "";
+  let deleteActorId = "";
   const telephonyService = {
     createMessageTemplate: async (
       input: { name: string; body: string },
@@ -649,13 +651,18 @@ test("일반 직원은 자신의 문자 템플릿을 만들고 담당 상담에 
         id: templateId,
         ...input,
         bodyByteLength: 12,
-        isActive: true,
-        scope: "personal" as const,
-        editable: true,
         image: null,
         createdAt: "2026-08-10T10:00:00.000Z",
         updatedAt: "2026-08-10T10:00:00.000Z",
       };
+    },
+    deleteMessageTemplate: async (
+      receivedTemplateId: string,
+      actor: StaffPrincipal,
+    ) => {
+      deletedTemplateId = receivedTemplateId;
+      deleteActorId = actor.id;
+      return { id: receivedTemplateId, deleted: true as const };
     },
     requestMessage: async (
       receivedConsultationId: string,
@@ -732,6 +739,14 @@ test("일반 직원은 자신의 문자 템플릿을 만들고 담당 상담에 
   );
   assert.equal(messageResponse.status, 201);
   assert.equal(messageActorId, realtimeActor.id);
+
+  const deleteResponse = await fetch(
+    `http://127.0.0.1:${address.port}/v1/message-templates/${templateId}`,
+    { method: "DELETE", headers },
+  );
+  assert.equal(deleteResponse.status, 200);
+  assert.equal(deletedTemplateId, templateId);
+  assert.equal(deleteActorId, realtimeActor.id);
 });
 
 test("통화 결과 API는 허용된 분류와 현재 직원을 서비스에 전달한다", async (context) => {

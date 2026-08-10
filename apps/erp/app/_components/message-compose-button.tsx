@@ -180,7 +180,7 @@ export function MessageComposeButton({
           <div>
             <p className="section-kicker">CUSTOMER MESSAGE</p>
             <h2 id="message-compose-title">{customerName} 고객에게 문자 보내기</h2>
-            <p>템플릿을 고른 뒤 내용을 마지막으로 확인하고 보내세요.</p>
+            <p>내 템플릿을 고르거나 내용을 직접 입력한 뒤 확인하고 보내세요.</p>
           </div>
           <button aria-label="문자 보내기 창 닫기" disabled={sending} onClick={() => setOpen(false)} type="button">×</button>
         </header>
@@ -193,7 +193,7 @@ export function MessageComposeButton({
                 <option value="">직접 입력</option>
                 {templates.map((template) => (
                   <option key={template.id} value={template.id}>
-                    {template.scope === "personal" ? "내 템플릿 · " : "기본 · "}{template.name}{template.image ? " · 이미지" : ""}
+                    {template.name}{template.image ? " · 이미지" : ""}
                   </option>
                 ))}
               </select>
