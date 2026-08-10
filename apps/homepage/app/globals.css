@@ -113,6 +113,10 @@
   padding-bottom: 120px;
 }
 
+.diagnosis-results {
+  scroll-margin-top: 110px;
+}
+
 .diagnosis-loading {
   min-height: 360px;
   color: var(--slate-600);
@@ -159,6 +163,7 @@
   max-width: 880px;
   margin: 54px auto 0;
   padding: 48px;
+  scroll-margin-top: 110px;
   border: 1px solid #d7ddd8;
   border-radius: 30px;
   background: #fffefb;
@@ -774,7 +779,12 @@
   .diagnosis-form-card {
     margin-top: 34px;
     padding: 28px 22px;
+    scroll-margin-top: 80px;
     border-radius: 22px;
+  }
+
+  .diagnosis-results {
+    scroll-margin-top: 80px;
   }
 
   .diagnosis-form-card > fieldset > legend {

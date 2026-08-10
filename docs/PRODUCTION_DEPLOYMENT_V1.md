@@ -1,10 +1,10 @@
 # AWS 운영 배포 기준선 v1
 
-기준 시각: 2026-08-07 KST  
-CloudFormation 스택: `lawand-prod`  
-리전: 서울(`ap-northeast-2`)  
+기준 시각: 2026-08-07 KST
+CloudFormation 스택: `lawand-prod`
+리전: 서울(`ap-northeast-2`)
 최초 배포 릴리스: `20260804T085006Z-84e8708`
-현재 ERP 릴리스: `20260807T072916Z-phone-aftercare-ux`  
+현재 ERP 릴리스: `20260807T072916Z-phone-aftercare-ux`
 현재 gateway 릴리스: `20260807T072916Z-phone-aftercare-ux`
 
 이 문서는 정식 도메인 전환 전까지의 실제 AWS 구성, 접속점, 데이터 이관 범위와

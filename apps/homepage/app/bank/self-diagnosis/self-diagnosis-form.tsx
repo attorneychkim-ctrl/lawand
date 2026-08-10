@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION,
@@ -15,6 +15,7 @@ import {
 } from "@lawand/core";
 
 import { getConsultationAttribution } from "@/app/_components/journey-tracker";
+import { moveAttention } from "@/lib/move-attention";
 
 import { ArrowIcon } from "../_components/site-chrome";
 
@@ -238,6 +239,9 @@ function FinancialPlan({ match }: { match: DiagnosisMatch }) {
 }
 
 export function SelfDiagnosisForm() {
+  const formCardRef = useRef<HTMLDivElement>(null);
+  const resultsRef = useRef<HTMLElement>(null);
+  const attentionRequestedRef = useRef(false);
   const [step, setStep] = useState(0);
   const [data, setData] = useState<FormData>(initialData);
   const [error, setError] = useState("");
@@ -258,6 +262,24 @@ export function SelfDiagnosisForm() {
         : [],
     [data.residenceRegion],
   );
+
+  useEffect(() => {
+    if (!attentionRequestedRef.current) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      attentionRequestedRef.current = false;
+      const scrollTarget = result ? resultsRef.current : formCardRef.current;
+      if (!scrollTarget) return;
+
+      moveAttention(scrollTarget, {
+        focusTarget: scrollTarget.querySelector<HTMLElement>(
+          "[data-attention-heading]",
+        ),
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [result, step]);
 
   const setField = <Key extends keyof FormData>(key: Key, value: FormData[Key]) => {
     setData((current) => ({ ...current, [key]: value }));
@@ -316,7 +338,15 @@ export function SelfDiagnosisForm() {
       setError(message);
       return;
     }
+    setError("");
+    attentionRequestedRef.current = true;
     setStep((current) => Math.min(steps.length - 1, current + 1));
+  };
+
+  const previous = () => {
+    setError("");
+    attentionRequestedRef.current = true;
+    setStep((current) => Math.max(0, current - 1));
   };
 
   const submit = async () => {
@@ -360,8 +390,8 @@ export function SelfDiagnosisForm() {
       if (!response.ok) {
         throw new Error(body.message ?? "자가진단 결과를 만들지 못했습니다.");
       }
+      attentionRequestedRef.current = true;
       setResult(body);
-      window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -380,10 +410,18 @@ export function SelfDiagnosisForm() {
     const isRehabilitation =
       assessment.recommendation === "personal_rehabilitation";
     return (
-      <section className="diagnosis-results shell" aria-labelledby="diagnosis-result-title">
+      <section
+        ref={resultsRef}
+        className="diagnosis-results shell"
+        aria-labelledby="diagnosis-result-title"
+      >
         <div className="diagnosis-result-lead">
           <p className="eyebrow">진단번호 {result.publicReceiptCode}</p>
-          <h2 id="diagnosis-result-title">
+          <h2
+            id="diagnosis-result-title"
+            data-attention-heading
+            tabIndex={-1}
+          >
             {isRehabilitation
               ? "나의 상황과 유사한 사례 5건을 찾았습니다."
               : "파산·면책 사례도 함께 살펴봐야 합니다."}
@@ -499,9 +537,11 @@ export function SelfDiagnosisForm() {
               className="button button-outline"
               type="button"
               onClick={() => {
+                attentionRequestedRef.current = true;
                 setData(initialData);
                 setResult(null);
                 setStep(0);
+                setError("");
               }}
             >
               다시 진단하기
@@ -523,10 +563,16 @@ export function SelfDiagnosisForm() {
         ))}
       </div>
 
-      <div className="diagnosis-form-card">
+      <div ref={formCardRef} className="diagnosis-form-card">
         {step === 0 ? (
           <fieldset>
-            <legend id="diagnosis-form-title">현재 거주지역과 소득</legend>
+            <legend
+              id="diagnosis-form-title"
+              data-attention-heading
+              tabIndex={-1}
+            >
+              현재 거주지역과 소득
+            </legend>
             <p>거주지역으로 관할법원을 먼저 안내하고 유사사건 비교에 반영합니다.</p>
             <label>
               <span>현재 거주 중인 지역</span>
@@ -592,7 +638,13 @@ export function SelfDiagnosisForm() {
 
         {step === 1 ? (
           <fieldset>
-            <legend>채무와 청산가치</legend>
+            <legend
+              id="diagnosis-form-title"
+              data-attention-heading
+              tabIndex={-1}
+            >
+              채무와 청산가치
+            </legend>
             <p>청산가치는 변제계획이 넘어야 할 제한조건으로 먼저 확인합니다.</p>
             <div className="diagnosis-field-grid">
               {([
@@ -622,7 +674,13 @@ export function SelfDiagnosisForm() {
 
         {step === 2 ? (
           <fieldset>
-            <legend>혼인·미성년 자녀·거주 조건</legend>
+            <legend
+              id="diagnosis-form-title"
+              data-attention-heading
+              tabIndex={-1}
+            >
+              혼인·미성년 자녀·거주 조건
+            </legend>
             <p>미성년 자녀 수를 부양가족 판단의 출발값으로 두고 비교합니다.</p>
             <div className="diagnosis-field-grid">
               <label>
@@ -662,7 +720,13 @@ export function SelfDiagnosisForm() {
 
         {step === 3 ? (
           <fieldset>
-            <legend>결과를 확인할 연락정보</legend>
+            <legend
+              id="diagnosis-form-title"
+              data-attention-heading
+              tabIndex={-1}
+            >
+              결과를 확인할 연락정보
+            </legend>
             <p>진단 결과와 입력값은 로앤 ERP의 상담 원장에 함께 등록됩니다.</p>
             <div className="diagnosis-field-grid">
               <label>
@@ -686,7 +750,7 @@ export function SelfDiagnosisForm() {
 
         {error ? <p className="diagnosis-error" role="alert">{error}</p> : null}
         <div className="diagnosis-actions">
-          {step > 0 ? <button className="button button-outline" type="button" onClick={() => { setStep((current) => current - 1); setError(""); }}>이전</button> : <span />}
+          {step > 0 ? <button className="button button-outline" type="button" onClick={previous}>이전</button> : <span />}
           {step < steps.length - 1 ? (
             <button className="button button-primary" type="button" onClick={next}>
               다음 조건
