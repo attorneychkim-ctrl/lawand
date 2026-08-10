@@ -18,6 +18,10 @@
 - 이 WSL 환경: node **v22.22.2**, pnpm **11.17.0**(Corepack + 로컬 shim).
 
 ## 작업 규칙
+- `main`이 아닌 워크트리 브랜치에서는 구현·검증 뒤 해당 브랜치 커밋과 원격 브랜치
+  푸시까지만 수행한다. `main` 머지·`main` 푸시와 실서비스 배포·운영 데이터 변경은
+  메인 세션에서만 수행하며, 사용자가 해당 브랜치 세션에 별도로 명시하지 않는 한
+  워크트리 브랜치 세션이 선행하지 않는다.
 - 의미 있는 작업(스캐폴딩, 신규 패키지/앱, DB 스키마, 외부 연동, 배포 등)을 마치면
   아래 **인수인계 로그에 형식 맞춰 새 항목을 append**할 것 — 다음 세션/다른 에이전트가
   이어받는 유일한 경로다.
@@ -54,6 +58,34 @@
 ---
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
+
+### 2026-08-10 — 브리지 재접속 종료 보정·회선당 활성 통화 단일화 운영 배포
+- 김지안 회선에서 수신 `connected`와 직접 발신이 동시에 활성로 보인 원인을 운영 원장과
+  Windows 로그로 대사했다. 다른 장소의 중복 센트릭스 로그인 때문에 slot 013이
+  `LOGIN_RESULT=-1`·`NETWORK_ERROR` 뒤 재접속했고, v0.7.0이 로그인 성공 때 메모리의 기존
+  수신 상태를 종료 이벤트 없이 비워 DB에 ghost가 남았다. 뒤 직접 발신은 정상 종료됐지만
+  수신 한 건만 계속 활성로 남은 상태였다.
+- Windows bridge v0.7.1은 네트워크 재접속·수동 해제·회선 재설정·본인확인 실패·프로세스
+  종료 전에 현재 활성 수신·발신별 `ended` 보정 이벤트를 DPAPI 내구 큐에 넣고 나서 상태를
+  비운다. 로그인 성공 시 남은 상태와 3분 지난 수신 ring도 보정한다. 외부 번호 계약에
+  맞지 않는 4자리 내부 leg는 payload 검증 전에 활성 상태를 만들지 않게 해 뒤따르는
+  `connected/ended` 고아 큐도 차단했다. x86 self-test 16개를 통과한 v0.7.1.0 실행 파일
+  SHA-256은 `0EF80F01F74EE631FFF02E626A4681127A7F344430AF6D307DA34DACB30101D8`이며
+  조직용 인증서가 없어 기존과 같이 `NotSigned`다.
+- gateway는 bridge와 U+ callback의 모든 새 ring을 endpoint advisory lock으로 직렬화하고,
+  같은 회선의 다른 `ringing/connected` 원장을 `SUPERSEDED_BY_NEW_CALL` 합성 종료 이벤트와
+  함께 닫는다. 뒤 실제 종료가 도착하면 provider cause로 보강한다. migration 없이 릴리스
+  `20260810T073937Z-centrex-active-call-v1`을 배포했다. private S3 AES256 아티팩트 SHA-256은
+  `8e89a0cfe418cdb2dde1acdb381ee9f454e27eb46e9914f9179d3b1b3f0c70a3`, gateway 이미지 ID는
+  `sha256:585b6878b719dbe70093212fe5822606f9a38f3027247f662375507d9cc4abe9`다.
+- 기존 수신 ghost는 확인된 재접속 시각 `2026-08-10T07:15:14.401Z`로
+  `BRIDGE_RECONNECT_RECOVERY` 종료 이벤트를 남겨 복구했다. 배포 전 409 고아 암호문 6건은
+  삭제하지 않고 slot 007·013의 `gateway-dead-letter-archive`로 옮겼다. 최종 상태는 배정
+  11+warm 5, 프로세스 16개 전부 v0.7.1.0, 오프라인·로그인 실패·활성 큐·dead-letter 0,
+  감독기 정상, CloudWatch 5종 경보 `OK`이고 회선별 활성 중복 0건이다.
+- 전체 typecheck·lint·production build, core 55개·gateway 78개 테스트, gateway 로컬 DB
+  ingress 통합 검증과 `git diff --check`를 통과했다. 운영 gateway·Caddy active, 컨테이너
+  재시작 0, 외부 health 200이다. `PROJECT_PLAN.md`는 v0.94다.
 
 ### 2026-08-10 — ERP 리걸프렌즈 고객 찾기·센트릭스 클릭투콜 구현
 - ERP 전역 내비게이션에 `/clients` 고객 찾기를 추가했다. 고객명 또는 전화번호로

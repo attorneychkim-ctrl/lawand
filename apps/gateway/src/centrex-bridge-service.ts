@@ -8,10 +8,7 @@ import {
   sql,
 } from "drizzle-orm";
 
-import {
-  createTelephonyCallId,
-  type CentrexBridgeEvent,
-} from "@lawand/core";
+import { createTelephonyCallId, type CentrexBridgeEvent } from "@lawand/core";
 import {
   telephonyCallObservationLinks,
   telephonyCalls,
@@ -22,6 +19,11 @@ import {
 import type { createDatabaseClient } from "@lawand/db";
 
 import type { DataProtection } from "./crypto.js";
+import {
+  CENTREX_SUPERSEDED_END_CAUSE,
+  endOtherActiveCentrexCalls,
+  lockCentrexEndpointActiveCalls,
+} from "./centrex-active-call.js";
 import {
   CENTREX_RING_CALLBACK_BRIDGE_ID,
   centrexInboundCorrelationLock,
@@ -160,23 +162,34 @@ export function createCentrexBridgeIngressService(options: {
 
     const eventFingerprint = protection.fingerprint(event);
     const direction = eventDirection(event);
-    const callLock =
-      event.eventType === "inbound.ringing"
-        ? centrexInboundCorrelationLock(
-            protection,
-            event.endpointId,
-            event.callerNumber,
-          )
-        : protection.fingerprint({
-            endpointId: event.endpointId,
-            providerCallId: event.providerCallId,
-          });
+    const callLock = protection.fingerprint({
+      endpointId: event.endpointId,
+      providerCallId: event.providerCallId,
+    });
     const occurredAt = new Date(event.occurredAt);
     const receivedAt = now();
 
     return db.transaction(async (tx) => {
+      const ringing =
+        event.eventType === "inbound.ringing" ||
+        event.eventType === "outbound.ringing";
+      if (ringing) {
+        await lockCentrexEndpointActiveCalls(
+          tx,
+          protection,
+          event.endpointId,
+        );
+      }
+      const correlationLock =
+        event.eventType === "inbound.ringing"
+          ? centrexInboundCorrelationLock(
+              protection,
+              event.endpointId,
+              event.callerNumber,
+            )
+          : callLock;
       await tx.execute(
-        sql`select pg_advisory_xact_lock(cast(${protection.advisoryLockKey(callLock)} as bigint))`,
+        sql`select pg_advisory_xact_lock(cast(${protection.advisoryLockKey(correlationLock)} as bigint))`,
       );
 
       const [existingEvent] = await tx
@@ -340,6 +353,15 @@ export function createCentrexBridgeIngressService(options: {
             call = mergedCall;
           }
         }
+        if (call?.state !== "ended") {
+          await endOtherActiveCentrexCalls(tx, protection, {
+            endpointId: event.endpointId,
+            ...(call ? { currentCallId: call.id } : {}),
+            occurredAt,
+            receivedAt,
+            triggeringEventId: event.eventId,
+          });
+        }
         if (!call) {
           const callId = createTelephonyCallId();
           const encryptedPhone = protection.encrypt(
@@ -421,15 +443,24 @@ export function createCentrexBridgeIngressService(options: {
       } else if (
         (event.eventType === "inbound.ended" ||
           event.eventType === "outbound.ended") &&
-        persistedCall.state !== "ended"
+        (persistedCall.state !== "ended" ||
+          persistedCall.providerEndCause === CENTREX_SUPERSEDED_END_CAUSE)
       ) {
+        const endedAt =
+          occurredAt >= persistedCall.ringingAt
+            ? occurredAt
+            : persistedCall.ringingAt;
+        const lastEventAt =
+          persistedCall.lastEventAt >= occurredAt
+            ? persistedCall.lastEventAt
+            : occurredAt;
         const [updatedCall] = await tx
           .update(telephonyInboundCalls)
           .set({
             state: "ended",
-            endedAt: occurredAt,
+            endedAt,
             providerEndCause: event.providerEndCause,
-            lastEventAt: occurredAt,
+            lastEventAt,
             updatedAt: receivedAt,
           })
           .where(eq(telephonyInboundCalls.id, persistedCall.id))

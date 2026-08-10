@@ -26,6 +26,10 @@ import type {
 } from "./centrex.js";
 import { CentrexDeliveryError } from "./centrex.js";
 import type { CentrexCredentialVault } from "./centrex-credential-vault.js";
+import {
+  endOtherActiveCentrexCalls,
+  lockCentrexEndpointActiveCalls,
+} from "./centrex-active-call.js";
 import type { DataProtection } from "./crypto.js";
 
 type Database = ReturnType<typeof createDatabaseClient>["db"];
@@ -290,6 +294,7 @@ export function createCentrexInboundObserver(options: {
       sender,
     );
     return db.transaction(async (tx) => {
+      await lockCentrexEndpointActiveCalls(tx, protection, endpoint.id);
       await tx.execute(
         sql`select pg_advisory_xact_lock(cast(${protection.advisoryLockKey(lock)} as bigint))`,
       );
@@ -334,6 +339,12 @@ export function createCentrexInboundObserver(options: {
       const callId = createTelephonyCallId();
       const eventId = createEventId();
       const providerCallId = `ringcb:${eventId.replaceAll("-", "")}`;
+      await endOtherActiveCentrexCalls(tx, protection, {
+        endpointId: endpoint.id,
+        occurredAt: receivedAt,
+        receivedAt,
+        triggeringEventId: eventId,
+      });
       const encryptedPhone = protection.encrypt(
         sender,
         `telephony_inbound_calls/${callId}/remote_phone`,

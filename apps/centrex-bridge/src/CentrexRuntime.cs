@@ -176,7 +176,7 @@ namespace Lawand.CentrexBridge
             EnsureHostInitialized();
             _connectionIdentityRejected = false;
             _reconnectAttempt = 0;
-            TryDisconnect();
+            TryDisconnect("BRIDGE_RECONNECT");
             Connect(true);
         }
 
@@ -184,7 +184,7 @@ namespace Lawand.CentrexBridge
         {
             ThrowIfDisposed();
             _healthTimer.Stop();
-            TryDisconnect();
+            TryDisconnect("BRIDGE_DISCONNECT");
             SetStatus(BridgeConnectionState.Stopped, "사용자가 연결을 해제했습니다.");
         }
 
@@ -220,7 +220,7 @@ namespace Lawand.CentrexBridge
 
             if (DateTimeOffset.UtcNow - _activeInboundAt > TimeSpan.FromMinutes(3))
             {
-                ClearActiveInboundCall();
+                CompensateActiveInboundCall("BRIDGE_RING_TIMEOUT");
                 reason = "ring_expired";
                 return false;
             }
@@ -330,7 +330,7 @@ namespace Lawand.CentrexBridge
             _connectionIdentityRejected = false;
             _reconnectAttempt = 0;
             _provisioningAlternateLoginAttempted = false;
-            TryDisconnect();
+            TryDisconnect("BRIDGE_RECONFIGURED");
             _activeProvisioningCommand = command;
             _logger.Info(
                 "PROVISION_APPLIED",
@@ -367,7 +367,7 @@ namespace Lawand.CentrexBridge
 
             try
             {
-                TryDisconnect();
+                TryDisconnect("BRIDGE_RECONFIGURED");
                 CredentialStore.Delete(_configuration.CredentialTarget);
                 _configuration.UpdateEndpoint(
                     command.EndpointId,
@@ -494,7 +494,7 @@ namespace Lawand.CentrexBridge
             if (!extensionMatches || !lineMatches)
             {
                 _connectionIdentityRejected = true;
-                TryDisconnect();
+                TryDisconnect("BRIDGE_IDENTITY_MISMATCH");
                 _logger.Warn(
                     "LOGIN_IDENTITY_MISMATCH",
                     "EXTENSION_MATCH=" + (extensionMatches ? "1" : "0"),
@@ -507,8 +507,7 @@ namespace Lawand.CentrexBridge
             }
 
             _reconnectAttempt = 0;
-            ClearActiveInboundCall();
-            ClearActiveOutboundCall();
+            CompensateActiveCalls("BRIDGE_RECONNECT");
             SetStatus(BridgeConnectionState.Connected, "센트릭스 수신 대기 중입니다.");
             CompleteProvisioning(true, "centrex_login_succeeded");
         }
@@ -543,7 +542,7 @@ namespace Lawand.CentrexBridge
                     "LOGIN_SUFFIX=" + LastDigits(extensionLoginId, 4));
                 _connectionIdentityRejected = false;
                 _reconnectAttempt = 0;
-                TryDisconnect();
+                TryDisconnect("BRIDGE_RECONNECT");
                 _alternateLoginTimer.Stop();
                 _alternateLoginTimer.Start();
                 return true;
@@ -605,18 +604,48 @@ namespace Lawand.CentrexBridge
 
             if (string.Equals(isDial, "1", StringComparison.Ordinal))
             {
+                GatewayEventPayload payload;
+                try
+                {
+                    payload = GatewayEventPayload.OutboundRinging(
+                        _configuration,
+                        uniqueId,
+                        parsed.Get("CALLERID"));
+                }
+                catch (ArgumentException)
+                {
+                    _logger.Warn(
+                        "RING_REJECTED",
+                        "REASON=invalid_outbound_number",
+                        "UNIQUEID=" + uniqueId);
+                    return;
+                }
                 _activeOutboundUniqueId = uniqueId;
                 _activeOutboundChannelUniqueIds.Clear();
                 _activeOutboundChannelUniqueIds.Add(uniqueId);
                 _activeOutboundAt = DateTimeOffset.UtcNow;
                 _activeOutboundConnectedEventSent = false;
-                RaiseGatewayEvent(GatewayEventPayload.OutboundRinging(
-                    _configuration,
-                    uniqueId,
-                    parsed.Get("CALLERID")));
+                RaiseGatewayEvent(payload);
                 return;
             }
 
+            GatewayEventPayload inboundPayload;
+            try
+            {
+                inboundPayload = GatewayEventPayload.Ringing(
+                    _configuration,
+                    uniqueId,
+                    parsed.Get("CALLERID"),
+                    parsed.Get("INEXTEN"));
+            }
+            catch (ArgumentException)
+            {
+                _logger.Warn(
+                    "RING_REJECTED",
+                    "REASON=invalid_inbound_number",
+                    "UNIQUEID=" + uniqueId);
+                return;
+            }
             _activeInboundUniqueId = uniqueId;
             _activeInboundChannelUniqueIds.Clear();
             _activeInboundChannelUniqueIds.Add(uniqueId);
@@ -631,11 +660,7 @@ namespace Lawand.CentrexBridge
                     parsed.Get("CALLERID"),
                     parsed.Get("INEXTEN")));
             }
-            RaiseGatewayEvent(GatewayEventPayload.Ringing(
-                _configuration,
-                uniqueId,
-                parsed.Get("CALLERID"),
-                parsed.Get("INEXTEN")));
+            RaiseGatewayEvent(inboundPayload);
         }
 
         private void HostChannelListReceived(object sender, CentrexRawEventArgs eventArgs)
@@ -806,6 +831,70 @@ namespace Lawand.CentrexBridge
             _activeOutboundConnectedEventSent = false;
         }
 
+        private void CompensateActiveInboundCall(string providerEndCause)
+        {
+            if (string.IsNullOrWhiteSpace(_activeInboundUniqueId))
+            {
+                return;
+            }
+
+            string uniqueId = _activeInboundUniqueId;
+            try
+            {
+                RaiseGatewayEvent(GatewayEventPayload.Ended(
+                    _configuration,
+                    uniqueId,
+                    providerEndCause));
+                _logger.Warn(
+                    "INBOUND_CALL_COMPENSATED",
+                    "CAUSE=" + providerEndCause,
+                    "UNIQUEID=" + uniqueId);
+            }
+            catch (Exception exception)
+            {
+                _logger.Error("INBOUND_CALL_COMPENSATION_FAILED", exception);
+            }
+            finally
+            {
+                ClearActiveInboundCall();
+            }
+        }
+
+        private void CompensateActiveOutboundCall(string providerEndCause)
+        {
+            if (string.IsNullOrWhiteSpace(_activeOutboundUniqueId))
+            {
+                return;
+            }
+
+            string uniqueId = _activeOutboundUniqueId;
+            try
+            {
+                RaiseGatewayEvent(GatewayEventPayload.OutboundEnded(
+                    _configuration,
+                    uniqueId,
+                    providerEndCause));
+                _logger.Warn(
+                    "OUTBOUND_CALL_COMPENSATED",
+                    "CAUSE=" + providerEndCause,
+                    "UNIQUEID=" + uniqueId);
+            }
+            catch (Exception exception)
+            {
+                _logger.Error("OUTBOUND_CALL_COMPENSATION_FAILED", exception);
+            }
+            finally
+            {
+                ClearActiveOutboundCall();
+            }
+        }
+
+        private void CompensateActiveCalls(string providerEndCause)
+        {
+            CompensateActiveInboundCall(providerEndCause);
+            CompensateActiveOutboundCall(providerEndCause);
+        }
+
         private void HostNetworkErrorReceived(object sender, EventArgs eventArgs)
         {
             _logger.Warn("NETWORK_ERROR");
@@ -903,7 +992,7 @@ namespace Lawand.CentrexBridge
                     previousLineLast4);
                 _connectionIdentityRejected = false;
                 _reconnectAttempt = 0;
-                TryDisconnect();
+                TryDisconnect("BRIDGE_RECONFIGURED");
                 if (hadPreviousCredential)
                 {
                     _logger.Info(
@@ -1040,6 +1129,7 @@ namespace Lawand.CentrexBridge
 
         private void ScheduleReconnect(string message)
         {
+            CompensateActiveCalls("BRIDGE_RECONNECT");
             _reconnectAttempt = Math.Min(_reconnectAttempt + 1, 8);
             int multiplier = 1 << Math.Min(_reconnectAttempt - 1, 4);
             int delaySeconds = Math.Min(
@@ -1052,12 +1142,11 @@ namespace Lawand.CentrexBridge
             SetStatus(BridgeConnectionState.Reconnecting, message);
         }
 
-        private void TryDisconnect()
+        private void TryDisconnect(string providerEndCause)
         {
+            CompensateActiveCalls(providerEndCause);
             if (!_hostInitialized)
             {
-                ClearActiveInboundCall();
-                ClearActiveOutboundCall();
                 return;
             }
 
@@ -1069,9 +1158,6 @@ namespace Lawand.CentrexBridge
             {
                 _logger.Error("DISCONNECT_FAILED", Unwrap(exception));
             }
-
-            ClearActiveInboundCall();
-            ClearActiveOutboundCall();
         }
 
         private void EnsureHostInitialized()
@@ -1150,7 +1236,7 @@ namespace Lawand.CentrexBridge
             _healthTimer.Dispose();
             _alternateLoginTimer.Stop();
             _alternateLoginTimer.Dispose();
-            TryDisconnect();
+            TryDisconnect("BRIDGE_PROCESS_STOPPED");
             _host.Dispose();
         }
     }
