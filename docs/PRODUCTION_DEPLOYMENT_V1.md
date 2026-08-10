@@ -5,8 +5,8 @@ CloudFormation 스택: `lawand-prod`
 리전: 서울(`ap-northeast-2`)
 최초 배포 릴리스: `20260804T085006Z-84e8708`
 현재 홈페이지 릴리스: `20260810T064408Z-homepage-cutover-ready-v3`
-현재 ERP 릴리스: `20260810T082342Z-client-directory-v1`
-현재 gateway 릴리스: `20260810T082342Z-client-directory-v1`
+현재 ERP 릴리스: `20260810T090235Z-customer-messaging-v1`
+현재 gateway 릴리스: `20260810T090235Z-customer-messaging-v1`
 
 이 문서는 정식 도메인 전환 전까지의 실제 AWS 구성, 접속점, 데이터 이관 범위와
 운영 체크리스트를 기록한다. 비밀번호·API 키·AWS 계정 ID·RDS 마스터 시크릿 ARN은
@@ -80,7 +80,7 @@ A와 `www` CNAME만 다루고 NS·MX는 변경하지 않는다.
 - migration `0022_consultation_sse_notifications.sql`은 상담 outbox INSERT가 커밋될 때
   개인정보 없이 이벤트 ID·유형·상담 ID·발생시각만 PostgreSQL 채널로 알린다. gateway의
   전용 연결만 이 채널을 `LISTEN`하며 RDS를 인터넷에 노출하지 않는다.
-- 2026-08-10 기준 migration `0040`까지 41개는 모두 적용됐고 40개 파일 해시는 현재 Git과 일치한다.
+- 2026-08-10 기준 migration `0041`까지 42개는 모두 적용됐고 41개 파일 해시는 현재 Git과 일치한다.
   역사적으로 운영에 적용된 `0028_inbound_phone_directory_resolver.sql` 한 개만 현재 파일과
   해시가 다르다. 후속 `0037_phone_desk_directory_context.sql`이 같은 함수 계약을 대체했고
   현재 스키마·권한 검증은 통과한다. 이 예외를 이유로 migration 원장을 수정하거나 0028을
@@ -159,6 +159,36 @@ EC2에서 ARM64 네이티브 빌드한다. 서버 배포는
 systemd 앱 단위와 Caddy edge 단위는 부팅 시 자동 시작한다. 최종 검증에서 홈페이지·ERP는
 재기동 후 약 1초, gateway는 약 2초 안에 health를 회복했고 실패한 systemd unit과
 최근 error priority journal은 없었다.
+
+## ERP 고객 문자·개인 템플릿 운영 배포
+
+2026-08-10 HERDR 관리 워크트리와 모든 `origin/worktree/*`를 대조해 누락된 문자 기능
+브랜치를 `main`에 통합했다. 고객 찾기 migration `0040`은 그대로 두고 문자 migration을
+`0041_late_talon.sql`로 재생성했으며, 릴리스
+`20260810T090235Z-customer-messaging-v1`로 gateway와 ERP를 함께 운영 배포했다.
+
+- 배포 전 암호화 수동 스냅샷
+  `lawand-prod-pre-customer-messaging-20260810t090235z`을 available까지 확인했다. private
+  S3 AES256 아티팩트 SHA-256은
+  `a63e291ff57ec819df258347d7ecf084371aa6824c01dbd401f850df77cb19ec`이다.
+- gateway 이미지 ID는
+  `sha256:0d54f035cc5576f13bdde9b72e7e7a0c079d85deaa7c8996cfc890849ff9deb2`, ERP 이미지
+  ID는 `sha256:cba22b9b1a3bc1b744954fdd3fee1608f5fe618372553a027ea44ead86973da2`다.
+- 운영 migration 원장은 42개다. `message_templates`·`telephony_messages`, 기본 템플릿
+  3개, `lawand_app` CRUD, viewer 읽기 전용, `PUBLIC` 권한 0을 확인했다. 인증 ERP의
+  `/message-templates`와 통제 상담 상세는 각각 200으로 템플릿 화면·`문자 보내기`·발송 완료
+  원장을 렌더했고 임시 직원 세션은 0건으로 정리했다.
+- 사용자 지정 통제 수신자에게 정상 담당자 API→outbox→센트릭스 worker로 실제 SMS 한 건을
+  발송했다. API 201, 42바이트 SMS, 제공자 코드 `0000`, outbox published, 1회 delivery
+  HTTP 200·succeeded를 확인했다. 통제 상담은 실제 발송 감사 원장을 보존한 채 `closed`
+  처리했으며 전화번호·본문은 로그와 문서에 남기지 않았다.
+- 운영 secret에는 `LAWAND_SOLAPI_MMS_SENDER`가 아직 없다. 따라서 텍스트 SMS/LMS는
+  활성이고 이미지 MMS만 명시적으로 비활성이다. SOLAPI 등록 발신번호 확정 뒤 명함 JPG
+  MMS 실제 canary가 남았다.
+- 최종 gateway·ERP·각 Caddy는 active, 컨테이너 재시작·릴리스 뒤 error journal 0,
+  외부 health/login 200이고 CloudWatch ALARM은 없다. Windows bridge는 배정 11·warm 5,
+  v0.7.1.0 프로세스 16개, 오프라인·로그인 실패·DPAPI 큐·dead-letter 0이며 감독기와
+  health task 결과도 0이다. 활성 통화와 회선별 활성 중복은 최종 읽기 시점에 모두 0이다.
 
 ## ERP 리걸프렌즈 고객 찾기 운영 배포
 

@@ -1,4 +1,4 @@
-# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v0.96)
+# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v0.97)
 
 > 이 문서는 새 로앤 홈페이지 + 새 ERP + 리걸플로/리걸프렌즈 연동을 하나의 플랫폼으로
 > 묶기 위한 **저장소 구조·아키텍처 설계 초안**이다. 코덱스/클로드코드 세션이 번갈아
@@ -682,6 +682,14 @@ JPG 이미지가 붙은 템플릿은 기존 SOLAPI 자격증명과 사전 등록
 문자 원장과 상담 상세에서 확인한다. ERP는 개인 템플릿 생성·비활성화, JPG 명함 첨부,
 허용 변수 치환과 실시간 휴대전화 미리보기를 제공한다. 운영 적용·통제 발송 게이트는
 [`docs/CENTREX_MESSAGING_V1.md`](docs/CENTREX_MESSAGING_V1.md)를 따른다.
+
+2026-08-10에는 HERDR와 모든 `origin/worktree/*`를 전수 대조해 누락된 문자 브랜치를
+`main`에 통합하고 고객 찾기 `0040` 다음의 migration `0041_late_talon.sql`을 운영에
+적용했다. gateway·ERP 릴리스 `20260810T090235Z-customer-messaging-v1`에서 인증된 전역
+템플릿 화면과 상담 상세 발송 UI를 확인하고, 사용자 지정 통제 수신자에게 센트릭스 SMS
+한 건을 정상 담당자 API와 outbox를 통해 실제 발송했다. 제공자 코드 `0000`, delivery
+HTTP 200, outbox published를 확인했으며 통제 상담은 감사 원장을 보존한 채 종료했다.
+운영 `LAWAND_SOLAPI_MMS_SENDER`가 아직 없으므로 이미지 MMS는 설정 전까지 비활성이다.
 
 수신전화는 REST polling이 아니라 Windows bridge가 센트릭스 OpenAPI의 `RINGEVENT`,
 `CHANNELLIST`, `CHANNELOUT`을 장수명 연결로 받아 gateway에 전달한다. 2026-08-06 실제
@@ -1370,7 +1378,8 @@ Manager와 별도 역할·보안그룹·TLS 기준을 적용한다.
   팝업 → 담당자 7분류 확정·감사 원장 → 부재·재상담 필요 목록 작업 큐
 - [x] 고객 문자 로컬 출시 후보: 센트릭스 SMS/LMS, SOLAPI JPG MMS, 담당자 개인 템플릿·
   변수 치환·휴대전화 미리보기·상담별 암호화 발송 원장
-- [ ] 운영 migration `0041`·SOLAPI 등록 MMS 발신번호 설정 → 통제 SMS/LMS·명함 MMS 각 1건 canary
+- [x] 운영 migration `0041`·gateway·ERP 통합 배포 → 통제 센트릭스 SMS 실제 발송 canary
+- [ ] SOLAPI 등록 MMS 발신번호 설정 → 200KB 이하 명함 JPG MMS 실제 발송 canary
 - [x] 임시 Windows Server 2022 x64 + 32비트 OpenAPI OCX 수신 canary:
   `RINGEVENT → Answer() → CHANNELLIST → CHANNELOUT`, 물리 전화기 스피커폰 양방향 통화
 - [x] x86 STA ActiveX host 기반 Windows bridge 1단계: Windows 자격 증명 관리자 →
@@ -1448,8 +1457,8 @@ Manager와 별도 역할·보안그룹·TLS 기준을 적용한다.
 5. 자가진단 읽기 모델의 과거 사건 이용 근거·희소 조합 일반화·책임 변호사 출시 심사
 6. 출시 전 핵심 기존 URL만 검색 성과를 확인해 유지/단일 301
 7. 활성화된 리걸프렌즈 워커의 외부 멱등성 계약과 응답 유실 건 운영 절차 확정
-8. 고객 문자 migration `0041`·SOLAPI 등록 MMS 발신번호를 적용하고 통제 SMS/LMS·명함 MMS
-   각 1건 canary 뒤, Solapi 최종 발송결과 자동 수신과 전체 상담 상태머신 확정
+8. SOLAPI 등록 MMS 발신번호를 적용하고 명함 JPG MMS 1건 canary 뒤, Solapi 최종
+   발송결과 자동 수신과 전체 상담 상태머신 확정
 9. 홈페이지 카카오 버튼 → ERP 대기 접수 → 실제 채팅 표시명 확정의 운영자 canary
 10. 실제 수신·ERP 발신·직접 발신 한 건씩 통화 종료 후 공용 후처리 자동 열림과 담당자 기본값 UX 확인
 11. 센트릭스 조직용 코드 서명 인증서 배포; 실제 배정이 50개에 가까워지기 전

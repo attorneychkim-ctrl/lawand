@@ -71,6 +71,35 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-10 — HERDR 전수 대조·고객 문자 v1 통합 운영 배포
+- HERDR가 이 저장소의 워크트리·터미널 관리자임을 재확인하고 HERDR 목록과 모든
+  `origin/worktree/*`를 대조했다. `clear-cloud-e8ca`, `rapid-forest-579e`,
+  `rapid-forest-aa5e`, `silver-stone-87f7`의 HEAD가 모두 현재 `main` ancestor다. 누락됐던
+  `rapid-forest-aa5e` 기능 커밋 `1235772`는 고객 찾기 migration `0040`을 보존하면서 문자
+  migration을 `0041_late_talon.sql`로 재생성해 merge commit `f15611e`로 통합·푸시했다.
+- 전체 5개 패키지 typecheck·lint·production build, core 59개·gateway 84개 테스트,
+  Drizzle schema check와 `git diff --check`를 통과했다. 운영 스냅샷
+  `lawand-prod-pre-customer-messaging-20260810t090235z`을 available까지 확인하고 migration
+  `0041`과 gateway·ERP를 같은 릴리스 `20260810T090235Z-customer-messaging-v1`로 배포했다.
+  private S3 AES256 아티팩트 SHA-256은
+  `a63e291ff57ec819df258347d7ecf084371aa6824c01dbd401f850df77cb19ec`이다. gateway 이미지
+  ID는 `sha256:0d54f035cc5576f13bdde9b72e7e7a0c079d85deaa7c8996cfc890849ff9deb2`, ERP 이미지
+  ID는 `sha256:cba22b9b1a3bc1b744954fdd3fee1608f5fe618372553a027ea44ead86973da2`다.
+- 운영 migration은 42개다. 문자 원장·개인 템플릿과 기본 템플릿 3개, `lawand_app` CRUD,
+  viewer 읽기, `PUBLIC` 권한 0을 확인했다. 인증 ERP `/message-templates`와 canary 상담 상세는
+  각각 200으로 `내 문자 템플릿`·`문자 보내기`·`발송 완료`를 렌더했고 임시 직원 세션은
+  0건으로 정리했다.
+- 사용자가 지정한 통제 수신자에게 정상 담당자 API→개인정보 없는 outbox→센트릭스 워커의
+  실제 SMS 한 건을 발송했다. API 201, SMS 42바이트, 제공자 코드 `0000`, outbox published,
+  1회 delivery HTTP 200·succeeded를 확인했다. 통제 상담은 발송 감사 원장을 보존한 채
+  `closed` 처리했고 전화번호·본문은 로그나 문서에 남기지 않았다. 단말 최종 수신은 수신자
+  확인 영역이다.
+- `LAWAND_SOLAPI_MMS_SENDER`는 아직 운영 설정에 없어 이미지 MMS만 의도적으로 비활성이다.
+  등록 발신번호를 확정한 뒤 명함 JPG MMS 한 건을 별도 canary한다. 최종 gateway·ERP·Caddy는
+  active, 컨테이너 재시작·error journal·CloudWatch ALARM 0, 외부 health/login 200이다.
+  Windows는 배정 11·warm 5·v0.7.1.0 프로세스 16, 오프라인·로그인 실패·DPAPI 큐·dead-letter
+  0이고 감독기·health task 결과도 0이다. `PROJECT_PLAN.md`는 v0.97이다.
+
 ### 2026-08-10 — 워크트리 관리자 HERDR 확정·누락 방지 게이트
 - 사용자가 이 저장소의 워크트리 관리자는 Orca가 아니라 **HERDR**라고 확정했다. 이후
   Orca 상태를 이 저장소의 작업 원장으로 사용하지 않는다. 메인 통합 전 HERDR 목록과
