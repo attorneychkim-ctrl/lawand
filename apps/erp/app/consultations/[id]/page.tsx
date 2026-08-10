@@ -783,7 +783,7 @@ export default async function ConsultationDetailPage({
               {consultation.telephonyCalls.map((call) => (
                 <article className="telephony-call-row" key={call.id}>
                   <div>
-                    <strong>{call.endpoint.label} · 내선 {call.endpoint.extension}</strong>
+                    <strong>내선 {call.endpoint.extension}</strong>
                     <span>{call.staffDisplayName} · {formatDate(call.requestedAt)}</span>
                     {telephonyResultDetail(call) ? (
                       <span>{telephonyResultDetail(call)}</span>

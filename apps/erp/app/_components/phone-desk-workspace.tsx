@@ -451,9 +451,7 @@ export function PhoneDeskWorkspace({
                 </div>
                 <div className="phone-desk-assignment">
                   <strong>{staffLabel}</strong>
-                  <span>
-                    {call.endpoint.label} · 내선 {call.endpoint.extension}
-                  </span>
+                  <span>내선 {call.endpoint.extension}</span>
                 </div>
                 <div className="phone-desk-status">
                   <span className={`is-${call.state}`}>{stateCopy[call.state]}</span>

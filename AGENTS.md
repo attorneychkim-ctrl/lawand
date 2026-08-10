@@ -71,6 +71,15 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-11 — ERP 내 정보 입력 스타일·전화 내선 중복 표시 수정
+- 우측 상단 직원 이름에서 진입하는 `/profile` 기본 정보의 소속·지역 `select`와 부서·직책
+  `input`에 ERP의 다른 입력 UI와 같은 테두리·배경·텍스트·hover/focus ring을 적용했다.
+- 전화데스크 목록의 직원 이름 아래에는 endpoint 라벨에 이미 포함된 내선을 다시 붙이지 않고
+  `내선 {번호}` 한 번만 표시한다. 같은 중복 표현이 있던 전화데스크 상세의 회선 정보와 상담
+  상세의 센트릭스 발신 원장도 동일하게 정리했다.
+- ERP typecheck·ESLint, core 선행 빌드와 ERP production build, `git diff --check`를 통과했다.
+  DB migration과 실서비스 배포·운영 데이터 변경은 없다.
+
 ### 2026-08-10 — HERDR 전수 통합·내 정보/개인 문자 템플릿 운영 배포
 - `herdr worktree list`, 모든 로컬 `worktree/*`와 `origin/worktree/*`를 갱신·대조했다. 현재
   HERDR 작업트리 `clear-field-5d52`, `clear-harbor-c5e2`, `rapid-field-d8d6`를 포함한 모든

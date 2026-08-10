@@ -90,7 +90,7 @@ export default async function PhoneDeskDetailPage({
           </div>
           <div>
             <span>회선</span>
-            <strong>{call.endpoint.label} · 내선 {call.endpoint.extension}</strong>
+            <strong>내선 {call.endpoint.extension}</strong>
           </div>
           <div>
             <span>회선 담당</span>
