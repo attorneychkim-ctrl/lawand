@@ -55,6 +55,34 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-10 — 홈페이지 출시 후보 EIP 배포·정식 도메인 안전 전환 준비
+- 기존 217개 워크트리 변경을 `d069eb6`으로 보존하고 뒤처진 `origin/main`을 병합한 뒤,
+  실제 `/bank/self-diagnosis`에 단계 전환 스크롤·포커스 어텐션 UX를 적용했다. 운영 DB
+  URL은 출력하지 않고 프로세스 환경에만 주입해 전체 typecheck·lint·production build,
+  core 55개·gateway 78개 테스트, Drizzle schema check를 통과했다. 673px 실제 Chrome에서
+  검증 실패 위치 유지와 다음·이전 단계 제목 이동도 확인했다.
+- 첫 홈페이지 이미지에서 빌드 시 DB secret이 없어 `/bank`의 빈 사례·후기가 정적 캐시된
+  문제를 발견했다. 비밀값을 build arg로 넣지 않고 `/bank`만 요청 시점 동적 렌더로 바꿨다.
+  최종 릴리스 `20260810T064408Z-homepage-cutover-ready-v3`, private S3 AES256 아티팩트
+  SHA-256 `0b159371d9c5fe021a4d81a1511f0d3d85dc05d83ababfe7f15a03496ba0ef3e`,
+  실행 이미지 ID `sha256:31e844e160ae428262017993bb455cd652126e059b35479c0cd4e017040c3465`를
+  홈페이지 EC2에 배포했다. 첫 화면 승인 사례 2개·후기 3개, 상담·자가진단·사례·후기·
+  robots·sitemap 200, 앱/Caddy active, 재시작·error journal 0이다.
+- 공개 검색과 기존 사이트 내비게이션에서 확인한 핵심 WordPress 회생·파산 URL을 가장
+  가까운 새 canonical로 한 번만 영구 이동하게 했다. 정식 Caddy는 새 경로만 AWS 앱으로,
+  아직 이관하지 않은 이혼·보험·부동산과 기타 legacy 경로는 기존 `222.239.248.41` HTTPS
+  origin으로 임시 전달한다. 운영 Caddy 버전에서 config validation을 통과했다.
+- 운영 migration 40개 중 39개 해시는 현재 Git과 일치한다. 역사적 0028 한 개만 적용 당시
+  해시가 다르지만 0037이 함수 계약을 대체했고 현재 schema·권한 검사는 정상이다. 원장을
+  고치거나 0028을 재실행하지 않는다. 후기 3,403·자가진단 1,759·공개 사례 54(발행 승인
+  51, preview 3), RDS available·암호화·PITR·삭제방지와 최신 수동 스냅샷을 확인했다.
+- DNS 기준점은 Cafe24 NS, apex A `222.239.248.41`, `www` apex CNAME, TTL 1,800초, AAAA 없음,
+  Daum MX 유지다. DNS는 아직 변경하지 않았다. 책임 변호사의 자가진단 최종 출시 승인과
+  Cafe24 DNS 접속이 다음 게이트다. Windows `lawand-slot-007` 4533은 다른 센트릭스 로그인과
+  충돌해 heartbeat는 정상이나 재로그인이 실패 중이고 해당 CloudWatch 경보 한 건이 남아
+  있다. 기존 중복 로그인을 종료한 뒤 자동 회복과 경보 `OK`를 확인한다. `PROJECT_PLAN.md`는
+  v0.93이다.
+
 ### 2026-08-10 — 실제 자가진단 단계 전환 어텐션 UX 검증 완료
 - `/bank/self-diagnosis`의 `다음 조건`·`이전`, 결과 제출 완료와 `다시 진단하기`가 새 DOM이
   렌더된 뒤 현재 질문 카드 또는 결과 영역을 고정 헤더 아래로 이동하고 새 제목에 포커스를

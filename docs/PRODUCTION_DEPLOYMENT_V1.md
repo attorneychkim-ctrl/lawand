@@ -1,9 +1,10 @@
 # AWS 운영 배포 기준선 v1
 
-기준 시각: 2026-08-07 KST
+기준 시각: 2026-08-10 KST
 CloudFormation 스택: `lawand-prod`
 리전: 서울(`ap-northeast-2`)
 최초 배포 릴리스: `20260804T085006Z-84e8708`
+현재 홈페이지 릴리스: `20260810T064408Z-homepage-cutover-ready-v3`
 현재 ERP 릴리스: `20260807T072916Z-phone-aftercare-ux`
 현재 gateway 릴리스: `20260807T072916Z-phone-aftercare-ux`
 
@@ -25,8 +26,10 @@ EIP의 HTTP 주소는 같은 경로의 임시 HTTPS 주소로 `301 Moved Permane
 접속점이다. 검색 노출, 광고, canonical 주소로 사용하지 않는다. ERP의 운영 세션 쿠키는
 `Secure`이므로 실제 로그인 검증과 사용은 반드시 HTTPS 주소로 한다.
 
-2026-08-04 확인 시 `lawandfirm.com`과 `www.lawandfirm.com`은 기존
-`222.239.248.41`을 계속 가리킨다. 이번 배포에서 DNS 레코드는 변경하지 않았다.
+2026-08-10 확인 시 apex A는 기존 `222.239.248.41`, `www`는 apex CNAME이며 권한
+네임서버는 Cafe24 네 대다. 레코드 TTL은 1,800초이고 apex AAAA는 없으며 Daum MX는
+그대로다. 이번 배포에서도 DNS 레코드는 변경하지 않았다. cutover와 rollback에서는
+A와 `www` CNAME만 다루고 NS·MX는 변경하지 않는다.
 
 ## 실제 AWS 구성
 
@@ -57,8 +60,10 @@ EIP의 HTTP 주소는 같은 경로의 임시 HTTPS 주소로 `301 Moved Permane
 - 배포 S3 버킷은 전체 public access 차단, 버전 관리, TLS 강제, `artifacts/` 30일
   만료 정책을 사용한다. 홈페이지 사용자 파일 저장소로 사용하지 않는다.
 - 기본 CloudWatch 경보는 세 EC2 상태, RDS CPU, RDS 여유 저장공간을 감시한다.
-  현재 경보 상태는 모두 `OK`다. SNS·PagerDuty·텔레그램 같은 실제 통지 대상은 아직
-  연결하지 않았다.
+  SNS·PagerDuty·텔레그램 같은 실제 통지 대상은 아직 연결하지 않았다. 2026-08-10
+  홈페이지 배포와 RDS 계통 경보는 없으나, 직원 가입 중 4533의 기존 센트릭스 로그인과
+  Windows bridge 로그인이 충돌해 `lawand-centrex-login-failures` 한 건이 `ALARM`이다.
+  기존 로그인을 종료한 뒤 자동 재접속과 경보 `OK`를 확인한다.
 
 ## RDS 기준선
 
@@ -77,6 +82,11 @@ EIP의 HTTP 주소는 같은 경로의 임시 HTTPS 주소로 `301 Moved Permane
 - migration `0022_consultation_sse_notifications.sql`은 상담 outbox INSERT가 커밋될 때
   개인정보 없이 이벤트 ID·유형·상담 ID·발생시각만 PostgreSQL 채널로 알린다. gateway의
   전용 연결만 이 채널을 `LISTEN`하며 RDS를 인터넷에 노출하지 않는다.
+- 2026-08-10 기준 migration 40개는 모두 적용됐고 39개 파일 해시는 현재 Git과 일치한다.
+  역사적으로 운영에 적용된 `0028_inbound_phone_directory_resolver.sql` 한 개만 현재 파일과
+  해시가 다르다. 후속 `0037_phone_desk_directory_context.sql`이 같은 함수 계약을 대체했고
+  현재 스키마·권한 검증은 통과한다. 이 예외를 이유로 migration 원장을 수정하거나 0028을
+  재실행하지 않는다.
 
 단일 AZ는 초기 비용·운영 복잡도를 낮춘 선택이다. 광고 트래픽을 본격 전환하기 전
 Multi-AZ 전환, 수동 스냅샷, 실제 복원 훈련과 경보 통지 연결을 완료한다.
@@ -87,8 +97,8 @@ Multi-AZ 전환, 수동 스냅샷, 실제 복원 훈련과 경보 통지 연결�
 |---|---:|---|
 | `customer_reviews` | 3,403 | 공개 3,359, 검수 대기 1, 비공개 43 |
 | `self_diagnosis_case_profiles` | 1,759 | 회생 1,342, 파산·면책 417 |
-| `public_case_studies` | 3 | 전부 `preview`; 운영 홈페이지에는 노출되지 않음 |
-| `staff_users` | 1 | 기존 활성 직원 계정과 연결 프로필·소속·외부 계정 |
+| `public_case_studies` | 54 | 개인정보·법률 승인 완료 발행 51, `preview/pending` 3 |
+| `staff_users` | 변동 | 2026-08-10 직원 초대·전화 배정 진행 중; ERP 원장을 실시간 기준으로 사용 |
 | `CB.TblCBCase` | 9,598 | 공개 사례·자가진단 원천; 운영 앱 직접 조회 금지 |
 | `CB.TblCaseMemo` | 202,772 | 사건 메모 원천; 개인정보 가능 원문 포함 |
 | `CB.TblMoClientStatement` | 9,402 | 진술·주소·채무상담 원천; 개인정보 가능 원문 포함 |
@@ -117,12 +127,10 @@ AES256 암호화 상태다. 운영 복원은 단일 트랜잭션으로 끝났고
 않고 미해결 참조로 유지한다. 세 테이블은 `lawand_migrator` 소유,
 `lawand_viewer` SELECT 전용이며 `lawand_app`과 `PUBLIC`은 접근할 수 없다.
 
-`public_case_studies` 세 건은 개인정보·법률·광고 검수 전 `preview/pending` 상태를
-유지한다. 프로덕션 홈페이지는 이 상태를 목록·상세·sitemap에서 제외한다. 발행은
-`docs/PUBLIC_CASE_STUDIES_V1.md`의 승인·철회·감사 조건을 갖춘 뒤 별도 작업으로 한다.
-자가진단 역시 임시 호스트에서 기술 검증만 완료한 상태다. 과거 사건 이용 근거,
-희소 조합 재식별 위험과 공개 결과 문구를 책임 변호사가 심사하기 전에는 광고 랜딩이나
-정식 도메인 공개 기능으로 전환하지 않는다.
+`public_case_studies` 중 51건은 개인정보·법률 승인 시각과 감사 조건을 갖춰 발행됐고,
+나머지 세 건은 `preview/pending` 상태라 목록·상세·sitemap에서 제외한다. 자가진단은 임시
+호스트에서 기술 검증을 완료했지만, 과거 사건 이용 근거·희소 조합 재식별 위험·공개 결과
+문구에 대한 책임 변호사의 최종 출시 승인을 별도 기록한 뒤 정식 도메인을 전환한다.
 
 ## 배포와 재배포
 
@@ -516,6 +524,28 @@ x86 OCX 프로세스 하나를 격리해 실행하고, 배정된 회선과 제�
   사건 8건 확장 필드, ERP 목록·상세 200을 확인했다. 임시 세션 잔존은 0건이고 gateway·
   ERP·Caddy active, 컨테이너 재시작·error journal·CloudWatch ALARM·진행 중 전화 명령은
   모두 0이며 활성 bridge heartbeat도 정상이다.
+
+## 2026-08-10 홈페이지 정식 도메인 출시 후보
+
+- 운영 main을 원격과 병합하고 실제 자가진단 단계의 스크롤·포커스 어텐션 UX를 반영했다.
+  전체 typecheck·lint·build, core 55개·gateway 78개 테스트와 schema check를 통과했다.
+- 빌드 이미지에 DB 비밀값을 넣지 않기 위해 `/bank`의 공개 사례·후기 조회를 요청 시점
+  동적 렌더로 바꿨다. 현재 릴리스의 첫 화면은 승인 사례 2개와 최신 후기 3개를 표시하며
+  빈 빌드 결과를 캐시하지 않는다.
+- 현재 릴리스 `20260810T064408Z-homepage-cutover-ready-v3`의 private S3 AES256 아티팩트
+  SHA-256은 `0b159371d9c5fe021a4d81a1511f0d3d85dc05d83ababfe7f15a03496ba0ef3e`,
+  실행 이미지 ID는 `sha256:31e844e160ae428262017993bb455cd652126e059b35479c0cd4e017040c3465`다.
+  앱·Caddy는 active, 컨테이너 재시작과 최근 error journal은 0이다.
+- 검색에 확인되는 기존 WordPress 회생·파산 핵심 URL은 끝 슬래시 유무와 관계없이 가장
+  가까운 새 문서로 한 번만 영구 이동한다. 임시 HTTPS에서 구주소→새 URL 1회→200을
+  확인했다.
+- 정식 Caddy 구성은 `/bank`, `/about`, `/people`, 약관·API·새 정적 자산만 새 홈페이지로
+  보내고 아직 이관하지 않은 `/divorce`, `/insurance`, `/realty`와 기타 legacy 경로는
+  기존 `222.239.248.41` HTTPS origin으로 전달한다. 실제 운영 Caddy 버전의 config
+  validation을 통과했다. 기존 서버 종료 전까지 이 fallback을 유지한다.
+- rollback은 Caddy의 현재 임시-host 설정과 직전 홈페이지 이미지들을 보존한 상태에서,
+  Cafe24 apex A를 `222.239.248.41`로 되돌리는 것을 1차 기준으로 한다. 정식 DNS와 인증서는
+  아직 변경하지 않았다.
 
 ## 도메인 전환 체크리스트
 
