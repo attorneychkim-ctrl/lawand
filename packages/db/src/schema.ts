@@ -197,6 +197,16 @@ export const telephonyCommandStatusEnum = pgEnum(
   ["queued", "dispatching", "succeeded", "failed", "unknown"],
 );
 
+export const telephonyMessageKindEnum = pgEnum(
+  "telephony_message_kind",
+  ["sms", "lms", "mms"],
+);
+
+export const telephonyMessageProviderEnum = pgEnum(
+  "telephony_message_provider",
+  ["centrex", "solapi"],
+);
+
 export const telephonyCallOutcomeEnum = pgEnum("telephony_call_outcome", [
   "unknown",
   "answered",
@@ -2042,6 +2052,237 @@ export const outboxDeliveryAttempts = pgTable(
         ${table.status} <> 'started'
         AND ${table.finishedAt} IS NOT NULL
       )`,
+    ),
+  ],
+);
+
+export const messageTemplates = pgTable(
+  "message_templates",
+  {
+    id: uuid("id").primaryKey(),
+    ownerUserId: uuid("owner_user_id").references(() => staffUsers.id, {
+      onDelete: "restrict",
+    }),
+    name: varchar("name", { length: 80 }).notNull(),
+    body: text("body").notNull(),
+    bodyByteLength: integer("body_byte_length").notNull(),
+    imageFileId: varchar("image_file_id", { length: 100 }),
+    imageUrl: text("image_url"),
+    imageOriginalName: varchar("image_original_name", { length: 100 }),
+    imageByteLength: integer("image_byte_length"),
+    imageWidth: integer("image_width"),
+    imageHeight: integer("image_height"),
+    isActive: boolean("is_active").default(true).notNull(),
+    createdByUserId: uuid("created_by_user_id").references(
+      () => staffUsers.id,
+      { onDelete: "restrict" },
+    ),
+    updatedByUserId: uuid("updated_by_user_id").references(
+      () => staffUsers.id,
+      { onDelete: "restrict" },
+    ),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("message_templates_owner_name_lower_uidx").on(
+      table.ownerUserId,
+      sql`lower(${table.name})`,
+    ),
+    index("message_templates_active_name_idx").on(
+      table.ownerUserId,
+      table.isActive,
+      table.name,
+    ),
+    check(
+      "message_templates_name_nonempty",
+      sql`length(btrim(${table.name})) > 0`,
+    ),
+    check(
+      "message_templates_body_nonempty",
+      sql`length(btrim(${table.body})) > 0`,
+    ),
+    check(
+      "message_templates_body_byte_length",
+      sql`${table.bodyByteLength} >= 1 AND ${table.bodyByteLength} <= 720`,
+    ),
+    check(
+      "message_templates_owner_audit_consistent",
+      sql`(
+        ${table.ownerUserId} IS NULL
+        AND ${table.createdByUserId} IS NULL
+        AND ${table.updatedByUserId} IS NULL
+      ) OR (
+        ${table.ownerUserId} IS NOT NULL
+        AND ${table.createdByUserId} = ${table.ownerUserId}
+        AND ${table.updatedByUserId} = ${table.ownerUserId}
+      )`,
+    ),
+    check(
+      "message_templates_image_metadata_complete",
+      sql`(
+        ${table.imageFileId} IS NULL
+        AND ${table.imageUrl} IS NULL
+        AND ${table.imageOriginalName} IS NULL
+        AND ${table.imageByteLength} IS NULL
+        AND ${table.imageWidth} IS NULL
+        AND ${table.imageHeight} IS NULL
+      ) OR (
+        ${table.imageFileId} IS NOT NULL
+        AND ${table.imageUrl} IS NOT NULL
+        AND ${table.imageOriginalName} IS NOT NULL
+        AND ${table.imageByteLength} BETWEEN 1 AND 204800
+        AND ${table.imageWidth} BETWEEN 1 AND 1500
+        AND ${table.imageHeight} BETWEEN 1 AND 1440
+      )`,
+    ),
+  ],
+);
+
+export const telephonyMessages = pgTable(
+  "telephony_messages",
+  {
+    id: uuid("id").primaryKey(),
+    provider: telephonyMessageProviderEnum("provider")
+      .default("centrex")
+      .notNull(),
+    endpointId: uuid("endpoint_id")
+      .notNull()
+      .references(() => telephonyEndpoints.id, { onDelete: "restrict" }),
+    staffUserId: uuid("staff_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "restrict" }),
+    consultationId: uuid("consultation_id")
+      .notNull()
+      .references(() => consultations.id, { onDelete: "restrict" }),
+    consultationRequestId: uuid("consultation_request_id")
+      .notNull()
+      .references(() => consultationRequests.id, { onDelete: "restrict" }),
+    templateId: uuid("template_id").references(() => messageTemplates.id, {
+      onDelete: "restrict",
+    }),
+    templateNameSnapshot: varchar("template_name_snapshot", { length: 80 }),
+    imageFileIdSnapshot: varchar("image_file_id_snapshot", { length: 100 }),
+    imageOriginalNameSnapshot: varchar("image_original_name_snapshot", {
+      length: 100,
+    }),
+    outboxEventId: uuid("outbox_event_id")
+      .notNull()
+      .references(() => outboxEvents.id, { onDelete: "restrict" }),
+    idempotencyKey: uuid("idempotency_key").notNull(),
+    remotePhoneFingerprint: bytea("remote_phone_fingerprint").notNull(),
+    bodyCiphertext: bytea("body_ciphertext").notNull(),
+    bodyNonce: bytea("body_nonce").notNull(),
+    bodyKeyVersion: varchar("body_key_version", { length: 50 }).notNull(),
+    bodyFingerprint: bytea("body_fingerprint").notNull(),
+    messageKind: telephonyMessageKindEnum("message_kind").notNull(),
+    bodyByteLength: integer("body_byte_length").notNull(),
+    commandStatus: telephonyCommandStatusEnum("command_status")
+      .default("queued")
+      .notNull(),
+    requestedAt: timestamp("requested_at", { withTimezone: true }).notNull(),
+    dispatchedAt: timestamp("dispatched_at", { withTimezone: true }),
+    providerRespondedAt: timestamp("provider_responded_at", {
+      withTimezone: true,
+    }),
+    providerCode: varchar("provider_code", { length: 20 }),
+    providerRemainingCount: integer("provider_remaining_count"),
+    lastErrorCode: varchar("last_error_code", { length: 100 }),
+    lastErrorMessage: text("last_error_message"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("telephony_messages_outbox_event_uidx").on(
+      table.outboxEventId,
+    ),
+    uniqueIndex("telephony_messages_idempotency_key_uidx").on(
+      table.idempotencyKey,
+    ),
+    index("telephony_messages_consultation_requested_idx").on(
+      table.consultationId,
+      table.requestedAt,
+    ),
+    index("telephony_messages_status_requested_idx").on(
+      table.commandStatus,
+      table.requestedAt,
+    ),
+    check(
+      "telephony_messages_remote_phone_fingerprint_length",
+      sql`octet_length(${table.remotePhoneFingerprint}) = 32`,
+    ),
+    check(
+      "telephony_messages_body_ciphertext_length",
+      sql`octet_length(${table.bodyCiphertext}) >= 17`,
+    ),
+    check(
+      "telephony_messages_body_nonce_length",
+      sql`octet_length(${table.bodyNonce}) = 12`,
+    ),
+    check(
+      "telephony_messages_body_key_version_nonempty",
+      sql`length(btrim(${table.bodyKeyVersion})) > 0`,
+    ),
+    check(
+      "telephony_messages_body_fingerprint_length",
+      sql`octet_length(${table.bodyFingerprint}) = 32`,
+    ),
+    check(
+      "telephony_messages_kind_byte_length",
+      sql`(
+        ${table.messageKind} = 'sms'
+        AND ${table.bodyByteLength} >= 1
+        AND ${table.bodyByteLength} <= 80
+      ) OR (
+        ${table.messageKind} = 'lms'
+        AND ${table.bodyByteLength} >= 81
+        AND ${table.bodyByteLength} <= 720
+      ) OR (
+        ${table.messageKind} = 'mms'
+        AND ${table.bodyByteLength} >= 1
+        AND ${table.bodyByteLength} <= 720
+      )`,
+    ),
+    check(
+      "telephony_messages_provider_kind",
+      sql`(
+        ${table.provider} = 'centrex'
+        AND ${table.messageKind} IN ('sms', 'lms')
+      ) OR (
+        ${table.provider} = 'solapi'
+        AND ${table.messageKind} = 'mms'
+      )`,
+    ),
+    check(
+      "telephony_messages_image_snapshot_pair",
+      sql`(
+        ${table.messageKind} = 'mms'
+        AND ${table.imageFileIdSnapshot} IS NOT NULL
+        AND ${table.imageOriginalNameSnapshot} IS NOT NULL
+      ) OR (
+        ${table.messageKind} <> 'mms'
+        AND ${table.imageFileIdSnapshot} IS NULL
+        AND ${table.imageOriginalNameSnapshot} IS NULL
+      )`,
+    ),
+    check(
+      "telephony_messages_template_snapshot_pair",
+      sql`(${table.templateId} IS NULL) = (${table.templateNameSnapshot} IS NULL)`,
+    ),
+    check(
+      "telephony_messages_dispatch_time_order",
+      sql`${table.dispatchedAt} IS NULL OR ${table.dispatchedAt} >= ${table.requestedAt}`,
+    ),
+    check(
+      "telephony_messages_provider_response_time_order",
+      sql`${table.providerRespondedAt} IS NULL OR ${table.providerRespondedAt} >= ${table.requestedAt}`,
+    ),
+    check(
+      "telephony_messages_provider_remaining_nonnegative",
+      sql`${table.providerRemainingCount} IS NULL OR ${table.providerRemainingCount} >= 0`,
+    ),
+    check(
+      "telephony_messages_error_pair",
+      sql`(${table.lastErrorCode} IS NULL AND ${table.lastErrorMessage} IS NULL)
+        OR (${table.lastErrorCode} IS NOT NULL AND ${table.lastErrorMessage} IS NOT NULL)`,
     ),
   ],
 );

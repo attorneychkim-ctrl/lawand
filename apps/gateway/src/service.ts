@@ -64,6 +64,7 @@ import {
   telephonyCallAftercare,
   telephonyCalls,
   telephonyEndpoints,
+  telephonyMessages,
 } from "@lawand/db";
 import type { createDatabaseClient } from "@lawand/db";
 
@@ -2343,6 +2344,46 @@ export function createConsultationService(options: {
       .where(eq(telephonyCalls.consultationId, consultationId))
       .orderBy(desc(telephonyCalls.requestedAt))
       .limit(10);
+    const telephonyMessageRows = await db
+      .select({
+        id: telephonyMessages.id,
+        staffUserId: telephonyMessages.staffUserId,
+        staffDisplayName: staffProfiles.displayName,
+        endpointId: telephonyMessages.endpointId,
+        endpointLabel: telephonyEndpoints.label,
+        endpointLineNumber: telephonyEndpoints.lineNumber,
+        endpointExtension: telephonyEndpoints.extension,
+        templateId: telephonyMessages.templateId,
+        templateName: telephonyMessages.templateNameSnapshot,
+        provider: telephonyMessages.provider,
+        imageFileId: telephonyMessages.imageFileIdSnapshot,
+        imageOriginalName: telephonyMessages.imageOriginalNameSnapshot,
+        bodyCiphertext: telephonyMessages.bodyCiphertext,
+        bodyNonce: telephonyMessages.bodyNonce,
+        bodyKeyVersion: telephonyMessages.bodyKeyVersion,
+        messageKind: telephonyMessages.messageKind,
+        bodyByteLength: telephonyMessages.bodyByteLength,
+        commandStatus: telephonyMessages.commandStatus,
+        requestedAt: telephonyMessages.requestedAt,
+        dispatchedAt: telephonyMessages.dispatchedAt,
+        providerRespondedAt: telephonyMessages.providerRespondedAt,
+        providerCode: telephonyMessages.providerCode,
+        providerRemainingCount: telephonyMessages.providerRemainingCount,
+        lastErrorCode: telephonyMessages.lastErrorCode,
+        lastErrorMessage: telephonyMessages.lastErrorMessage,
+      })
+      .from(telephonyMessages)
+      .innerJoin(
+        telephonyEndpoints,
+        eq(telephonyEndpoints.id, telephonyMessages.endpointId),
+      )
+      .innerJoin(
+        staffProfiles,
+        eq(staffProfiles.userId, telephonyMessages.staffUserId),
+      )
+      .where(eq(telephonyMessages.consultationId, consultationId))
+      .orderBy(desc(telephonyMessages.requestedAt))
+      .limit(20);
     const deliveryAttemptsByEvent = new Map<
       string,
       typeof deliveryAttemptRows
@@ -2493,6 +2534,41 @@ export function createConsultationService(options: {
               legalFriendsCase.managerAssignedAt?.toISOString() ?? null,
           }
         : null,
+      telephonyMessages: telephonyMessageRows.map((message) => ({
+        id: message.id,
+        staffUserId: message.staffUserId,
+        staffDisplayName: message.staffDisplayName,
+        endpoint: {
+          id: message.endpointId,
+          label: message.endpointLabel,
+          lineNumber: message.endpointLineNumber,
+          extension: message.endpointExtension,
+        },
+        templateId: message.templateId,
+        templateName: message.templateName,
+        provider: message.provider,
+        imageAttached: Boolean(message.imageFileId),
+        imageName: message.imageOriginalName,
+        body: protection.decrypt(
+          {
+            ciphertext: message.bodyCiphertext,
+            nonce: message.bodyNonce,
+            keyVersion: message.bodyKeyVersion,
+          },
+          `telephony_messages/${message.id}/body`,
+        ),
+        messageKind: message.messageKind,
+        bodyByteLength: message.bodyByteLength,
+        commandStatus: message.commandStatus,
+        requestedAt: message.requestedAt.toISOString(),
+        dispatchedAt: message.dispatchedAt?.toISOString() ?? null,
+        providerRespondedAt:
+          message.providerRespondedAt?.toISOString() ?? null,
+        providerCode: message.providerCode,
+        providerRemainingCount: message.providerRemainingCount,
+        lastErrorCode: message.lastErrorCode,
+        lastErrorMessage: message.lastErrorMessage,
+      })),
       telephonyCalls: telephonyCallRows.map((call) => ({
         id: call.id,
         staffUserId: call.staffUserId,

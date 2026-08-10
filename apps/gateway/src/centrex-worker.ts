@@ -11,7 +11,11 @@ import {
   lte,
 } from "drizzle-orm";
 
-import { createEventId, telephonyCallRequestedEventSchema } from "@lawand/core";
+import {
+  createEventId,
+  telephonyCallRequestedEventSchema,
+  telephonyMessageRequestedEventSchema,
+} from "@lawand/core";
 import {
   consultationRequests,
   outboxDeliveryAttempts,
@@ -19,6 +23,7 @@ import {
   telephonyCallDirectoryTargets,
   telephonyCalls,
   telephonyEndpoints,
+  telephonyMessages,
 } from "@lawand/db";
 import type { createDatabaseClient } from "@lawand/db";
 
@@ -30,10 +35,16 @@ import {
   type CentrexReconciliationMatch,
 } from "./centrex-reconciliation.js";
 import type { DataProtection } from "./crypto.js";
+import {
+  createSolapiMmsMessage,
+  SolapiDeliveryError,
+  type SolapiClient,
+} from "./solapi.js";
 
 type Database = ReturnType<typeof createDatabaseClient>["db"];
 
 const EVENT_TYPE = "telephony.call.requested" as const;
+const MESSAGE_EVENT_TYPE = "telephony.message.requested" as const;
 const LEASE_TIMEOUT_MS = 2 * 60 * 1_000;
 
 type ClaimedEvent = {
@@ -44,6 +55,10 @@ type ClaimedEvent = {
   attemptNumber: number;
 };
 
+type ClaimedMessageEvent = ClaimedEvent & {
+  messageId: string;
+};
+
 type DeliveryFailure = {
   code: string;
   message: string;
@@ -52,7 +67,10 @@ type DeliveryFailure = {
 };
 
 class CentrexWorkerConfigurationError extends Error {
-  constructor(readonly code: "credential_not_configured", message: string) {
+  constructor(
+    readonly code: "credential_not_configured" | "mms_not_configured",
+    message: string,
+  ) {
     super(message);
   }
 }
@@ -63,6 +81,16 @@ function deliveryFailure(error: unknown): DeliveryFailure {
       code: error.code,
       message: error.message,
       commandStatus: error.options.commandStatus,
+      ...(error.options.httpStatus
+        ? { httpStatus: error.options.httpStatus }
+        : {}),
+    };
+  }
+  if (error instanceof SolapiDeliveryError) {
+    return {
+      code: error.code,
+      message: error.message,
+      commandStatus: error.code === "ambiguous_delivery" ? "unknown" : "failed",
       ...(error.options.httpStatus
         ? { httpStatus: error.options.httpStatus }
         : {}),
@@ -87,6 +115,8 @@ export function createCentrexWorker(options: {
   protection: DataProtection;
   centrexClient: CentrexClient;
   credentialVault: CentrexCredentialVault;
+  solapiClient?: SolapiClient | null;
+  solapiMmsSender?: string | null;
   workerId?: string;
   minimumCommandGapMs?: number;
   now?: () => Date;
@@ -96,6 +126,8 @@ export function createCentrexWorker(options: {
     protection,
     centrexClient,
     credentialVault,
+    solapiClient = null,
+    solapiMmsSender = null,
     workerId = `${hostname()}:${process.pid}:centrex`,
     minimumCommandGapMs = 3_000,
     now = () => new Date(),
@@ -103,6 +135,7 @@ export function createCentrexWorker(options: {
   let stopped = true;
   let timer: NodeJS.Timeout | undefined;
   let currentRun: Promise<void> | undefined;
+  let preferMessages = false;
 
   async function recoverExpiredLeases(currentTime: Date): Promise<number> {
     return db.transaction(async (tx) => {
@@ -222,6 +255,129 @@ export function createCentrexWorker(options: {
     });
   }
 
+  async function recoverExpiredMessageLeases(
+    currentTime: Date,
+  ): Promise<number> {
+    return db.transaction(async (tx) => {
+      const expired = await tx
+        .select({ id: outboxEvents.id })
+        .from(outboxEvents)
+        .where(
+          and(
+            eq(outboxEvents.eventType, MESSAGE_EVENT_TYPE),
+            eq(outboxEvents.status, "pending"),
+            lt(
+              outboxEvents.lockedAt,
+              new Date(currentTime.getTime() - LEASE_TIMEOUT_MS),
+            ),
+          ),
+        )
+        .for("update", { skipLocked: true });
+      if (expired.length === 0) return 0;
+      const ids = expired.map((event) => event.id);
+      const message =
+        "이전 문자 작업이 응답 기록 전에 중단됐습니다. 제공자 발송 내역을 확인해 주세요.";
+      await tx
+        .update(outboxEvents)
+        .set({
+          status: "dead",
+          lockedAt: null,
+          lockedBy: null,
+          lastError: message,
+        })
+        .where(inArray(outboxEvents.id, ids));
+      await tx
+        .update(outboxDeliveryAttempts)
+        .set({
+          status: "dead",
+          errorCode: "ambiguous_previous_attempt",
+          errorMessage: message,
+          finishedAt: currentTime,
+        })
+        .where(
+          and(
+            inArray(outboxDeliveryAttempts.outboxEventId, ids),
+            eq(outboxDeliveryAttempts.status, "started"),
+          ),
+        );
+      await tx
+        .update(telephonyMessages)
+        .set({
+          commandStatus: "unknown",
+          lastErrorCode: "ambiguous_previous_attempt",
+          lastErrorMessage: message,
+          updatedAt: currentTime,
+        })
+        .where(inArray(telephonyMessages.outboxEventId, ids));
+      return expired.length;
+    });
+  }
+
+  async function claimNextMessage(
+    currentTime: Date,
+  ): Promise<ClaimedMessageEvent | null> {
+    return db.transaction(async (tx) => {
+      const [event] = await tx
+        .select({
+          id: outboxEvents.id,
+          aggregateId: outboxEvents.aggregateId,
+          payload: outboxEvents.payload,
+          attempts: outboxEvents.attempts,
+        })
+        .from(outboxEvents)
+        .where(
+          and(
+            eq(outboxEvents.eventType, MESSAGE_EVENT_TYPE),
+            eq(outboxEvents.status, "pending"),
+            isNull(outboxEvents.lockedAt),
+            lte(outboxEvents.availableAt, currentTime),
+          ),
+        )
+        .orderBy(asc(outboxEvents.availableAt), asc(outboxEvents.createdAt))
+        .limit(1)
+        .for("update", { skipLocked: true });
+      if (!event) return null;
+      const attemptNumber = event.attempts + 1;
+      const attemptId = createEventId();
+      await tx
+        .update(outboxEvents)
+        .set({
+          attempts: attemptNumber,
+          lockedAt: currentTime,
+          lockedBy: workerId,
+          lastError: null,
+        })
+        .where(eq(outboxEvents.id, event.id));
+      await tx
+        .update(telephonyMessages)
+        .set({
+          commandStatus: "dispatching",
+          dispatchedAt: currentTime,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          updatedAt: currentTime,
+        })
+        .where(eq(telephonyMessages.id, event.aggregateId));
+      await tx.insert(outboxDeliveryAttempts).values({
+        id: attemptId,
+        outboxEventId: event.id,
+        attemptNumber,
+        workerId,
+        status: "started",
+        startedAt: currentTime,
+        createdAt: currentTime,
+      });
+      return {
+        id: event.id,
+        callId: event.aggregateId,
+        messageId: event.aggregateId,
+        payload: event.payload,
+        attemptId,
+        attemptNumber,
+      };
+    });
+  }
+
   async function prepareCommand(event: ClaimedEvent) {
     const envelope = telephonyCallRequestedEventSchema.parse(event.payload);
     if (envelope.data.callId !== event.callId) {
@@ -322,6 +478,109 @@ export function createCentrexWorker(options: {
     };
   }
 
+  async function prepareMessageCommand(event: ClaimedMessageEvent) {
+    const envelope = telephonyMessageRequestedEventSchema.parse(event.payload);
+    if (envelope.data.messageId !== event.messageId) {
+      throw new Error("telephony_message_event_mismatch");
+    }
+    const [row] = await db
+      .select({
+        messageId: telephonyMessages.id,
+        provider: telephonyMessages.provider,
+        requestId: telephonyMessages.consultationRequestId,
+        endpointId: telephonyMessages.endpointId,
+        bodyCiphertext: telephonyMessages.bodyCiphertext,
+        bodyNonce: telephonyMessages.bodyNonce,
+        bodyKeyVersion: telephonyMessages.bodyKeyVersion,
+        imageFileId: telephonyMessages.imageFileIdSnapshot,
+        remotePhoneFingerprint: telephonyMessages.remotePhoneFingerprint,
+        apiLoginId: telephonyEndpoints.apiLoginId,
+        credentialKey: telephonyEndpoints.credentialKey,
+        phoneCiphertext: consultationRequests.phoneCiphertext,
+        phoneNonce: consultationRequests.phoneNonce,
+        phoneKeyVersion: consultationRequests.phoneKeyVersion,
+        requestPhoneFingerprint: consultationRequests.phoneFingerprint,
+      })
+      .from(telephonyMessages)
+      .innerJoin(
+        telephonyEndpoints,
+        and(
+          eq(telephonyEndpoints.id, telephonyMessages.endpointId),
+          eq(telephonyEndpoints.isActive, true),
+          eq(telephonyEndpoints.provider, "centrex"),
+        ),
+      )
+      .innerJoin(
+        consultationRequests,
+        eq(
+          consultationRequests.id,
+          telephonyMessages.consultationRequestId,
+        ),
+      )
+      .where(eq(telephonyMessages.id, event.messageId))
+      .limit(1);
+    if (
+      !row ||
+      row.requestId !== envelope.data.requestId ||
+      row.endpointId !== envelope.data.endpointId ||
+      !row.phoneCiphertext ||
+      !row.phoneNonce ||
+      !row.phoneKeyVersion ||
+      !row.requestPhoneFingerprint ||
+      !row.remotePhoneFingerprint.equals(row.requestPhoneFingerprint)
+    ) {
+      throw new Error("telephony_message_reference_not_found");
+    }
+    if (row.provider !== envelope.data.provider) {
+      throw new Error("telephony_message_provider_mismatch");
+    }
+    const common = {
+      endpointId: row.endpointId,
+      destination: protection.decrypt(
+        {
+          ciphertext: row.phoneCiphertext,
+          nonce: row.phoneNonce,
+          keyVersion: row.phoneKeyVersion,
+        },
+        `consultation_requests.phone:${row.requestId}`,
+      ),
+      message: protection.decrypt(
+        {
+          ciphertext: row.bodyCiphertext,
+          nonce: row.bodyNonce,
+          keyVersion: row.bodyKeyVersion,
+        },
+        `telephony_messages/${row.messageId}/body`,
+      ),
+    };
+    if (row.provider === "solapi") {
+      if (!row.imageFileId) {
+        throw new Error("telephony_message_image_not_found");
+      }
+      return {
+        ...common,
+        provider: "solapi" as const,
+        imageFileId: row.imageFileId,
+      };
+    }
+    const passwordSha512 = await credentialVault.get({
+      endpointId: row.endpointId,
+      credentialKey: row.credentialKey,
+    });
+    if (!passwordSha512) {
+      throw new CentrexWorkerConfigurationError(
+        "credential_not_configured",
+        "센트릭스 회선 자격증명이 운영 비밀 설정에 없습니다.",
+      );
+    }
+    return {
+      ...common,
+      provider: "centrex" as const,
+      apiLoginId: row.apiLoginId,
+      passwordSha512,
+    };
+  }
+
   async function markSucceeded(
     event: ClaimedEvent,
     currentTime: Date,
@@ -406,6 +665,100 @@ export function createCentrexWorker(options: {
     });
   }
 
+  async function markMessageSucceeded(
+    event: ClaimedMessageEvent,
+    currentTime: Date,
+    result: {
+      httpStatus: number;
+      providerCode: string;
+      remainingCount: number | null;
+    },
+  ) {
+    await db.transaction(async (tx) => {
+      await tx
+        .update(outboxEvents)
+        .set({
+          status: "published",
+          lockedAt: null,
+          lockedBy: null,
+          publishedAt: currentTime,
+          lastError: null,
+        })
+        .where(
+          and(
+            eq(outboxEvents.id, event.id),
+            eq(outboxEvents.status, "pending"),
+            eq(outboxEvents.lockedBy, workerId),
+          ),
+        );
+      await tx
+        .update(outboxDeliveryAttempts)
+        .set({
+          status: "succeeded",
+          httpStatus: result.httpStatus,
+          finishedAt: currentTime,
+        })
+        .where(eq(outboxDeliveryAttempts.id, event.attemptId));
+      await tx
+        .update(telephonyMessages)
+        .set({
+          commandStatus: "succeeded",
+          providerRespondedAt: currentTime,
+          providerCode: result.providerCode,
+          providerRemainingCount: result.remainingCount,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          updatedAt: currentTime,
+        })
+        .where(eq(telephonyMessages.id, event.messageId));
+    });
+  }
+
+  async function markMessageFailed(
+    event: ClaimedMessageEvent,
+    currentTime: Date,
+    failure: DeliveryFailure,
+  ) {
+    await db.transaction(async (tx) => {
+      await tx
+        .update(outboxEvents)
+        .set({
+          status: "dead",
+          availableAt: currentTime,
+          lockedAt: null,
+          lockedBy: null,
+          lastError: failure.message,
+        })
+        .where(
+          and(
+            eq(outboxEvents.id, event.id),
+            eq(outboxEvents.status, "pending"),
+            eq(outboxEvents.lockedBy, workerId),
+          ),
+        );
+      await tx
+        .update(outboxDeliveryAttempts)
+        .set({
+          status: "dead",
+          httpStatus: failure.httpStatus ?? null,
+          errorCode: failure.code,
+          errorMessage: failure.message,
+          finishedAt: currentTime,
+        })
+        .where(eq(outboxDeliveryAttempts.id, event.attemptId));
+      await tx
+        .update(telephonyMessages)
+        .set({
+          commandStatus: failure.commandStatus,
+          providerRespondedAt: failure.httpStatus ? currentTime : null,
+          lastErrorCode: failure.code,
+          lastErrorMessage: failure.message,
+          updatedAt: currentTime,
+        })
+        .where(eq(telephonyMessages.id, event.messageId));
+    });
+  }
+
   async function runOnce(): Promise<boolean> {
     const currentTime = now();
     await recoverExpiredLeases(currentTime);
@@ -444,6 +797,95 @@ export function createCentrexWorker(options: {
         JSON.stringify({
           event: "centrex_clickdial_failed",
           callId: event.callId,
+          attempt: event.attemptNumber,
+          errorCode: failure.code,
+          occurredAt: finishedAt.toISOString(),
+        }),
+      );
+    }
+    return true;
+  }
+
+  async function runMessageOnce(): Promise<boolean> {
+    const currentTime = now();
+    await recoverExpiredMessageLeases(currentTime);
+    const event = await claimNextMessage(currentTime);
+    if (!event) return false;
+    let endpointId: string | undefined;
+    let commandProvider: "centrex" | "solapi" | undefined;
+    try {
+      const command = await prepareMessageCommand(event);
+      endpointId = command.endpointId;
+      commandProvider = command.provider;
+      if (command.provider === "centrex") {
+        const result = await centrexClient.sendMessage(command);
+        const respondedAt = now();
+        await markMessageSucceeded(event, respondedAt, result);
+        await db
+          .update(telephonyEndpoints)
+          .set({ lastAuthSucceededAt: respondedAt, updatedAt: respondedAt })
+          .where(eq(telephonyEndpoints.id, command.endpointId));
+        console.log(
+          JSON.stringify({
+            event: "telephony_message_succeeded",
+            provider: command.provider,
+            messageId: event.messageId,
+            attempt: event.attemptNumber,
+            remainingCount: result.remainingCount,
+            occurredAt: respondedAt.toISOString(),
+          }),
+        );
+        return true;
+      }
+      if (!solapiClient || !solapiMmsSender) {
+        throw new CentrexWorkerConfigurationError(
+          "mms_not_configured",
+          "솔라피 MMS 발신 설정이 없습니다.",
+        );
+      }
+      const result = await solapiClient.sendMms(
+        createSolapiMmsMessage({
+          to: command.destination,
+          from: solapiMmsSender,
+          text: command.message,
+          imageId: command.imageFileId,
+          messageId: event.messageId,
+        }),
+      );
+      const respondedAt = now();
+      await markMessageSucceeded(event, respondedAt, {
+        httpStatus: result.httpStatus,
+        providerCode: result.statusCode,
+        remainingCount: null,
+      });
+      console.log(
+        JSON.stringify({
+          event: "telephony_message_succeeded",
+          provider: command.provider,
+          messageId: event.messageId,
+          attempt: event.attemptNumber,
+          remainingCount: null,
+          occurredAt: respondedAt.toISOString(),
+        }),
+      );
+    } catch (error) {
+      const failure = deliveryFailure(error);
+      const finishedAt = now();
+      await markMessageFailed(event, finishedAt, failure);
+      if (
+        endpointId &&
+        commandProvider === "centrex" &&
+        failure.code === "authentication_failed"
+      ) {
+        await db
+          .update(telephonyEndpoints)
+          .set({ lastAuthFailedAt: finishedAt, updatedAt: finishedAt })
+          .where(eq(telephonyEndpoints.id, endpointId));
+      }
+      console.warn(
+        JSON.stringify({
+          event: "telephony_message_failed",
+          messageId: event.messageId,
           attempt: event.attemptNumber,
           errorCode: failure.code,
           occurredAt: finishedAt.toISOString(),
@@ -621,7 +1063,15 @@ export function createCentrexWorker(options: {
   }
 
   async function runCycle(): Promise<void> {
-    await runOnce();
+    let processed: boolean;
+    if (preferMessages) {
+      processed = await runMessageOnce();
+      if (!processed) processed = await runOnce();
+    } else {
+      processed = await runOnce();
+      if (!processed) processed = await runMessageOnce();
+    }
+    if (processed) preferMessages = !preferMessages;
     await reconcileOnce();
   }
 
@@ -654,7 +1104,7 @@ export function createCentrexWorker(options: {
     await currentRun;
   }
 
-  return { reconcileOnce, runOnce, start, stop };
+  return { reconcileOnce, runMessageOnce, runOnce, start, stop };
 }
 
 export type CentrexWorker = ReturnType<typeof createCentrexWorker>;

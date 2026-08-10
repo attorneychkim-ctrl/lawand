@@ -288,6 +288,13 @@
       "when": 1786345957730,
       "tag": "0040_wandering_lenny_balinger",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1786352239337,
+      "tag": "0041_late_talon",
+      "breakpoints": true
     }
   ]
 }

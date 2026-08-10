@@ -1,5 +1,12 @@
+import {
+  CENTREX_LMS_MAX_BYTES,
+  centrexMessageByteLength,
+} from "@lawand/core";
+
 export const CENTREX_CLICKDIAL_URL =
   "https://centrex.uplus.co.kr/RestApi/clickdial";
+export const CENTREX_SMS_SEND_URL =
+  "https://centrex.uplus.co.kr/RestApi/smssend";
 export const CENTREX_USERINFO_URL =
   "https://centrex.uplus.co.kr/RestApi/userinfo";
 export const CENTREX_CALLHISTORY_URL =
@@ -15,6 +22,9 @@ export class CentrexDeliveryError extends Error {
       | "authentication_failed"
       | "permission_denied"
       | "invalid_request"
+      | "message_too_long"
+      | "recipient_limit_exceeded"
+      | "message_quota_exhausted"
       | "provider_rejected"
       | "unexpected_http_status"
       | "invalid_response"
@@ -34,6 +44,13 @@ type CentrexClickDialInput = {
   apiLoginId: string;
   passwordSha512: string;
   destination: string;
+};
+
+type CentrexMessageInput = {
+  apiLoginId: string;
+  passwordSha512: string;
+  destination: string;
+  message: string;
 };
 
 type CentrexCredentials = Pick<
@@ -96,6 +113,20 @@ function normalizedInput(input: CentrexClickDialInput) {
     );
   }
   return { ...credentials, destination };
+}
+
+function normalizedMessageInput(input: CentrexMessageInput) {
+  const normalized = normalizedInput(input);
+  const message = input.message.trim();
+  const byteLength = centrexMessageByteLength(message);
+  if (!message || byteLength > CENTREX_LMS_MAX_BYTES) {
+    throw new CentrexDeliveryError(
+      "message_too_long",
+      "문자 내용은 센트릭스 LMS 기준 720바이트 이하여야 합니다.",
+      { commandStatus: "failed" },
+    );
+  }
+  return { ...normalized, message, byteLength };
 }
 
 function responseCode(value: unknown): string | null {
@@ -341,6 +372,112 @@ export function createCentrexClient(options: {
       );
     }
     return { httpStatus: response.status, providerCode: "0000" };
+  }
+
+  async function sendMessage(input: CentrexMessageInput): Promise<{
+    httpStatus: number;
+    providerCode: "0000";
+    remainingCount: number;
+  }> {
+    const normalized = normalizedMessageInput(input);
+    let response: Response;
+    try {
+      response = await fetchImpl(CENTREX_SMS_SEND_URL, {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
+        },
+        body: new URLSearchParams({
+          id: normalized.apiLoginId,
+          pass: normalized.passwordSha512,
+          destnumber: normalized.destination,
+          smsmsg: normalized.message,
+        }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch {
+      throw new CentrexDeliveryError(
+        "ambiguous_delivery",
+        "센트릭스 문자 발송 결과를 확인할 수 없습니다. 발송 내역을 먼저 확인해 주세요.",
+        { commandStatus: "unknown" },
+      );
+    }
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new CentrexDeliveryError(
+        "unexpected_http_status",
+        `센트릭스 문자 발송이 예상하지 못한 HTTP 상태를 반환했습니다. (${response.status})`,
+        {
+          commandStatus: response.status >= 500 ? "unknown" : "failed",
+          httpStatus: response.status,
+        },
+      );
+    }
+    const parsed = await parsedResponse(response, "문자 발송", 64 * 1024);
+    const code = responseCode(parsed);
+    if (!code) {
+      throw new CentrexDeliveryError(
+        "invalid_response",
+        "센트릭스 문자 발송 응답에 결과 코드가 없습니다.",
+        { commandStatus: "unknown", httpStatus: response.status },
+      );
+    }
+    if (code !== "0000") {
+      const messageErrors: Record<
+        string,
+        { code: CentrexDeliveryError["code"]; message: string }
+      > = {
+        "3002": {
+          code: "message_too_long",
+          message: "센트릭스가 문자 길이 초과로 발송을 거부했습니다.",
+        },
+        "3003": {
+          code: "recipient_limit_exceeded",
+          message: "센트릭스가 수신번호 개수 초과로 발송을 거부했습니다.",
+        },
+        "3004": {
+          code: "message_quota_exhausted",
+          message: "센트릭스 문자의 남은 발송 가능 건수가 없습니다.",
+        },
+      };
+      const known = messageErrors[code];
+      if (known) {
+        throw new CentrexDeliveryError(known.code, known.message, {
+          commandStatus: "failed",
+          httpStatus: response.status,
+          providerCode: code,
+        });
+      }
+      throw providerFailure(code, response.status);
+    }
+    const data =
+      parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>).DATAS
+        : null;
+    const remainingCount =
+      data && typeof data === "object" && !Array.isArray(data)
+        ? nonnegativeInteger((data as Record<string, unknown>).RESTCOUNT)
+        : null;
+    if (
+      responseStatus(parsed)?.trim().toUpperCase() !== "OK" ||
+      remainingCount === null
+    ) {
+      throw new CentrexDeliveryError(
+        "invalid_response",
+        "센트릭스 문자 발송 결과를 확인하지 못했습니다.",
+        {
+          commandStatus: "unknown",
+          httpStatus: response.status,
+          providerCode: code,
+        },
+      );
+    }
+    return {
+      httpStatus: response.status,
+      providerCode: "0000",
+      remainingCount,
+    };
   }
 
   async function getUserInfo(input: CentrexCredentials): Promise<{
@@ -710,6 +847,7 @@ export function createCentrexClient(options: {
     getCallHistory,
     getInboundCallHistory,
     getUserInfo,
+    sendMessage,
     setRingCallback,
   };
 }

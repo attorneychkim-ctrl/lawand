@@ -6,6 +6,7 @@ import {
   CENTREX_CLICKDIAL_URL,
   CENTREX_INBOUND_CALL_HISTORY_URL,
   CENTREX_SET_RING_CALLBACK_URL,
+  CENTREX_SMS_SEND_URL,
   CENTREX_USERINFO_URL,
   CentrexDeliveryError,
   createCentrexClient,
@@ -205,6 +206,73 @@ test("클릭투콜은 인증값과 고객번호를 URL이 아닌 POST body로 �
     },
   );
   assert.deepEqual(result, { httpStatus: 200, providerCode: "0000" });
+});
+
+test("문자는 고객번호와 본문을 URL이 아닌 POST body로 보내고 잔여 건수를 읽는다", async () => {
+  let receivedUrl = "";
+  let receivedBody = "";
+  const client = createCentrexClient({
+    fetchImpl: async (input, init) => {
+      receivedUrl = String(input);
+      receivedBody = String(init?.body);
+      return new Response(
+        JSON.stringify({
+          SVC_RT: "0000",
+          SVC_MSG: "OK",
+          DATAS: {
+            STATUS: "OK",
+            DEBUG: "01012345678=OK",
+            RESTCOUNT: "17",
+          },
+        }),
+        { status: 200 },
+      );
+    },
+  });
+
+  const result = await client.sendMessage({
+    apiLoginId: "07012345678",
+    passwordSha512,
+    destination: "010-1234-5678",
+    message: "상담 요청을 확인했습니다.",
+  });
+
+  assert.equal(receivedUrl, CENTREX_SMS_SEND_URL);
+  assert.equal(new URL(receivedUrl).search, "");
+  assert.deepEqual(Object.fromEntries(new URLSearchParams(receivedBody)), {
+    id: "07012345678",
+    pass: passwordSha512,
+    destnumber: "01012345678",
+    smsmsg: "상담 요청을 확인했습니다.",
+  });
+  assert.deepEqual(result, {
+    httpStatus: 200,
+    providerCode: "0000",
+    remainingCount: 17,
+  });
+});
+
+test("문자 잔여 건수 부족은 재시도 없는 확정 실패로 분류한다", async () => {
+  const client = createCentrexClient({
+    fetchImpl: async () =>
+      new Response(
+        JSON.stringify({ SVC_RT: "3004", SVC_MSG: "NO_SMSCOUNT" }),
+        { status: 200 },
+      ),
+  });
+
+  await assert.rejects(
+    client.sendMessage({
+      apiLoginId: "07012345678",
+      passwordSha512,
+      destination: "01012345678",
+      message: "상담 안내",
+    }),
+    (error: unknown) =>
+      error instanceof CentrexDeliveryError &&
+      error.code === "message_quota_exhausted" &&
+      error.options.commandStatus === "failed",
+  );
 });
 
 test("사용자정보 조회로 API 로그인과 실제 회선·내선을 분리 검증한다", async () => {

@@ -9,6 +9,7 @@ import {
   consultationRequestedEventSchema,
   legalfriendsRegistrationRequestedEventSchema,
   telephonyCallRequestedEventSchema,
+  telephonyMessageRequestedEventSchema,
 } from "./events.js";
 
 const requestedEvent = {
@@ -268,6 +269,60 @@ test("고객찾기 클릭투콜도 전화번호 없이 리걸프렌즈 식별자
     telephonyCallRequestedEventSchema.safeParse({
       ...callEvent,
       data: { ...callEvent.data, phone: "01012345678" },
+    }).success,
+    false,
+  );
+});
+
+test("문자 발송 이벤트는 전화번호와 본문 대신 암호화 원장 참조만 남긴다", () => {
+  const messageEvent = {
+    ...assignmentEnvelope,
+    eventType: "telephony.message.requested",
+    data: {
+      messageId: "01984c7d-8500-7000-8000-000000000030",
+      consultationId: assignmentEnvelope.correlationId,
+      requestId: "01984c7d-8500-7000-8000-000000000002",
+      endpointId: "01984c7d-8500-7000-8000-000000000021",
+      staffUserId: "01984c7d-8500-7000-8000-000000000006",
+      provider: "centrex",
+      channel: "sms",
+      command: "smssend",
+      contentRef:
+        "telephony_messages/01984c7d-8500-7000-8000-000000000030/body",
+    },
+  } as const;
+
+  assert.equal(
+    telephonyMessageRequestedEventSchema.safeParse(messageEvent).success,
+    true,
+  );
+  assert.equal(
+    telephonyMessageRequestedEventSchema.safeParse({
+      ...messageEvent,
+      data: {
+        ...messageEvent.data,
+        provider: "solapi",
+        channel: "mms",
+        command: "send-many",
+      },
+    }).success,
+    true,
+  );
+  assert.equal(
+    telephonyMessageRequestedEventSchema.safeParse({
+      ...messageEvent,
+      data: { ...messageEvent.data, provider: "solapi" },
+    }).success,
+    false,
+  );
+  assert.equal(
+    telephonyMessageRequestedEventSchema.safeParse({
+      ...messageEvent,
+      data: {
+        ...messageEvent.data,
+        phone: "01012345678",
+        body: "상담 안내",
+      },
     }).success,
     false,
   );

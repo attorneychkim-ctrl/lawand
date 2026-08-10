@@ -21,6 +21,7 @@ import { ClaimConsultationButton } from "../../_components/claim-consultation-bu
 import { ClickToCallButton } from "../../_components/click-to-call-button";
 import { CopyButton } from "../../_components/copy-button";
 import { KakaoEntryPanel } from "../../_components/kakao-entry-panel";
+import { MessageComposeButton } from "../../_components/message-compose-button";
 import { StaffBar } from "../../_components/staff-bar";
 
 function formatDate(value: string | null) {
@@ -561,6 +562,18 @@ function telephonyResultDetail(
   return `센트릭스 미연결 · 상태 ${call.providerStatus ?? "확인 불가"}`;
 }
 
+function messageStatusLabel(
+  message: ConsultationDetail["telephonyMessages"][number],
+) {
+  return {
+    queued: "발송 대기",
+    dispatching: "발송 중",
+    succeeded: "발송 완료",
+    failed: "발송 실패",
+    unknown: "확인 필요",
+  }[message.commandStatus];
+}
+
 export default async function ConsultationDetailPage({
   params,
 }: {
@@ -586,6 +599,7 @@ export default async function ConsultationDetailPage({
   const canClickToCall =
     Boolean(latestPhone) &&
     consultation.assignment?.assigneeUserId === staff.id;
+  const canSendMessage = canClickToCall;
   const latestMyCall = consultation.telephonyCalls.find(
     (call) => call.staffUserId === staff.id,
   );
@@ -613,6 +627,14 @@ export default async function ConsultationDetailPage({
             </p>
           </div>
           <div className="detail-actions">
+            {canSendMessage ? (
+              <MessageComposeButton
+                consultationId={consultation.id}
+                customerName={consultation.displayName}
+                receiptCode={consultation.publicReceiptCode}
+                staffName={staff.displayName}
+              />
+            ) : null}
             {canClickToCall ? (
               <ClickToCallButton
                 consultationId={consultation.id}
@@ -717,6 +739,35 @@ export default async function ConsultationDetailPage({
             </div>
           </aside>
         </div>
+
+        {consultation.telephonyMessages.length > 0 ? (
+          <section className="detail-section message-ledger" aria-labelledby="message-ledger-title">
+            <header className="detail-section-heading">
+              <div>
+                <p className="section-kicker">MESSAGE LEDGER</p>
+                <h2 id="message-ledger-title">고객 문자 발송 내역</h2>
+                <p>실제 보낸 문구와 템플릿, 이미지 첨부 여부, 발송 결과를 함께 보관합니다.</p>
+              </div>
+              <span className="count-badge">최근 {consultation.telephonyMessages.length}건</span>
+            </header>
+            <div className="message-ledger-list">
+              {consultation.telephonyMessages.map((message) => (
+                <article className="message-ledger-row" key={message.id}>
+                  <div className="message-ledger-copy">
+                    <strong>{message.templateName ?? "직접 입력"} · {message.messageKind.toUpperCase()}</strong>
+                    <span>{message.staffDisplayName} · {formatDate(message.requestedAt)}</span>
+                    <p>{message.body}</p>
+                    {message.imageAttached ? <small>이미지 첨부 · {message.imageName}</small> : null}
+                  </div>
+                  <span className={`telephony-call-status is-${message.commandStatus === "succeeded" ? "success" : message.commandStatus === "failed" || message.commandStatus === "unknown" ? "danger" : "pending"}`}>
+                    {messageStatusLabel(message)}
+                  </span>
+                  {message.lastErrorMessage ? <p className="message-ledger-error">{message.lastErrorMessage}</p> : null}
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         {consultation.telephonyCalls.length > 0 ? (
           <section className="detail-section telephony-ledger" aria-labelledby="telephony-ledger-title">

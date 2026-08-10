@@ -8,19 +8,26 @@ import {
   isNotNull,
   isNull,
   lt,
+  ne,
   or,
   sql,
 } from "drizzle-orm";
 
 import {
   assertPlatformEvent,
+  centrexMessageByteLength,
+  centrexMessageKind,
   createConsultationId,
   createConsultationRequestId,
   createEventId,
   createPublicReceiptCode,
   createTelephonyCallId,
+  createTelephonyMessageId,
   CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION,
+  type MessageTemplateCreate,
+  type MessageTemplateUpdate,
   type PhoneDeskAftercareSave,
+  type TelephonyMessageSend,
   type TelephonyCallDisposition,
   type CentrexBridgeCommandResult,
   type PlatformEvent,
@@ -30,6 +37,7 @@ import {
   consultationRequests,
   consultationStatusHistory,
   consultations,
+  messageTemplates,
   outboxEvents,
   staffAuditLogs,
   staffMemberships,
@@ -43,12 +51,18 @@ import {
   telephonyEndpoints,
   telephonyInboundCalls,
   telephonyInboundCommands,
+  telephonyMessages,
   telephonyFollowUpTasks,
 } from "@lawand/db";
 import type { createDatabaseClient } from "@lawand/db";
 
 import type { StaffPrincipal } from "./auth.js";
 import type { DataProtection } from "./crypto.js";
+import {
+  inspectMmsJpeg,
+  SolapiDeliveryError,
+  type SolapiClient,
+} from "./solapi.js";
 
 type Database = ReturnType<typeof createDatabaseClient>["db"];
 
@@ -202,6 +216,17 @@ export class TelephonyCallError extends Error {
       | "staff_not_assignable"
       | "consultation_phone_mismatch"
       | "consultation_already_exists"
+      | "message_not_found"
+      | "message_owned_by_other_staff"
+      | "message_template_not_found"
+      | "message_template_inactive"
+      | "message_template_name_conflict"
+      | "message_template_owned_by_other_staff"
+      | "message_image_invalid"
+      | "message_image_upload_failed"
+      | "mms_feature_disabled"
+      | "message_idempotency_conflict"
+      | "message_body_invalid"
       | "inbound_call_not_found"
       | "inbound_call_not_ringing"
       | "inbound_call_answer_unavailable"
@@ -215,11 +240,15 @@ export class TelephonyCallError extends Error {
   }
 }
 
-function eventRow(event: PlatformEvent, callId: string) {
+function eventRow(
+  event: PlatformEvent,
+  aggregateId: string,
+  aggregateType = "telephony_call",
+) {
   return {
     id: event.eventId,
-    aggregateType: "telephony_call",
-    aggregateId: callId,
+    aggregateType,
+    aggregateId,
     eventType: event.eventType,
     eventVersion: event.eventVersion,
     correlationId: event.correlationId,
@@ -286,10 +315,55 @@ function callResponse(call: {
   };
 }
 
+function messageResponse(message: {
+  id: string;
+  consultationId: string;
+  endpointId: string;
+  templateId: string | null;
+  templateNameSnapshot: string | null;
+  provider: "centrex" | "solapi";
+  messageKind: "sms" | "lms" | "mms";
+  imageFileIdSnapshot: string | null;
+  imageOriginalNameSnapshot: string | null;
+  bodyByteLength: number;
+  commandStatus: "queued" | "dispatching" | "succeeded" | "failed" | "unknown";
+  requestedAt: Date;
+  dispatchedAt: Date | null;
+  providerRespondedAt: Date | null;
+  providerCode: string | null;
+  providerRemainingCount: number | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+}) {
+  return {
+    id: message.id,
+    consultationId: message.consultationId,
+    endpointId: message.endpointId,
+    templateId: message.templateId,
+    templateName: message.templateNameSnapshot,
+    provider: message.provider,
+    messageKind: message.messageKind,
+    imageAttached: Boolean(message.imageFileIdSnapshot),
+    imageName: message.imageOriginalNameSnapshot,
+    bodyByteLength: message.bodyByteLength,
+    commandStatus: message.commandStatus,
+    requestedAt: message.requestedAt.toISOString(),
+    dispatchedAt: message.dispatchedAt?.toISOString() ?? null,
+    providerRespondedAt:
+      message.providerRespondedAt?.toISOString() ?? null,
+    providerCode: message.providerCode,
+    providerRemainingCount: message.providerRemainingCount,
+    lastErrorCode: message.lastErrorCode,
+    lastErrorMessage: message.lastErrorMessage,
+  };
+}
+
 export function createTelephonyService(options: {
   db: Database;
   protection: DataProtection;
   dispatchEnabled: boolean;
+  solapiClient?: SolapiClient | null;
+  solapiMmsSender?: string | null;
   answerableBridgeIds?: ReadonlySet<string>;
   now?: () => Date;
 }) {
@@ -297,6 +371,8 @@ export function createTelephonyService(options: {
     db,
     protection,
     dispatchEnabled,
+    solapiClient = null,
+    solapiMmsSender = null,
     answerableBridgeIds = new Set<string>(),
     now = () => new Date(),
   } = options;
@@ -2213,6 +2289,528 @@ export function createTelephonyService(options: {
     });
   }
 
+  async function listMessageTemplates(
+    actor: StaffPrincipal,
+    includeInactive = false,
+  ) {
+    const rows = await db
+      .select()
+      .from(messageTemplates)
+      .where(
+        and(
+          or(
+            isNull(messageTemplates.ownerUserId),
+            eq(messageTemplates.ownerUserId, actor.id),
+          ),
+          includeInactive ? undefined : eq(messageTemplates.isActive, true),
+        ),
+      )
+      .orderBy(asc(messageTemplates.ownerUserId), asc(messageTemplates.name));
+    return {
+      items: rows.map((template) => templateResponse(template, actor)),
+    };
+  }
+
+  function templateResponse(
+    template: typeof messageTemplates.$inferSelect,
+    actor: StaffPrincipal,
+  ) {
+    return {
+      id: template.id,
+      name: template.name,
+      body: template.body,
+      bodyByteLength: template.bodyByteLength,
+      isActive: template.isActive,
+      scope: template.ownerUserId ? ("personal" as const) : ("built_in" as const),
+      editable: template.ownerUserId === actor.id,
+      image:
+        template.imageFileId &&
+        template.imageUrl &&
+        template.imageOriginalName &&
+        template.imageByteLength &&
+        template.imageWidth &&
+        template.imageHeight
+          ? {
+              url: template.imageUrl,
+              originalName: template.imageOriginalName,
+              byteLength: template.imageByteLength,
+              width: template.imageWidth,
+              height: template.imageHeight,
+            }
+          : null,
+      createdAt: template.createdAt.toISOString(),
+      updatedAt: template.updatedAt.toISOString(),
+    };
+  }
+
+  async function uploadTemplateImage(image: NonNullable<MessageTemplateCreate["image"]>) {
+    if (!solapiClient) {
+      throw new TelephonyCallError(
+        "mms_feature_disabled",
+        "이미지 템플릿을 사용하려면 솔라피 MMS 연동을 먼저 설정해야 합니다.",
+      );
+    }
+    let inspected: ReturnType<typeof inspectMmsJpeg>;
+    try {
+      inspected = inspectMmsJpeg(image.fileBase64);
+    } catch {
+      throw new TelephonyCallError(
+        "message_image_invalid",
+        "이미지는 200KB 이하 JPG이고 1500×1440px 이하여야 합니다.",
+      );
+    }
+    try {
+      const uploaded = await solapiClient.uploadMmsImage({
+        fileBase64: image.fileBase64,
+        name: image.originalName,
+      });
+      return {
+        imageFileId: uploaded.fileId,
+        imageUrl: uploaded.url,
+        imageOriginalName: image.originalName,
+        imageByteLength: inspected.bytes,
+        imageWidth: inspected.width,
+        imageHeight: inspected.height,
+      };
+    } catch (error) {
+      throw new TelephonyCallError(
+        error instanceof SolapiDeliveryError && error.code === "provider_rejected"
+          ? "message_image_invalid"
+          : "message_image_upload_failed",
+        error instanceof Error
+          ? error.message
+          : "이미지를 업로드하지 못했습니다.",
+      );
+    }
+  }
+
+  async function createMessageTemplate(
+    input: MessageTemplateCreate,
+    actor: StaffPrincipal,
+  ) {
+    const createdAt = now();
+    const [conflict] = await db
+      .select({ id: messageTemplates.id })
+      .from(messageTemplates)
+      .where(
+        and(
+          eq(messageTemplates.ownerUserId, actor.id),
+          sql`lower(${messageTemplates.name}) = lower(${input.name})`,
+        ),
+      )
+      .limit(1);
+    if (conflict) {
+      throw new TelephonyCallError(
+        "message_template_name_conflict",
+        "내 템플릿에 같은 이름이 이미 있습니다.",
+      );
+    }
+    const imageValues = input.image
+      ? await uploadTemplateImage(input.image)
+      : {};
+    const [created] = await db
+      .insert(messageTemplates)
+      .values({
+        id: createEventId(),
+        ownerUserId: actor.id,
+        name: input.name,
+        body: input.body,
+        bodyByteLength: centrexMessageByteLength(input.body),
+        ...imageValues,
+        isActive: true,
+        createdByUserId: actor.id,
+        updatedByUserId: actor.id,
+        createdAt,
+        updatedAt: createdAt,
+      })
+      .onConflictDoNothing()
+      .returning();
+    if (!created) {
+      throw new TelephonyCallError(
+        "message_template_name_conflict",
+        "내 템플릿에 같은 이름이 이미 있습니다.",
+      );
+    }
+    await db.insert(staffAuditLogs).values({
+      id: createEventId(),
+      actorUserId: actor.id,
+      action: "telephony.message_template.created",
+      targetType: "message_template",
+      targetId: created.id,
+      metadata: {
+        bodyByteLength: created.bodyByteLength,
+      },
+      occurredAt: createdAt,
+      createdAt,
+    });
+    return templateResponse(created, actor);
+  }
+
+  async function updateMessageTemplate(
+    templateId: string,
+    input: MessageTemplateUpdate,
+    actor: StaffPrincipal,
+  ) {
+    const updatedAt = now();
+    return db.transaction(async (tx) => {
+      const [template] = await tx
+        .select()
+        .from(messageTemplates)
+        .where(eq(messageTemplates.id, templateId))
+        .limit(1)
+        .for("update");
+      if (!template) {
+        throw new TelephonyCallError(
+          "message_template_not_found",
+          "문자 템플릿을 찾을 수 없습니다.",
+        );
+      }
+      if (template.ownerUserId !== actor.id) {
+        throw new TelephonyCallError(
+          "message_template_owned_by_other_staff",
+          template.ownerUserId
+            ? "다른 직원의 개인 템플릿은 수정할 수 없습니다."
+            : "기본 템플릿은 수정할 수 없습니다. 내 템플릿으로 새로 만들어 주세요.",
+        );
+      }
+      const [conflict] = await tx
+        .select({ id: messageTemplates.id })
+        .from(messageTemplates)
+        .where(
+          and(
+            ne(messageTemplates.id, templateId),
+            eq(messageTemplates.ownerUserId, actor.id),
+            sql`lower(${messageTemplates.name}) = lower(${input.name})`,
+          ),
+        )
+        .limit(1);
+      if (conflict) {
+        throw new TelephonyCallError(
+          "message_template_name_conflict",
+          "내 템플릿에 같은 이름이 이미 있습니다.",
+        );
+      }
+      const imageValues =
+        input.image === undefined
+          ? {}
+          : input.image === null
+            ? {
+                imageFileId: null,
+                imageUrl: null,
+                imageOriginalName: null,
+                imageByteLength: null,
+                imageWidth: null,
+                imageHeight: null,
+              }
+            : await uploadTemplateImage(input.image);
+      const [updated] = await tx
+        .update(messageTemplates)
+        .set({
+          name: input.name,
+          body: input.body,
+          bodyByteLength: centrexMessageByteLength(input.body),
+          isActive: input.isActive,
+          ...imageValues,
+          updatedByUserId: actor.id,
+          updatedAt,
+        })
+        .where(eq(messageTemplates.id, templateId))
+        .returning();
+      if (!updated) throw new Error("message_template_not_updated");
+      await tx.insert(staffAuditLogs).values({
+        id: createEventId(),
+        actorUserId: actor.id,
+        action: "telephony.message_template.updated",
+        targetType: "message_template",
+        targetId: templateId,
+        metadata: {
+          previousActive: template.isActive,
+          isActive: updated.isActive,
+          bodyByteLength: updated.bodyByteLength,
+        },
+        occurredAt: updatedAt,
+        createdAt: updatedAt,
+      });
+      return templateResponse(updated, actor);
+    });
+  }
+
+  async function requestMessage(
+    consultationId: string,
+    input: TelephonyMessageSend,
+    actor: StaffPrincipal,
+  ) {
+    if (!dispatchEnabled) {
+      throw new TelephonyCallError(
+        "feature_disabled",
+        "센트릭스 문자 발송이 아직 활성화되지 않았습니다.",
+      );
+    }
+    const textKind = centrexMessageKind(input.body);
+    if (textKind === "too_long") {
+      throw new TelephonyCallError(
+        "message_body_invalid",
+        "문자 내용은 센트릭스 LMS 기준 720바이트 이하여야 합니다.",
+      );
+    }
+    const requestedAt = now();
+    return db.transaction(async (tx) => {
+      const [existing] = await tx
+        .select()
+        .from(telephonyMessages)
+        .where(eq(telephonyMessages.idempotencyKey, input.idempotencyKey))
+        .limit(1);
+      if (existing) {
+        if (
+          existing.consultationId !== consultationId ||
+          existing.staffUserId !== actor.id
+        ) {
+          throw new TelephonyCallError(
+            "message_idempotency_conflict",
+            "문자 발송 재시도 식별자가 다른 요청과 충돌했습니다.",
+          );
+        }
+        return { ...messageResponse(existing), replayed: true };
+      }
+
+      const [consultation] = await tx
+        .select({ id: consultations.id })
+        .from(consultations)
+        .where(eq(consultations.id, consultationId))
+        .limit(1)
+        .for("update");
+      if (!consultation) {
+        throw new TelephonyCallError(
+          "consultation_not_found",
+          "상담을 찾을 수 없습니다.",
+        );
+      }
+      const [assignment] = await tx
+        .select({ assigneeUserId: consultationAssignments.assigneeUserId })
+        .from(consultationAssignments)
+        .where(eq(consultationAssignments.consultationId, consultationId))
+        .limit(1);
+      if (!assignment) {
+        throw new TelephonyCallError(
+          "consultation_not_assigned",
+          "상담하기로 담당자를 먼저 지정해 주세요.",
+        );
+      }
+      if (assignment.assigneeUserId !== actor.id) {
+        throw new TelephonyCallError(
+          "consultation_assigned_to_other_staff",
+          "현재 담당자만 이 상담 고객에게 문자를 보낼 수 있습니다.",
+        );
+      }
+      const [request] = await tx
+        .select({
+          id: consultationRequests.id,
+          phoneFingerprint: consultationRequests.phoneFingerprint,
+        })
+        .from(consultationRequests)
+        .where(
+          and(
+            eq(consultationRequests.consultationId, consultationId),
+            eq(consultationRequests.contactChannel, "phone"),
+            isNotNull(consultationRequests.phoneCiphertext),
+            isNotNull(consultationRequests.phoneNonce),
+            isNotNull(consultationRequests.phoneKeyVersion),
+            isNotNull(consultationRequests.phoneFingerprint),
+          ),
+        )
+        .orderBy(desc(consultationRequests.submittedAt))
+        .limit(1);
+      if (!request?.phoneFingerprint) {
+        throw new TelephonyCallError(
+          "consultation_phone_not_collected",
+          "전화번호가 수집된 상담 고객에게만 문자를 보낼 수 있습니다.",
+        );
+      }
+      const [endpoint] = await tx
+        .select({ id: telephonyEndpoints.id })
+        .from(staffTelephonyBindings)
+        .innerJoin(
+          telephonyEndpoints,
+          eq(telephonyEndpoints.id, staffTelephonyBindings.endpointId),
+        )
+        .where(
+          and(
+            eq(staffTelephonyBindings.staffUserId, actor.id),
+            eq(staffTelephonyBindings.isActive, true),
+            eq(staffTelephonyBindings.isPrimary, true),
+            eq(telephonyEndpoints.provider, "centrex"),
+            eq(telephonyEndpoints.isActive, true),
+          ),
+        )
+        .limit(1);
+      if (!endpoint) {
+        throw new TelephonyCallError(
+          "centrex_endpoint_not_linked",
+          "직원 계정에 활성 센트릭스 회선이 연결되지 않았습니다.",
+        );
+      }
+
+      let templateName: string | null = null;
+      let imageFileId: string | null = null;
+      let imageOriginalName: string | null = null;
+      if (input.templateId) {
+        const [template] = await tx
+          .select({
+            id: messageTemplates.id,
+            name: messageTemplates.name,
+            isActive: messageTemplates.isActive,
+            ownerUserId: messageTemplates.ownerUserId,
+            imageFileId: messageTemplates.imageFileId,
+            imageOriginalName: messageTemplates.imageOriginalName,
+          })
+          .from(messageTemplates)
+          .where(eq(messageTemplates.id, input.templateId))
+          .limit(1);
+        if (!template) {
+          throw new TelephonyCallError(
+            "message_template_not_found",
+            "선택한 문자 템플릿을 찾을 수 없습니다.",
+          );
+        }
+        if (!template.isActive) {
+          throw new TelephonyCallError(
+            "message_template_inactive",
+            "현재 사용하지 않는 문자 템플릿입니다.",
+          );
+        }
+        if (template.ownerUserId && template.ownerUserId !== actor.id) {
+          throw new TelephonyCallError(
+            "message_template_owned_by_other_staff",
+            "다른 직원의 개인 템플릿은 사용할 수 없습니다.",
+          );
+        }
+        templateName = template.name;
+        imageFileId = template.imageFileId;
+        imageOriginalName = template.imageOriginalName;
+      }
+
+      const provider = imageFileId ? ("solapi" as const) : ("centrex" as const);
+      const messageKind = imageFileId ? ("mms" as const) : textKind;
+      if (provider === "solapi" && (!solapiClient || !solapiMmsSender)) {
+        throw new TelephonyCallError(
+          "mms_feature_disabled",
+          "이미지 문자를 보내려면 솔라피 MMS 발신번호 설정이 필요합니다.",
+        );
+      }
+
+      const messageId = createTelephonyMessageId();
+      const eventId = createEventId();
+      const encryptedBody = protection.encrypt(
+        input.body,
+        `telephony_messages/${messageId}/body`,
+      );
+      const bodyByteLength = centrexMessageByteLength(input.body);
+      const event: PlatformEvent = {
+        eventId,
+        eventType: "telephony.message.requested",
+        eventVersion: 1,
+        occurredAt: requestedAt.toISOString(),
+        producer: "lawand.gateway",
+        correlationId: consultationId,
+        data:
+          provider === "solapi"
+            ? {
+                messageId,
+                consultationId,
+                requestId: request.id,
+                endpointId: endpoint.id,
+                staffUserId: actor.id,
+                provider: "solapi",
+                channel: "mms",
+                command: "send-many",
+                contentRef: `telephony_messages/${messageId}/body`,
+              }
+            : {
+                messageId,
+                consultationId,
+                requestId: request.id,
+                endpointId: endpoint.id,
+                staffUserId: actor.id,
+                provider: "centrex",
+                channel: "sms",
+                command: "smssend",
+                contentRef: `telephony_messages/${messageId}/body`,
+              },
+      };
+      assertPlatformEvent(event);
+      await tx.insert(outboxEvents).values(
+        eventRow(event, messageId, "telephony_message"),
+      );
+      const [message] = await tx
+        .insert(telephonyMessages)
+        .values({
+          id: messageId,
+          provider,
+          endpointId: endpoint.id,
+          staffUserId: actor.id,
+          consultationId,
+          consultationRequestId: request.id,
+          templateId: input.templateId,
+          templateNameSnapshot: templateName,
+          imageFileIdSnapshot: imageFileId,
+          imageOriginalNameSnapshot: imageOriginalName,
+          outboxEventId: eventId,
+          idempotencyKey: input.idempotencyKey,
+          remotePhoneFingerprint: request.phoneFingerprint,
+          bodyCiphertext: encryptedBody.ciphertext,
+          bodyNonce: encryptedBody.nonce,
+          bodyKeyVersion: encryptedBody.keyVersion,
+          bodyFingerprint: protection.fingerprint(input.body),
+          messageKind,
+          bodyByteLength,
+          commandStatus: "queued",
+          requestedAt,
+          createdAt: requestedAt,
+          updatedAt: requestedAt,
+        })
+        .returning();
+      if (!message) throw new Error("telephony_message_not_created");
+      await tx.insert(staffAuditLogs).values({
+        id: createEventId(),
+        actorUserId: actor.id,
+        action: "telephony.message.requested",
+        targetType: "telephony_message",
+        targetId: messageId,
+        metadata: {
+          consultationId,
+          endpointId: endpoint.id,
+          templateId: input.templateId,
+          messageKind,
+          bodyByteLength,
+        },
+        occurredAt: requestedAt,
+        createdAt: requestedAt,
+      });
+      return { ...messageResponse(message), replayed: false };
+    });
+  }
+
+  async function getMessage(messageId: string, actor: StaffPrincipal) {
+    const [message] = await db
+      .select()
+      .from(telephonyMessages)
+      .where(eq(telephonyMessages.id, messageId))
+      .limit(1);
+    if (!message) {
+      throw new TelephonyCallError(
+        "message_not_found",
+        "문자 발송 요청을 찾을 수 없습니다.",
+      );
+    }
+    if (message.staffUserId !== actor.id) {
+      throw new TelephonyCallError(
+        "message_owned_by_other_staff",
+        "문자를 보낸 담당자만 발송 결과를 확인할 수 있습니다.",
+      );
+    }
+    return messageResponse(message);
+  }
+
   async function requestClickToCall(
     consultationId: string,
     actor: StaffPrincipal,
@@ -2653,8 +3251,11 @@ export function createTelephonyService(options: {
     completePhoneDeskFollowUp,
     completeInboundAnswerCommand,
     confirmDisposition,
+    createMessageTemplate,
     getCall,
     getInboundCallSnapshot,
+    getMessage,
+    listMessageTemplates,
     getPhoneDeskCalls,
     getPhoneDeskCall,
     pollInboundAnswerCommand,
@@ -2662,7 +3263,9 @@ export function createTelephonyService(options: {
     requestDirectoryClickToCall,
     requestInboundAnswer,
     searchLegalFriendsClients,
+    requestMessage,
     savePhoneDeskAftercare,
+    updateMessageTemplate,
   };
 }
 

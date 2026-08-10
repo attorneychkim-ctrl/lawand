@@ -73,6 +73,47 @@ export type TelephonyCall = {
   replayed?: boolean;
 };
 
+export type MessageTemplate = {
+  id: string;
+  name: string;
+  body: string;
+  bodyByteLength: number;
+  isActive: boolean;
+  scope: "built_in" | "personal";
+  editable: boolean;
+  image: {
+    url: string;
+    originalName: string;
+    byteLength: number;
+    width: number;
+    height: number;
+  } | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TelephonyMessage = {
+  id: string;
+  consultationId: string;
+  endpointId: string;
+  templateId: string | null;
+  templateName: string | null;
+  provider: "centrex" | "solapi";
+  messageKind: "sms" | "lms" | "mms";
+  imageAttached: boolean;
+  imageName: string | null;
+  bodyByteLength: number;
+  commandStatus: "queued" | "dispatching" | "succeeded" | "failed" | "unknown";
+  requestedAt: string;
+  dispatchedAt: string | null;
+  providerRespondedAt: string | null;
+  providerCode: string | null;
+  providerRemainingCount: number | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  replayed?: boolean;
+};
+
 export type TelephonyCallDisposition =
   | "customer_conversation"
   | "voicemail"
@@ -380,6 +421,33 @@ export type ConsultationDetail = {
       aftercareResult: PhoneDeskCallResult | null;
     }
   >;
+  telephonyMessages: Array<{
+    id: string;
+    staffUserId: string;
+    staffDisplayName: string;
+    endpoint: {
+      id: string;
+      label: string;
+      lineNumber: string;
+      extension: string;
+    };
+    templateId: string | null;
+    templateName: string | null;
+    provider: "centrex" | "solapi";
+    imageAttached: boolean;
+    imageName: string | null;
+    body: string;
+    messageKind: "sms" | "lms" | "mms";
+    bodyByteLength: number;
+    commandStatus: TelephonyMessage["commandStatus"];
+    requestedAt: string;
+    dispatchedAt: string | null;
+    providerRespondedAt: string | null;
+    providerCode: string | null;
+    providerRemainingCount: number | null;
+    lastErrorCode: string | null;
+    lastErrorMessage: string | null;
+  }>;
   firstRequestedAt: string;
   lastRequestedAt: string;
   requests: Array<{
@@ -427,6 +495,7 @@ async function gatewayFetch(
     body?: unknown;
     signal?: AbortSignal;
     streaming?: boolean;
+    timeoutMs?: number;
   } = {},
 ) {
   const sessionToken = await readStaffSessionToken();
@@ -448,7 +517,9 @@ async function gatewayFetch(
     cache: "no-store",
     signal:
       options.signal ??
-      (options.streaming ? undefined : AbortSignal.timeout(8_000)),
+      (options.streaming
+        ? undefined
+        : AbortSignal.timeout(options.timeoutMs ?? 8_000)),
   });
 }
 
@@ -642,6 +713,82 @@ async function telephonyResponse(response: Response): Promise<TelephonyCall> {
     );
   }
   return (await response.json()) as TelephonyCall;
+}
+
+async function messageResponse<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      message?: string;
+    } | null;
+    throw new ConsultationGatewayError(
+      response.status,
+      body?.message ?? `문자 처리 실패 (${response.status})`,
+    );
+  }
+  return (await response.json()) as T;
+}
+
+export async function getMessageTemplates(
+  includeInactive = false,
+): Promise<MessageTemplate[]> {
+  const body = await messageResponse<{ items: MessageTemplate[] }>(
+    await gatewayFetch(
+      `/v1/message-templates${includeInactive ? "?includeInactive=true" : ""}`,
+    ),
+  );
+  return body.items;
+}
+
+export async function createMessageTemplate(input: {
+  name: string;
+  body: string;
+  image?: { originalName: string; fileBase64: string } | null;
+}): Promise<MessageTemplate> {
+  return messageResponse(
+    await gatewayFetch("/v1/message-templates", {
+      method: "POST",
+      body: input,
+      timeoutMs: 20_000,
+    }),
+  );
+}
+
+export async function updateMessageTemplate(
+  templateId: string,
+  input: {
+    name: string;
+    body: string;
+    isActive: boolean;
+    image?: { originalName: string; fileBase64: string } | null;
+  },
+): Promise<MessageTemplate> {
+  return messageResponse(
+    await gatewayFetch(`/v1/message-templates/${templateId}`, {
+      method: "POST",
+      body: input,
+      timeoutMs: 20_000,
+    }),
+  );
+}
+
+export async function requestConsultationMessage(
+  consultationId: string,
+  input: { idempotencyKey: string; templateId: string | null; body: string },
+): Promise<TelephonyMessage> {
+  return messageResponse(
+    await gatewayFetch(`/v1/consultations/${consultationId}/messages`, {
+      method: "POST",
+      body: input,
+    }),
+  );
+}
+
+export async function getTelephonyMessage(
+  messageId: string,
+): Promise<TelephonyMessage> {
+  return messageResponse(
+    await gatewayFetch(`/v1/telephony-messages/${messageId}`),
+  );
 }
 
 export async function requestConsultationClickToCall(

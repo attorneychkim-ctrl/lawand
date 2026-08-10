@@ -10,6 +10,7 @@ export type ConsultationRequestId = string;
 export type EventId = string;
 export type ReviewSubmissionId = string;
 export type TelephonyCallId = string;
+export type TelephonyMessageId = string;
 
 export function createConsultationId(): ConsultationId {
   return uuidv7();
@@ -28,6 +29,10 @@ export function createReviewSubmissionId(): ReviewSubmissionId {
 }
 
 export function createTelephonyCallId(): TelephonyCallId {
+  return uuidv7();
+}
+
+export function createTelephonyMessageId(): TelephonyMessageId {
   return uuidv7();
 }
 

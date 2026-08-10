@@ -111,7 +111,7 @@ function nextAvailableAt(
 export function createAlimtalkOutboxWorker(options: {
   db: Database;
   protection: DataProtection;
-  solapiClient: SolapiClient;
+  solapiClient: Pick<SolapiClient, "sendAlimtalk">;
   pfId: string;
   requestTemplateId: string;
   assignmentTemplateId: string;

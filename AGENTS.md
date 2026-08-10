@@ -18,6 +18,9 @@
 - 이 WSL 환경: node **v22.22.2**, pnpm **11.17.0**(Corepack + 로컬 shim).
 
 ## 작업 규칙
+- 이 저장소의 워크트리·터미널 관리자는 **HERDR**다. Orca 관리로 가정하거나 Orca 상태를
+  인수인계 원장으로 사용하지 않는다. HERDR 세션에서는 `HERDR_ENV=1`을 확인하고
+  `herdr worktree list`로 관리 워크트리를 확인한다.
 - `main`이 아닌 워크트리 브랜치에서는 구현·검증 뒤 해당 브랜치 커밋과 원격 브랜치
   푸시까지만 수행한다. `main` 머지·`main` 푸시와 실서비스 배포·운영 데이터 변경은
   메인 세션에서만 수행하며, 사용자가 해당 브랜치 세션에 별도로 명시하지 않는 한
@@ -28,6 +31,9 @@
   릴리스 ID로 함께 적용한다. 이미 별도 긴급 배포된 작업이나 이번 배포에서 제외할 작업은
   인수인계 로그에 명시해 중복·누락 배포를 막으며, `main` 푸시만으로 배포 완료로 간주하지
   않는다.
+- 메인 통합 배포 직전에는 HERDR 워크트리 목록과 `origin/worktree/*` 원격 브랜치를 모두
+  열거하고, 각 HEAD가 `main`의 ancestor인지 확인한다. 미반영 브랜치는 `병합/명시적 제외/
+  진행 중` 중 하나로 기록하기 전에는 아티팩트 생성과 운영 배포를 시작하지 않는다.
 - 의미 있는 작업(스캐폴딩, 신규 패키지/앱, DB 스키마, 외부 연동, 배포 등)을 마치면
   아래 **인수인계 로그에 형식 맞춰 새 항목을 append**할 것 — 다음 세션/다른 에이전트가
   이어받는 유일한 경로다.
@@ -65,6 +71,16 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-10 — 워크트리 관리자 HERDR 확정·누락 방지 게이트
+- 사용자가 이 저장소의 워크트리 관리자는 Orca가 아니라 **HERDR**라고 확정했다. 이후
+  Orca 상태를 이 저장소의 작업 원장으로 사용하지 않는다. 메인 통합 전 HERDR 목록과
+  모든 `origin/worktree/*` HEAD의 `main` 포함 여부를 함께 대조하는 규칙을 작업 규칙에
+  추가했다.
+- 전수 대조 결과 `clear-cloud-e8ca`, `rapid-forest-579e`, `silver-stone-87f7`은 `main`에
+  포함됐고 문자 기능 `rapid-forest-aa5e`만 누락된 것을 확인했다. 이 브랜치는 현재 메인에
+  통합 중이며, 고객 찾기용 운영 migration `0040`과 충돌하므로 문자 migration은 `0041`로
+  재생성한 뒤 검증·배포한다.
+
 ### 2026-08-10 — ERP 고객 찾기·migration 0040 통합 운영 배포
 - 기존 메인 고객 찾기 커밋 `5bb3087`, silver-stone 병합 결과와 메인 통합 배포 지침
   `c464dae`를 현재 `main` HEAD 단일 아티팩트로 묶었다. 암호화 RDS 스냅샷
@@ -88,6 +104,32 @@
   active, systemd·컨테이너 재시작 0, error journal 0, 내외부 health 200, CloudWatch 경보는
   모두 `OK`다. 통화 원장이나 기존 운영 데이터를 수동 보정하지 않았다. `PROJECT_PLAN.md`는
   v0.95다.
+
+### 2026-08-10 — 센트릭스 문자·직원 개인 템플릿·JPG MMS 로컬 출시 후보
+- migration `0040_late_talon.sql`로 직원 개인 `message_templates`와 암호화 본문 기반
+  `telephony_messages` 원장을 추가했다. 소유자 없는 기본 템플릿 3개는 전 직원 읽기 전용이고,
+  개인 템플릿은 `owner_user_id`의 직원만 조회·수정·사용한다. 템플릿 이름도 직원별로만
+  중복을 막으며 생성·수정·발송은 모두 기존 직원 세션과 상담 역할 경계를 거친다.
+- 전화번호가 수집된 현재 담당 상담에서 텍스트 전용 문자는 U+ 센트릭스 `smssend`로
+  SMS 80바이트/LMS 720바이트를 발송한다. 개인정보 없는 `telephony.message.requested`
+  outbox와 AES-GCM 본문 원장을 같은 트랜잭션으로 만들고 기존 단일 워커가 클릭투콜과
+  번갈아 직렬 처리한다. 고객 번호·본문은 이벤트·로그에 넣지 않고 발송 직전에만 복호화한다.
+- 템플릿에는 JPG 명함 이미지를 붙일 수 있다. 브라우저와 gateway가 200KB·1500×1440px
+  제한을 확인하고 SOLAPI `/storage/v1/files`에 한 번 업로드한 뒤 파일 ID·미리보기 URL·
+  크기·해상도만 저장한다. 이미지 템플릿 발송은 SOLAPI MMS로 자동 분기하며 새 운영 설정
+  `LAWAND_SOLAPI_MMS_SENDER`에는 같은 계정에 사전 등록된 국내 발신번호가 필요하다.
+- ERP 전역 `문자` 메뉴에서 내 템플릿 생성·수정·비활성화, 기본 템플릿 복사, 허용 변수
+  `{{고객명}}`·`{{담당자명}}`·`{{접수번호}}`, JPG 첨부와 실시간 휴대전화 미리보기를
+  제공한다. 상담 상세에는 `문자 보내기` 작성창·발송 전 확인·상태 polling과 실제 본문·
+  이미지 여부·담당자·결과 원장을 추가했다. 첫 SSR은 고정 상태이고 dialog는 사용자 클릭
+  뒤 body portal로 열려 hydration 비결정값을 만들지 않는다.
+- core 57개·gateway 83개 테스트, 5개 패키지 개별 typecheck, core/db/gateway/ERP build,
+  gateway/ERP lint, Drizzle schema check와 `git diff --check`를 통과했다. 모노레포 root turbo는
+  이 워크트리 PATH에 `pnpm` shim이 없어 실행하지 못했지만 같은 범위를 패키지별로 검증했다.
+  로컬·운영 DB migration, 실제 SMS/MMS 발송, `main` 병합과 운영 배포는 하지 않았다.
+  운영은 암호화 스냅샷 → migration 0040 → 기존 SOLAPI 키와 등록 발신번호 설정 → gateway/ERP
+  동시 배포 → 통제 SMS/LMS·명함 MMS 각 1건 순서다. 상세는 `docs/CENTREX_MESSAGING_V1.md`,
+  `PROJECT_PLAN.md`는 v0.94다.
 
 ### 2026-08-10 — silver-stone 메인 병합·기배포 상태 검증
 - 원격 `worktree/silver-stone-87f7`의 기능·운영 문서 커밋을 기존 고객 찾기 커밋이 있는
