@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import { moveAttention } from "@/lib/move-attention";
+
 import { ArrowIcon, CheckIcon } from "../bank/_components/site-chrome";
 
 type QuestionKey = "visit" | "curiosity" | "priority" | "discovery";
@@ -280,12 +282,8 @@ export function AboutConversation() {
         `[data-about-answer][data-index="${questionIndex}"]`,
       );
       if (!response) return;
-      const reducedMotion = window.matchMedia(
-        "(prefers-reduced-motion: reduce)",
-      ).matches;
-      response.scrollIntoView({
-        behavior: reducedMotion ? "auto" : "smooth",
-        block: "center",
+      moveAttention(response, {
+        focusTarget: response.querySelector<HTMLElement>("h4"),
       });
     }, 80);
   }
@@ -298,12 +296,8 @@ export function AboutConversation() {
           )
         : document.querySelector<HTMLElement>(".about-conversation-result");
     if (!target) return;
-    const reducedMotion = window.matchMedia(
-      "(prefers-reduced-motion: reduce)",
-    ).matches;
-    target.scrollIntoView({
-      behavior: reducedMotion ? "auto" : "smooth",
-      block: "center",
+    moveAttention(target, {
+      focusTarget: target.querySelector<HTMLElement>("h3"),
     });
   }
 
@@ -377,7 +371,7 @@ export function AboutConversation() {
                   <span>{String(questionIndex + 1).padStart(2, "0")}</span>
                   <p>{question.eyebrow}</p>
                 </header>
-                <h3>{question.question}</h3>
+                <h3 tabIndex={-1}>{question.question}</h3>
                 <div className="about-answer-options">
                   {question.options.map((option) => {
                     const isSelected =
@@ -413,7 +407,7 @@ export function AboutConversation() {
                     <p className="about-answer-response-label">
                       로앤의 솔직한 답
                     </p>
-                    <h4>{selected.answerTitle}</h4>
+                    <h4 tabIndex={-1}>{selected.answerTitle}</h4>
                     <p className="about-answer-response-body">
                       {selected.answer}
                     </p>
@@ -450,7 +444,7 @@ export function AboutConversation() {
             {completedCount === questions.length && result ? (
               <>
                 <p className="eyebrow">YOUR LAW&amp; STANDARD</p>
-                <h3>{result.title}</h3>
+                <h3 tabIndex={-1}>{result.title}</h3>
                 <p>{result.body}</p>
                 <div>
                   <a className="button button-inverse" href="#evidence">
