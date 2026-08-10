@@ -71,6 +71,23 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-10 — ERP 문자 템플릿 개인 전용·실삭제 출시 후보
+- 기본 제공 템플릿과 `상담 화면에서 이 템플릿 사용` 체크를 제거했다. 템플릿은 이제
+  `owner_user_id`가 반드시 있는 직원 개인 설정이며, 만든 직원의 모든 템플릿이 상담 상세
+  발송창에 표시된다. 전역 `문자` 화면에는 확인창을 거치는 실제 삭제 버튼과 빈 목록 안내를
+  추가했고, 다른 직원 템플릿의 조회·수정·사용·삭제 차단은 gateway에서 계속 강제한다.
+- migration `0042_bright_midnight.sql`은 기존 기본 템플릿 3건과 `is_active` 컬럼·인덱스를
+  제거한다. 삭제된 템플릿을 사용한 과거 발송은 `telephony_messages.template_id`만
+  `ON DELETE SET NULL`로 해제하며 템플릿명·암호화 본문·이미지 스냅샷과 감사 원장은
+  보존한다. 발송과 삭제가 경합하지 않도록 발송 트랜잭션은 템플릿에 key-share lock을 잡는다.
+- 현재 `lawand_dev`를 복제한 임시 DB에서 `lawand_migrator` 역할로 migration을 적용해
+  기본 템플릿 0건, 소유자 `NOT NULL`, `is_active` 0개, FK 삭제 동작 `SET NULL`, 완화된
+  스냅샷 제약을 확인한 뒤 임시 DB를 삭제했다. 실제 로컬·운영 DB migration과 운영 배포는
+  수행하지 않았다.
+- 전체 5개 패키지 typecheck·lint·production build, core 59개·gateway 84개 테스트,
+  Drizzle schema check와 `git diff --check`를 통과했다. 운영 반영 시에는 암호화 RDS 스냅샷
+  뒤 migration `0042`와 gateway·ERP를 같은 릴리스로 배포한다. `PROJECT_PLAN.md`는 v0.98이다.
+
 ### 2026-08-10 — HERDR 전수 대조·고객 문자 v1 통합 운영 배포
 - HERDR가 이 저장소의 워크트리·터미널 관리자임을 재확인하고 HERDR 목록과 모든
   `origin/worktree/*`를 대조했다. `clear-cloud-e8ca`, `rapid-forest-579e`,

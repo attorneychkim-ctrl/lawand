@@ -10,12 +10,10 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: Request) {
+export async function GET() {
   try {
-    const includeInactive =
-      new URL(request.url).searchParams.get("includeInactive") === "true";
     return NextResponse.json({
-      items: await getMessageTemplates(includeInactive),
+      items: await getMessageTemplates(),
     });
   } catch {
     return NextResponse.json(

@@ -53,11 +53,11 @@ export function MessageTemplateWorkspace({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [body, setBody] = useState("");
-  const [isActive, setIsActive] = useState(true);
   const [existingImage, setExistingImage] = useState<MessageTemplate["image"]>(null);
   const [imageDraft, setImageDraft] = useState<ImageDraft | null>(null);
   const [removeImage, setRemoveImage] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -69,7 +69,6 @@ export function MessageTemplateWorkspace({
     setEditingId(null);
     setName("");
     setBody("");
-    setIsActive(true);
     setExistingImage(null);
     setImageDraft(null);
     setRemoveImage(false);
@@ -78,23 +77,14 @@ export function MessageTemplateWorkspace({
   }
 
   function edit(template: MessageTemplate) {
-    if (!template.editable) return;
     setEditingId(template.id);
     setName(template.name);
     setBody(template.body);
-    setIsActive(template.isActive);
     setExistingImage(template.image);
     setImageDraft(null);
     setRemoveImage(false);
     setError("");
     setSuccess("");
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  function copyBuiltIn(template: MessageTemplate) {
-    resetForm();
-    setName(`${template.name} - 내 버전`);
-    setBody(template.body);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -140,7 +130,6 @@ export function MessageTemplateWorkspace({
           body: JSON.stringify({
             name,
             body,
-            ...(editingId ? { isActive } : {}),
             ...(image === undefined ? {} : { image }),
           }),
         },
@@ -160,7 +149,6 @@ export function MessageTemplateWorkspace({
       setEditingId(result.id);
       setName(result.name);
       setBody(result.body);
-      setIsActive(result.isActive);
       setExistingImage(result.image);
       setImageDraft(null);
       setRemoveImage(false);
@@ -169,6 +157,31 @@ export function MessageTemplateWorkspace({
       setError(reason instanceof Error ? reason.message : "템플릿을 저장하지 못했습니다.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function remove(template: MessageTemplate) {
+    if (!window.confirm(`\"${template.name}\" 템플릿을 삭제할까요?`)) return;
+    setDeletingId(template.id);
+    setError("");
+    setSuccess("");
+    try {
+      const response = await fetch(`/api/message-templates/${template.id}`, {
+        method: "DELETE",
+      });
+      const result = (await response.json().catch(() => null)) as
+        | { id?: string; deleted?: boolean; message?: string }
+        | null;
+      if (!response.ok || result?.deleted !== true) {
+        throw new Error(result?.message ?? "템플릿을 삭제하지 못했습니다.");
+      }
+      setItems((current) => current.filter((item) => item.id !== template.id));
+      if (editingId === template.id) resetForm();
+      setSuccess("내 문자 템플릿을 삭제했습니다.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "템플릿을 삭제하지 못했습니다.");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -181,7 +194,7 @@ export function MessageTemplateWorkspace({
             <h2 id="template-editor-title">{editingId ? "내 템플릿 수정" : "내 템플릿 만들기"}</h2>
             <p>여기서 만든 템플릿은 내 계정에만 표시됩니다.</p>
           </div>
-          {editingId ? <button className="secondary-button" onClick={resetForm} type="button">새 템플릿</button> : null}
+          {editingId ? <button className="secondary-button" disabled={saving || deletingId !== null} onClick={resetForm} type="button">새 템플릿</button> : null}
         </header>
 
         <div className="message-template-editor-grid">
@@ -216,15 +229,9 @@ export function MessageTemplateWorkspace({
                 <button onClick={() => { setImageDraft(null); setRemoveImage(true); }} type="button">이미지 제거</button>
               </div>
             ) : null}
-            {editingId ? (
-              <label className="message-active-toggle">
-                <input checked={isActive} onChange={(event) => setIsActive(event.target.checked)} type="checkbox" />
-                <span>상담 화면에서 이 템플릿 사용</span>
-              </label>
-            ) : null}
             {error ? <p className="message-compose-error" role="alert">{error}</p> : null}
             {success ? <p className="message-compose-result is-succeeded" role="status">{success}</p> : null}
-            <button className="primary-button" disabled={saving || !name.trim() || !body.trim() || byteLength > 720} type="submit">
+            <button className="primary-button" disabled={saving || deletingId !== null || !name.trim() || !body.trim() || byteLength > 720} type="submit">
               {saving ? "저장 중…" : editingId ? "변경 내용 저장" : "내 템플릿 저장"}
             </button>
           </form>
@@ -245,25 +252,30 @@ export function MessageTemplateWorkspace({
         <header>
           <div>
             <p className="section-kicker">SAVED MESSAGES</p>
-            <h2 id="template-list-title">사용 가능한 템플릿</h2>
-            <p>기본 템플릿은 읽기 전용이며, 내 템플릿만 수정할 수 있습니다.</p>
+            <h2 id="template-list-title">내 템플릿</h2>
+            <p>저장한 템플릿은 상담 화면에서 바로 선택할 수 있습니다.</p>
           </div>
           <span className="count-badge">{items.length}개</span>
         </header>
         <div className="message-template-cards">
+          {items.length === 0 ? (
+            <p className="message-template-empty">아직 저장한 문자 템플릿이 없습니다.</p>
+          ) : null}
           {items.map((template) => (
-            <article className={`${template.isActive ? "" : "is-inactive"}`} key={template.id}>
+            <article key={template.id}>
               <div>
-                <span className={`message-template-scope is-${template.scope}`}>{template.scope === "personal" ? "내 템플릿" : "기본"}</span>
+                <span className="message-template-scope is-personal">내 템플릿</span>
                 {template.image ? <span className="message-template-image-badge">이미지</span> : null}
-                {!template.isActive ? <span className="message-template-inactive-badge">사용 안 함</span> : null}
               </div>
               <h3>{template.name}</h3>
               <p>{template.body}</p>
               <small>{template.bodyByteLength} byte{template.image ? ` · ${template.image.originalName}` : ""}</small>
-              <button className="secondary-button" onClick={() => template.editable ? edit(template) : copyBuiltIn(template)} type="button">
-                {template.editable ? "수정" : "내 템플릿으로 복사"}
-              </button>
+              <div className="message-template-card-actions">
+                <button className="secondary-button" disabled={saving || deletingId !== null} onClick={() => edit(template)} type="button">수정</button>
+                <button className="message-template-delete-button" disabled={saving || deletingId !== null} onClick={() => void remove(template)} type="button">
+                  {deletingId === template.id ? "삭제 중…" : "삭제"}
+                </button>
+              </div>
             </article>
           ))}
         </div>

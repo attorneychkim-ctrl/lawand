@@ -2060,9 +2060,11 @@ export const messageTemplates = pgTable(
   "message_templates",
   {
     id: uuid("id").primaryKey(),
-    ownerUserId: uuid("owner_user_id").references(() => staffUsers.id, {
-      onDelete: "restrict",
-    }),
+    ownerUserId: uuid("owner_user_id")
+      .notNull()
+      .references(() => staffUsers.id, {
+        onDelete: "restrict",
+      }),
     name: varchar("name", { length: 80 }).notNull(),
     body: text("body").notNull(),
     bodyByteLength: integer("body_byte_length").notNull(),
@@ -2072,26 +2074,18 @@ export const messageTemplates = pgTable(
     imageByteLength: integer("image_byte_length"),
     imageWidth: integer("image_width"),
     imageHeight: integer("image_height"),
-    isActive: boolean("is_active").default(true).notNull(),
-    createdByUserId: uuid("created_by_user_id").references(
-      () => staffUsers.id,
-      { onDelete: "restrict" },
-    ),
-    updatedByUserId: uuid("updated_by_user_id").references(
-      () => staffUsers.id,
-      { onDelete: "restrict" },
-    ),
+    createdByUserId: uuid("created_by_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "restrict" }),
+    updatedByUserId: uuid("updated_by_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "restrict" }),
     ...timestamps,
   },
   (table) => [
     uniqueIndex("message_templates_owner_name_lower_uidx").on(
       table.ownerUserId,
       sql`lower(${table.name})`,
-    ),
-    index("message_templates_active_name_idx").on(
-      table.ownerUserId,
-      table.isActive,
-      table.name,
     ),
     check(
       "message_templates_name_nonempty",
@@ -2107,15 +2101,8 @@ export const messageTemplates = pgTable(
     ),
     check(
       "message_templates_owner_audit_consistent",
-      sql`(
-        ${table.ownerUserId} IS NULL
-        AND ${table.createdByUserId} IS NULL
-        AND ${table.updatedByUserId} IS NULL
-      ) OR (
-        ${table.ownerUserId} IS NOT NULL
-        AND ${table.createdByUserId} = ${table.ownerUserId}
-        AND ${table.updatedByUserId} = ${table.ownerUserId}
-      )`,
+      sql`${table.createdByUserId} = ${table.ownerUserId}
+        AND ${table.updatedByUserId} = ${table.ownerUserId}`,
     ),
     check(
       "message_templates_image_metadata_complete",
@@ -2158,7 +2145,7 @@ export const telephonyMessages = pgTable(
       .notNull()
       .references(() => consultationRequests.id, { onDelete: "restrict" }),
     templateId: uuid("template_id").references(() => messageTemplates.id, {
-      onDelete: "restrict",
+      onDelete: "set null",
     }),
     templateNameSnapshot: varchar("template_name_snapshot", { length: 80 }),
     imageFileIdSnapshot: varchar("image_file_id_snapshot", { length: 100 }),
@@ -2265,7 +2252,7 @@ export const telephonyMessages = pgTable(
     ),
     check(
       "telephony_messages_template_snapshot_pair",
-      sql`(${table.templateId} IS NULL) = (${table.templateNameSnapshot} IS NULL)`,
+      sql`${table.templateId} IS NULL OR ${table.templateNameSnapshot} IS NOT NULL`,
     ),
     check(
       "telephony_messages_dispatch_time_order",
