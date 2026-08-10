@@ -49,7 +49,7 @@ export const metadata: Metadata = {
     canonical: pagePath,
   },
   openGraph: {
-    title: "법무법인 로앤 소개 | 큰말보다 확인 가능한 과정",
+    title: "법무법인 로앤 소개 | 앞선 약속보다 확인 가능한 과정",
     description:
       "무엇을 중요하게 보는지 네 가지 질문에 답하고, 로앤의 실제 기록과 일하는 원칙을 확인해 보세요.",
     type: "website",
@@ -66,6 +66,13 @@ function formatMonth(value: Date) {
   })
     .format(value)
     .replaceAll(" ", "");
+}
+
+function formatMonthLabel(value: Date) {
+  return new Intl.DateTimeFormat("ko-KR", {
+    month: "long",
+    year: "numeric",
+  }).format(value);
 }
 
 export default async function AboutPage() {
@@ -114,7 +121,7 @@ export default async function AboutPage() {
               <div>
                 <p className="eyebrow light-eyebrow">ABOUT LAW&amp;</p>
                 <h1>
-                  신뢰는 큰말보다,
+                  신뢰는 앞선 약속보다,
                   <br />
                   <span>확인 가능한 과정에서</span>
                   <br />
@@ -159,7 +166,7 @@ export default async function AboutPage() {
                 </dl>
                 <p>
                   출처가 불분명한 누적 상담·성공 숫자는 쓰지 않습니다. 공개
-                  후기 원장과 공식 법인·사무소 정보처럼 확인 가능한 값만
+                  후기 기록과 공식 법인·사무소 정보처럼 확인 가능한 값만
                   표시합니다.
                 </p>
               </aside>
@@ -232,9 +239,9 @@ export default async function AboutPage() {
                 고객이 남긴 기록을 엽니다.
               </h2>
               <p>
-                2016년 10월부터 현재까지 작성된 공개 후기의 원문·작성일·작성
-                당시 단계를 보존하고 있습니다. 별점이나 ‘베스트 후기’로
-                줄 세우지 않습니다.
+                {formatMonthLabel(evidence.firstReviewDate)}부터 현재까지 작성된
+                공개 후기의 원문·작성일·작성 당시 단계를 그대로 보존하고
+                있습니다. 별점이나 ‘베스트 후기’로 줄 세우지 않습니다.
               </p>
               <a className="button button-outline-light" href="/bank/reviews">
                 공개 후기 원문 살펴보기
@@ -244,7 +251,7 @@ export default async function AboutPage() {
 
             <div className="about-evidence-dashboard">
               <header>
-                <span>공개 후기 원장</span>
+                <span>공개 후기 기록</span>
                 <strong>
                   {evidence.totalCount.toLocaleString("ko-KR")}
                   <small>건</small>

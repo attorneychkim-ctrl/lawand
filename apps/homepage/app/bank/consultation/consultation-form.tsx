@@ -11,13 +11,7 @@ import { CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION } from "@lawand/core";
 
 import { KakaoConsultationEntry } from "@/app/_components/kakao-consultation-entry";
 
-import {
-  getConsultationAttribution,
-  getConsultationCtaContext,
-  getConsultationJourney,
-  type ConsultationCtaContext,
-  type JourneyEntry,
-} from "../../_components/journey-tracker";
+import { getConsultationAttribution } from "../../_components/journey-tracker";
 import {
   ArrowIcon,
   CheckIcon,
@@ -383,8 +377,6 @@ export function ConsultationForm() {
   const [data, setData] = useState<FormData>(initialData);
   const [error, setError] = useState("");
   const [receipt, setReceipt] = useState("");
-  const [journey, setJourney] = useState<JourneyEntry[]>([]);
-  const [ctaContext, setCtaContext] = useState<ConsultationCtaContext | null>(null);
   const [now, setNow] = useState(() => new Date());
   const [customDateOpen, setCustomDateOpen] = useState(false);
   const [idempotencyKey, setIdempotencyKey] = useState(() =>
@@ -581,8 +573,6 @@ export function ConsultationForm() {
             : "상담 요청을 접수하지 못했습니다.",
         );
       }
-      setJourney(getConsultationJourney());
-      setCtaContext(getConsultationCtaContext());
       setReceipt(result.publicReceiptCode);
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (submissionError) {
@@ -656,20 +646,9 @@ export function ConsultationForm() {
         <div className="complete-expectation">
           <span>연락 안내</span>
           <p>
-            빠른 연락 요청은 운영시간 내 접수 순서대로 확인합니다. 시간대를
-            선택했다면 해당 30분 구간 안에 연락드릴 예정입니다.
+            빠른 연락을 요청하셨다면 운영시간에 접수된 순서대로 확인합니다.
+            시간대를 선택하셨다면 그 30분 구간 안에 연락드립니다.
           </p>
-        </div>
-
-        <div className="complete-journey">
-          <strong>브라우저 세션 확인</strong>
-          <p>
-            내부 방문 경로 {Math.max(journey.length, 1)}개와 광고 유입 정보를 이 접수에
-            연결했습니다.
-          </p>
-          {ctaContext && ctaContext.path !== "/bank/consultation" ? (
-            <span>이 세션에서 상담 요청을 누른 페이지: {ctaContext.path}</span>
-          ) : null}
         </div>
 
         <div className="complete-actions">
@@ -713,8 +692,8 @@ export function ConsultationForm() {
         </section>
 
         <section className="consultation-entry shell" aria-labelledby="entry-title">
-          <div className="prototype-notice" role="status">
-            상담 요청을 완료하면 입력 내용이 안전하게 암호화되어 접수됩니다.
+          <div className="intake-notice" role="status">
+            상담 요청을 완료하면 입력 내용이 암호화되어 안전하게 접수됩니다.
           </div>
           <div className="consultation-entry-heading">
             <p className="eyebrow">시작 방법</p>
@@ -775,8 +754,8 @@ export function ConsultationForm() {
 
   return (
     <section className="consultation-flow shell">
-      <div className="prototype-notice" role="status">
-        입력 내용은 제출 전까지 이 화면에만 있으며, 완료 버튼을 누르면 암호화해
+      <div className="intake-notice" role="status">
+        입력 내용은 제출 전까지 이 화면에만 남으며, 완료 버튼을 누르면 암호화해
         접수합니다.
       </div>
 
@@ -1016,7 +995,7 @@ export function ConsultationForm() {
               >
                 <span>가능한 빨리</span>
                 <strong>{callbackExpectation}</strong>
-                <small>연락이 늦어지면 지연 안내를 보내는 흐름으로 연결할 예정입니다.</small>
+                <small>운영시간에 접수된 순서대로 확인해 연락드립니다.</small>
               </button>
               <button
                 type="button"
@@ -1144,7 +1123,9 @@ export function ConsultationForm() {
                   value={data.nickname}
                   onChange={(event) => update("nickname", event.target.value)}
                 />
-                <small>미입력 시 내부에서 익명 이름이 자동으로 만들어집니다.</small>
+                <small>
+                  입력하지 않으면 접수번호를 기준으로 한 익명 표기로 접수됩니다.
+                </small>
               </label>
               <label>
                 <span>휴대전화 번호</span>
@@ -1254,7 +1235,7 @@ export function ConsultationForm() {
               </div>
               <div>
                 <dt>이름 또는 호칭</dt>
-                <dd>{data.nickname.trim() || "익명 이름 자동 생성"}</dd>
+                <dd>{data.nickname.trim() || "입력하지 않음 · 익명으로 접수"}</dd>
               </div>
               <div>
                 <dt>거주 지역</dt>
@@ -1317,8 +1298,8 @@ export function ConsultationForm() {
               </p>
             </div>
 
-            <div className="prototype-submit-note">
-              완료하면 실제 상담 요청으로 접수되며 접수번호가 발급됩니다.
+            <div className="consultation-submit-note">
+              완료를 누르면 상담 요청이 접수되고 접수번호가 발급됩니다.
             </div>
           </div>
         ) : null}
