@@ -8,6 +8,10 @@ export type GatewayConfig = {
   outboxWorkerEnabled: boolean;
   legalFriendsApiToken: string | null;
   alimtalkWorkerEnabled: boolean;
+  solapiApiCredentials: {
+    apiKey: string;
+    apiSecret: string;
+  } | null;
   solapi: {
     apiKey: string;
     apiSecret: string;
@@ -15,6 +19,7 @@ export type GatewayConfig = {
     requestTemplateId: string;
     assignmentTemplateId: string;
   } | null;
+  solapiMmsSender: string | null;
   kakaoSkill: {
     botId: string;
     secret: string;
@@ -257,6 +262,13 @@ export function readGatewayConfig(): GatewayConfig {
     assignmentTemplateId:
       process.env.LAWAND_SOLAPI_ASSIGNMENT_TEMPLATE_ID?.trim() || "",
   };
+  const solapiApiCredentials =
+    solapiValues.apiKey && solapiValues.apiSecret
+      ? {
+          apiKey: solapiValues.apiKey,
+          apiSecret: solapiValues.apiSecret,
+        }
+      : null;
   const solapi = Object.values(solapiValues).every(Boolean)
     ? solapiValues
     : null;
@@ -265,6 +277,14 @@ export function readGatewayConfig(): GatewayConfig {
       "알림톡 워커를 사용하려면 솔라피 API 키·시크릿·채널·템플릿 설정이 모두 필요합니다.",
     );
   }
+  const solapiMmsSenderValue =
+    process.env.LAWAND_SOLAPI_MMS_SENDER?.replace(/\D/g, "") || "";
+  if (solapiMmsSenderValue && !/^0\d{8,10}$/.test(solapiMmsSenderValue)) {
+    throw new Error(
+      "LAWAND_SOLAPI_MMS_SENDER는 사전 등록된 국내 발신번호여야 합니다.",
+    );
+  }
+  const solapiMmsSender = solapiMmsSenderValue || null;
   const kakaoSkillValues = {
     botId: process.env.LAWAND_KAKAO_CHATBOT_BOT_ID?.trim() || "",
     secret: process.env.LAWAND_KAKAO_CHATBOT_SKILL_SECRET?.trim() || "",
@@ -318,7 +338,9 @@ export function readGatewayConfig(): GatewayConfig {
     outboxWorkerEnabled,
     legalFriendsApiToken,
     alimtalkWorkerEnabled,
+    solapiApiCredentials,
     solapi,
+    solapiMmsSender,
     kakaoSkill,
     naverBookingImapEnabled,
     naverBookingImap,

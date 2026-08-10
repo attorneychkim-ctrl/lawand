@@ -55,6 +55,32 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-10 — 센트릭스 문자·직원 개인 템플릿·JPG MMS 로컬 출시 후보
+- migration `0040_late_talon.sql`로 직원 개인 `message_templates`와 암호화 본문 기반
+  `telephony_messages` 원장을 추가했다. 소유자 없는 기본 템플릿 3개는 전 직원 읽기 전용이고,
+  개인 템플릿은 `owner_user_id`의 직원만 조회·수정·사용한다. 템플릿 이름도 직원별로만
+  중복을 막으며 생성·수정·발송은 모두 기존 직원 세션과 상담 역할 경계를 거친다.
+- 전화번호가 수집된 현재 담당 상담에서 텍스트 전용 문자는 U+ 센트릭스 `smssend`로
+  SMS 80바이트/LMS 720바이트를 발송한다. 개인정보 없는 `telephony.message.requested`
+  outbox와 AES-GCM 본문 원장을 같은 트랜잭션으로 만들고 기존 단일 워커가 클릭투콜과
+  번갈아 직렬 처리한다. 고객 번호·본문은 이벤트·로그에 넣지 않고 발송 직전에만 복호화한다.
+- 템플릿에는 JPG 명함 이미지를 붙일 수 있다. 브라우저와 gateway가 200KB·1500×1440px
+  제한을 확인하고 SOLAPI `/storage/v1/files`에 한 번 업로드한 뒤 파일 ID·미리보기 URL·
+  크기·해상도만 저장한다. 이미지 템플릿 발송은 SOLAPI MMS로 자동 분기하며 새 운영 설정
+  `LAWAND_SOLAPI_MMS_SENDER`에는 같은 계정에 사전 등록된 국내 발신번호가 필요하다.
+- ERP 전역 `문자` 메뉴에서 내 템플릿 생성·수정·비활성화, 기본 템플릿 복사, 허용 변수
+  `{{고객명}}`·`{{담당자명}}`·`{{접수번호}}`, JPG 첨부와 실시간 휴대전화 미리보기를
+  제공한다. 상담 상세에는 `문자 보내기` 작성창·발송 전 확인·상태 polling과 실제 본문·
+  이미지 여부·담당자·결과 원장을 추가했다. 첫 SSR은 고정 상태이고 dialog는 사용자 클릭
+  뒤 body portal로 열려 hydration 비결정값을 만들지 않는다.
+- core 57개·gateway 83개 테스트, 5개 패키지 개별 typecheck, core/db/gateway/ERP build,
+  gateway/ERP lint, Drizzle schema check와 `git diff --check`를 통과했다. 모노레포 root turbo는
+  이 워크트리 PATH에 `pnpm` shim이 없어 실행하지 못했지만 같은 범위를 패키지별로 검증했다.
+  로컬·운영 DB migration, 실제 SMS/MMS 발송, `main` 병합과 운영 배포는 하지 않았다.
+  운영은 암호화 스냅샷 → migration 0040 → 기존 SOLAPI 키와 등록 발신번호 설정 → gateway/ERP
+  동시 배포 → 통제 SMS/LMS·명함 MMS 각 1건 순서다. 상세는 `docs/CENTREX_MESSAGING_V1.md`,
+  `PROJECT_PLAN.md`는 v0.94다.
+
 ### 2026-08-10 — 홈페이지 출시 후보 EIP 배포·정식 도메인 안전 전환 준비
 - 기존 217개 워크트리 변경을 `d069eb6`으로 보존하고 뒤처진 `origin/main`을 병합한 뒤,
   실제 `/bank/self-diagnosis`에 단계 전환 스크롤·포커스 어텐션 UX를 적용했다. 운영 DB

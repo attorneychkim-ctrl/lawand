@@ -1,5 +1,148 @@
 import { z } from "zod";
 
+export const CENTREX_SMS_MAX_BYTES = 80;
+export const CENTREX_LMS_MAX_BYTES = 720;
+export const MMS_IMAGE_MAX_BYTES = 200 * 1024;
+export const MMS_IMAGE_MAX_WIDTH = 1_500;
+export const MMS_IMAGE_MAX_HEIGHT = 1_440;
+
+export const MESSAGE_TEMPLATE_VARIABLES = [
+  "{{고객명}}",
+  "{{담당자명}}",
+  "{{접수번호}}",
+] as const;
+
+export type MessageTemplateVariable =
+  (typeof MESSAGE_TEMPLATE_VARIABLES)[number];
+
+/**
+ * 센트릭스 규격의 국내 문자 바이트 기준을 보수적으로 계산한다.
+ * ASCII는 1바이트, BMP 한글·문자는 2바이트, 보조평면 문자는 4바이트다.
+ */
+export function centrexMessageByteLength(value: string): number {
+  let bytes = 0;
+  for (const character of value) {
+    const codePoint = character.codePointAt(0);
+    if (codePoint === undefined) continue;
+    bytes += codePoint <= 0x7f ? 1 : codePoint <= 0xffff ? 2 : 4;
+  }
+  return bytes;
+}
+
+export function centrexMessageKind(
+  value: string,
+): "sms" | "lms" | "too_long" {
+  const bytes = centrexMessageByteLength(value);
+  if (bytes <= CENTREX_SMS_MAX_BYTES) return "sms";
+  if (bytes <= CENTREX_LMS_MAX_BYTES) return "lms";
+  return "too_long";
+}
+
+function templateVariables(value: string): string[] {
+  return value.match(/\{\{[^{}]+\}\}/g) ?? [];
+}
+
+function validateTemplateBody(
+  value: string,
+  context: z.RefinementCtx,
+): void {
+  for (const variable of templateVariables(value)) {
+    if (!(MESSAGE_TEMPLATE_VARIABLES as readonly string[]).includes(variable)) {
+      context.addIssue({
+        code: "custom",
+        message: `허용되지 않은 템플릿 변수입니다: ${variable}`,
+      });
+    }
+  }
+  if (centrexMessageByteLength(value) > CENTREX_LMS_MAX_BYTES) {
+    context.addIssue({
+      code: "custom",
+      message: "템플릿은 센트릭스 LMS 기준 720바이트 이하여야 합니다.",
+    });
+  }
+}
+
+const messageTemplateNameSchema = z.string().trim().min(1).max(80);
+const messageTemplateBodySchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(CENTREX_LMS_MAX_BYTES)
+  .superRefine(validateTemplateBody);
+
+const messageTemplateImageSchema = z
+  .object({
+    originalName: z.string().trim().min(1).max(100),
+    fileBase64: z
+      .string()
+      .min(4)
+      .max(Math.ceil(MMS_IMAGE_MAX_BYTES / 3) * 4 + 4)
+      .regex(/^[A-Za-z0-9+/]+={0,2}$/, "이미지 데이터 형식이 올바르지 않습니다."),
+  })
+  .strict();
+
+export const messageTemplateCreateSchema = z
+  .object({
+    name: messageTemplateNameSchema,
+    body: messageTemplateBodySchema,
+    image: messageTemplateImageSchema.nullable().optional(),
+  })
+  .strict();
+
+export const messageTemplateUpdateSchema = z
+  .object({
+    name: messageTemplateNameSchema,
+    body: messageTemplateBodySchema,
+    isActive: z.boolean(),
+    // 생략하면 기존 이미지를 유지하고, null이면 제거하며, 객체면 교체한다.
+    image: messageTemplateImageSchema.nullable().optional(),
+  })
+  .strict();
+
+export const telephonyMessageSendSchema = z
+  .object({
+    idempotencyKey: z.uuid(),
+    templateId: z.uuid().nullable(),
+    body: z.string().trim().min(1).max(CENTREX_LMS_MAX_BYTES),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (templateVariables(value.body).length > 0) {
+      context.addIssue({
+        code: "custom",
+        message: "치환되지 않은 템플릿 변수가 남아 있습니다.",
+        path: ["body"],
+      });
+    }
+    if (centrexMessageByteLength(value.body) > CENTREX_LMS_MAX_BYTES) {
+      context.addIssue({
+        code: "custom",
+        message: "문자 내용은 센트릭스 LMS 기준 720바이트 이하여야 합니다.",
+        path: ["body"],
+      });
+    }
+  });
+
+export function renderMessageTemplate(
+  body: string,
+  values: Record<MessageTemplateVariable, string>,
+): string {
+  return MESSAGE_TEMPLATE_VARIABLES.reduce(
+    (rendered, variable) => rendered.replaceAll(variable, values[variable]),
+    body,
+  );
+}
+
+export type MessageTemplateCreate = z.infer<
+  typeof messageTemplateCreateSchema
+>;
+export type MessageTemplateUpdate = z.infer<
+  typeof messageTemplateUpdateSchema
+>;
+export type TelephonyMessageSend = z.infer<
+  typeof telephonyMessageSendSchema
+>;
+
 export const telephonyCallDispositionSchema = z.enum([
   "customer_conversation",
   "voicemail",

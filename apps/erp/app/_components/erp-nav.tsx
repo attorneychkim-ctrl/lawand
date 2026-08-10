@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-function NavIcon({ kind }: { kind: "consultations" | "phone" | "staff" }) {
+function NavIcon({ kind }: { kind: "consultations" | "phone" | "messages" | "staff" }) {
   return kind === "consultations" ? (
     <svg aria-hidden="true" viewBox="0 0 24 24">
       <path d="M7.5 6.5h9M7.5 10.5h9M7.5 14.5h5" />
@@ -12,6 +12,11 @@ function NavIcon({ kind }: { kind: "consultations" | "phone" | "staff" }) {
   ) : kind === "phone" ? (
     <svg aria-hidden="true" viewBox="0 0 24 24">
       <path d="M7.8 3.8 10 8.5 7.5 10a14.3 14.3 0 0 0 6.5 6.5l1.5-2.5 4.7 2.2v3a1.8 1.8 0 0 1-1.8 1.8A15.4 15.4 0 0 1 3 5.6a1.8 1.8 0 0 1 1.8-1.8h3Z" />
+    </svg>
+  ) : kind === "messages" ? (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="M5 4.5h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-8l-5 3v-3H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z" />
+      <path d="M7 9h10M7 13h7" />
     </svg>
   ) : (
     <svg aria-hidden="true" viewBox="0 0 24 24">
@@ -42,6 +47,14 @@ export function ErpNav({ showStaff }: { showStaff: boolean }) {
       >
         <NavIcon kind="phone" />
         <span>전화</span>
+      </Link>
+      <Link
+        aria-current={pathname.startsWith("/message-templates") ? "page" : undefined}
+        className={pathname.startsWith("/message-templates") ? "is-active" : undefined}
+        href="/message-templates"
+      >
+        <NavIcon kind="messages" />
+        <span>문자</span>
       </Link>
       {showStaff ? (
         <Link

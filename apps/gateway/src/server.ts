@@ -47,6 +47,9 @@ const config = readGatewayConfig();
 const database = createDatabaseClient(config.databaseUrl);
 const protection = createDataProtection(config);
 const centrexClient = createCentrexClient();
+const solapiClient = config.solapiApiCredentials
+  ? createSolapiClient(config.solapiApiCredentials)
+  : null;
 const centrexCredentialVault = createCentrexCredentialVault({
   db: database.db,
   protection,
@@ -84,6 +87,8 @@ const telephonyService = createTelephonyService({
   db: database.db,
   protection,
   dispatchEnabled: config.centrexWorkerEnabled,
+  solapiClient,
+  solapiMmsSender: config.solapiMmsSender,
   answerableBridgeIds: new Set(Object.keys(config.centrexBridgeKeys ?? {})),
 });
 const centrexBridgeIngress = createCentrexBridgeIngressService({
@@ -168,14 +173,11 @@ const legalFriendsOutboxWorker =
       })
     : null;
 const alimtalkOutboxWorker =
-  config.alimtalkWorkerEnabled && config.solapi
+  config.alimtalkWorkerEnabled && config.solapi && solapiClient
     ? createAlimtalkOutboxWorker({
         db: database.db,
         protection,
-        solapiClient: createSolapiClient({
-          apiKey: config.solapi.apiKey,
-          apiSecret: config.solapi.apiSecret,
-        }),
+        solapiClient,
         pfId: config.solapi.pfId,
         requestTemplateId: config.solapi.requestTemplateId,
         assignmentTemplateId: config.solapi.assignmentTemplateId,
@@ -199,6 +201,8 @@ const centrexWorker =
         protection,
         centrexClient,
         credentialVault: centrexCredentialVault,
+        solapiClient,
+        solapiMmsSender: config.solapiMmsSender,
       })
     : null;
 

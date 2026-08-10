@@ -22,9 +22,12 @@ import {
   staffLoginSchema,
   centrexBridgeEventSchema,
   centrexBridgeCommandResultSchema,
+  messageTemplateCreateSchema,
+  messageTemplateUpdateSchema,
   phoneDeskAftercareSaveSchema,
   phoneDeskFollowUpCompletionSchema,
   telephonyCallDispositionConfirmationSchema,
+  telephonyMessageSendSchema,
 } from "@lawand/core";
 
 import {
@@ -74,6 +77,7 @@ import {
 } from "./telephony-service.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
+const MAX_MESSAGE_TEMPLATE_BODY_BYTES = 320 * 1024;
 const SSE_HEARTBEAT_INTERVAL_MS = 20_000;
 
 function sendJson(
@@ -102,13 +106,16 @@ function sendSseEvent(
   response.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
-async function readBody(request: IncomingMessage): Promise<Buffer> {
+async function readBody(
+  request: IncomingMessage,
+  maxBytes = MAX_BODY_BYTES,
+): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buffer.length;
-    if (size > MAX_BODY_BYTES) {
+    if (size > maxBytes) {
       throw new Error("payload_too_large");
     }
     chunks.push(buffer);
@@ -124,8 +131,11 @@ function parseJson(body: Buffer): unknown {
   }
 }
 
-async function readJson(request: IncomingMessage): Promise<unknown> {
-  return parseJson(await readBody(request));
+async function readJson(
+  request: IncomingMessage,
+  maxBytes = MAX_BODY_BYTES,
+): Promise<unknown> {
+  return parseJson(await readBody(request, maxBytes));
 }
 
 function hasHeaderAccess(
@@ -1416,6 +1426,136 @@ export function createGatewayServer(options?: {
       }
 
       if (
+        request.method === "GET" &&
+        url.pathname === "/v1/message-templates"
+      ) {
+        if (
+          !options?.telephonyService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        sendJson(
+          response,
+          200,
+          await options.telephonyService.listMessageTemplates(
+            actor,
+            url.searchParams.get("includeInactive") === "true",
+          ),
+        );
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        url.pathname === "/v1/message-templates"
+      ) {
+        if (
+          !options?.telephonyService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        const parsed = messageTemplateCreateSchema.safeParse(
+          await readJson(request, MAX_MESSAGE_TEMPLATE_BODY_BYTES),
+        );
+        if (!parsed.success) {
+          sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+          return;
+        }
+        sendJson(
+          response,
+          201,
+          await options.telephonyService.createMessageTemplate(
+            parsed.data,
+            actor,
+          ),
+        );
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        url.pathname.startsWith("/v1/message-templates/")
+      ) {
+        if (
+          !options?.telephonyService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const templateId = url.pathname.slice(
+          "/v1/message-templates/".length,
+        );
+        if (!validUuid(templateId)) {
+          sendJson(response, 400, { error: "invalid_template_id" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        const parsed = messageTemplateUpdateSchema.safeParse(
+          await readJson(request, MAX_MESSAGE_TEMPLATE_BODY_BYTES),
+        );
+        if (!parsed.success) {
+          sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+          return;
+        }
+        sendJson(
+          response,
+          200,
+          await options.telephonyService.updateMessageTemplate(
+            templateId,
+            parsed.data,
+            actor,
+          ),
+        );
+        return;
+      }
+
+      if (
         request.method === "POST" &&
         url.pathname.startsWith("/v1/consultations/") &&
         url.pathname.endsWith("/assign-to-me")
@@ -1452,6 +1592,56 @@ export function createGatewayServer(options?: {
         );
         const result = await options.service.assignToSelf(
           consultationId,
+          actor,
+        );
+        sendJson(response, result.replayed ? 200 : 201, result);
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        url.pathname.startsWith("/v1/consultations/") &&
+        url.pathname.endsWith("/messages")
+      ) {
+        if (
+          !options?.telephonyService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const consultationId = url.pathname.slice(
+          "/v1/consultations/".length,
+          -"/messages".length,
+        );
+        if (!validUuid(consultationId)) {
+          sendJson(response, 400, { error: "invalid_consultation_id" });
+          return;
+        }
+        const parsed = telephonyMessageSendSchema.safeParse(
+          await readJson(request),
+        );
+        if (!parsed.success) {
+          sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        const result = await options.telephonyService.requestMessage(
+          consultationId,
+          parsed.data,
           actor,
         );
         sendJson(response, result.replayed ? 200 : 201, result);
@@ -1498,6 +1688,46 @@ export function createGatewayServer(options?: {
           actor,
         );
         sendJson(response, result.replayed ? 200 : 201, result);
+        return;
+      }
+
+      if (
+        request.method === "GET" &&
+        url.pathname.startsWith("/v1/telephony-messages/")
+      ) {
+        if (
+          !options?.telephonyService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const messageId = url.pathname.slice(
+          "/v1/telephony-messages/".length,
+        );
+        if (!validUuid(messageId)) {
+          sendJson(response, 400, { error: "invalid_message_id" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        sendJson(
+          response,
+          200,
+          await options.telephonyService.getMessage(messageId, actor),
+        );
         return;
       }
 
@@ -1738,14 +1968,22 @@ export function createGatewayServer(options?: {
           error.code === "aftercare_not_found" ||
           error.code === "follow_up_not_found" ||
           error.code === "inbound_call_not_found" ||
-          error.code === "inbound_command_not_found"
+          error.code === "inbound_command_not_found" ||
+          error.code === "message_not_found" ||
+          error.code === "message_template_not_found"
             ? 404
             : error.code === "call_owned_by_other_staff" ||
-                error.code === "inbound_call_owned_by_other_staff"
+                error.code === "inbound_call_owned_by_other_staff" ||
+                error.code === "message_owned_by_other_staff" ||
+                error.code === "message_template_owned_by_other_staff"
               ? 403
-              : error.code === "follow_up_due_invalid"
+              : error.code === "follow_up_due_invalid" ||
+                  error.code === "message_body_invalid" ||
+                  error.code === "message_image_invalid"
                 ? 400
-              : error.code === "feature_disabled"
+              : error.code === "feature_disabled" ||
+                  error.code === "mms_feature_disabled" ||
+                  error.code === "message_image_upload_failed"
                 ? 503
                 : 409;
         sendJson(response, statusCode, {

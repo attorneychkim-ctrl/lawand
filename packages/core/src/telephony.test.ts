@@ -6,9 +6,70 @@ import {
   centrexBridgeCommandResultSchema,
   centrexBridgeEventSchema,
   centrexBridgeResetCommandSchema,
+  centrexMessageByteLength,
+  centrexMessageKind,
+  messageTemplateCreateSchema,
   phoneDeskAftercareSaveSchema,
+  renderMessageTemplate,
+  telephonyMessageSendSchema,
   telephonyCallDispositionConfirmationSchema,
 } from "./telephony.js";
+
+test("센트릭스 SMS/LMS 바이트와 템플릿 변수를 검증한다", () => {
+  assert.equal(centrexMessageByteLength("ABC 가나다😀"), 3 + 1 + 6 + 4);
+  assert.equal(centrexMessageKind("가".repeat(40)), "sms");
+  assert.equal(centrexMessageKind("가".repeat(41)), "lms");
+  assert.equal(centrexMessageKind("가".repeat(361)), "too_long");
+  assert.equal(
+    messageTemplateCreateSchema.safeParse({
+      name: "부재 안내",
+      body: "{{고객명}}님, {{담당자명}}입니다. 접수번호 {{접수번호}}",
+    }).success,
+    true,
+  );
+  assert.equal(
+    messageTemplateCreateSchema.safeParse({
+      name: "잘못된 변수",
+      body: "{{사건번호}}를 확인해 주세요.",
+    }).success,
+    false,
+  );
+  assert.equal(
+    messageTemplateCreateSchema.safeParse({
+      name: "명함 안내",
+      body: "{{고객명}}님, 담당자 명함을 보내드립니다.",
+      image: {
+        originalName: "명함.jpg",
+        fileBase64: "AAEC",
+      },
+    }).success,
+    true,
+  );
+  assert.equal(
+    messageTemplateCreateSchema.safeParse({
+      name: "잘못된 이미지",
+      body: "이미지 안내",
+      image: { originalName: "명함.png", fileBase64: "data:image/png;base64,AAEC" },
+    }).success,
+    false,
+  );
+  assert.equal(
+    renderMessageTemplate("{{고객명}}님, {{담당자명}}입니다.", {
+      "{{고객명}}": "홍길동",
+      "{{담당자명}}": "김상담",
+      "{{접수번호}}": "LA-260810-ABCDEFGH",
+    }),
+    "홍길동님, 김상담입니다.",
+  );
+  assert.equal(
+    telephonyMessageSendSchema.safeParse({
+      idempotencyKey: "01980000-0000-7000-8000-000000000041",
+      templateId: null,
+      body: "{{고객명}}님께 보내는 미치환 문구",
+    }).success,
+    false,
+  );
+});
 
 test("통화 종료 결과는 허용된 단일 분류만 받는다", () => {
   assert.deepEqual(

@@ -113,6 +113,36 @@ const telephonyCallReferenceDataSchema = z
   })
   .strict();
 
+const telephonyMessageReferenceFields = {
+  messageId: z.uuid(),
+  consultationId: z.uuid(),
+  requestId: z.uuid(),
+  endpointId: z.uuid(),
+  staffUserId: z.uuid(),
+  contentRef: z
+    .string()
+    .regex(/^telephony_messages\/[0-9a-f-]{36}\/body$/),
+};
+
+const telephonyMessageReferenceDataSchema = z.discriminatedUnion("provider", [
+  z
+    .object({
+      ...telephonyMessageReferenceFields,
+      provider: z.literal("centrex"),
+      channel: z.literal("sms"),
+      command: z.literal("smssend"),
+    })
+    .strict(),
+  z
+    .object({
+      ...telephonyMessageReferenceFields,
+      provider: z.literal("solapi"),
+      channel: z.literal("mms"),
+      command: z.literal("send-many"),
+    })
+    .strict(),
+]);
+
 const assignedDataSchema = assignmentReferenceDataSchema
   .extend({
     assigneeUserId: z.uuid(),
@@ -182,6 +212,13 @@ export const telephonyCallRequestedEventSchema = eventEnvelopeSchema
   })
   .strict();
 
+export const telephonyMessageRequestedEventSchema = eventEnvelopeSchema
+  .extend({
+    eventType: z.literal("telephony.message.requested"),
+    data: telephonyMessageReferenceDataSchema,
+  })
+  .strict();
+
 export const alimtalkRequestNotificationRequestedEventSchema =
   eventEnvelopeSchema
     .extend({
@@ -214,6 +251,7 @@ export const platformEventSchema = z.discriminatedUnion("eventType", [
   consultationKakaoChatConfirmedEventSchema,
   consultationKakaoEntryInvalidatedEventSchema,
   telephonyCallRequestedEventSchema,
+  telephonyMessageRequestedEventSchema,
   legalfriendsRegistrationRequestedEventSchema,
   alimtalkRequestNotificationRequestedEventSchema,
   alimtalkAssignmentNotificationRequestedEventSchema,
@@ -242,6 +280,9 @@ export type LegalfriendsRegistrationRequestedEvent = z.infer<
 >;
 export type TelephonyCallRequestedEvent = z.infer<
   typeof telephonyCallRequestedEventSchema
+>;
+export type TelephonyMessageRequestedEvent = z.infer<
+  typeof telephonyMessageRequestedEventSchema
 >;
 export type AlimtalkRequestNotificationRequestedEvent = z.infer<
   typeof alimtalkRequestNotificationRequestedEventSchema

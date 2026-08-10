@@ -5,8 +5,10 @@ import {
   createSolapiAlimtalkMessage,
   createSolapiAuthHeader,
   createSolapiClient,
+  createSolapiMmsMessage,
   formatAlimtalkContactSchedule,
   formatAlimtalkTimestamp,
+  inspectMmsJpeg,
   SolapiDeliveryError,
 } from "./solapi.js";
 
@@ -20,6 +22,75 @@ test("솔라피 인증 헤더는 공식 date+salt HMAC-SHA256 계약을 따른�
     }),
     "HMAC-SHA256 apiKey=test-key, date=2026-07-30T00:00:00.000Z, salt=1234567890123456, signature=42efee87d89a47cc4c865caa356f79ce120d9c3f903cb95bb8a2da31a3184d0e",
   );
+});
+
+test("MMS JPG 규격을 확인하고 발신·수신 번호를 숫자로 정규화한다", () => {
+  const jpeg = Buffer.from([
+    0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x01, 0x20, 0x01, 0x40,
+    0x03, 0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00, 0xff, 0xd9,
+  ]).toString("base64");
+  assert.deepEqual(inspectMmsJpeg(jpeg), {
+    bytes: 23,
+    width: 320,
+    height: 288,
+  });
+  assert.deepEqual(
+    createSolapiMmsMessage({
+      to: "010-1234-5678",
+      from: "02-930-2266",
+      text: "명함을 보내드립니다.",
+      imageId: "ST01FZ-test",
+      messageId: "01984c7d-8500-7000-8000-000000000030",
+    }),
+    {
+      to: "01012345678",
+      from: "029302266",
+      text: "명함을 보내드립니다.",
+      type: "MMS",
+      imageId: "ST01FZ-test",
+      customFields: {
+        lawandMessageId: "01984c7d-8500-7000-8000-000000000030",
+      },
+    },
+  );
+});
+
+test("MMS 이미지는 스토리지 API에 Base64와 MMS 타입으로 한 번 업로드한다", async () => {
+  let requestBody: unknown;
+  const client = createSolapiClient({
+    apiKey: "test-key",
+    apiSecret: "test-secret",
+    storageEndpoint: "https://storage.test/files",
+    fetchImplementation: async (input, init) => {
+      assert.equal(String(input), "https://storage.test/files");
+      requestBody = JSON.parse(String(init?.body));
+      return new Response(
+        JSON.stringify({
+          fileId: "ST01FZ-test",
+          url: "https://storage.test/ST01FZ-test",
+          fileSize: 23,
+          width: 320,
+          height: 288,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    },
+  });
+  assert.deepEqual(
+    await client.uploadMmsImage({ fileBase64: "AAEC", name: "명함.jpg" }),
+    {
+      fileId: "ST01FZ-test",
+      url: "https://storage.test/ST01FZ-test",
+      fileSize: 23,
+      width: 320,
+      height: 288,
+    },
+  );
+  assert.deepEqual(requestBody, {
+    file: "AAEC",
+    type: "MMS",
+    name: "명함.jpg",
+  });
 });
 
 test("알림톡은 승인 변수만 보내고 문자 대체발송을 명시적으로 끈다", () => {

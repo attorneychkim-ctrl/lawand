@@ -553,6 +553,107 @@ test("클릭투콜 API는 인증된 현재 담당자와 상담 ID를 서비스�
   assert.equal(received?.actor.id, realtimeActor.id);
 });
 
+test("일반 직원은 자신의 문자 템플릿을 만들고 담당 상담에 문자를 요청한다", async (context) => {
+  const consultationId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2d8";
+  const templateId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2d9";
+  const messageId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2da";
+  let templateActorId = "";
+  let messageActorId = "";
+  const telephonyService = {
+    createMessageTemplate: async (
+      input: { name: string; body: string },
+      actor: StaffPrincipal,
+    ) => {
+      templateActorId = actor.id;
+      return {
+        id: templateId,
+        ...input,
+        bodyByteLength: 12,
+        isActive: true,
+        scope: "personal" as const,
+        editable: true,
+        image: null,
+        createdAt: "2026-08-10T10:00:00.000Z",
+        updatedAt: "2026-08-10T10:00:00.000Z",
+      };
+    },
+    requestMessage: async (
+      receivedConsultationId: string,
+      input: { templateId: string | null; body: string },
+      actor: StaffPrincipal,
+    ) => {
+      assert.equal(receivedConsultationId, consultationId);
+      assert.equal(input.templateId, templateId);
+      messageActorId = actor.id;
+      return {
+        id: messageId,
+        consultationId,
+        endpointId: "019fa6a4-6834-7782-aa0b-4e71ffb8a2db",
+        templateId,
+        templateName: "내 부재 안내",
+        provider: "centrex" as const,
+        messageKind: "sms" as const,
+        imageAttached: false,
+        imageName: null,
+        bodyByteLength: 12,
+        commandStatus: "queued" as const,
+        requestedAt: "2026-08-10T10:00:00.000Z",
+        dispatchedAt: null,
+        providerRespondedAt: null,
+        providerCode: null,
+        providerRemainingCount: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        replayed: false,
+      };
+    },
+  } as unknown as TelephonyService;
+  const authService = {
+    authorize: async () => realtimeActor,
+  } as unknown as StaffAuthService;
+  const server = createGatewayServer({
+    authService,
+    internalApiKey: "test-internal-key",
+    telephonyService,
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const headers = {
+    "content-type": "application/json",
+    "x-lawand-internal-key": "test-internal-key",
+    "x-lawand-staff-session": "s".repeat(43),
+  };
+
+  const templateResponse = await fetch(
+    `http://127.0.0.1:${address.port}/v1/message-templates`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ name: "내 부재 안내", body: "부재 안내입니다." }),
+    },
+  );
+  assert.equal(templateResponse.status, 201);
+  assert.equal(templateActorId, realtimeActor.id);
+
+  const messageResponse = await fetch(
+    `http://127.0.0.1:${address.port}/v1/consultations/${consultationId}/messages`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        idempotencyKey: "019fa6a4-6834-7782-aa0b-4e71ffb8a2dc",
+        templateId,
+        body: "부재 안내입니다.",
+      }),
+    },
+  );
+  assert.equal(messageResponse.status, 201);
+  assert.equal(messageActorId, realtimeActor.id);
+});
+
 test("통화 결과 API는 허용된 분류와 현재 직원을 서비스에 전달한다", async (context) => {
   const callId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2d1";
   let received:
