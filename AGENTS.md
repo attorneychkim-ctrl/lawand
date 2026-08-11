@@ -71,6 +71,48 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-11 — main 누적 브랜치 통합·통화 활동 v2/페이지네이션/문자 UX 운영 배포
+- `HERDR_ENV=1`에서 main과 HERDR worktree 4개, 로컬 worktree, 원격
+  `origin/worktree/*` 12개를 전수 대조했다. 통화 활동 v2 브랜치는 이미 main에 포함돼 있었고,
+  `quiet-harbor-6e25`의 상담·전화데스크 서버 페이지네이션/재통화 담당자 필터를 merge commit
+  `2ef4e02`, `quiet-harbor-a725`의 U+ 불투명 `SRC` 격리·문자 전체번호/MMS 이미지 UX를
+  `c7eb92c`로 병합했다. migration 번호 충돌은 통화 root/leg `0045_safe_zarek.sql`,
+  페이지네이션 인덱스 `0046_small_cargill.sql`, 문자 이미지 snapshot
+  `0047_wandering_maximus.sql` 순으로 재생성했다. 최종 모든 원격 worktree HEAD는 main
+  ancestor이며 배포 소스는 `main`/`origin/main` `b5f8beb`이다.
+- 최초 운영 migration은 기존 후처리 35건 중 관측 통화와 클릭 명령을 함께 참조한 2건이 새
+  정확히 한 source 제약에 걸려 트랜잭션 전체가 롤백됐다. 기존 운영 앱과 DB는 그대로였고,
+  관측 원장을 동일 UUID의 call root로 승격하면서 두 legacy 참조를 원자적으로 해제하되 기존
+  observation link를 보존하도록 `b5f8beb`에서 보정했다. 실제 double-source fixture를 넣은
+  임시 DB에서 `0042..0047`을 다시 적용해 root/leg·후처리 제약을 검증하고 임시 DB를 삭제했다.
+  전체 5패키지 typecheck·lint·production build, core 64개·gateway 108개 테스트, Drizzle
+  schema check, Windows .NET Framework x86 self-test 19개와 `git diff --check`를 통과했다.
+- 암호화 RDS 스냅샷 `lawand-prod-pre-integrated-call-messaging-20260811t102618z`을 available로
+  확보하고 통합 릴리스 `20260811T104143Z-integrated-call-messaging-v2`를 배포했다. private
+  S3 AES256 아티팩트 SHA-256은
+  `21a4d992a51a5fe7c0ce8e957d44c3250cedde9d4723f9fb446a1d0001417d11`, gateway 이미지 ID는
+  `sha256:10df1494e899cbd6709f107027de25e7884ecca289a441bbd371ddc29e44d5e2`, ERP는
+  `sha256:c3047d33f51c98888fafc6759bbd29f95347d2c1f570c00789584eca4625d445`다. 운영 migration
+  원장은 `0047`까지 48개이고 최근 `0042..0047` 해시는 Git과 모두 일치한다. 기존 수·발신
+  295건은 root/leg 295쌍·연결 누락 0, 후처리 35건·재통화 10건 보존, source 위반 0이며
+  기존 MMS 52건 중 안전한 40건만 이미지 URL을 보강했고 비-MMS 오보강은 0이다.
+- Windows 공용 bridge는 연속 활성 통화·root/leg·실행 명령·회선 중복 0과 배정 19+warm 5,
+  queue/dead-letter 0을 확인하고 v0.8.0.0으로 전환했다. 첫 시도는 supervisor가
+  `lawand-slot-*`만 관리하고 별도 `canary-4591` task를 시작하지 않는 기존 계약 때문에
+  23/24에서 시간초과했으나 v0.7.2 24개로 자동 원복·health 정상화를 확인했다. 두 번째는 해당
+  task를 명시적으로 시작해 24개 모두 v0.8.0.0, 로그인/heartbeat 최신, 오프라인·로그인 실패·
+  DPAPI queue·dead-letter 0으로 복구했다. v0.8 exe SHA-256은
+  `312764133521E634EDAAF0820F4F44F953E41EEE34CD50BBF96B94F3BF0CA46B`, rollback v0.7.2는
+  `C4453BC29FC3AA541EF2C18CA2E479E7E44CF487BFAF14E6C817B4CA308A7012`이며 임시 S3 읽기
+  IAM 정책은 제거했다. 조직용 Authenticode 서명은 여전히 별도 과제다.
+- 최종 gateway·ERP·각 Caddy active, 컨테이너 재시작·error journal 0, 외부 health/login
+  200, CloudWatch 전체 ALARM 0이고 센트릭스 5종도 모두 OK다. 인증 smoke에서 상담 7건과
+  전화데스크 첫 페이지 20건의 page 계약, 통화 활동 빈 snapshot, 문자 82건·mailbox 7개,
+  ERP 상담·전화데스크·문자 화면 200과 오류 배너 0을 확인하고 임시 세션을 삭제했다. 실제
+  전화·문자는 새로 만들지 않았다. 다음은 일반 내선·무조건/통화 후 호전환·실패 복귀 네
+  실통화 acceptance와 승인된 대표 회선의 Case_idx 통제 회신 canary다. `PROJECT_PLAN.md`는
+  v1.14다.
+
 ### 2026-08-11 — 통합 통화 활동 root/leg·호전환·전 직원 카드/담당자 알림 출시 후보
 - migration `0045_safe_zarek.sql`에 고객 통화 root, 개별 customer/consultation/internal
   leg, provider root/channel/source 식별자, transfer relation과 원본 v2 관측 원장을 추가했다.

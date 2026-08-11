@@ -5,8 +5,9 @@ CloudFormation 스택: `lawand-prod`
 리전: 서울(`ap-northeast-2`)
 최초 배포 릴리스: `20260804T085006Z-84e8708`
 현재 홈페이지 릴리스: `20260810T064408Z-homepage-cutover-ready-v3`
-현재 ERP 릴리스: `20260811T035307Z-centrex-message-inbox-v1`
-현재 gateway 릴리스: `20260811T035307Z-centrex-message-inbox-v1`
+현재 ERP 릴리스: `20260811T104143Z-integrated-call-messaging-v2`
+현재 gateway 릴리스: `20260811T104143Z-integrated-call-messaging-v2`
+현재 Windows bridge: `v0.8.0.0`
 
 이 문서는 정식 도메인 전환 전까지의 실제 AWS 구성, 접속점, 데이터 이관 범위와
 운영 체크리스트를 기록한다. 비밀번호·API 키·AWS 계정 ID·RDS 마스터 시크릿 ARN은
@@ -80,7 +81,8 @@ A와 `www` CNAME만 다루고 NS·MX는 변경하지 않는다.
 - migration `0022_consultation_sse_notifications.sql`은 상담 outbox INSERT가 커밋될 때
   개인정보 없이 이벤트 ID·유형·상담 ID·발생시각만 PostgreSQL 채널로 알린다. gateway의
   전용 연결만 이 채널을 `LISTEN`하며 RDS를 인터넷에 노출하지 않는다.
-- 2026-08-11 기준 migration `0043`까지 44개는 모두 적용됐고 43개 파일 해시는 현재 Git과 일치한다.
+- 2026-08-11 기준 migration `0047`까지 48개가 모두 적용됐고 최근 `0042..0047` 파일 해시는
+  현재 Git과 일치한다.
   역사적으로 운영에 적용된 `0028_inbound_phone_directory_resolver.sql` 한 개만 현재 파일과
   해시가 다르다. 후속 `0037_phone_desk_directory_context.sql`이 같은 함수 계약을 대체했고
   현재 스키마·권한 검증은 통과한다. 이 예외를 이유로 migration 원장을 수정하거나 0028을
@@ -159,6 +161,43 @@ EC2에서 ARM64 네이티브 빌드한다. 서버 배포는
 systemd 앱 단위와 Caddy edge 단위는 부팅 시 자동 시작한다. 최종 검증에서 홈페이지·ERP는
 재기동 후 약 1초, gateway는 약 2초 안에 health를 회복했고 실패한 systemd unit과
 최근 error priority journal은 없었다.
+
+## 통화 활동 v2·서버 페이지네이션·문자 후속 UX 통합 배포
+
+2026-08-11 HERDR worktree 4개와 원격 `origin/worktree/*` 12개를 전수 대조해 모든 HEAD가
+main ancestor임을 확인하고, `main`/`origin/main` `b5f8beb`을 단일 배포 소스로 사용했다.
+상담·전화데스크 페이지네이션 브랜치는 `2ef4e02`, U+ 불투명 `SRC`·문자 UX 브랜치는
+`c7eb92c`로 병합했다. 통화 활동 root/leg를 `0045_safe_zarek.sql`, 페이지네이션 인덱스를
+`0046_small_cargill.sql`, 문자 이미지 URL snapshot을 `0047_wandering_maximus.sql`로
+순서화했다.
+
+- 최초 `0045` 적용은 기존 후처리 2건이 관측 통화와 클릭 명령을 함께 참조해 새 source
+  제약과 충돌했고 transaction 전체가 롤백됐다. 기존 앱·DB는 변경되지 않았다. 관측 원장을
+  동일 UUID call root로 승격하고 기존 observation link를 보존하는 `b5f8beb` 보정 뒤 실제
+  double-source fixture가 있는 임시 DB에서 `0042..0047` 전체를 재검증했다.
+- 암호화 수동 스냅샷 `lawand-prod-pre-integrated-call-messaging-20260811t102618z`을
+  `available`로 확보하고 릴리스 `20260811T104143Z-integrated-call-messaging-v2`를 gateway와
+  ERP에 배포했다. private S3 AES256 아티팩트 SHA-256은
+  `21a4d992a51a5fe7c0ce8e957d44c3250cedde9d4723f9fb446a1d0001417d11`이다. gateway 이미지
+  ID는 `sha256:10df1494e899cbd6709f107027de25e7884ecca289a441bbd371ddc29e44d5e2`, ERP는
+  `sha256:c3047d33f51c98888fafc6759bbd29f95347d2c1f570c00789584eca4625d445`다.
+- migration 뒤 수·발신 295건은 call root/leg 295쌍, 연결 누락 0이다. 후처리 35건과 재통화
+  10건을 모두 보존했고 source 위반 0이다. 기존 MMS 52건 중 발송 snapshot과 현재 템플릿
+  파일이 같은 40건만 이미지 URL을 보강했으며 비-MMS 오보강은 0이다. 페이지네이션 인덱스
+  세 개와 신규 통화 테이블의 앱 CRUD·viewer SELECT·PUBLIC 0 권한도 확인했다.
+- Windows bridge는 활성 통화·root/leg·받기/발신/프로비저닝/문자 명령·회선 중복 0을 연속
+  확인한 뒤 공용 실행 파일을 v0.8.0.0으로 교체했다. 첫 시도는 supervisor 범위 밖의 기존
+  `canary-4591` task가 자동 시작되지 않아 23/24에서 v0.7.2로 자동 원복했고, 원복 뒤 24개·
+  health 정상화를 확인했다. 재시도에서는 해당 task만 명시적으로 시작해 배정 19+warm 5,
+  프로세스 24개 모두 v0.8.0.0, 오프라인·로그인 실패·DPAPI queue·dead-letter 0을 확인했다.
+  v0.8 SHA-256은 `312764133521E634EDAAF0820F4F44F953E41EEE34CD50BBF96B94F3BF0CA46B`,
+  rollback v0.7.2는 `C4453BC29FC3AA541EF2C18CA2E479E7E44CF487BFAF14E6C817B4CA308A7012`다.
+  staging에만 허용한 임시 S3 읽기 IAM 정책은 제거했다.
+- 인증 smoke는 상담·전화데스크의 page 1/20 계약, 빈 통화 활동 snapshot, 문자 82건과
+  대표 mailbox 7개, ERP 상담·전화데스크·문자 화면을 모두 200으로 확인했다. mailbox 7개는
+  최근 동기화·오류 0이고 임시 세션은 삭제했다. gateway·ERP·각 Caddy active, 컨테이너
+  재시작·error journal 0, 외부 health/login 200, CloudWatch 전체 ALARM 0이며 센트릭스
+  5종도 모두 OK다. 이번 배포에서는 실제 전화나 문자를 새로 만들지 않았다.
 
 ## 대표 문자 수신함·U+ 수신 이력 보정 통합 배포
 

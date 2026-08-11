@@ -1,4 +1,4 @@
-# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.13)
+# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.14)
 
 > 이 문서는 새 로앤 홈페이지 + 새 ERP + 리걸플로/리걸프렌즈 연동을 하나의 플랫폼으로
 > 묶기 위한 **저장소 구조·아키텍처 설계 초안**이다. 코덱스/클로드코드 세션이 번갈아
@@ -388,7 +388,7 @@
 > 보정하며 SSE 재동기화도 현재 페이지·크기·필터·기간을 유지한다. 상담 현황은
 > 전체·배정 대기·내 담당·확인 필요·오늘 접수, 전화 현황은 전체·수신·ERP 발신·직접 발신·
 > 진행 중을 선택 기간 전체의 서버 집계로 표시하고 각 카드를 실제 목록 필터로 사용한다.
-> migration `0045_flaky_roulette.sql`은 이 조회의 최신순·날짜 범위를 위해 상담 요청시각,
+> migration `0046_small_cargill.sql`은 이 조회의 최신순·날짜 범위를 위해 상담 요청시각,
 > 클릭투콜 요청시각, 관측 통화 호출시각 단독 btree 인덱스를 추가한다.
 > 재통화 업무 큐는 통화 이력의 페이지·날짜와 별도인 전체 열린 업무 원장으로 유지한다.
 > 전화데스크 상세는 기존 같은 전화번호 상담 연결, 리걸프렌즈 고객명·담당자를 이용한
@@ -554,7 +554,16 @@
 > Notification과 탭 간 중복 방지를 ERP에 연결했다. 개인정보 없는 NOTIFY/SSE는 통화 ID만
 > 전달하고 전체 번호·고객·사건·담당자·회선은 인증 snapshot에서만 복호화한다. 임시 로컬
 > DB 복제본 수직 검증과 전체 테스트·lint·typecheck·production build, Windows x86 compile·
-> self-test를 통과했으며 운영 migration·배포·실통화 canary는 하지 않았다.
+> self-test를 통과했다. 2026-08-11 통합 릴리스
+> `20260811T104143Z-integrated-call-messaging-v2`로 migration `0045_safe_zarek.sql`,
+> `0046_small_cargill.sql`, `0047_wandering_maximus.sql`과 gateway·ERP·Windows bridge
+> v0.8.0을 운영에 함께 반영했다. 기존 후처리 35건은 동일 UUID의 새 call root로 유실 없이
+> 승격했고 재통화 10건을 보존했다. 운영 원장은 root/leg 295쌍·연결 누락 0, 후처리 source
+> 위반 0이며 대표 문자 mailbox 7개도 오류 없이 동기화된다. 활성 통화·실행 명령·회선 중복·
+> DPAPI queue/dead-letter 0에서 전환했고 gateway·ERP·Caddy 재시작 0, 센트릭스 5종을 포함한
+> CloudWatch ALARM 0을 확인했다. 남은 acceptance는 실제 전화를 새로 만들지 않은 이번 배포와
+> 분리해 일반 내선·무조건/통화 후 호전환·실패 복귀 네 시나리오와 통제 문자 회신을 수행하는
+> 것이다.
 > `Office_idx=56` 사건만 이름·전화·사건번호·원본 사건 ID 없이 추출한 자가진단
 > 런타임 읽기 모델을 만들었다. 현재 1,759건(회생 1,342·파산면책 417)이며 gateway만
 > 이 모델을 읽는다. `/bank/self-diagnosis`는 고객 상황과 유사한 다섯 건의 월 변제금·
@@ -769,7 +778,8 @@ JPG 이미지가 붙은 템플릿은 기존 SOLAPI 자격증명과 사전 등록
 조회·수정·사용·삭제한다. 개인 템플릿은 별도 활성화 체크 없이 항상 상담 화면에 표시한다.
 삭제해도 과거 발송의 본문·템플릿명·이미지 스냅샷은 보존하며 현재 템플릿 참조만 해제한다.
 이미지 Base64는 저장하지 않고 SOLAPI
-스토리지 파일 ID·미리보기 URL·크기·해상도만 보존한다. migration `0045_fat_ronan.sql`부터
+스토리지 파일 ID·미리보기 URL·크기·해상도만 보존한다. migration
+`0047_wandering_maximus.sql`부터
 발송 원장에도 이미지 URL snapshot을 남기고, 기존 MMS는 현재 템플릿의 파일 ID가 발송
 snapshot과 같은 경우에만 URL을 보강한다. 따라서 템플릿을 나중에 수정해도 과거 문자에
 다른 이미지가 표시되지 않는다. 고객 번호와 본문은 outbox·로그에
@@ -799,15 +809,18 @@ snapshot과 같은 경우에만 URL을 보강한다. 따라서 템플릿을 나�
 출시 후보는 U+가 문자열로 정의한 비표준 `SRC`를 불투명 provider 식별자로 암호화·HMAC
 보존하되 일반 전화번호와 별도 namespace를 사용하고 최신 발신 맥락 매칭에서 제외한다.
 ERP에는 원문 대신 `발신번호 확인 필요`만 표시하며 같은 페이지의 정상 번호 메시지는 계속
-수집한다. DB migration 없이 gateway만 배포하면 기존 실패 상태가 다음 polling에서 자동
-해제되고 backfill을 재개한다. 실제 통제 회신 Case_idx canary는 이 수정의 운영 반영 뒤 수행한다.
+수집한다. 이 수정은 통합 릴리스 `20260811T104143Z-integrated-call-messaging-v2`로 운영 반영했고,
+기존 실패 상태는 다음 polling에서 자동 해제돼 대표 mailbox 7개가 모두 오류 없이 최근
+동기화됐다. 실제 통제 회신 Case_idx canary는 별도로 수행한다.
 같은 화면의 후속 출시 후보는 인증·역할 검사를 통과한 직원에게 대화 목록의 전체 고객
 전화번호를 하이픈 형식으로 표시한다. DB 암호화, outbox·로그 비식별 계약과 조회 감사는
 유지하며 비표준 U+ `SRC` 원문은 전체 번호로 취급하지 않는다. 대화 말풍선은 휴대전화와
 비슷한 약 18~23자 폭과 15px급 본문으로 제한하고, MMS는 파일명 대신 발송 당시 이미지를
 표시한다. 같은 선택 행을 다시 눌렀을 때 loading만 켜고 조회 효과가 재실행되지 않던 오류를
 없애며, 빠른 대화 전환 중 늦게 끝난 이전 응답도 최신 선택을 덮어쓰지 못하게 요청 순서를
-검증한다. 이 후속은 migration `0045`, gateway와 ERP를 같은 릴리스로 반영해야 한다.
+검증한다. 이 후속은 migration `0047_wandering_maximus.sql`과 gateway·ERP를 위 통합
+릴리스로 반영했다. 기존 MMS 52건 중 파일 snapshot이 현재 템플릿과 같은 40건만 이미지 URL을
+보강했고 비-MMS 오보강은 0건이다.
 지연 운영 검증에서 gateway·ERP·Caddy와 외부 HTTPS, 재시작·error journal은 계속
 정상이었지만 `lawand-slot-017` 하나가 성공 로그인 뒤 U+ `STATUS=-1(NotFound)` 재접속을
 반복해 `lawand-centrex-login-failures` 경보가 ALARM으로 바뀌었다. 배정 원장 heartbeat,
@@ -1577,8 +1590,8 @@ Manager와 별도 역할·보안그룹·TLS 기준을 적용한다.
 - [x] 운영 migration `0044`·gateway/ERP 통합 배포 → `/messages`와 대표 mailbox 7개 비활성
   상태·권한·기존 대화 운영 검증
 - [x] 대표 계정 7개 TTY `userinfo` 검증 연결
-- [ ] U+ 비표준 `SRC` 격리 gateway 수정 운영 반영 → 과거 수신 backfill·통제 회신 1건의
-  Case_idx 연결·단말/ERP 수신 canary
+- [x] U+ 비표준 `SRC` 격리 gateway 수정 운영 반영 → 대표 mailbox 7개 오류 0·최근 동기화
+- [ ] 대표번호 통제 회신 1건의 Case_idx 연결·단말/ERP 수신 canary
 - [x] SOLAPI 등록 MMS 발신번호를 운영 Secrets Manager·gateway에 적용
 - [ ] 200KB 이하 명함 JPG MMS 실제 발송·단말 수신 canary
 - [x] 임시 Windows Server 2022 x64 + 32비트 OpenAPI OCX 수신 canary:
@@ -1626,6 +1639,8 @@ Manager와 별도 역할·보안그룹·TLS 기준을 적용한다.
   - [ ] 통화 후 호전환 B/고객 final leg의 추가 provider 증거 확보·결정적 상관 구현
 - [x] 통합 통화 활동 구현: root/leg 원장·외부 수발신 공용 snapshot/card·정확한 알림 대상·
   토스트/Notification API·최종 고객 통화자 1회 후처리
+- [x] 통합 통화 활동 migration `0045`·gateway·ERP·bridge v0.8.0 운영 통합 배포
+- [ ] v0.8.0 일반 내선·무조건/통화 후 호전환·실패 복귀 운영 acceptance 재수행
 - [x] 실제 업무 통화를 포함한 10→25→50 프로세스 CPU·메모리 canary와 warm 5개 원복
 - [ ] bridge 조직용 Authenticode 인증서 발급·서명 배포
 - [x] Windows 재부팅 canary: 평문 자동 로그온 없이 SYSTEM 경보 확인 → 관리자 RDP 로그인 →
@@ -1673,14 +1688,14 @@ Manager와 별도 역할·보안그룹·TLS 기준을 적용한다.
 7. 활성화된 리걸프렌즈 워커의 외부 멱등성 계약과 응답 유실 건 운영 절차 확정
 8. SOLAPI 명함 JPG MMS 1건 canary 뒤, Solapi 최종 발송결과 자동 수신과 전체 상담
    상태머신 확정
-9. 대표 문자 수신함의 U+ 비표준 `SRC` 격리 수정을 gateway에 반영한 뒤
-   `02-555-7465` 통제 회신 1건의 Case_idx 통합 대화 canary; 대표전화 근무/휴무·담당자
+9. 대표 문자 수신함의 U+ 비표준 `SRC` 격리 수정은 배포 완료. 승인된 통제 대표 회선의
+   회신 1건으로 Case_idx 통합 대화 canary; 대표전화 근무/휴무·담당자
    조건 라우팅은 별도 설계
 10. 홈페이지 카카오 버튼 → ERP 대기 접수 → 실제 채팅 표시명 확정의 운영자 canary
 11. 실제 수신·ERP 발신·직접 발신 한 건씩 통화 종료 후 공용 후처리 자동 열림과 담당자 기본값 UX 확인
 12. 센트릭스 조직용 코드 서명 인증서 배포; 실제 배정이 50개에 가까워지기 전
     t3.medium의 메모리 여유를 재확인하고 t3.large 상향 검토
-13. 통합 통화 활동 migration과 bridge v0.8.0·gateway·ERP를 같은 릴리스로 배포한 뒤
+13. 통합 통화 활동 migration과 bridge v0.8.0·gateway·ERP의 같은 릴리스 배포는 완료.
     일반 내선·무조건/통화 후 호전환·실패 복귀를 다시 canary한다. 통화 후 호전환의
     B/customer final leg는 추가 provider 증거가 없으면 계속 `호전환 확인 필요`로 남기고,
     공용 카드·담당자 알림·최종 통화자 후처리와 녹취 매핑용 provider 식별자를 대조한다.
