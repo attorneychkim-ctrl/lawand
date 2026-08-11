@@ -1,6 +1,6 @@
 import {
   getConsultations,
-  type ConsultationListItem,
+  type ConsultationListSnapshot,
 } from "../lib/gateway";
 import { requireStaff } from "../lib/session";
 import { ConsultationWorkspace } from "./_components/consultation-workspace";
@@ -20,10 +20,17 @@ function koreanTodayKey() {
 
 export default async function ErpHome() {
   const staff = await requireStaff();
-  let consultations: ConsultationListItem[] = [];
+  let snapshot: ConsultationListSnapshot = {
+    items: [],
+    total: 0,
+    page: 1,
+    pageSize: 20,
+    pageCount: 1,
+    summary: { all: 0, waiting: 0, mine: 0, attention: 0, today: 0 },
+  };
   let loadError = "";
   try {
-    consultations = await getConsultations();
+    snapshot = await getConsultations();
   } catch {
     loadError =
       "게이트웨이에 연결하지 못했습니다. 로컬 3022 서버 상태를 확인해 주세요.";
@@ -42,7 +49,7 @@ export default async function ErpHome() {
             </p>
           </div>
           <p className="header-context">
-            최신 요청순 <strong>최대 50건</strong>
+            최신 요청순 <strong>날짜·페이지별 조회</strong>
           </p>
         </header>
 
@@ -54,14 +61,13 @@ export default async function ErpHome() {
 
         {!loadError ? (
           <ConsultationWorkspace
-            consultations={consultations}
-            key={consultations
+            initialSnapshot={snapshot}
+            key={snapshot.items
               .map(
                 (item) =>
                   `${item.id}:${item.lastRequestedAt}:${item.state}:${item.assigneeUserId ?? ""}`,
               )
               .join("|")}
-            staffUserId={staff.id}
             todayKey={koreanTodayKey()}
           />
         ) : null}

@@ -9,8 +9,31 @@ import { StaffBar } from "../_components/staff-bar";
 const emptySnapshot: PhoneDeskCallSnapshot = {
   snapshotAt: "1970-01-01T00:00:00.000Z",
   items: [],
+  total: 0,
+  page: 1,
+  pageSize: 20,
+  pageCount: 1,
+  summary: {
+    all: 0,
+    inbound: 0,
+    clickToCall: 0,
+    centrexDirect: 0,
+    active: 0,
+  },
   followUps: [],
 };
+
+function koreanTodayKey() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
 
 export default async function PhoneDeskPage() {
   const staff = await requireStaff();
@@ -35,7 +58,7 @@ export default async function PhoneDeskPage() {
             </p>
           </div>
           <p className="header-context">
-            최신 통화순 <strong>최대 100건</strong>
+            최신 통화순 <strong>날짜·페이지별 조회</strong>
           </p>
         </header>
 
@@ -44,7 +67,14 @@ export default async function PhoneDeskPage() {
             {loadError}
           </p>
         ) : (
-          <PhoneDeskWorkspace initialSnapshot={snapshot} />
+          <PhoneDeskWorkspace
+            currentStaff={{
+              staffUserId: staff.id,
+              displayName: staff.displayName,
+            }}
+            initialSnapshot={snapshot}
+            todayKey={koreanTodayKey()}
+          />
         )}
 
         <p className="security-note">

@@ -189,6 +189,51 @@ function validUuid(value: string): boolean {
   );
 }
 
+type PagedDateQuery = {
+  page: number;
+  pageSize: 20 | 50 | 100;
+  from?: Date;
+  to?: Date;
+};
+
+function pagedDateQuery(
+  searchParams: URLSearchParams,
+): PagedDateQuery | null {
+  const pageValue = searchParams.get("page") ?? "1";
+  const pageSizeValue =
+    searchParams.get("pageSize") ?? searchParams.get("limit") ?? "20";
+  if (!/^\d+$/.test(pageValue) || !/^\d+$/.test(pageSizeValue)) {
+    return null;
+  }
+  const page = Number(pageValue);
+  const pageSize = Number(pageSizeValue);
+  if (
+    !Number.isSafeInteger(page) ||
+    page < 1 ||
+    !([20, 50, 100] as const).includes(pageSize as 20 | 50 | 100)
+  ) {
+    return null;
+  }
+
+  const fromValue = searchParams.get("from");
+  const toValue = searchParams.get("to");
+  const from = fromValue ? new Date(fromValue) : undefined;
+  const to = toValue ? new Date(toValue) : undefined;
+  if (
+    (from && Number.isNaN(from.getTime())) ||
+    (to && Number.isNaN(to.getTime())) ||
+    (from && to && from >= to)
+  ) {
+    return null;
+  }
+  return {
+    page,
+    pageSize: pageSize as 20 | 50 | 100,
+    ...(from ? { from } : {}),
+    ...(to ? { to } : {}),
+  };
+}
+
 export function createGatewayServer(options?: {
   service?: ConsultationService;
   internalApiKey?: string;
@@ -1391,11 +1436,33 @@ export function createGatewayServer(options?: {
         await options.authService.authorize(sessionToken, [
           ...consultationAccessRoles,
         ]);
-        const limit = Number(url.searchParams.get("limit") ?? "50");
+        const query = pagedDateQuery(url.searchParams);
+        const filter = url.searchParams.get("filter") ?? "all";
+        if (
+          !query ||
+          ![
+            "all",
+            "inbound",
+            "click_to_call",
+            "centrex_direct",
+            "active",
+          ].includes(filter)
+        ) {
+          sendJson(response, 400, { error: "invalid_list_query" });
+          return;
+        }
         sendJson(
           response,
           200,
-          await options.telephonyService.getPhoneDeskCalls(limit),
+          await options.telephonyService.getPhoneDeskCalls({
+            ...query,
+            filter: filter as
+              | "all"
+              | "inbound"
+              | "click_to_call"
+              | "centrex_direct"
+              | "active",
+          }),
         );
         return;
       }
@@ -2231,10 +2298,27 @@ export function createGatewayServer(options?: {
         ]);
 
         if (url.pathname === "/v1/consultations") {
-          const limit = Number(url.searchParams.get("limit") ?? "50");
-          const result = await options.service.list(
-            Number.isInteger(limit) ? limit : 50,
-          );
+          const query = pagedDateQuery(url.searchParams);
+          const filter = url.searchParams.get("filter") ?? "all";
+          if (
+            !query ||
+            !["all", "waiting", "mine", "attention", "today"].includes(
+              filter,
+            )
+          ) {
+            sendJson(response, 400, { error: "invalid_list_query" });
+            return;
+          }
+          const result = await options.service.list({
+            ...query,
+            filter: filter as
+              | "all"
+              | "waiting"
+              | "mine"
+              | "attention"
+              | "today",
+            staffUserId: actor.id,
+          });
           await options.authService.recordConsultationAccess(actor, {
             kind: "list",
           });

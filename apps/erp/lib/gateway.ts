@@ -49,6 +49,24 @@ export type ConsultationListItem = {
   lastRequestedAt: string;
 };
 
+export type ListPageSize = 20 | 50 | 100;
+
+export type ConsultationListFilter =
+  | "all"
+  | "waiting"
+  | "mine"
+  | "attention"
+  | "today";
+
+export type ConsultationListSnapshot = {
+  items: ConsultationListItem[];
+  total: number;
+  page: number;
+  pageSize: ListPageSize;
+  pageCount: number;
+  summary: Record<ConsultationListFilter, number>;
+};
+
 export type TelephonyCall = {
   id: string;
   targetSource: "consultation" | "legal_friends_directory";
@@ -410,6 +428,17 @@ export type PhoneDeskFollowUp = {
 export type PhoneDeskCallSnapshot = {
   snapshotAt: string;
   items: PhoneDeskCall[];
+  total: number;
+  page: number;
+  pageSize: ListPageSize;
+  pageCount: number;
+  summary: {
+    all: number;
+    inbound: number;
+    clickToCall: number;
+    centrexDirect: number;
+    active: number;
+  };
   followUps: PhoneDeskFollowUp[];
 };
 
@@ -663,13 +692,37 @@ export class ConsultationGatewayError extends Error {
   }
 }
 
-export async function getConsultations(): Promise<ConsultationListItem[]> {
-  const response = await gatewayFetch("/v1/consultations?limit=50");
+type PagedDateOptions<TFilter extends string> = {
+  page?: number;
+  pageSize?: ListPageSize;
+  filter?: TFilter;
+  from?: string;
+  to?: string;
+};
+
+function pagedDateParams<TFilter extends string>(
+  options: PagedDateOptions<TFilter>,
+) {
+  const params = new URLSearchParams({
+    page: String(options.page ?? 1),
+    pageSize: String(options.pageSize ?? 20),
+    filter: options.filter ?? "all",
+  });
+  if (options.from) params.set("from", options.from);
+  if (options.to) params.set("to", options.to);
+  return params;
+}
+
+export async function getConsultations(
+  options: PagedDateOptions<ConsultationListFilter> = {},
+): Promise<ConsultationListSnapshot> {
+  const response = await gatewayFetch(
+    `/v1/consultations?${pagedDateParams(options).toString()}`,
+  );
   if (!response.ok) {
     throw new Error(`상담 목록 조회 실패 (${response.status})`);
   }
-  const body = (await response.json()) as { items: ConsultationListItem[] };
-  return body.items;
+  return (await response.json()) as ConsultationListSnapshot;
 }
 
 export async function openConsultationEventStream(
@@ -729,8 +782,19 @@ export async function openTelephonyInboundEventStream(
   });
 }
 
-export async function getPhoneDeskCalls(): Promise<PhoneDeskCallSnapshot> {
-  const response = await gatewayFetch("/v1/phone-desk/calls?limit=100");
+export type PhoneDeskListFilter =
+  | "all"
+  | "inbound"
+  | "click_to_call"
+  | "centrex_direct"
+  | "active";
+
+export async function getPhoneDeskCalls(
+  options: PagedDateOptions<PhoneDeskListFilter> = {},
+): Promise<PhoneDeskCallSnapshot> {
+  const response = await gatewayFetch(
+    `/v1/phone-desk/calls?${pagedDateParams(options).toString()}`,
+  );
   if (!response.ok) {
     throw new Error(`전화데스크 목록 조회 실패 (${response.status})`);
   }

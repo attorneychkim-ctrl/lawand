@@ -402,7 +402,7 @@ export function InboundCallIndicator({
   const refreshDirectOutboundAftercare = useCallback(async () => {
     const sequence = ++deskRequestSequence.current;
     const [response, activityResponse] = await Promise.all([
-      fetch("/api/phone-desk/calls", {
+      fetch("/api/phone-desk/calls?pageSize=100", {
         cache: "no-store",
         headers: { accept: "application/json" },
       }),
