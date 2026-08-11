@@ -1316,8 +1316,13 @@ a.inbound-customer:hover { text-decoration: underline; }
 .detail-actions {
   display: flex;
   flex: 0 0 auto;
-  align-items: center;
+  align-items: flex-start;
   gap: 9px;
+}
+
+.detail-actions .call-button,
+.detail-actions .legalfriends-invalidation-button {
+  min-height: 46px;
 }
 
 .secondary-action-link,
