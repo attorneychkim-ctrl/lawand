@@ -49,6 +49,55 @@ const STALE_BRIDGE_RINGING_MAX_AGE_MS = 5 * 60 * 1_000;
 const CENTREX_OBSERVATION_TIMEOUT_BRIDGE_ID =
   "centrex-observation-timeout";
 
+export function normalizeCentrexInboundHistoryTimeline(input: {
+  currentRingingAt: Date;
+  currentConnectedAt: Date | null;
+  providerStartedAt: Date;
+  providerEndedAt: Date;
+  providerAnswered: boolean;
+}) {
+  const ringingAt = new Date(
+    Math.min(
+      input.currentRingingAt.getTime(),
+      input.providerStartedAt.getTime(),
+    ),
+  );
+  const connectedAt = input.currentConnectedAt ??
+    (input.providerAnswered
+      ? new Date(
+          Math.max(
+            input.currentRingingAt.getTime(),
+            input.providerStartedAt.getTime(),
+          ),
+        )
+      : null);
+  const endedAt = new Date(
+    Math.max(
+      input.providerEndedAt.getTime(),
+      connectedAt?.getTime() ?? ringingAt.getTime(),
+    ),
+  );
+  return { ringingAt, connectedAt, endedAt };
+}
+
+export async function reconcileCentrexInboundHistoryBatch<T>(
+  records: readonly T[],
+  reconcile: (record: T) => Promise<boolean>,
+  onFailure: (error: unknown, record: T) => void,
+) {
+  let reconciled = 0;
+  let failed = 0;
+  for (const record of records) {
+    try {
+      if (await reconcile(record)) reconciled += 1;
+    } catch (error) {
+      failed += 1;
+      onFailure(error, record);
+    }
+  }
+  return { reconciled, failed };
+}
+
 const CALLBACK_QUERY_KEYS = new Set([
   "sender",
   "receiver",
@@ -107,6 +156,16 @@ function normalizedHistoryCause(
   status: CentrexInboundCallHistoryRecord["status"],
 ): string {
   return status.replaceAll(" ", "_");
+}
+
+function historyReconciliationErrorCode(error: unknown): string {
+  if (error instanceof CentrexDeliveryError) return error.code;
+  if (error && typeof error === "object" && "code" in error) {
+    const code = (error as { code?: unknown }).code;
+    if (code === "23514") return "database_check_violation";
+    if (code === "23505") return "database_unique_violation";
+  }
+  return "unexpected_error";
 }
 
 function historyProviderCallId(
@@ -559,13 +618,20 @@ export function createCentrexInboundObserver(options: {
       if (call?.state === "ended") return false;
 
       if (call) {
-        if (answered && call.state === "ringing") {
+        const timeline = normalizeCentrexInboundHistoryTimeline({
+          currentRingingAt: call.ringingAt,
+          currentConnectedAt: call.connectedAt,
+          providerStartedAt: startedAt,
+          providerEndedAt: endedAt,
+          providerAnswered: answered,
+        });
+        if (timeline.connectedAt && call.state === "ringing") {
           await persistHistoryEvent(tx, {
             eventType: "inbound.connected",
             inboundCallId: call.id,
             endpointId: endpoint.id,
             providerCallId,
-            occurredAt: startedAt,
+            occurredAt: timeline.connectedAt,
             receivedAt: currentTime,
           });
         }
@@ -573,10 +639,11 @@ export function createCentrexInboundObserver(options: {
           .update(telephonyInboundCalls)
           .set({
             state: "ended",
-            connectedAt: answered ? startedAt : null,
-            endedAt,
+            ringingAt: timeline.ringingAt,
+            connectedAt: timeline.connectedAt,
+            endedAt: timeline.endedAt,
             providerEndCause,
-            lastEventAt: endedAt,
+            lastEventAt: timeline.endedAt,
             updatedAt: currentTime,
           })
           .where(eq(telephonyInboundCalls.id, call.id));
@@ -585,7 +652,7 @@ export function createCentrexInboundObserver(options: {
           inboundCallId: call.id,
           endpointId: endpoint.id,
           providerCallId,
-          occurredAt: endedAt,
+          occurredAt: timeline.endedAt,
           receivedAt: currentTime,
           providerEndCause,
         });
@@ -593,6 +660,13 @@ export function createCentrexInboundObserver(options: {
       }
 
       const callId = createTelephonyCallId();
+      const timeline = normalizeCentrexInboundHistoryTimeline({
+        currentRingingAt: startedAt,
+        currentConnectedAt: null,
+        providerStartedAt: startedAt,
+        providerEndedAt: endedAt,
+        providerAnswered: answered,
+      });
       const encryptedPhone = protection.encrypt(
         remotePhone,
         `telephony_inbound_calls/${callId}/remote_phone`,
@@ -611,11 +685,11 @@ export function createCentrexInboundObserver(options: {
         remotePhoneMasked: maskedPhone(remotePhone),
         incomingLineLast4: endpoint.lineNumber.slice(-4),
         state: "ended",
-        ringingAt: startedAt,
-        connectedAt: answered ? startedAt : null,
-        endedAt,
+        ringingAt: timeline.ringingAt,
+        connectedAt: timeline.connectedAt,
+        endedAt: timeline.endedAt,
         providerEndCause,
-        lastEventAt: endedAt,
+        lastEventAt: timeline.endedAt,
         createdAt: currentTime,
         updatedAt: currentTime,
       });
@@ -624,16 +698,16 @@ export function createCentrexInboundObserver(options: {
         inboundCallId: callId,
         endpointId: endpoint.id,
         providerCallId,
-        occurredAt: startedAt,
+        occurredAt: timeline.ringingAt,
         receivedAt: currentTime,
       });
-      if (answered) {
+      if (timeline.connectedAt) {
         await persistHistoryEvent(tx, {
           eventType: "inbound.connected",
           inboundCallId: callId,
           endpointId: endpoint.id,
           providerCallId,
-          occurredAt: startedAt,
+          occurredAt: timeline.connectedAt,
           receivedAt: currentTime,
         });
       }
@@ -642,7 +716,7 @@ export function createCentrexInboundObserver(options: {
         inboundCallId: callId,
         endpointId: endpoint.id,
         providerCallId,
-        occurredAt: endedAt,
+        occurredAt: timeline.endedAt,
         receivedAt: currentTime,
         providerEndCause,
       });
@@ -662,18 +736,28 @@ export function createCentrexInboundObserver(options: {
         page: 1,
         pageSize: 50,
       });
-      let reconciled = 0;
-      for (const record of [...history.records].reverse()) {
-        if (await reconcileRecord(endpoint, record, currentTime)) {
-          reconciled += 1;
-        }
-      }
-      if (reconciled > 0) {
+      const result = await reconcileCentrexInboundHistoryBatch(
+        [...history.records].reverse(),
+        (record) => reconcileRecord(endpoint, record, currentTime),
+        (error, record) => {
+          console.warn(
+            JSON.stringify({
+              event: "centrex_inbound_history_record_reconciliation_failed",
+              endpointId: endpoint.id,
+              providerStatus: record.status,
+              errorCode: historyReconciliationErrorCode(error),
+              occurredAt: currentTime.toISOString(),
+            }),
+          );
+        },
+      );
+      if (result.reconciled > 0) {
         console.log(
           JSON.stringify({
             event: "centrex_inbound_history_reconciled",
             endpointId: endpoint.id,
-            count: reconciled,
+            count: result.reconciled,
+            failedCount: result.failed,
             occurredAt: currentTime.toISOString(),
           }),
         );

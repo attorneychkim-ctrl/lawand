@@ -12,6 +12,8 @@ import type {
 type SourceFilter = "all" | PhoneDeskCall["source"];
 type ConnectionState = "connecting" | "connected" | "disconnected";
 
+const UPLUS_HISTORY_DELAY_MS = 2 * 60 * 1_000;
+
 const sourceCopy: Record<
   PhoneDeskCall["source"],
   { label: string; description: string }
@@ -86,6 +88,26 @@ function formatDuration(seconds: number) {
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds % 60;
   return minutes > 0 ? `${minutes}분 ${remainder}초` : `${remainder}초`;
+}
+
+function isUplusHistoryDelayed(
+  call: PhoneDeskCall,
+  currentTime: number | null,
+) {
+  return call.state === "ringing" &&
+    call.receptionMode === "uplus_network" &&
+    currentTime !== null &&
+    currentTime - new Date(call.ringingAt ?? call.occurredAt).getTime() >=
+      UPLUS_HISTORY_DELAY_MS;
+}
+
+function callStateLabel(call: PhoneDeskCall, currentTime: number | null) {
+  if (call.state === "ringing" && call.receptionMode === "uplus_network") {
+    return isUplusHistoryDelayed(call, currentTime)
+      ? "이력 반영 지연"
+      : "수신 상태 확인 중";
+  }
+  return stateCopy[call.state];
 }
 
 function caseTypeLabel(caseType: number) {
@@ -174,10 +196,25 @@ function CustomerSummary({ call }: { call: PhoneDeskCall }) {
   );
 }
 
-function CallTiming({ call }: { call: PhoneDeskCall }) {
+function CallTiming({
+  call,
+  currentTime,
+}: {
+  call: PhoneDeskCall;
+  currentTime: number | null;
+}) {
   if (call.state === "pending") return <span>센트릭스 응답 대기</span>;
   if (call.state === "failed") return <span>발신 명령 실패</span>;
   if (call.state === "unknown") return <span>전화기 상태 확인 필요</span>;
+  if (call.state === "ringing" && call.receptionMode === "uplus_network") {
+    return (
+      <span>
+        {isUplusHistoryDelayed(call, currentTime)
+          ? "U+ 종료 이력 자동 재확인 중"
+          : "U+ 종료 이력 확인 중"}
+      </span>
+    );
+  }
   if (call.state === "connected" && call.durationSeconds === null) {
     return <span>현재 통화 중</span>;
   }
@@ -412,6 +449,7 @@ export function PhoneDeskWorkspace({
             </p>
           ) : visibleItems.map((call) => {
             const source = sourceCopy[call.source];
+            const historyDelayed = isUplusHistoryDelayed(call, currentTime);
             const staffLabel = call.clickToCall
               ? call.clickToCall.requestedBy.displayName
               : call.endpointOwners.map((owner) => owner.displayName).join(" · ") ||
@@ -454,8 +492,10 @@ export function PhoneDeskWorkspace({
                   <span>내선 {call.endpoint.extension}</span>
                 </div>
                 <div className="phone-desk-status">
-                  <span className={`is-${call.state}`}>{stateCopy[call.state]}</span>
-                  <CallTiming call={call} />
+                  <span className={`is-${historyDelayed ? "unknown" : call.state}`}>
+                    {callStateLabel(call, currentTime)}
+                  </span>
+                  <CallTiming call={call} currentTime={currentTime} />
                 </div>
                 <time dateTime={call.occurredAt}>
                   {formatDateTime(call.occurredAt)}
