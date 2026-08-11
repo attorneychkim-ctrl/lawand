@@ -12,6 +12,7 @@ export type TelephonyDeskEventNotification = {
     | "observed_call.changed"
     | "click_to_call.changed"
     | "click_to_call.linked"
+    | "call_activity.changed"
     | "aftercare.changed"
     | "follow_up.changed";
   entityId: string;
@@ -33,6 +34,7 @@ const eventTypes = new Set<TelephonyDeskEventNotification["eventType"]>([
   "observed_call.changed",
   "click_to_call.changed",
   "click_to_call.linked",
+  "call_activity.changed",
   "aftercare.changed",
   "follow_up.changed",
 ]);

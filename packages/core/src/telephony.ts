@@ -282,6 +282,23 @@ const providerCallIdSchema = z
   .string()
   .regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$/);
 const phoneDigitsSchema = z.string().regex(/^[0-9]{8,20}$/);
+const callPartyDigitsSchema = z.string().regex(/^[0-9]{2,20}$/);
+const extensionDigitsSchema = z.string().regex(/^[0-9]{2,10}$/);
+
+export const centrexCallPartyKindSchema = z.enum([
+  "internal",
+  "external",
+  "unknown",
+]);
+
+export const centrexChannelKindSchema = z.enum([
+  "sip",
+  "pjsip",
+  "local",
+  "local_xfer",
+  "other",
+  "none",
+]);
 
 const centrexBridgeEventEnvelopeSchema = z
   .object({
@@ -342,6 +359,101 @@ export const centrexBridgeOutboundEndedEventSchema =
     })
     .strict();
 
+const centrexBridgeObservationEnvelopeSchema = z
+  .object({
+    schemaVersion: z.literal(2),
+    eventId: z.uuid(),
+    bridgeId: bridgeIdSchema,
+    endpointId: z.uuid(),
+    occurredAt: z.iso.datetime({ offset: true }),
+    providerCallId: providerCallIdSchema,
+    agentExtension: extensionDigitsSchema,
+  })
+  .strict();
+
+/**
+ * OCX RINGEVENT를 개인정보 원문 없이 정규화한 관측 계약이다.
+ * contextProviderCallId는 외부 통화가 살아 있는 상태에서 시작한 내선 상담처럼
+ * bridge가 직접 알고 있는 상위 통화 문맥만 담는다.
+ */
+export const centrexBridgeCallRingingObservationSchema =
+  centrexBridgeObservationEnvelopeSchema
+    .extend({
+      eventType: z.literal("call.ringing"),
+      direction: z.enum(["inbound", "outbound"]),
+      remotePartyKind: centrexCallPartyKindSchema,
+      remotePartyNumber: callPartyDigitsSchema,
+      incomingLineNumber: callPartyDigitsSchema.optional(),
+      contextProviderCallId: providerCallIdSchema.optional(),
+      channelKind: centrexChannelKindSchema,
+      relatedChannelKind: centrexChannelKindSchema,
+    })
+    .strict()
+    .superRefine((value, context) => {
+      if (value.direction === "inbound" && !value.incomingLineNumber) {
+        context.addIssue({
+          code: "custom",
+          message: "수신 관측에는 최초 수신 회선이 필요합니다.",
+          path: ["incomingLineNumber"],
+        });
+      }
+      if (value.direction === "outbound" && value.incomingLineNumber) {
+        context.addIssue({
+          code: "custom",
+          message: "발신 관측에는 최초 수신 회선을 넣지 않습니다.",
+          path: ["incomingLineNumber"],
+        });
+      }
+      const digitLength = value.remotePartyNumber.length;
+      if (
+        (value.remotePartyKind === "internal" && digitLength > 8) ||
+        (value.remotePartyKind === "external" && digitLength < 9)
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "상대 종류와 번호 길이가 일치하지 않습니다.",
+          path: ["remotePartyKind"],
+        });
+      }
+      if (
+        value.contextProviderCallId &&
+        value.remotePartyKind !== "internal"
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "상위 통화 문맥은 내선 상담 관측에만 허용합니다.",
+          path: ["contextProviderCallId"],
+        });
+      }
+    });
+
+/** CHANNELLIST의 양쪽 provider ID와 파생 채널/상대 종류를 모두 보존한다. */
+export const centrexBridgeCallChannelsObservationSchema =
+  centrexBridgeObservationEnvelopeSchema
+    .extend({
+      eventType: z.literal("call.channels"),
+      relatedProviderCallId: providerCallIdSchema,
+      party1Kind: centrexCallPartyKindSchema,
+      party2Kind: centrexCallPartyKindSchema,
+      party1Number: callPartyDigitsSchema.optional(),
+      party2Number: callPartyDigitsSchema.optional(),
+      channel1Kind: centrexChannelKindSchema,
+      channel2Kind: centrexChannelKindSchema,
+    })
+    .strict();
+
+/** CHANNELOUT은 unique/source ID를 함께 보존해 어느 leg가 끝났는지 판정한다. */
+export const centrexBridgeCallEndedObservationSchema =
+  centrexBridgeObservationEnvelopeSchema
+    .extend({
+      eventType: z.literal("call.ended"),
+      sourceProviderCallId: providerCallIdSchema.optional(),
+      providerEndCause: z.string().regex(/^[A-Za-z0-9_.:-]{1,30}$/),
+      channelKind: centrexChannelKindSchema,
+      relatedChannelKind: centrexChannelKindSchema,
+    })
+    .strict();
+
 export const centrexBridgeEventSchema = z.discriminatedUnion("eventType", [
   centrexBridgeRingingEventSchema,
   centrexBridgeConnectedEventSchema,
@@ -349,9 +461,16 @@ export const centrexBridgeEventSchema = z.discriminatedUnion("eventType", [
   centrexBridgeOutboundRingingEventSchema,
   centrexBridgeOutboundConnectedEventSchema,
   centrexBridgeOutboundEndedEventSchema,
+  centrexBridgeCallRingingObservationSchema,
+  centrexBridgeCallChannelsObservationSchema,
+  centrexBridgeCallEndedObservationSchema,
 ]);
 
 export type CentrexBridgeEvent = z.infer<typeof centrexBridgeEventSchema>;
+export type CentrexBridgeCallObservation = Extract<
+  CentrexBridgeEvent,
+  { schemaVersion: 2 }
+>;
 
 export const centrexBridgeAnswerCommandSchema = z
   .object({

@@ -1,4 +1,4 @@
-# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.12)
+# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.13)
 
 > 이 문서는 새 로앤 홈페이지 + 새 ERP + 리걸플로/리걸프렌즈 연동을 하나의 플랫폼으로
 > 묶기 위한 **저장소 구조·아키텍처 설계 초안**이다. 코덱스/클로드코드 세션이 번갈아
@@ -529,6 +529,20 @@
 > 외부 root와 B final leg 연결이 결정적이며 실패·복귀는 bridge-local 문맥으로 판별 가능하다.
 > 통화 후 호전환 성공의 B/customer final leg는 passive event만으로 외부 root와 결정적으로
 > 연결할 수 없어 여전히 미해결이다. cause 또는 시간 근접만으로 상태·상관관계를 추정하지 않는다.
+> 2026-08-11에는 이 계약의 출시 후보 구현을 완료했다. bridge v0.8.0 후보가 기존 외부
+> 수·발신 v1과 함께 내선·호전환 `RINGEVENT`·`CHANNELLIST`·`CHANNELOUT`을 v2 관측으로
+> 전달하고, migration `0045_safe_zarek.sql`이 고객 call root·개별 leg·provider
+> root/channel/source 식별자·transfer relation·원본 관측을 보존한다. gateway는 동일 외부
+> root·고객 지문·원수신 회선·대상 agent·provider root→adjacent 관계가 모두 맞는
+> 무조건 호전환만 확정하고, U+ callback/history가 중간 A leg를 종료하더라도 활성 B/customer
+> leg가 있으면 root를 닫지 않는다. 통화 후 호전환 final leg 근거가 없으면
+> `호전환 확인 필요`로 남기고 최종 통화자와 후처리를 추측하지 않는다. 공유 회선도 provider
+> 근거 없이 임의의 한 직원을 최종 통화자로 지정하지 않는다. 외부 수·발신 공용 카드와
+> 참여자 전용 내선 카드, 전달·복귀 상태, 정확한 `Member_idx` 담당자 알림, 토스트·브라우저
+> Notification과 탭 간 중복 방지를 ERP에 연결했다. 개인정보 없는 NOTIFY/SSE는 통화 ID만
+> 전달하고 전체 번호·고객·사건·담당자·회선은 인증 snapshot에서만 복호화한다. 임시 로컬
+> DB 복제본 수직 검증과 전체 테스트·lint·typecheck·production build, Windows x86 compile·
+> self-test를 통과했으며 운영 migration·배포·실통화 canary는 하지 않았다.
 > `Office_idx=56` 사건만 이름·전화·사건번호·원본 사건 ID 없이 추출한 자가진단
 > 런타임 읽기 모델을 만들었다. 현재 1,759건(회생 1,342·파산면책 417)이며 gateway만
 > 이 모델을 읽는다. `/bank/self-diagnosis`는 고객 상황과 유사한 다섯 건의 월 변제금·
@@ -1578,8 +1592,9 @@ Manager와 별도 역할·보안그룹·TLS 기준을 적용한다.
 - [x] bridge v0.7.2 비식별 관측 로그 통제 배포와 시나리오별 상관 가능 범위 확정
   - [x] 4591·1208 일반 내선과 통화 후 호전환 양쪽 endpoint 실제 이벤트 canary
   - [x] 무조건 호전환·실패 복귀 canary와 암호화 DLQ 3건 archive·active queue 정상화
-  - [ ] 통화 후 호전환 B/고객 final leg 상관 증거와 bridge transfer correlation 구현
-- [ ] 통합 통화 활동 구현: root/leg 원장·외부 수발신 공용 snapshot/card·정확한 알림 대상·
+  - [x] 활성 외부 root 문맥의 A/B consultation attempt와 미연결 복귀 correlation 구현
+  - [ ] 통화 후 호전환 B/고객 final leg의 추가 provider 증거 확보·결정적 상관 구현
+- [x] 통합 통화 활동 구현: root/leg 원장·외부 수발신 공용 snapshot/card·정확한 알림 대상·
   토스트/Notification API·최종 고객 통화자 1회 후처리
 - [x] 실제 업무 통화를 포함한 10→25→50 프로세스 CPU·메모리 canary와 warm 5개 원복
 - [ ] bridge 조직용 Authenticode 인증서 발급·서명 배포
@@ -1634,11 +1649,10 @@ Manager와 별도 역할·보안그룹·TLS 기준을 적용한다.
 11. 실제 수신·ERP 발신·직접 발신 한 건씩 통화 종료 후 공용 후처리 자동 열림과 담당자 기본값 UX 확인
 12. 센트릭스 조직용 코드 서명 인증서 배포; 실제 배정이 50개에 가까워지기 전
     t3.medium의 메모리 여유를 재확인하고 t3.large 상향 검토
-13. bridge v0.7.2의 일반 내선·무조건/통화 후 호전환·실패 복귀 fixture를 테스트로 고정한다.
-    고객 통화 root와 call legs, 엄격한 transfer evidence, 마지막 customer leg 기준 종료를
-    구현하고, 활성 외부 root 안의 consultation attempt/returned를 bridge가 명시적으로
-    상관한다. 통화 후 호전환 B/고객 final leg의 결정적 증거가 없으면 `호전환 확인 필요`로
-    남긴 뒤 외부 수·발신 공용 상단 카드, 담당자 알림과 최종 통화자 후처리를 통합 구현
+13. 통합 통화 활동 migration과 bridge v0.8.0·gateway·ERP를 같은 릴리스로 배포한 뒤
+    일반 내선·무조건/통화 후 호전환·실패 복귀를 다시 canary한다. 통화 후 호전환의
+    B/customer final leg는 추가 provider 증거가 없으면 계속 `호전환 확인 필요`로 남기고,
+    공용 카드·담당자 알림·최종 통화자 후처리와 녹취 매핑용 provider 식별자를 대조한다.
 14. 비즈콜 앱 직접 발신 1건이 종료 후 전화데스크에 들어오는지만 운영 acceptance로 확인;
     실시간 모바일 ring·ERP 받기·원격 발신은 현재 범위에서 제외
 15. 전화 담당자의 실시간 근무현황과 회선 통화 중 여부를 전화데스크·수신 카드에 결합

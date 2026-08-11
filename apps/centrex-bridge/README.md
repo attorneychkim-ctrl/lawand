@@ -23,8 +23,8 @@ LG U+ 고급형 센트릭스 A타입의 32비트 OpenAPI OCX를 상시 호스팅
   통화로 판정하고, 연결된 통화는 `CHANNELLIST`의 양쪽 channel ID를 종료까지 추적
 - `RINGEVENT(ISDIAL=1)`은 상대 `CALLERID`를 직접 발신으로 기록하고 수신과 분리된
   `outbound.ringing → outbound.connected → outbound.ended` 계약으로 전달
-- 외부 전화번호 계약을 만족하지 않는 4자리 내부 leg 등은 활성 통화 상태를 만들기 전에
-  거부해 뒤따르는 연결·종료 이벤트가 고아 큐가 되지 않게 함
+- 기존 외부 수·발신 v1 계약은 유지하고, 4자리 내선과 호전환도 v2 관측 계약으로
+  `RINGEVENT`·`CHANNELLIST`·`CHANNELOUT`의 root/adjacent/source 문맥을 gateway에 전달
 - 내선·호전환 canary용 진단 로그는 전화번호 원문이나 raw OCX payload 대신 상대 종류
   (`internal/external`)와 채널 종류(`sip/pjsip/local/local_xfer`)만 기록
 - gateway의 전화 받기 명령을 0.75초 간격의 서명된 polling으로 가져오며 전화번호는
@@ -170,10 +170,11 @@ PowerShell에서 아래처럼 실행한다. `InstallOffset`·`InstallLimit`은 �
 gateway 응답 본문은 기록하지 않는다. 운영자가 원인 조사 후 보존해야 하는 암호문은
 `gateway-dead-letter-archive`로 이동하며 평문으로 풀어 저장하지 않는다.
 
-bridge v0.7.2의 상대·채널 종류 로그는 내선과 호전환에서 실제로 전달되는 leg 관계를
-확인하기 위한 수동 관측 정보다. 기존 4자리 내부 leg 거부, gateway 이벤트 계약과 ERP
-표시 동작은 바꾸지 않는다. 관측 결과로 상관관계가 확인되기 전에는 `local_xfer` 채널의
-존재만으로 고객 보류·호전환 완료를 추정하지 않는다.
+bridge v0.7.2의 상대·채널 종류 로그로 내선과 호전환의 실측 관계를 확정했다. v0.8.0
+출시 후보는 같은 비식별 필드를 v2 관측 이벤트로 전달한다. 기존 외부 수·발신 v1은
+병행해 호환성을 유지하고, 정상 무조건 호전환의 원수신 회선 불일치는 v2 전용 엄격한
+상관 경계에서만 수용한다. 통화 후 호전환의 최종 고객 leg처럼 증거가 부족한 관계는
+`호전환 확인 필요`로 남기며 `local_xfer`나 종료 cause만으로 완료를 추정하지 않는다.
 
 ## 운영 점검과 부하시험
 

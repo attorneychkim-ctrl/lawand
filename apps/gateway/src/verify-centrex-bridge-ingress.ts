@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
 
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 
 import {
   consultationRequests,
   createDatabaseClient,
+  telephonyCallLegs,
   telephonyCallObservationLinks,
+  telephonyCallObservations,
+  telephonyCallProviderIdentifiers,
+  telephonyCallRelations,
+  telephonyCallRoots,
   telephonyCalls,
   telephonyEndpoints,
   telephonyInboundCalls,
@@ -322,6 +327,85 @@ try {
     .from(telephonyInboundEvents)
     .where(eq(telephonyInboundEvents.inboundCallId, outboundRing.callId));
   assert.equal(outboundEvents.length, 3);
+
+  const activityProviderCallId = `${providerCallId}.activity`;
+  const activityRing = await service.ingest(
+    {
+      schemaVersion: 2,
+      eventId: randomUUID(),
+      bridgeId,
+      endpointId,
+      eventType: "call.ringing",
+      occurredAt: new Date(baseTime + 7_000).toISOString(),
+      providerCallId: activityProviderCallId,
+      agentExtension: "4591",
+      direction: "inbound",
+      remotePartyKind: "external",
+      remotePartyNumber: phone,
+      incomingLineNumber: line,
+      channelKind: "sip",
+      relatedChannelKind: "sip",
+    },
+    {
+      bridgeId,
+      endpointId,
+      authenticationNonceHash: randomBytes(32),
+    },
+  );
+  await service.ingest(
+    {
+      schemaVersion: 2,
+      eventId: randomUUID(),
+      bridgeId,
+      endpointId,
+      eventType: "call.channels",
+      occurredAt: new Date(baseTime + 8_000).toISOString(),
+      providerCallId: activityProviderCallId,
+      relatedProviderCallId: `${activityProviderCallId}.channel`,
+      agentExtension: "4591",
+      party1Kind: "external",
+      party2Kind: "internal",
+      party1Number: phone,
+      party2Number: "4591",
+      channel1Kind: "sip",
+      channel2Kind: "sip",
+    },
+    {
+      bridgeId,
+      endpointId,
+      authenticationNonceHash: randomBytes(32),
+    },
+  );
+  await service.ingest(
+    {
+      schemaVersion: 2,
+      eventId: randomUUID(),
+      bridgeId,
+      endpointId,
+      eventType: "call.ended",
+      occurredAt: new Date(baseTime + 9_000).toISOString(),
+      providerCallId: `${activityProviderCallId}.channel`,
+      sourceProviderCallId: activityProviderCallId,
+      agentExtension: "4591",
+      providerEndCause: "16",
+      channelKind: "sip",
+      relatedChannelKind: "sip",
+    },
+    {
+      bridgeId,
+      endpointId,
+      authenticationNonceHash: randomBytes(32),
+    },
+  );
+  const [activityRoot] = await database.db
+    .select({
+      state: telephonyCallRoots.state,
+      endedAt: telephonyCallRoots.endedAt,
+    })
+    .from(telephonyCallRoots)
+    .where(eq(telephonyCallRoots.id, activityRing.callId));
+  assert.equal(activityRoot?.state, "ended");
+  assert.ok(activityRoot?.endedAt);
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.equal(realtimeErrors.length, 0);
   const deskChanges = deskRealtimeMessages.filter(
@@ -490,6 +574,28 @@ try {
   await database.db
     .delete(telephonyInboundCalls)
     .where(eq(telephonyInboundCalls.endpointId, endpointId));
+  const rootRows = await database.db
+    .select({ id: telephonyCallRoots.id })
+    .from(telephonyCallRoots)
+    .where(eq(telephonyCallRoots.originalEndpointId, endpointId));
+  const rootIds = rootRows.map((row) => row.id);
+  if (rootIds.length) {
+    await database.db
+      .delete(telephonyCallObservations)
+      .where(inArray(telephonyCallObservations.rootId, rootIds));
+    await database.db
+      .delete(telephonyCallRelations)
+      .where(inArray(telephonyCallRelations.rootId, rootIds));
+    await database.db
+      .delete(telephonyCallProviderIdentifiers)
+      .where(inArray(telephonyCallProviderIdentifiers.rootId, rootIds));
+    await database.db
+      .delete(telephonyCallLegs)
+      .where(inArray(telephonyCallLegs.rootId, rootIds));
+    await database.db
+      .delete(telephonyCallRoots)
+      .where(inArray(telephonyCallRoots.id, rootIds));
+  }
   await database.db
     .delete(telephonyEndpoints)
     .where(eq(telephonyEndpoints.id, endpointId));

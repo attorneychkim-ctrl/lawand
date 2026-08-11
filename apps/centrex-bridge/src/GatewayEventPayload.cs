@@ -16,6 +16,7 @@ namespace Lawand.CentrexBridge
         {
         }
 
+        public int SchemaVersion { get; private set; }
         public string EventId { get; private set; }
         public string BridgeId { get; private set; }
         public string EndpointId { get; private set; }
@@ -27,6 +28,21 @@ namespace Lawand.CentrexBridge
         public string CalledNumber { get; private set; }
         public string ProviderChannelId { get; private set; }
         public string ProviderEndCause { get; private set; }
+        public string Direction { get; private set; }
+        public string AgentExtension { get; private set; }
+        public string RemotePartyKind { get; private set; }
+        public string RemotePartyNumber { get; private set; }
+        public string ContextProviderCallId { get; private set; }
+        public string RelatedProviderCallId { get; private set; }
+        public string SourceProviderCallId { get; private set; }
+        public string Party1Kind { get; private set; }
+        public string Party2Kind { get; private set; }
+        public string Party1Number { get; private set; }
+        public string Party2Number { get; private set; }
+        public string ChannelKind { get; private set; }
+        public string RelatedChannelKind { get; private set; }
+        public string Channel1Kind { get; private set; }
+        public string Channel2Kind { get; private set; }
 
         public static GatewayEventPayload Ringing(
             BridgeConfiguration configuration,
@@ -141,6 +157,130 @@ namespace Lawand.CentrexBridge
                 cause);
         }
 
+        public static GatewayEventPayload ObservedRinging(
+            BridgeConfiguration configuration,
+            string providerCallId,
+            string direction,
+            string remotePartyKind,
+            string remotePartyNumber,
+            string incomingLineNumber,
+            string contextProviderCallId,
+            string channelKind,
+            string relatedChannelKind)
+        {
+            string normalizedDirection = ValidChoice(
+                direction,
+                "direction",
+                "inbound",
+                "outbound");
+            string normalizedPartyKind = ValidChoice(
+                remotePartyKind,
+                "remotePartyKind",
+                "internal",
+                "external",
+                "unknown");
+            string normalizedIncomingLine = null;
+            if (string.Equals(normalizedDirection, "inbound", StringComparison.Ordinal))
+            {
+                normalizedIncomingLine = ValidPartyNumber(
+                    incomingLineNumber,
+                    "incomingLineNumber");
+            }
+            return new GatewayEventPayload
+            {
+                SchemaVersion = 2,
+                EventId = Guid.NewGuid().ToString("D"),
+                BridgeId = configuration.BridgeId,
+                EndpointId = configuration.EndpointId,
+                EventType = "call.ringing",
+                OccurredAt = DateTimeOffset.UtcNow.ToString("o", CultureInfo.InvariantCulture),
+                ProviderCallId = ValidProviderId(providerCallId, "providerCallId"),
+                Direction = normalizedDirection,
+                AgentExtension = ValidExtension(configuration.ExpectedExtension),
+                RemotePartyKind = normalizedPartyKind,
+                RemotePartyNumber = ValidPartyNumber(remotePartyNumber, "remotePartyNumber"),
+                IncomingLineNumber = normalizedIncomingLine,
+                ContextProviderCallId = string.IsNullOrWhiteSpace(contextProviderCallId)
+                    ? null
+                    : ValidProviderId(contextProviderCallId, "contextProviderCallId"),
+                ChannelKind = ValidChannelKind(channelKind),
+                RelatedChannelKind = ValidChannelKind(relatedChannelKind)
+            };
+        }
+
+        public static GatewayEventPayload ObservedChannels(
+            BridgeConfiguration configuration,
+            string providerCallId,
+            string relatedProviderCallId,
+            string party1Kind,
+            string party2Kind,
+            string party1Number,
+            string party2Number,
+            string channel1Kind,
+            string channel2Kind)
+        {
+            return new GatewayEventPayload
+            {
+                SchemaVersion = 2,
+                EventId = Guid.NewGuid().ToString("D"),
+                BridgeId = configuration.BridgeId,
+                EndpointId = configuration.EndpointId,
+                EventType = "call.channels",
+                OccurredAt = DateTimeOffset.UtcNow.ToString("o", CultureInfo.InvariantCulture),
+                ProviderCallId = ValidProviderId(providerCallId, "providerCallId"),
+                RelatedProviderCallId = ValidProviderId(
+                    relatedProviderCallId,
+                    "relatedProviderCallId"),
+                AgentExtension = ValidExtension(configuration.ExpectedExtension),
+                Party1Kind = ValidChoice(
+                    party1Kind,
+                    "party1Kind",
+                    "internal",
+                    "external",
+                    "unknown"),
+                Party2Kind = ValidChoice(
+                    party2Kind,
+                    "party2Kind",
+                    "internal",
+                    "external",
+                    "unknown"),
+                Party1Number = OptionalPartyNumber(party1Number),
+                Party2Number = OptionalPartyNumber(party2Number),
+                Channel1Kind = ValidChannelKind(channel1Kind),
+                Channel2Kind = ValidChannelKind(channel2Kind)
+            };
+        }
+
+        public static GatewayEventPayload ObservedEnded(
+            BridgeConfiguration configuration,
+            string providerCallId,
+            string sourceProviderCallId,
+            string providerEndCause,
+            string channelKind,
+            string relatedChannelKind)
+        {
+            string cause = CentrexEventParser.SafeToken(providerEndCause, 30);
+            if (string.IsNullOrWhiteSpace(cause))
+            {
+                cause = "unknown";
+            }
+            return new GatewayEventPayload
+            {
+                SchemaVersion = 2,
+                EventId = Guid.NewGuid().ToString("D"),
+                BridgeId = configuration.BridgeId,
+                EndpointId = configuration.EndpointId,
+                EventType = "call.ended",
+                OccurredAt = DateTimeOffset.UtcNow.ToString("o", CultureInfo.InvariantCulture),
+                ProviderCallId = ValidProviderId(providerCallId, "providerCallId"),
+                SourceProviderCallId = OptionalProviderId(sourceProviderCallId),
+                AgentExtension = ValidExtension(configuration.ExpectedExtension),
+                ProviderEndCause = cause,
+                ChannelKind = ValidChannelKind(channelKind),
+                RelatedChannelKind = ValidChannelKind(relatedChannelKind)
+            };
+        }
+
         private static GatewayEventPayload Create(
             BridgeConfiguration configuration,
             string eventType,
@@ -153,6 +293,7 @@ namespace Lawand.CentrexBridge
         {
             return new GatewayEventPayload
             {
+                SchemaVersion = 1,
                 EventId = Guid.NewGuid().ToString("D"),
                 BridgeId = configuration.BridgeId,
                 EndpointId = configuration.EndpointId,
@@ -170,7 +311,7 @@ namespace Lawand.CentrexBridge
         public string ToJson()
         {
             Dictionary<string, object> value = new Dictionary<string, object>();
-            value["schemaVersion"] = 1;
+            value["schemaVersion"] = SchemaVersion;
             value["eventId"] = EventId;
             value["bridgeId"] = BridgeId;
             value["endpointId"] = EndpointId;
@@ -194,7 +335,33 @@ namespace Lawand.CentrexBridge
             {
                 value["providerEndCause"] = ProviderEndCause;
             }
+            Add(value, "direction", Direction);
+            Add(value, "agentExtension", AgentExtension);
+            Add(value, "remotePartyKind", RemotePartyKind);
+            Add(value, "remotePartyNumber", RemotePartyNumber);
+            Add(value, "contextProviderCallId", ContextProviderCallId);
+            Add(value, "relatedProviderCallId", RelatedProviderCallId);
+            Add(value, "sourceProviderCallId", SourceProviderCallId);
+            Add(value, "party1Kind", Party1Kind);
+            Add(value, "party2Kind", Party2Kind);
+            Add(value, "party1Number", Party1Number);
+            Add(value, "party2Number", Party2Number);
+            Add(value, "channelKind", ChannelKind);
+            Add(value, "relatedChannelKind", RelatedChannelKind);
+            Add(value, "channel1Kind", Channel1Kind);
+            Add(value, "channel2Kind", Channel2Kind);
             return new JavaScriptSerializer().Serialize(value);
+        }
+
+        private static void Add(
+            IDictionary<string, object> target,
+            string key,
+            string value)
+        {
+            if (value != null)
+            {
+                target[key] = value;
+            }
         }
 
         private static string ValidProviderId(string value, string field)
@@ -215,6 +382,66 @@ namespace Lawand.CentrexBridge
                 throw new ArgumentException(field + " 형식이 올바르지 않습니다.");
             }
             return digits;
+        }
+
+        private static string ValidPartyNumber(string value, string field)
+        {
+            string digits = CentrexEventParser.DigitsOnly(value);
+            if (digits.Length < 2 || digits.Length > 20)
+            {
+                throw new ArgumentException(field + " 형식이 올바르지 않습니다.");
+            }
+            return digits;
+        }
+
+        private static string OptionalPartyNumber(string value)
+        {
+            string digits = CentrexEventParser.DigitsOnly(value);
+            return digits.Length >= 2 && digits.Length <= 20 ? digits : null;
+        }
+
+        private static string OptionalProviderId(string value)
+        {
+            string safe = CentrexEventParser.SafeToken(value, 100);
+            return ProviderIdPattern.IsMatch(safe) && safe != "0" ? safe : null;
+        }
+
+        private static string ValidExtension(string value)
+        {
+            string digits = CentrexEventParser.DigitsOnly(value);
+            if (digits.Length < 2 || digits.Length > 10)
+            {
+                throw new ArgumentException("agentExtension 형식이 올바르지 않습니다.");
+            }
+            return digits;
+        }
+
+        private static string ValidChannelKind(string value)
+        {
+            return ValidChoice(
+                value,
+                "channelKind",
+                "sip",
+                "pjsip",
+                "local",
+                "local_xfer",
+                "other",
+                "none");
+        }
+
+        private static string ValidChoice(
+            string value,
+            string field,
+            params string[] allowed)
+        {
+            foreach (string candidate in allowed)
+            {
+                if (string.Equals(value, candidate, StringComparison.Ordinal))
+                {
+                    return candidate;
+                }
+            }
+            throw new ArgumentException(field + " 형식이 올바르지 않습니다.");
         }
     }
 }

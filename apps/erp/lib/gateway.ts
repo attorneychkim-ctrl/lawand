@@ -229,6 +229,9 @@ export type TelephonyInboundCall = {
         source: "legal_friends";
         clientName: string;
         cases: Array<{
+          caseIdx: number;
+          caseNumber: string | null;
+          caseName: string | null;
           caseType: number;
           caseState: number;
           isClosed: boolean;
@@ -237,6 +240,7 @@ export type TelephonyInboundCall = {
           caseCreatedOn: string;
           caseUpdatedOn: string;
           staffNames: string[];
+          staffUserIds: string[];
         }>;
       }
     | null;
@@ -247,9 +251,69 @@ export type TelephonyInboundCallSnapshot = {
   items: TelephonyInboundCall[];
 };
 
+export type TelephonyCallActivity = {
+  id: string;
+  observedCallId: string | null;
+  scope: "external" | "internal";
+  direction: "inbound" | "outbound" | null;
+  state:
+    | "ringing"
+    | "connected"
+    | "transferring"
+    | "needs_confirmation"
+    | "ended";
+  correlationStatus: "pending" | "confirmed" | "needs_confirmation" | "rejected";
+  remotePhone: string | null;
+  originalLineLast4: string | null;
+  startedAt: string;
+  connectedAt: string | null;
+  endedAt: string | null;
+  lastEventAt: string;
+  currentEndpoint: {
+    id: string;
+    label: string;
+    lineNumber: string;
+    extension: string;
+  };
+  participants: Array<{
+    legId: string;
+    endpointId: string;
+    staffUserId: string | null;
+    displayName: string | null;
+    kind: "customer" | "consultation" | "internal";
+    direction: "inbound" | "outbound";
+    state: "ringing" | "connected" | "ended";
+    remoteExtension: string | null;
+    startedAt: string;
+  }>;
+  transfer: {
+    state:
+      | "transfer_attempted"
+      | "transfer_completed"
+      | "transfer_returned"
+      | "transfer_unresolved";
+    correlationStatus: "pending" | "confirmed" | "needs_confirmation" | "rejected";
+  } | null;
+  customerMatch: TelephonyInboundCall["customerMatch"];
+  notificationKind:
+    | "external_inbound"
+    | "internal_inbound"
+    | "transferred_customer"
+    | "transfer_returned"
+    | null;
+  notificationTargetUserIds: string[];
+  canOpenAftercare: boolean;
+};
+
+export type TelephonyCallActivitySnapshot = {
+  snapshotAt: string;
+  items: TelephonyCallActivity[];
+};
+
 export type PhoneDeskCall = {
   id: string;
   observedCallId: string | null;
+  callRootId: string | null;
   direction: "inbound" | "outbound";
   receptionMode: "office_bridge" | "uplus_network" | null;
   source: "inbound" | "click_to_call" | "centrex_direct";
@@ -269,6 +333,7 @@ export type PhoneDeskCall = {
   ringSeconds: number | null;
   durationSeconds: number | null;
   providerEndCause: string | null;
+  finalStaffUserId: string | null;
   endpoint: {
     id: string;
     label: string;
@@ -622,6 +687,14 @@ export async function getTelephonyInboundCalls(): Promise<TelephonyInboundCallSn
     throw new Error(`수신전화 상태 조회 실패 (${response.status})`);
   }
   return (await response.json()) as TelephonyInboundCallSnapshot;
+}
+
+export async function getTelephonyCallActivities(): Promise<TelephonyCallActivitySnapshot> {
+  const response = await gatewayFetch("/v1/telephony-call-activities");
+  if (!response.ok) {
+    throw new Error(`통화 활동 상태 조회 실패 (${response.status})`);
+  }
+  return (await response.json()) as TelephonyCallActivitySnapshot;
 }
 
 export async function answerTelephonyInboundCall(

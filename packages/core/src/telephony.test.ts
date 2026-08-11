@@ -313,3 +313,80 @@ test("센트릭스 브리지 직접 발신 이벤트는 상대 번호와 상태�
     true,
   );
 });
+
+test("센트릭스 v2 관측은 내선 상담의 상위 외부 통화 문맥을 보존한다", () => {
+  const observation = {
+    schemaVersion: 2,
+    eventId: "01980000-0000-7000-8000-000000000051",
+    bridgeId: "seoul-phone-01",
+    endpointId: "01980000-0000-7000-8000-000000000002",
+    eventType: "call.ringing",
+    occurredAt: "2026-08-11T17:28:56.000+09:00",
+    providerCallId: "1785994319.3000001",
+    agentExtension: "4591",
+    direction: "outbound",
+    remotePartyKind: "internal",
+    remotePartyNumber: "1208",
+    contextProviderCallId: "1785994319.2999991",
+    channelKind: "sip",
+    relatedChannelKind: "sip",
+  } as const;
+
+  assert.deepEqual(centrexBridgeEventSchema.parse(observation), observation);
+  assert.equal(
+    centrexBridgeEventSchema.safeParse({
+      ...observation,
+      remotePartyKind: "external",
+    }).success,
+    false,
+  );
+  assert.equal(
+    centrexBridgeEventSchema.safeParse({
+      ...observation,
+      direction: "inbound",
+    }).success,
+    false,
+  );
+});
+
+test("센트릭스 v2 채널·종료 관측은 양쪽 provider 식별자를 보존한다", () => {
+  const base = {
+    schemaVersion: 2,
+    bridgeId: "seoul-phone-01",
+    endpointId: "01980000-0000-7000-8000-000000000002",
+    occurredAt: "2026-08-11T17:29:09.000+09:00",
+    providerCallId: "1785994319.3000001",
+    agentExtension: "4591",
+  } as const;
+  const channels = {
+    ...base,
+    eventId: "01980000-0000-7000-8000-000000000052",
+    eventType: "call.channels",
+    relatedProviderCallId: "1785994319.3000002",
+    party1Kind: "internal",
+    party2Kind: "internal",
+    party1Number: "4591",
+    party2Number: "1208",
+    channel1Kind: "sip",
+    channel2Kind: "sip",
+  } as const;
+  const ended = {
+    ...base,
+    eventId: "01980000-0000-7000-8000-000000000053",
+    eventType: "call.ended",
+    sourceProviderCallId: "1785994319.3000002",
+    providerEndCause: "16",
+    channelKind: "sip",
+    relatedChannelKind: "sip",
+  } as const;
+
+  assert.deepEqual(centrexBridgeEventSchema.parse(channels), channels);
+  assert.deepEqual(centrexBridgeEventSchema.parse(ended), ended);
+  assert.equal(
+    centrexBridgeEventSchema.safeParse({
+      ...ended,
+      sourceProviderCallId: "unsafe/provider/id",
+    }).success,
+    false,
+  );
+});

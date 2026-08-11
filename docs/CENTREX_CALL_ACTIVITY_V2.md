@@ -1,7 +1,7 @@
 # 센트릭스 통합 통화 활동 v2
 
 > 상태: 일반 내선·무조건/통화 후 호전환·실패 복귀 실통화 fixture 수집 완료,
-> 구현 전 root/leg·transfer evidence 계약 확정, 통화 후 호전환 final leg 상관은 미해결
+> root/leg·transfer evidence 출시 후보 구현 완료, 통화 후 호전환 final leg 상관은 미해결
 >
 > 기준일: 2026-08-11
 >
@@ -283,7 +283,7 @@ correlation 이벤트를 명시적으로 생성해야 제품이 `호전환 시�
 확인 시 4591·1208 active call과 실행 명령, target queue/dead-letter, 관련 CloudWatch
 ALARM은 모두 0이었고 다른 업무 통화는 조회만 했으며 개입하지 않았다.
 
-## 7. 구현 전 확정 계약
+## 7. 확정 구현 계약
 
 1. 한 고객 통화를 `customer call root`로 두고 A/customer, A/B consultation,
    B/customer를 각각 별도 call leg로 저장한다.
@@ -302,17 +302,42 @@ ALARM은 모두 0이었고 다른 업무 통화는 조회만 했으며 개입하
 ## 8. 구현 순서와 완료 기준
 
 1. **완료:** v0.7.2 통제 배포와 일반 내선·무조건/통화 후 호전환·실패 복귀 비식별 증거 수집.
-2. root/leg 상관관계, 엄격한 무조건 호전환 수용 경계와 실패·복귀 correlation을 테스트
-   fixture로 먼저 고정한다.
-3. gateway에 외부 통화 root, leg, 참여자와 전환 관계를 멱등 저장한다.
-4. 현재 수신 snapshot을 통합 통화 활동 snapshot으로 확장하고 외부 수·발신 공용 카드를
-   연결한다.
-5. 리걸프렌즈 `Member_idx`·`sub_member_idx` 기반 담당자 해석과 알림 대상 snapshot을
-   구현한다.
-6. 토스트·Notification API와 탭 간 중복 방지를 구현한다.
-7. 최종 고객 통화자 한 명에게만 후처리를 자동으로 연다.
-8. 권한·개인정보·재접속·중복 이벤트·호전환 실패 회귀 테스트 뒤 운영 canary를 수행한다.
+2. **완료:** root/leg 상관관계, 엄격한 무조건 호전환 수용 경계와 실패·복귀 correlation을
+   정책 fixture와 로컬 수직 검증으로 고정한다.
+3. **완료:** gateway에 외부 통화 root, leg, 참여자와 전환 관계를 멱등 저장한다.
+4. **완료:** 현재 수신 snapshot을 통합 통화 활동 snapshot으로 확장하고 외부 수·발신
+   공용 카드를 연결한다.
+5. **완료:** 리걸프렌즈 `Member_idx`·`sub_member_idx` 기반 담당자 해석과 알림 대상
+   snapshot을 구현한다.
+6. **완료:** 토스트·Notification API와 탭 간 중복 방지를 구현한다.
+7. **완료:** 결정적으로 확정된 최종 고객 통화자 한 명에게만 후처리를 자동으로 연다.
+8. **남음:** 권한·개인정보·재접속·중복 이벤트 회귀 검증은 로컬에서 통과했다. 운영
+   migration·bridge/gateway/ERP 통합 배포 뒤 네 실통화 시나리오 canary를 수행한다.
 
 완료 조건은 외부 수·발신 공용 카드가 한 통화당 하나로 일관되게 보이고, 일반 내선은 참여자만
 보며, 수신 담당자와 호전환 대상자가 정확히 한 번 알림을 받고, 중간 leg 종료가 고객 root를
 끝내지 않으며, 최종 고객 통화자에게만 후처리가 열리는 것이다.
+
+## 9. 출시 후보 구현 결과
+
+- migration `0045_safe_zarek.sql`에 고객 통화 root, 개별 leg, provider root/channel/source
+  식별자, transfer relation, 원본 관측 원장을 추가했다. 기존 수·발신 원장은 같은 UUID의
+  external root로 승격하고 후처리는 기존 통화 또는 새 root 중 정확히 하나만 참조한다.
+- bridge v0.8.0 후보는 외부 v1 이벤트를 유지하면서 내선·호전환까지 v2 관측을 함께 보낸다.
+  종료 시 실제 `UNIQUEID`를 `SRCUNIQUEID`보다 우선하고, 정상 무조건 호전환은 동일 외부
+  root·고객 지문·원수신 회선·대상 agent·`CHANNELLIST`를 모두 만족할 때만 확정한다.
+- gateway는 U+ callback/history와 bridge 관측을 같은 root/leg에 합치며, 중간 고객 leg 또는
+  상담 leg 종료가 다른 활성 고객 leg를 닫지 않는다. 통화 후 호전환 final leg가 보이지
+  않으면 root와 후처리를 `호전환 확인 필요`로 보존한다. 공유 회선은 실제 통화자를 임의로
+  한 명 선택하지 않는다.
+- 인증 통화 활동 snapshot은 외부 수·발신을 전 직원에게, 일반 내선은 참여 endpoint
+  담당자에게만 반환한다. 수신 알림은 정확한 리걸프렌즈 member index·상담 담당자와 회선
+  담당자를 합치고 없으면 활성 직원 전체로 확장한다.
+- ERP는 수신·직접발신·클릭투콜 공용 카드, 개인 내선 상태, 전달/복귀/확인 필요 상태,
+  9초 토스트와 명시적 Notification 권한, 8초 multi-tab leader lease·통화 ID 중복 방지를
+  적용했다. 개인정보 없는 NOTIFY/SSE 뒤 인증 same-origin snapshot에서 전체 번호와 고객·
+  사건·담당자·회선 정보를 채운다.
+- 임시 로컬 DB 복제본의 전체 migration과 실제 ingress 수직 검증, core 64개·gateway
+  104개 테스트, 전체 typecheck·lint·production build, Drizzle schema check, Windows
+  .NET Framework x86 Release compile·self-test 19개를 통과했다. 운영 migration·배포와
+  실통화 canary는 수행하지 않았다.

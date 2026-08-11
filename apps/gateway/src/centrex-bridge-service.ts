@@ -11,6 +11,7 @@ import {
 import { createTelephonyCallId, type CentrexBridgeEvent } from "@lawand/core";
 import {
   telephonyCallObservationLinks,
+  telephonyCallLegs,
   telephonyCalls,
   telephonyEndpoints,
   telephonyInboundCalls,
@@ -19,6 +20,7 @@ import {
 import type { createDatabaseClient } from "@lawand/db";
 
 import type { DataProtection } from "./crypto.js";
+import { createCentrexCallActivityService } from "./centrex-call-activity-service.js";
 import {
   CENTREX_SUPERSEDED_END_CAUSE,
   endOtherActiveCentrexCalls,
@@ -43,6 +45,7 @@ export class CentrexBridgeIngressError extends Error {
       | "endpoint_not_found"
       | "endpoint_inactive"
       | "incoming_line_mismatch"
+      | "agent_extension_mismatch"
       | "orphan_event"
       | "event_replay_conflict"
       | "nonce_replay_conflict"
@@ -67,12 +70,21 @@ export function createCentrexBridgeIngressService(options: {
   now?: () => Date;
 }) {
   const { db, protection, now = () => new Date() } = options;
+  const callActivity = createCentrexCallActivityService({
+    db,
+    protection,
+    now,
+    fail(code, message) {
+      throw new CentrexBridgeIngressError(code, message);
+    },
+  });
 
   async function linkOutboundObservation(
     tx: Parameters<Parameters<Database["transaction"]>[0]>[0],
     call: {
       id: string;
       endpointId: string;
+      callLegId: string | null;
       remotePhoneFingerprint: Buffer;
       ringingAt: Date;
     },
@@ -81,6 +93,7 @@ export function createCentrexBridgeIngressService(options: {
     const candidates = await tx
       .select({
         id: telephonyCalls.id,
+        staffUserId: telephonyCalls.staffUserId,
         requestedAt: telephonyCalls.requestedAt,
       })
       .from(telephonyCalls)
@@ -126,6 +139,10 @@ export function createCentrexBridgeIngressService(options: {
       candidates,
     );
     if (!candidate) return null;
+    const selectedCandidate = candidates.find(
+      (item) => item.id === candidate.id,
+    );
+    if (!selectedCandidate) return null;
 
     const [link] = await tx
       .insert(telephonyCallObservationLinks)
@@ -139,6 +156,15 @@ export function createCentrexBridgeIngressService(options: {
       })
       .onConflictDoNothing()
       .returning();
+    if (link && call.callLegId) {
+      await tx
+        .update(telephonyCallLegs)
+        .set({
+          staffUserId: selectedCandidate.staffUserId,
+          updatedAt: linkedAt,
+        })
+        .where(eq(telephonyCallLegs.id, call.callLegId));
+    }
     return link ?? null;
   }
 
@@ -150,6 +176,9 @@ export function createCentrexBridgeIngressService(options: {
       authenticationNonceHash: Buffer;
     },
   ) {
+    if (event.schemaVersion === 2) {
+      return callActivity.ingest(event, authentication);
+    }
     if (
       event.bridgeId !== authentication.bridgeId ||
       event.endpointId !== authentication.endpointId
@@ -466,6 +495,36 @@ export function createCentrexBridgeIngressService(options: {
           .where(eq(telephonyInboundCalls.id, persistedCall.id))
           .returning();
         if (updatedCall) persistedCall = updatedCall;
+      }
+
+      const [activityLeg] = await tx
+        .select({
+          id: telephonyCallLegs.id,
+          rootId: telephonyCallLegs.rootId,
+        })
+        .from(telephonyCallLegs)
+        .where(
+          and(
+            eq(telephonyCallLegs.endpointId, event.endpointId),
+            eq(telephonyCallLegs.providerCallId, event.providerCallId),
+          ),
+        )
+        .limit(1);
+      if (
+        activityLeg &&
+        (persistedCall.callRootId !== activityLeg.rootId ||
+          persistedCall.callLegId !== activityLeg.id)
+      ) {
+        const [linkedCall] = await tx
+          .update(telephonyInboundCalls)
+          .set({
+            callRootId: activityLeg.rootId,
+            callLegId: activityLeg.id,
+            updatedAt: receivedAt,
+          })
+          .where(eq(telephonyInboundCalls.id, persistedCall.id))
+          .returning();
+        if (linkedCall) persistedCall = linkedCall;
       }
 
       await tx.insert(telephonyInboundEvents).values({

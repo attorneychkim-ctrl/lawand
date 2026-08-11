@@ -43,6 +43,25 @@ test("후처리와 재통화 업무 변경 알림도 개인정보 없이 허용�
   }
 });
 
+test("통합 통화 활동 변경도 개인정보 없는 신호만 허용한다", () => {
+  assert.deepEqual(
+    parseTelephonyDeskEventNotification(
+      JSON.stringify({
+        eventType: "call_activity.changed",
+        entityId: "01980000-0000-7000-8000-000000000003",
+        direction: "inbound",
+        occurredAt: "2026-08-11T08:15:27.000Z",
+      }),
+    ),
+    {
+      eventType: "call_activity.changed",
+      entityId: "01980000-0000-7000-8000-000000000003",
+      direction: "inbound",
+      occurredAt: "2026-08-11T08:15:27.000Z",
+    },
+  );
+});
+
 test("전화번호나 알 수 없는 유형이 섞인 전화데스크 알림은 거부한다", () => {
   assert.equal(
     parseTelephonyDeskEventNotification(

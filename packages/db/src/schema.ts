@@ -272,6 +272,67 @@ export const telephonyBridgeEventTypeEnum = pgEnum(
   ],
 );
 
+export const telephonyCallScopeEnum = pgEnum("telephony_call_scope", [
+  "external",
+  "internal",
+]);
+
+export const telephonyCallRootStateEnum = pgEnum(
+  "telephony_call_root_state",
+  ["ringing", "connected", "transferring", "needs_confirmation", "ended"],
+);
+
+export const telephonyCallLegKindEnum = pgEnum("telephony_call_leg_kind", [
+  "customer",
+  "consultation",
+  "internal",
+]);
+
+export const telephonyCallLegStateEnum = pgEnum("telephony_call_leg_state", [
+  "ringing",
+  "connected",
+  "ended",
+]);
+
+export const telephonyCallPartyKindEnum = pgEnum(
+  "telephony_call_party_kind",
+  ["external", "internal", "unknown"],
+);
+
+export const telephonyCallCorrelationStatusEnum = pgEnum(
+  "telephony_call_correlation_status",
+  ["pending", "confirmed", "needs_confirmation", "rejected"],
+);
+
+export const telephonyCallRelationTypeEnum = pgEnum(
+  "telephony_call_relation_type",
+  [
+    "transfer_attempted",
+    "transfer_completed",
+    "transfer_returned",
+    "transfer_unresolved",
+  ],
+);
+
+export const telephonyProviderIdentifierRoleEnum = pgEnum(
+  "telephony_provider_identifier_role",
+  ["root", "channel", "source"],
+);
+
+export const telephonyCallObservationTypeEnum = pgEnum(
+  "telephony_call_observation_type",
+  ["ringing", "channels", "ended"],
+);
+
+export const telephonyChannelKindEnum = pgEnum("telephony_channel_kind", [
+  "sip",
+  "pjsip",
+  "local",
+  "local_xfer",
+  "other",
+  "none",
+]);
+
 export const staffOrganizations = pgTable("staff_organizations", {
   key: varchar("key", { length: 50 }).primaryKey(),
   name: varchar("name", { length: 100 }).notNull(),
@@ -2694,6 +2755,192 @@ export const telephonyCallDirectoryTargets = pgTable(
   ],
 );
 
+export const telephonyCallRoots = pgTable(
+  "telephony_call_roots",
+  {
+    id: uuid("id").primaryKey(),
+    provider: telephonyProviderEnum("provider").default("centrex").notNull(),
+    scope: telephonyCallScopeEnum("scope").notNull(),
+    direction: telephonyCallDirectionEnum("direction"),
+    state: telephonyCallRootStateEnum("state").default("ringing").notNull(),
+    correlationStatus: telephonyCallCorrelationStatusEnum(
+      "correlation_status",
+    )
+      .default("confirmed")
+      .notNull(),
+    originalEndpointId: uuid("original_endpoint_id")
+      .notNull()
+      .references(() => telephonyEndpoints.id, { onDelete: "restrict" }),
+    currentEndpointId: uuid("current_endpoint_id").references(
+      () => telephonyEndpoints.id,
+      { onDelete: "restrict" },
+    ),
+    finalEndpointId: uuid("final_endpoint_id").references(
+      () => telephonyEndpoints.id,
+      { onDelete: "restrict" },
+    ),
+    finalStaffUserId: uuid("final_staff_user_id").references(
+      () => staffUsers.id,
+      { onDelete: "restrict" },
+    ),
+    remotePhoneCiphertext: bytea("remote_phone_ciphertext"),
+    remotePhoneNonce: bytea("remote_phone_nonce"),
+    remotePhoneKeyVersion: varchar("remote_phone_key_version", { length: 50 }),
+    remotePhoneFingerprint: bytea("remote_phone_fingerprint"),
+    remotePhoneMasked: varchar("remote_phone_masked", { length: 20 }),
+    originalLineLast4: varchar("original_line_last4", { length: 4 }),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    connectedAt: timestamp("connected_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    lastEventAt: timestamp("last_event_at", { withTimezone: true }).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    index("telephony_call_roots_state_last_event_idx").on(
+      table.scope,
+      table.state,
+      table.lastEventAt,
+    ),
+    index("telephony_call_roots_phone_started_idx").on(
+      table.remotePhoneFingerprint,
+      table.startedAt,
+    ),
+    index("telephony_call_roots_current_endpoint_idx").on(
+      table.currentEndpointId,
+      table.state,
+    ),
+    check(
+      "telephony_call_roots_scope_direction",
+      sql`(${table.scope} = 'external' AND ${table.direction} IS NOT NULL)
+        OR (${table.scope} = 'internal' AND ${table.direction} IS NULL)`,
+    ),
+    check(
+      "telephony_call_roots_remote_party",
+      sql`(
+        ${table.scope} = 'external'
+        AND ${table.remotePhoneCiphertext} IS NOT NULL
+        AND ${table.remotePhoneNonce} IS NOT NULL
+        AND ${table.remotePhoneKeyVersion} IS NOT NULL
+        AND ${table.remotePhoneFingerprint} IS NOT NULL
+        AND ${table.remotePhoneMasked} IS NOT NULL
+        AND ${table.originalLineLast4} IS NOT NULL
+        AND octet_length(${table.remotePhoneCiphertext}) >= 17
+        AND octet_length(${table.remotePhoneNonce}) = 12
+        AND octet_length(${table.remotePhoneFingerprint}) = 32
+        AND ${table.remotePhoneMasked} ~ '^\\*\\*\\*[0-9]{4}$'
+        AND ${table.originalLineLast4} ~ '^[0-9]{4}$'
+      ) OR (
+        ${table.scope} = 'internal'
+        AND ${table.remotePhoneCiphertext} IS NULL
+        AND ${table.remotePhoneNonce} IS NULL
+        AND ${table.remotePhoneKeyVersion} IS NULL
+        AND ${table.remotePhoneFingerprint} IS NULL
+        AND ${table.remotePhoneMasked} IS NULL
+        AND ${table.originalLineLast4} IS NULL
+      )`,
+    ),
+    check(
+      "telephony_call_roots_time_order",
+      sql`(${table.connectedAt} IS NULL OR ${table.connectedAt} >= ${table.startedAt})
+        AND (${table.endedAt} IS NULL OR ${table.endedAt} >= ${table.startedAt})
+        AND ${table.lastEventAt} >= ${table.startedAt}`,
+    ),
+    check(
+      "telephony_call_roots_end_state",
+      sql`(${table.state} = 'ended' AND ${table.endedAt} IS NOT NULL)
+        OR (${table.state} <> 'ended')`,
+    ),
+  ],
+);
+
+export const telephonyCallLegs = pgTable(
+  "telephony_call_legs",
+  {
+    id: uuid("id").primaryKey(),
+    rootId: uuid("root_id")
+      .notNull()
+      .references(() => telephonyCallRoots.id, { onDelete: "restrict" }),
+    endpointId: uuid("endpoint_id")
+      .notNull()
+      .references(() => telephonyEndpoints.id, { onDelete: "restrict" }),
+    staffUserId: uuid("staff_user_id").references(() => staffUsers.id, {
+      onDelete: "restrict",
+    }),
+    bridgeId: varchar("bridge_id", { length: 80 }).notNull(),
+    kind: telephonyCallLegKindEnum("kind").notNull(),
+    direction: telephonyCallDirectionEnum("direction").notNull(),
+    state: telephonyCallLegStateEnum("state").default("ringing").notNull(),
+    remotePartyKind: telephonyCallPartyKindEnum("remote_party_kind").notNull(),
+    remoteExtension: varchar("remote_extension", { length: 10 }),
+    providerCallId: varchar("provider_call_id", { length: 100 }).notNull(),
+    providerChannelId: varchar("provider_channel_id", { length: 100 }),
+    providerEndCause: varchar("provider_end_cause", { length: 30 }),
+    correlationStatus: telephonyCallCorrelationStatusEnum(
+      "correlation_status",
+    )
+      .default("confirmed")
+      .notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    connectedAt: timestamp("connected_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    lastEventAt: timestamp("last_event_at", { withTimezone: true }).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("telephony_call_legs_endpoint_provider_uidx").on(
+      table.endpointId,
+      table.providerCallId,
+    ),
+    index("telephony_call_legs_root_state_idx").on(
+      table.rootId,
+      table.kind,
+      table.state,
+    ),
+    index("telephony_call_legs_staff_last_event_idx").on(
+      table.staffUserId,
+      table.lastEventAt,
+    ),
+    check(
+      "telephony_call_legs_bridge_id_format",
+      sql`${table.bridgeId} ~ '^[A-Za-z0-9][A-Za-z0-9_.-]{2,79}$'`,
+    ),
+    check(
+      "telephony_call_legs_provider_ids",
+      sql`${table.providerCallId} ~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$'
+        AND (${table.providerChannelId} IS NULL OR ${table.providerChannelId} ~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$')`,
+    ),
+    check(
+      "telephony_call_legs_remote_extension",
+      sql`(${table.remotePartyKind} = 'external' AND ${table.remoteExtension} IS NULL)
+        OR (${table.remotePartyKind} <> 'external' AND (${table.remoteExtension} IS NULL OR ${table.remoteExtension} ~ '^[0-9]{2,10}$'))`,
+    ),
+    check(
+      "telephony_call_legs_state_times",
+      sql`(
+        ${table.state} = 'ringing'
+        AND ${table.connectedAt} IS NULL
+        AND ${table.endedAt} IS NULL
+        AND ${table.providerEndCause} IS NULL
+      ) OR (
+        ${table.state} = 'connected'
+        AND ${table.connectedAt} IS NOT NULL
+        AND ${table.endedAt} IS NULL
+        AND ${table.providerEndCause} IS NULL
+      ) OR (
+        ${table.state} = 'ended'
+        AND ${table.endedAt} IS NOT NULL
+        AND ${table.providerEndCause} IS NOT NULL
+      )`,
+    ),
+    check(
+      "telephony_call_legs_time_order",
+      sql`(${table.connectedAt} IS NULL OR ${table.connectedAt} >= ${table.startedAt})
+        AND (${table.endedAt} IS NULL OR ${table.endedAt} >= ${table.startedAt})
+        AND ${table.lastEventAt} >= ${table.startedAt}`,
+    ),
+  ],
+);
+
 export const telephonyInboundCalls = pgTable(
   "telephony_inbound_calls",
   {
@@ -2706,6 +2953,12 @@ export const telephonyInboundCalls = pgTable(
       .notNull()
       .references(() => telephonyEndpoints.id, { onDelete: "restrict" }),
     bridgeId: varchar("bridge_id", { length: 80 }).notNull(),
+    callRootId: uuid("call_root_id").references(() => telephonyCallRoots.id, {
+      onDelete: "restrict",
+    }),
+    callLegId: uuid("call_leg_id").references(() => telephonyCallLegs.id, {
+      onDelete: "restrict",
+    }),
     providerCallId: varchar("provider_call_id", { length: 100 }).notNull(),
     remotePhoneCiphertext: bytea("remote_phone_ciphertext").notNull(),
     remotePhoneNonce: bytea("remote_phone_nonce").notNull(),
@@ -2830,6 +3083,9 @@ export const telephonyCallAftercare = pgTable(
       () => telephonyCalls.id,
       { onDelete: "restrict" },
     ),
+    callRootId: uuid("call_root_id").references(() => telephonyCallRoots.id, {
+      onDelete: "restrict",
+    }),
     consultationId: uuid("consultation_id").references(
       () => consultations.id,
       { onDelete: "restrict" },
@@ -2854,13 +3110,16 @@ export const telephonyCallAftercare = pgTable(
     uniqueIndex("telephony_call_aftercare_command_uidx")
       .on(table.telephonyCallId)
       .where(sql`${table.telephonyCallId} IS NOT NULL`),
+    uniqueIndex("telephony_call_aftercare_root_uidx")
+      .on(table.callRootId)
+      .where(sql`${table.callRootId} IS NOT NULL`),
     index("telephony_call_aftercare_consultation_idx").on(
       table.consultationId,
       table.confirmedAt,
     ),
     check(
       "telephony_call_aftercare_source_present",
-      sql`${table.observedCallId} IS NOT NULL OR ${table.telephonyCallId} IS NOT NULL`,
+      sql`num_nonnulls(${table.observedCallId}, ${table.telephonyCallId}, ${table.callRootId}) = 1`,
     ),
     check(
       "telephony_call_aftercare_other_text_crypto",
@@ -3019,6 +3278,191 @@ export const telephonyInboundEvents = pgTable(
         AND ${table.providerChannelId} IS NULL
         AND ${table.providerEndCause} IS NOT NULL
       )`,
+    ),
+  ],
+);
+
+/**
+ * provider 식별자는 통화 root/leg와 향후 녹취 메타데이터를 잇는 안정적인 원장이다.
+ * 식별자 자체는 브라우저와 실시간 알림 payload에 노출하지 않는다.
+ */
+export const telephonyCallProviderIdentifiers = pgTable(
+  "telephony_call_provider_identifiers",
+  {
+    id: uuid("id").primaryKey(),
+    rootId: uuid("root_id")
+      .notNull()
+      .references(() => telephonyCallRoots.id, { onDelete: "restrict" }),
+    legId: uuid("leg_id")
+      .notNull()
+      .references(() => telephonyCallLegs.id, { onDelete: "restrict" }),
+    endpointId: uuid("endpoint_id")
+      .notNull()
+      .references(() => telephonyEndpoints.id, { onDelete: "restrict" }),
+    provider: telephonyProviderEnum("provider").default("centrex").notNull(),
+    role: telephonyProviderIdentifierRoleEnum("role").notNull(),
+    providerValue: varchar("provider_value", { length: 100 }).notNull(),
+    firstObservedAt: timestamp("first_observed_at", {
+      withTimezone: true,
+    }).notNull(),
+    lastObservedAt: timestamp("last_observed_at", {
+      withTimezone: true,
+    }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("telephony_call_provider_identifiers_endpoint_role_uidx").on(
+      table.endpointId,
+      table.role,
+      table.providerValue,
+    ),
+    index("telephony_call_provider_identifiers_provider_value_idx").on(
+      table.provider,
+      table.providerValue,
+    ),
+    index("telephony_call_provider_identifiers_root_leg_idx").on(
+      table.rootId,
+      table.legId,
+    ),
+    check(
+      "telephony_call_provider_identifiers_value_format",
+      sql`${table.providerValue} ~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$'`,
+    ),
+    check(
+      "telephony_call_provider_identifiers_time_order",
+      sql`${table.lastObservedAt} >= ${table.firstObservedAt}`,
+    ),
+  ],
+);
+
+export const telephonyCallRelations = pgTable(
+  "telephony_call_relations",
+  {
+    id: uuid("id").primaryKey(),
+    rootId: uuid("root_id")
+      .notNull()
+      .references(() => telephonyCallRoots.id, { onDelete: "restrict" }),
+    fromLegId: uuid("from_leg_id").references(() => telephonyCallLegs.id, {
+      onDelete: "restrict",
+    }),
+    toLegId: uuid("to_leg_id").references(() => telephonyCallLegs.id, {
+      onDelete: "restrict",
+    }),
+    relationType: telephonyCallRelationTypeEnum("relation_type").notNull(),
+    correlationStatus: telephonyCallCorrelationStatusEnum(
+      "correlation_status",
+    ).notNull(),
+    correlationKey: varchar("correlation_key", { length: 220 }).notNull(),
+    evidence: jsonb("evidence").$type<Record<string, unknown>>().notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("telephony_call_relations_correlation_key_uidx").on(
+      table.correlationKey,
+    ),
+    index("telephony_call_relations_root_occurred_idx").on(
+      table.rootId,
+      table.occurredAt,
+    ),
+    check(
+      "telephony_call_relations_key_nonempty",
+      sql`length(btrim(${table.correlationKey})) > 0`,
+    ),
+  ],
+);
+
+export const telephonyCallObservations = pgTable(
+  "telephony_call_observations",
+  {
+    id: uuid("id").primaryKey(),
+    endpointId: uuid("endpoint_id")
+      .notNull()
+      .references(() => telephonyEndpoints.id, { onDelete: "restrict" }),
+    bridgeId: varchar("bridge_id", { length: 80 }).notNull(),
+    rootId: uuid("root_id").references(() => telephonyCallRoots.id, {
+      onDelete: "restrict",
+    }),
+    legId: uuid("leg_id").references(() => telephonyCallLegs.id, {
+      onDelete: "restrict",
+    }),
+    observationType: telephonyCallObservationTypeEnum(
+      "observation_type",
+    ).notNull(),
+    direction: telephonyCallDirectionEnum("direction"),
+    partyKind: telephonyCallPartyKindEnum("party_kind"),
+    providerCallId: varchar("provider_call_id", { length: 100 }).notNull(),
+    relatedProviderCallId: varchar("related_provider_call_id", { length: 100 }),
+    sourceProviderCallId: varchar("source_provider_call_id", { length: 100 }),
+    contextProviderCallId: varchar("context_provider_call_id", { length: 100 }),
+    remotePartyFingerprint: bytea("remote_party_fingerprint"),
+    remotePartyMasked: varchar("remote_party_masked", { length: 20 }),
+    incomingLineLast4: varchar("incoming_line_last4", { length: 4 }),
+    agentExtension: varchar("agent_extension", { length: 10 }).notNull(),
+    channelKind: telephonyChannelKindEnum("channel_kind").notNull(),
+    relatedChannelKind: telephonyChannelKindEnum(
+      "related_channel_kind",
+    ).notNull(),
+    providerEndCause: varchar("provider_end_cause", { length: 30 }),
+    correlationStatus: telephonyCallCorrelationStatusEnum(
+      "correlation_status",
+    )
+      .default("pending")
+      .notNull(),
+    eventFingerprint: bytea("event_fingerprint").notNull(),
+    authenticationNonceHash: bytea("authentication_nonce_hash").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("telephony_call_observations_bridge_nonce_uidx").on(
+      table.bridgeId,
+      table.authenticationNonceHash,
+    ),
+    index("telephony_call_observations_provider_call_idx").on(
+      table.providerCallId,
+      table.occurredAt,
+    ),
+    index("telephony_call_observations_root_occurred_idx").on(
+      table.rootId,
+      table.occurredAt,
+    ),
+    check(
+      "telephony_call_observations_bridge_id_format",
+      sql`${table.bridgeId} ~ '^[A-Za-z0-9][A-Za-z0-9_.-]{2,79}$'`,
+    ),
+    check(
+      "telephony_call_observations_provider_ids",
+      sql`${table.providerCallId} ~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$'
+        AND (${table.relatedProviderCallId} IS NULL OR ${table.relatedProviderCallId} ~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$')
+        AND (${table.sourceProviderCallId} IS NULL OR ${table.sourceProviderCallId} ~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$')
+        AND (${table.contextProviderCallId} IS NULL OR ${table.contextProviderCallId} ~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$')`,
+    ),
+    check(
+      "telephony_call_observations_hash_lengths",
+      sql`octet_length(${table.eventFingerprint}) = 32
+        AND octet_length(${table.authenticationNonceHash}) = 32
+        AND (${table.remotePartyFingerprint} IS NULL OR octet_length(${table.remotePartyFingerprint}) = 32)`,
+    ),
+    check(
+      "telephony_call_observations_remote_party",
+      sql`(
+        ${table.remotePartyFingerprint} IS NULL
+        AND ${table.remotePartyMasked} IS NULL
+      ) OR (
+        ${table.remotePartyFingerprint} IS NOT NULL
+        AND ${table.remotePartyMasked} ~ '^\\*\\*\\*[0-9]{2,4}$'
+      )`,
+    ),
+    check(
+      "telephony_call_observations_line_extension",
+      sql`(${table.incomingLineLast4} IS NULL OR ${table.incomingLineLast4} ~ '^[0-9]{2,4}$')
+        AND ${table.agentExtension} ~ '^[0-9]{2,10}$'`,
     ),
   ],
 );
