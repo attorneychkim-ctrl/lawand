@@ -1,12 +1,12 @@
 # AWS 운영 배포 기준선 v1
 
-기준 시각: 2026-08-10 KST
+기준 시각: 2026-08-11 KST
 CloudFormation 스택: `lawand-prod`
 리전: 서울(`ap-northeast-2`)
 최초 배포 릴리스: `20260804T085006Z-84e8708`
 현재 홈페이지 릴리스: `20260810T064408Z-homepage-cutover-ready-v3`
-현재 ERP 릴리스: `20260810T090235Z-customer-messaging-v1`
-현재 gateway 릴리스: `20260810T090235Z-customer-messaging-v1`
+현재 ERP 릴리스: `20260810T231946Z-client-directory-messaging-v1`
+현재 gateway 릴리스: `20260810T231946Z-client-directory-messaging-v1`
 
 이 문서는 정식 도메인 전환 전까지의 실제 AWS 구성, 접속점, 데이터 이관 범위와
 운영 체크리스트를 기록한다. 비밀번호·API 키·AWS 계정 ID·RDS 마스터 시크릿 ARN은
@@ -17,9 +17,9 @@ CloudFormation 스택: `lawand-prod`
 | 앱 | EIP HTTP(HTTPS로 전환) | 임시 HTTPS | 인스턴스 |
 |---|---|---|---|
 | 홈페이지 | `http://15.165.23.84/bank` | `https://15-165-23-84.sslip.io/bank` | `t4g.small`, 30GB gp3 |
-| ERP | `http://3.34.72.9/login` | `https://3-34-72-9.sslip.io/login` | `t4g.small`, 30GB gp3 |
-| gateway | `http://3.36.255.226/health` | `https://3-36-255-226.sslip.io/health` | `t4g.medium`, 40GB gp3 |
-| Centrex bridge canary | `15.165.2.138` | 해당 없음(SSM·제한된 RDP 전용) | Windows Server 2022 x64, `t3.medium` |
+| ERP | `http://3.34.72.9/login` | `https://3-34-72-9.sslip.io/login` | `t4g.small`, 100GB gp3 |
+| gateway | `http://3.36.255.226/health` | `https://3-36-255-226.sslip.io/health` | `t4g.medium`, 100GB gp3 |
+| Centrex bridge canary | `15.165.2.138` | 해당 없음(SSM·제한된 RDP 전용) | Windows Server 2022 x64, `t3.medium`, 100GB gp3 |
 
 EIP의 HTTP 주소는 같은 경로의 임시 HTTPS 주소로 `301 Moved Permanently` 전환한다.
 `sslip.io` 주소는 도메인 전환 전 인증서·화면·모바일 동작을 검증하기 위한 임시
@@ -80,7 +80,7 @@ A와 `www` CNAME만 다루고 NS·MX는 변경하지 않는다.
 - migration `0022_consultation_sse_notifications.sql`은 상담 outbox INSERT가 커밋될 때
   개인정보 없이 이벤트 ID·유형·상담 ID·발생시각만 PostgreSQL 채널로 알린다. gateway의
   전용 연결만 이 채널을 `LISTEN`하며 RDS를 인터넷에 노출하지 않는다.
-- 2026-08-10 기준 migration `0041`까지 42개는 모두 적용됐고 41개 파일 해시는 현재 Git과 일치한다.
+- 2026-08-11 기준 migration `0043`까지 44개는 모두 적용됐고 43개 파일 해시는 현재 Git과 일치한다.
   역사적으로 운영에 적용된 `0028_inbound_phone_directory_resolver.sql` 한 개만 현재 파일과
   해시가 다르다. 후속 `0037_phone_desk_directory_context.sql`이 같은 함수 계약을 대체했고
   현재 스키마·권한 검증은 통과한다. 이 예외를 이유로 migration 원장을 수정하거나 0028을
@@ -209,6 +209,35 @@ systemd 앱 단위와 Caddy edge 단위는 부팅 시 자동 시작한다. 최�
   ERP·Caddy active, 재시작·error journal·CloudWatch ALARM 0, 외부 health/login 200이다.
   Windows bridge는 재시작하지 않았고 v0.7.1.0 프로세스 16, 배정/연결 11, warm 5,
   오프라인·로그인 실패·DPAPI 큐·dead-letter 0을 유지한다. 실제 JPG MMS canary는 별도다.
+
+후속 고객 찾기 문자와 ERP 프로필 입력·전화 내선 표시 수정은 릴리스
+`20260810T231946Z-client-directory-messaging-v1`로 gateway·ERP에 함께 배포했다.
+
+- 배포 소스는 `main`/`origin/main` `b6c6afc`이며 HERDR 작업트리와 모든 로컬·원격
+  `worktree/*` HEAD가 main ancestor다. 전체 typecheck·lint·build, core 61개·gateway
+  87개 테스트, schema check와 `git diff --check`를 통과했다.
+- 암호화 스냅샷 `lawand-prod-pre-client-directory-messaging-20260810t231946z`, private S3
+  AES256 아티팩트 SHA-256
+  `021b7c4787b2fd9738d0b452c98801c9e8c352febe53c48f4147c5e9a5823383`을 확보했다. gateway
+  이미지 ID는 `sha256:781b4420ef8f78113631268a53a392435270be46c920acef3d11c47d56beb2f0`,
+  ERP는 `sha256:b7175abae52e6ce80e1768d48383b7107eca80d7462e45576b504d5bec3add67`이다.
+- migration `0043_famous_rafael_vega.sql` 적용 뒤 운영 원장은 44개이고 최신 해시는
+  `03ec720269d34ad1693c7849bf3267a364b3b93a0163b090b8b35591a326737c`로 Git과 일치한다.
+  기존 상담 문자 2건, 신규 대상 원장, `target_source NOT NULL`, 앱 CRUD·viewer SELECT
+  전용·PUBLIC 권한 0을 확인했다.
+- gateway 전환 직전 업무 통화 1건을 감지해 아무 상태도 바꾸지 않고 중단했으며 자연 종료와
+  연속 0건 확인 뒤 다시 전환했다. Windows bridge는 재시작하거나 원장을 보정하지 않았다.
+  인증 ERP `/clients`, `/profile`, `/message-templates`, `/phone-desk`는 모두 200이고 임시
+  세션은 0건이다. smoke는 발송하지 않았지만 직후 직원이 요청한 고객 찾기 LMS 1건이
+  Centrex `succeeded`·outbox `published`로 완료됐다.
+- 사용자가 EBS를 100GiB로 증설한 뒤 OS 파티션이 기존 ERP 30GiB·gateway 40GiB·Windows
+  C: 30GiB에 머문 것을 확인해 서비스 중단 없이 세 파일시스템을 100GiB로 확장했다. 최종
+  여유는 ERP 약 76GB, gateway 약 64GB, Windows 약 79.31GB다.
+- 최종 gateway·ERP·Caddy active, systemd·컨테이너 재시작 0, error journal 0, 외부
+  health/login 200, CloudWatch ALARM 0이다. 활성 수·발신·회선 중복·통화/문자 명령·문자
+  pending/dead/실패는 0이고 일반 업무 pending outbox 9건은 변경하지 않았다. Windows는
+  v0.7.1.0 프로세스 16, 설치 51·배정/연결 11·warm 5, 오프라인·로그인 실패·DPAPI 큐·
+  dead-letter 0이며 감독기·health task 결과도 0이다.
 
 ## ERP 리걸프렌즈 고객 찾기 운영 배포
 

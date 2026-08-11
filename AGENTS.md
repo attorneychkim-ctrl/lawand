@@ -71,6 +71,44 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-11 — HERDR 전수 통합·고객 찾기 문자 운영 배포·EC2 100GB 반영
+- HERDR 작업트리 `calm-stone-97b1`, `silver-cloud-fa0f`와 모든 로컬 `worktree/*`,
+  `origin/worktree/*`를 갱신·대조했다. 모든 HEAD가 `main`의 ancestor였고
+  `git pull --ff-only origin main`과 `git push origin main`도 최신이라 추가 merge commit은
+  만들지 않았다. 배포 소스는 `main`/`origin/main`이 일치한 `b6c6afc`다.
+- 전체 5개 패키지 typecheck·lint·production build, core 61개·gateway 87개 테스트,
+  Drizzle schema check와 `git diff --check`를 통과했다. 추적 파일 전용 private S3 AES256
+  아티팩트 SHA-256은
+  `021b7c4787b2fd9738d0b452c98801c9e8c352febe53c48f4147c5e9a5823383`이고 릴리스는
+  `20260810T231946Z-client-directory-messaging-v1`이다.
+- 암호화 RDS 스냅샷
+  `lawand-prod-pre-client-directory-messaging-20260810t231946z`을 `available`까지 확인한 뒤
+  migration `0043_famous_rafael_vega.sql`과 gateway·ERP를 같은 릴리스로 배포했다. 운영
+  migration은 44개이고 최신 해시
+  `03ec720269d34ad1693c7849bf3267a364b3b93a0163b090b8b35591a326737c`가 Git과 일치한다.
+  신규 대상 테이블, `target_source NOT NULL`, 기존 상담 문자 2건 보존, 앱 CRUD·viewer
+  SELECT 전용·PUBLIC 권한 0을 확인했다. gateway 이미지 ID는
+  `sha256:781b4420ef8f78113631268a53a392435270be46c920acef3d11c47d56beb2f0`, ERP는
+  `sha256:b7175abae52e6ce80e1768d48383b7107eca80d7462e45576b504d5bec3add67`이다.
+- 사용자가 EBS를 100GiB로 늘렸지만 ERP 30GiB·gateway 40GiB·Windows C: 30GiB에 OS
+  파티션이 남아 있음을 확인했다. 실행 컨테이너와 bridge를 중단하지 않고 ERP·gateway의
+  루트 파티션/XFS와 Windows C:를 각각 100GiB로 온라인 확장했다. ERP 빌드 전에는 실행
+  이미지가 아닌 미사용 Docker build cache만 정리했다. 최종 여유는 ERP 약 76GB, gateway
+  약 64GB, Windows 약 79.31GB이고 Windows volume health는 `Healthy`다.
+- gateway 전환 직전 업무 통화 1건이 감지돼 자동 중단했고 서비스 파일·컨테이너를 바꾸지
+  않았다. 자연 종료 후 연속 두 번 0건과 명령 내부 gate를 다시 확인해 전환했으며 통화를
+  강제 종료하거나 원장을 보정하지 않았다. Windows bridge는 재시작하지 않았고 v0.7.1.0
+  프로세스 16, 설치 51·배정/연결 11·warm 5, 오프라인·로그인 실패·DPAPI 큐·dead-letter 0,
+  감독기·health task 정상이다.
+- 인증 ERP `/clients`, `/profile`, `/message-templates`, `/phone-desk`는 모두 200이고 고객
+  찾기의 문자·전화 및 개인 템플릿 marker를 렌더했으며 임시 세션은 0건으로 삭제했다. smoke
+  test는 발송하지 않았지만 배포 직후 직원이 실제 사용한 고객 찾기 LMS 1건이 Centrex
+  `succeeded`, outbox `published`로 완료돼 신규 수직 흐름도 확인됐다. 최종 활성 수·발신,
+  회선 중복, 통화·문자 명령, 문자 pending/dead/실패는 0이고 일반 업무 pending outbox 9건은
+  변경하지 않았다. gateway·ERP·Caddy active, systemd·컨테이너 재시작 0, error journal 0,
+  외부 health/login 200, CloudWatch ALARM 0이다. 실제 JPG MMS canary는 별도다.
+  `PROJECT_PLAN.md`는 v1.03이다.
+
 ### 2026-08-11 — ERP 고객 찾기 문자·전화 동등 흐름 출시 후보
 - `/clients` 검색 결과에 기존 센트릭스 클릭투콜과 함께 상담 상세의 문자 작성창을 재사용해
   개인 템플릿·직접 입력·SMS/LMS·JPG MMS를 보낼 수 있게 했다. `{{고객명}}`과

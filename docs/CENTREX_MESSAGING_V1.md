@@ -13,8 +13,14 @@
   이미지 MMS 발송 경계는 활성화됐고, 명함 JPG 실제 수신 canary만 별도로 남아 있다.
 - 기본 템플릿·활성화 체크 제거와 개인 템플릿 삭제를 위한 migration
   `0042_bright_midnight.sql` 및 gateway·ERP 변경을 릴리스
-  `20260810T135657Z-profile-message-templates-v1`로 운영 배포했다. 운영에는 기본 템플릿 0건,
-  직원 개인 템플릿 7건이 있으며 과거 발송 snapshot과 역할별 권한 경계도 유지된다.
+  `20260810T135657Z-profile-message-templates-v1`로 운영 배포했다. 배포 직후 기본 템플릿 0건,
+  직원 개인 템플릿 7건이었으며 과거 발송 snapshot과 역할별 권한 경계도 유지된다.
+- 고객 찾기 검색 결과의 문자 작성 흐름과 암호화 대상 snapshot을 migration
+  `0043_famous_rafael_vega.sql`, gateway·ERP 릴리스
+  `20260810T231946Z-client-directory-messaging-v1`로 운영 배포했다. 브라우저와 outbox는
+  고객·사건 ID만 전달하고 gateway가 삭제 사건·전화번호를 다시 검증한다. 배포 smoke는
+  발송 없이 수행했으며, 직후 직원이 실제 요청한 고객 찾기 LMS 1건은 Centrex
+  `succeeded`·outbox `published`로 완료됐다.
 
 ## 범위
 
@@ -49,6 +55,8 @@
 - 허용 변수는 `{{고객명}}`, `{{담당자명}}`, `{{접수번호}}`이며 상담 발송창에서 실제 값으로 치환한다.
 - 작성 중인 본문과 이미지를 휴대전화 모양 미리보기에서 즉시 확인한다.
 - 상담 상세의 `문자 보내기`는 로그인 직원의 개인 템플릿을 모두 보여 주며 별도 활성화 체크는 없다.
+- 고객 찾기 결과도 같은 작성창을 사용하되 리걸프렌즈 고객·사건 ID를 gateway에서 재검증하고,
+  발신 가능한 전화번호가 없는 결과에는 문자와 전화를 모두 노출하지 않는다.
 - 발송 전 고객명과 SMS/LMS/MMS 종류를 명시한 확인창을 거친다.
 - 상담 상세 원장에는 담당자·템플릿·실제 본문·이미지 첨부 여부·요청/제공자 결과를 표시한다.
 
@@ -76,5 +84,8 @@
 - `0042` 적용 뒤 운영 migration 43개와 Git 해시 일치, 기본 템플릿 0·개인 템플릿 7,
   소유자 `NOT NULL`, `is_active` 제거, FK `SET NULL`, 앱/조회자/PUBLIC 권한을 확인했다.
   인증 ERP 문자 화면은 200이고 문자 대기·실패·dead 원장은 모두 0이다.
+- `0043` 적용 뒤 운영 migration 44개와 최신 Git 해시 일치, 기존 상담 문자 2건 보존,
+  `telephony_message_directory_targets`, `target_source NOT NULL`, 앱 CRUD·viewer SELECT 전용·
+  PUBLIC 권한 0을 확인했다. 인증 `/clients`는 문자·전화 및 개인 템플릿 UI를 렌더한다.
 - SOLAPI MMS 등록 발신번호 설정은 완료했고 실제 JPG canary가 남았다. API 접수 뒤 최종
   단말 결과를 자동 수집하는 웹훅/조회 소비자도 후속 범위다.

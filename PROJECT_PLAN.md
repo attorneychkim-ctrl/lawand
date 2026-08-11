@@ -1,4 +1,4 @@
-# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.02)
+# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.03)
 
 > 이 문서는 새 로앤 홈페이지 + 새 ERP + 리걸플로/리걸프렌즈 연동을 하나의 플랫폼으로
 > 묶기 위한 **저장소 구조·아키텍처 설계 초안**이다. 코덱스/클로드코드 세션이 번갈아
@@ -816,8 +816,11 @@ gateway가 기존 `resolve_legalfriends_directory_call_target` 경계에서 삭�
 사용한다. 전화데스크는 통화 사실·후처리 원장이라는 역할을 유지하고, 고객 대상이 명시되지
 않은 직접 수·발신 행에서 원시 상대번호로 새 문자를 보내는 버튼은 추가하지 않는다. 향후
 전화데스크 문자가 필요하면 상담 또는 리걸프렌즈 고객으로 해석된 상세에서만 같은 안전한
-대상 재검증 경계를 재사용한다. 이 변경은 출시 후보이며 로컬·운영 migration과 운영 배포는
-아직 수행하지 않았다.
+대상 재검증 경계를 재사용한다. 이 변경은 암호화 RDS 스냅샷 뒤 migration `0043`과
+gateway·ERP 릴리스 `20260810T231946Z-client-directory-messaging-v1`로 운영 배포했다. 운영
+migration은 44개이며 최신 해시가 Git과 일치하고, 기존 상담 문자 2건 보존·신규 대상 원장·
+역할별 권한을 확인했다. 인증 `/clients`의 문자·전화 및 개인 템플릿 UI를 확인한 뒤 직원이
+실제로 요청한 고객 찾기 LMS 1건도 Centrex `succeeded`·outbox `published`로 완료됐다.
 
 ### 2-4. 기존 시스템은 어댑터 뒤로 (`packages/integrations`)
 리걸플로·리걸프렌즈·기존 Laravel ERP 호출을 앱 코드에 흩뿌리지 말고 어댑터 패키지에
@@ -1419,6 +1422,8 @@ Manager와 별도 역할·보안그룹·TLS 기준을 적용한다.
 - [x] 운영 migration `0041`·gateway·ERP 통합 배포 → 통제 센트릭스 SMS 실제 발송 canary
 - [x] 운영 migration `0042`·gateway·ERP 통합 배포 → 기본 템플릿/활성화 제거, 개인 템플릿
   실삭제·과거 발송 snapshot 보존, ERP 내 정보·본인 업무 연결 운영 활성화
+- [x] 운영 migration `0043`·gateway·ERP 통합 배포 → 고객 찾기 대상 재검증·암호화 snapshot·
+  기존 단일 문자 worker 기반 SMS/LMS/MMS 흐름
 - [x] SOLAPI 등록 MMS 발신번호를 운영 Secrets Manager·gateway에 적용
 - [ ] 200KB 이하 명함 JPG MMS 실제 발송·단말 수신 canary
 - [x] 임시 Windows Server 2022 x64 + 32비트 OpenAPI OCX 수신 canary:
