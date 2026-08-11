@@ -583,8 +583,11 @@ namespace Lawand.CentrexBridge
                 "RING_EVENT",
                 "ISDIAL=" + isDial,
                 "CALLER=" + maskedCaller,
+                "CALLER_KIND=" + CentrexEventParser.CallPartyKind(parsed.Get("CALLERID")),
                 "LINE=" + incomingLine,
                 "AGENT_SUFFIX=" + agentSuffix,
+                "CHANNEL_KIND=" + CentrexEventParser.ChannelKind(parsed.Get("CHANNEL")),
+                "RECHANNEL_KIND=" + CentrexEventParser.ChannelKind(parsed.Get("RECHANNEL")),
                 "UNIQUEID=" + uniqueId);
 
             if (uniqueId.Length == 0 ||
@@ -668,6 +671,12 @@ namespace Lawand.CentrexBridge
             ParsedCentrexEvent parsed = CentrexEventParser.Parse(eventArgs.Raw);
             _logger.Info(
                 "CHANNEL_LIST",
+                "CHANNEL1_KIND=" + CentrexEventParser.ChannelKind(parsed.Get("CHANNEL1")),
+                "CHANNEL2_KIND=" + CentrexEventParser.ChannelKind(parsed.Get("CHANNEL2")),
+                "CALLER1=" + CentrexEventParser.MaskPhone(parsed.Get("CALLER1ID")),
+                "CALLER1_KIND=" + CentrexEventParser.CallPartyKind(parsed.Get("CALLER1ID")),
+                "CALLER2=" + CentrexEventParser.MaskPhone(parsed.Get("CALLER2ID")),
+                "CALLER2_KIND=" + CentrexEventParser.CallPartyKind(parsed.Get("CALLER2ID")),
                 "UNIQUEID1=" + CentrexEventParser.SafeToken(parsed.Get("UNIQUEID1"), 80),
                 "UNIQUEID2=" + CentrexEventParser.SafeToken(parsed.Get("UNIQUEID2"), 80));
 
@@ -749,6 +758,8 @@ namespace Lawand.CentrexBridge
             string sourceUniqueId = CentrexEventParser.SafeToken(parsed.Get("SRCUNIQUEID"), 80);
             _logger.Info(
                 "CHANNEL_OUT",
+                "CHANNEL_KIND=" + CentrexEventParser.ChannelKind(parsed.Get("CHANNEL")),
+                "RECHANNEL_KIND=" + CentrexEventParser.ChannelKind(parsed.Get("RECHANNEL")),
                 "UNIQUEID=" + uniqueId,
                 "SRCUNIQUEID=" + sourceUniqueId,
                 "HCAUSE=" + CentrexEventParser.SafeToken(parsed.Get("HCAUSE"), 20));

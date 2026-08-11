@@ -71,6 +71,24 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-11 — 통합 통화 활동 v2 기준선·내선/호전환 canary 준비
+- 외부 수신·센트릭스 직접 발신·ERP 클릭투콜을 로그인 직원 전체의 상단 카드에 표시하고,
+  일반 내선은 참여자에게만 표시하되 수신자에게 토스트·브라우저 알림을 보내는 제품 정책을
+  확정했다. 외부 수신 알림은 고객 담당자와 회선 담당자 전원, 정확한 담당자가 없으면 활성
+  직원 전체가 대상이다. 리걸프렌즈 담당자는 이름 비교가 아니라 사건의 `Member_idx`·
+  `sub_member_idx`를 `staff_external_accounts.external_member_idx`와 연결한다. 승인된 내부
+  브라우저 알림에는 전체 번호·고객·상담/사건·담당자·회선·전달자를 최대한 제공한다.
+- 호전환은 하나의 외부 고객 통화 root 아래 A/고객, A/B 상담, B/고객 leg를 연결한다. A leg
+  종료는 전체 종료로 보지 않고 마지막 고객 leg 종료 때만 통화를 끝내며, 후처리는 최종 고객
+  통화자에게 한 번만 연다. 일반 내선·무조건/통화 후 호전환·실패 복귀의 통제 canary와
+  구현 순서를 `docs/CENTREX_CALL_ACTIVITY_V2.md`에 고정했고 `PROJECT_PLAN.md`는 v1.10이다.
+- bridge v0.7.2 후보는 기존 gateway payload·내부 4자리 leg 거부·통화 상태 처리를 바꾸지
+  않고 `RINGEVENT`·`CHANNELLIST`·`CHANNELOUT` 로그에 비식별 상대 종류와 채널 종류만
+  추가한다. 로컬 Windows .NET Framework x86 빌드와 self-test 18개, `git diff --check`를
+  통과했다. 임시 unsigned 빌드 산출물은 삭제했다. 운영 배포·실제 통화·DB migration·운영
+  데이터 변경은 수행하지 않았다. 다음 단계는 온라인인 두 내선과 통제 외부 발신자를 정해
+  v0.7.2를 통제 배포한 뒤 실제 양쪽 이벤트 상관키를 확인하는 것이다.
+
 ### 2026-08-11 — 통합 배포 지연 검증·외부 센트릭스 로그인 충돌 확인
 - 릴리스 `20260811T035307Z-centrex-message-inbox-v1`의 지연 검증에서도 gateway·ERP 외부
   HTTPS는 200이고 두 앱과 Caddy는 active, 배포 이미지 ID 일치, systemd·컨테이너 재시작

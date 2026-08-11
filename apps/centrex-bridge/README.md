@@ -25,6 +25,8 @@ LG U+ 고급형 센트릭스 A타입의 32비트 OpenAPI OCX를 상시 호스팅
   `outbound.ringing → outbound.connected → outbound.ended` 계약으로 전달
 - 외부 전화번호 계약을 만족하지 않는 4자리 내부 leg 등은 활성 통화 상태를 만들기 전에
   거부해 뒤따르는 연결·종료 이벤트가 고아 큐가 되지 않게 함
+- 내선·호전환 canary용 진단 로그는 전화번호 원문이나 raw OCX payload 대신 상대 종류
+  (`internal/external`)와 채널 종류(`sip/pjsip/local/local_xfer`)만 기록
 - gateway의 전화 받기 명령을 0.75초 간격의 서명된 polling으로 가져오며 전화번호는
   명령 payload에 포함하지 않음
 - `Answer()`는 현재 활성 수신 unique ID가 명령의 provider ID와 맞을 때만 호출하고,
@@ -167,6 +169,11 @@ PowerShell에서 아래처럼 실행한다. `InstallOffset`·`InstallLimit`은 �
 `gateway-dead-letter`에 같은 암호문으로 격리한다. raw OCX 이벤트, 비밀번호, 발신번호 원문,
 gateway 응답 본문은 기록하지 않는다. 운영자가 원인 조사 후 보존해야 하는 암호문은
 `gateway-dead-letter-archive`로 이동하며 평문으로 풀어 저장하지 않는다.
+
+bridge v0.7.2의 상대·채널 종류 로그는 내선과 호전환에서 실제로 전달되는 leg 관계를
+확인하기 위한 수동 관측 정보다. 기존 4자리 내부 leg 거부, gateway 이벤트 계약과 ERP
+표시 동작은 바꾸지 않는다. 관측 결과로 상관관계가 확인되기 전에는 `local_xfer` 채널의
+존재만으로 고객 보류·호전환 완료를 추정하지 않는다.
 
 ## 운영 점검과 부하시험
 
