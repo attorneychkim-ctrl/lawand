@@ -22,7 +22,7 @@ import { createDataProtection } from "./crypto.js";
 const config = readGatewayConfig();
 const database = createDatabaseClient(config.databaseUrl);
 const protection = createDataProtection(config);
-const fixedNow = new Date("2099-01-01T00:00:00.000Z");
+const fixedNow = new Date("2099-01-01T00:00:00.470Z");
 let createdCallId: string | null = null;
 
 try {
@@ -65,7 +65,7 @@ try {
               source: "01000009999",
               destination: endpoint.lineNumber,
               durationSeconds: 8,
-              status: "CANCEL" as const,
+              status: "ANSWERED" as const,
               channel: "SIP/provider",
               destinationChannel: `SIP/${endpoint.extension}`,
               endTime: "2099-01-01 09:00:08",
@@ -136,6 +136,9 @@ try {
       state: telephonyInboundCalls.state,
       bridgeId: telephonyInboundCalls.bridgeId,
       maskedPhone: telephonyInboundCalls.remotePhoneMasked,
+      ringingAt: telephonyInboundCalls.ringingAt,
+      connectedAt: telephonyInboundCalls.connectedAt,
+      endedAt: telephonyInboundCalls.endedAt,
       eventCount: count(telephonyInboundEvents.id),
     })
     .from(telephonyInboundCalls)
@@ -148,12 +151,18 @@ try {
       telephonyInboundCalls.state,
       telephonyInboundCalls.bridgeId,
       telephonyInboundCalls.remotePhoneMasked,
+      telephonyInboundCalls.ringingAt,
+      telephonyInboundCalls.connectedAt,
+      telephonyInboundCalls.endedAt,
     );
   assert.deepEqual(persisted, {
     state: "ended",
     bridgeId: "local-verification-bridge",
     maskedPhone: "***9999",
-    eventCount: 3,
+    ringingAt: new Date("2099-01-01T00:00:00.000Z"),
+    connectedAt: fixedNow,
+    endedAt: new Date("2099-01-01T00:00:08.000Z"),
+    eventCount: 4,
   });
 
   await database.db.transaction(async (tx) => {
@@ -178,6 +187,7 @@ try {
       callbackCreated: true,
       callbackReplayDeduplicated: true,
       bridgeDuplicateMerged: true,
+      subsecondHistoryNormalized: true,
       inboundHistoryReconciled: true,
       temporaryRowsRemaining: 0,
     }),
