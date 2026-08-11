@@ -10,6 +10,7 @@ export const SOLAPI_MESSAGES_ENDPOINT =
   "https://api.solapi.com/messages/v4/send-many/detail";
 export const SOLAPI_STORAGE_ENDPOINT =
   "https://api.solapi.com/storage/v1/files";
+export const SOLAPI_MMS_SUBJECT = "법무법인 로앤 안내";
 
 export type AlimtalkTemplatePurpose =
   | "consultation_requested"
@@ -43,6 +44,7 @@ export type SolapiMmsMessage = {
   from: string;
   text: string;
   type: "MMS";
+  subject: string;
   imageId: string;
   customFields?: { lawandMessageId: string };
 };
@@ -400,6 +402,7 @@ export function createSolapiMmsMessage(options: {
     from,
     text: options.text,
     type: "MMS",
+    subject: SOLAPI_MMS_SUBJECT,
     imageId: options.imageId,
     ...(options.messageId
       ? { customFields: { lawandMessageId: options.messageId } }

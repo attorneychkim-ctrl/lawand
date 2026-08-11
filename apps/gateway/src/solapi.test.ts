@@ -10,6 +10,7 @@ import {
   formatAlimtalkTimestamp,
   inspectMmsJpeg,
   SolapiDeliveryError,
+  SOLAPI_MMS_SUBJECT,
 } from "./solapi.js";
 
 test("솔라피 인증 헤더는 공식 date+salt HMAC-SHA256 계약을 따른다", () => {
@@ -47,12 +48,14 @@ test("MMS JPG 규격을 확인하고 발신·수신 번호를 숫자로 정규�
       from: "029302266",
       text: "명함을 보내드립니다.",
       type: "MMS",
+      subject: SOLAPI_MMS_SUBJECT,
       imageId: "ST01FZ-test",
       customFields: {
         lawandMessageId: "01984c7d-8500-7000-8000-000000000030",
       },
     },
   );
+  assert.ok(Buffer.byteLength(SOLAPI_MMS_SUBJECT, "utf8") <= 40);
 });
 
 test("MMS 이미지는 스토리지 API에 Base64와 MMS 타입으로 한 번 업로드한다", async () => {
