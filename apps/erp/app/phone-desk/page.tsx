@@ -44,7 +44,13 @@ export default async function PhoneDeskPage() {
             {loadError}
           </p>
         ) : (
-          <PhoneDeskWorkspace initialSnapshot={snapshot} />
+          <PhoneDeskWorkspace
+            currentStaff={{
+              staffUserId: staff.id,
+              displayName: staff.displayName,
+            }}
+            initialSnapshot={snapshot}
+          />
         )}
 
         <p className="security-note">

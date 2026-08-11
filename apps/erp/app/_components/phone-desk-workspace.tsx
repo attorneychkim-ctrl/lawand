@@ -11,8 +11,13 @@ import type {
 
 type SourceFilter = "all" | PhoneDeskCall["source"];
 type ConnectionState = "connecting" | "connected" | "disconnected";
+type FollowUpAssignee = { staffUserId: string; displayName: string };
 
 const UPLUS_HISTORY_DELAY_MS = 2 * 60 * 1_000;
+const allFollowUpAssignees: FollowUpAssignee = {
+  staffUserId: "all",
+  displayName: "전체 담당자",
+};
 
 const sourceCopy: Record<
   PhoneDeskCall["source"],
@@ -228,12 +233,17 @@ function CallTiming({
 }
 
 export function PhoneDeskWorkspace({
+  currentStaff,
   initialSnapshot,
 }: {
+  currentStaff: { staffUserId: string; displayName: string };
   initialSnapshot: PhoneDeskCallSnapshot;
 }) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [filter, setFilter] = useState<SourceFilter>("all");
+  const [followUpAssigneeFilter, setFollowUpAssigneeFilter] = useState(
+    currentStaff,
+  );
   const [query, setQuery] = useState("");
   const [connection, setConnection] =
     useState<ConnectionState>("connecting");
@@ -353,6 +363,35 @@ export function PhoneDeskWorkspace({
     });
   }, [filter, query, snapshot.items]);
 
+  const followUpAssignees = useMemo(() => {
+    const assignees = [currentStaff];
+    const seen = new Set([currentStaff.staffUserId]);
+    for (const task of snapshot.followUps) {
+      if (seen.has(task.assignee.staffUserId)) continue;
+      seen.add(task.assignee.staffUserId);
+      assignees.push(task.assignee);
+    }
+    if (
+      followUpAssigneeFilter.staffUserId !== "all" &&
+      !seen.has(followUpAssigneeFilter.staffUserId)
+    ) {
+      assignees.push(followUpAssigneeFilter);
+    }
+    return assignees;
+  }, [currentStaff, followUpAssigneeFilter, snapshot.followUps]);
+
+  const visibleFollowUps = useMemo(
+    () =>
+      followUpAssigneeFilter.staffUserId === "all"
+        ? snapshot.followUps
+        : snapshot.followUps.filter(
+            (task) =>
+              task.assignee.staffUserId ===
+              followUpAssigneeFilter.staffUserId,
+          ),
+    [followUpAssigneeFilter, snapshot.followUps],
+  );
+
   return (
     <section className="phone-desk-workspace">
       <div className="phone-desk-metrics" aria-label="전화 원장 요약">
@@ -371,13 +410,50 @@ export function PhoneDeskWorkspace({
             <p className="eyebrow">FOLLOW-UP QUEUE</p>
             <h2>재통화 업무</h2>
           </div>
-          <span className="count-badge">미완료 {snapshot.followUps.length}건</span>
+          <div className="phone-follow-up-controls">
+            <label className="phone-follow-up-assignee-filter">
+              <span>담당자</span>
+              <select
+                onChange={(event) => {
+                  const staffUserId = event.target.value;
+                  setFollowUpAssigneeFilter(
+                    staffUserId === "all"
+                      ? allFollowUpAssignees
+                      : followUpAssignees.find(
+                          (assignee) =>
+                            assignee.staffUserId === staffUserId,
+                        ) ?? currentStaff,
+                  );
+                }}
+                value={followUpAssigneeFilter.staffUserId}
+              >
+                <option value="all">전체 담당자</option>
+                {followUpAssignees.map((assignee) => (
+                  <option
+                    key={assignee.staffUserId}
+                    value={assignee.staffUserId}
+                  >
+                    {assignee.staffUserId === currentStaff.staffUserId
+                      ? `내 업무 · ${assignee.displayName}`
+                      : assignee.displayName}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <span className="count-badge">미완료 {visibleFollowUps.length}건</span>
+          </div>
         </div>
-        {snapshot.followUps.length === 0 ? (
-          <p className="phone-follow-up-empty">예정된 재통화 업무가 없습니다.</p>
+        {visibleFollowUps.length === 0 ? (
+          <p className="phone-follow-up-empty">
+            {snapshot.followUps.length === 0
+              ? "예정된 재통화 업무가 없습니다."
+              : followUpAssigneeFilter.staffUserId === currentStaff.staffUserId
+                ? "내게 배정된 재통화 업무가 없습니다."
+                : "선택한 담당자의 재통화 업무가 없습니다."}
+          </p>
         ) : (
           <div className="phone-follow-up-list">
-            {snapshot.followUps.map((task) => {
+            {visibleFollowUps.map((task) => {
               const overdue =
                 currentTime !== null &&
                 new Date(task.dueAt).getTime() < currentTime;

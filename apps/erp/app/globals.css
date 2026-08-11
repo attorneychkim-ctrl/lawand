@@ -3727,6 +3727,41 @@ a.inbound-customer:hover { text-decoration: underline; }
 }
 
 .phone-follow-up-heading h2 { margin: 2px 0 0; font-size: 1.05rem; }
+.phone-follow-up-controls,
+.phone-follow-up-assignee-filter {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.phone-follow-up-controls { justify-content: flex-end; }
+.phone-follow-up-assignee-filter > span {
+  color: var(--muted);
+  font-size: .66rem;
+  font-weight: 780;
+  white-space: nowrap;
+}
+
+.phone-follow-up-assignee-filter select {
+  min-width: 170px;
+  min-height: 36px;
+  padding: 0 32px 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-size: .7rem;
+  font-weight: 760;
+  outline: none;
+}
+
+.phone-follow-up-assignee-filter select:hover { border-color: var(--muted-2); }
+.phone-follow-up-assignee-filter select:focus {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 12%, transparent);
+}
+
 .phone-follow-up-empty { margin: 0; color: var(--muted); font-size: .74rem; }
 .phone-follow-up-list { display: grid; gap: 8px; }
 
@@ -4728,6 +4763,9 @@ a.inbound-customer:hover { text-decoration: underline; }
   .phone-desk-row > time { white-space: normal; }
   .phone-follow-up-list article,
   .phone-follow-up-heading { align-items: flex-start; flex-direction: column; }
+  .phone-follow-up-controls { width: 100%; justify-content: space-between; }
+  .phone-follow-up-assignee-filter { min-width: 0; flex: 1; }
+  .phone-follow-up-assignee-filter select { min-width: 0; width: 100%; }
   .phone-follow-up-actions { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
   .phone-desk-detail-summary { grid-template-columns: 1fr 1fr; }
   .phone-desk-detail-summary > div,
