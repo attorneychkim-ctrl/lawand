@@ -1148,11 +1148,111 @@ test("직원 수신전화 스냅샷은 권한 확인 뒤 전체 번호와 동시
   assert.doesNotMatch(body, /callerNumber|remotePhoneCiphertext/);
 });
 
+test("상담 목록은 인증된 직원의 필터·날짜·페이지 조건을 전달한다", async (context) => {
+  let received:
+    | {
+        page: number;
+        pageSize: number;
+        filter?: string;
+        staffUserId: string;
+        from?: Date;
+        to?: Date;
+      }
+    | undefined;
+  const service = {
+    list: async (query: NonNullable<typeof received>) => {
+      received = query;
+      return {
+        items: [],
+        total: 0,
+        page: 1,
+        pageSize: query.pageSize,
+        pageCount: 1,
+        summary: { all: 0, waiting: 0, mine: 0, attention: 0, today: 0 },
+      };
+    },
+  } as unknown as ConsultationService;
+  const authService = {
+    authorize: async () => realtimeActor,
+    recordConsultationAccess: async () => undefined,
+  } as unknown as StaffAuthService;
+  const server = createGatewayServer({
+    authService,
+    internalApiKey: "test-internal-key",
+    service,
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const response = await fetch(
+    `http://127.0.0.1:${address.port}/v1/consultations?page=2&pageSize=20&filter=mine&from=2026-08-10T00%3A00%3A00%2B09%3A00&to=2026-08-11T00%3A00%3A00%2B09%3A00`,
+    {
+      headers: {
+        "x-lawand-internal-key": "test-internal-key",
+        "x-lawand-staff-session": "test-session",
+      },
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(received?.page, 2);
+  assert.equal(received?.pageSize, 20);
+  assert.equal(received?.filter, "mine");
+  assert.equal(received?.staffUserId, realtimeActor.id);
+  assert.equal(received?.from?.toISOString(), "2026-08-09T15:00:00.000Z");
+  assert.equal(received?.to?.toISOString(), "2026-08-10T15:00:00.000Z");
+});
+
+test("목록 조회는 허용하지 않은 페이지 크기와 필터를 거부한다", async (context) => {
+  const authService = {
+    authorize: async () => realtimeActor,
+  } as unknown as StaffAuthService;
+  const server = createGatewayServer({
+    authService,
+    internalApiKey: "test-internal-key",
+    service: {} as ConsultationService,
+    telephonyService: {} as TelephonyService,
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const headers = {
+    "x-lawand-internal-key": "test-internal-key",
+    "x-lawand-staff-session": "test-session",
+  };
+  const [consultationsResponse, callsResponse] = await Promise.all([
+    fetch(
+      `http://127.0.0.1:${address.port}/v1/consultations?pageSize=25`,
+      { headers },
+    ),
+    fetch(
+      `http://127.0.0.1:${address.port}/v1/phone-desk/calls?filter=unknown`,
+      { headers },
+    ),
+  ]);
+  assert.equal(consultationsResponse.status, 400);
+  assert.equal(callsResponse.status, 400);
+});
+
 test("직원 전화데스크 목록은 권한 확인 뒤 통합 원장을 반환한다", async (context) => {
-  let receivedLimit = 0;
+  let receivedQuery:
+    | {
+        page: number;
+        pageSize: number;
+        filter?: string;
+        from?: Date;
+        to?: Date;
+      }
+    | undefined;
   const telephonyService = {
-    getPhoneDeskCalls: async (limit: number) => {
-      receivedLimit = limit;
+    getPhoneDeskCalls: async (query: NonNullable<typeof receivedQuery>) => {
+      receivedQuery = query;
       return {
         snapshotAt: "2026-08-06T06:00:00.000Z",
         items: [
@@ -1187,7 +1287,7 @@ test("직원 전화데스크 목록은 권한 확인 뒤 통합 원장을 반환
   );
   assert.equal(denied.status, 401);
   const accepted = await fetch(
-    `http://127.0.0.1:${address.port}/v1/phone-desk/calls?limit=100`,
+    `http://127.0.0.1:${address.port}/v1/phone-desk/calls?page=3&pageSize=50&filter=active&from=2026-08-01T00%3A00%3A00%2B09%3A00&to=2026-08-08T00%3A00%3A00%2B09%3A00`,
     {
       headers: {
         "x-lawand-internal-key": "test-internal-key",
@@ -1196,7 +1296,11 @@ test("직원 전화데스크 목록은 권한 확인 뒤 통합 원장을 반환
     },
   );
   assert.equal(accepted.status, 200);
-  assert.equal(receivedLimit, 100);
+  assert.equal(receivedQuery?.page, 3);
+  assert.equal(receivedQuery?.pageSize, 50);
+  assert.equal(receivedQuery?.filter, "active");
+  assert.equal(receivedQuery?.from?.toISOString(), "2026-07-31T15:00:00.000Z");
+  assert.equal(receivedQuery?.to?.toISOString(), "2026-08-07T15:00:00.000Z");
   const body = await accepted.text();
   assert.match(body, /click_to_call/);
   assert.match(body, /01012345678/);

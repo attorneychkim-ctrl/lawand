@@ -3,10 +3,21 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-import type { ConsultationListItem } from "../../lib/gateway";
+import type {
+  ConsultationListFilter,
+  ConsultationListItem,
+  ConsultationListSnapshot,
+  ListPageSize,
+} from "../../lib/gateway";
 import { ClaimConsultationButton } from "./claim-consultation-button";
+import {
+  ListDateControls,
+  ListPagination,
+  listDateQuery,
+  type ListDateFilter,
+} from "./list-navigation";
 
-type QueueFilter = "all" | "waiting" | "mine" | "attention" | "today";
+type QueueFilter = ConsultationListFilter;
 type RealtimeStatus = "connecting" | "connected" | "reconnecting";
 
 const stateLabels: Record<string, string> = {
@@ -57,18 +68,6 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-function koreanDateKey(value: string) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Seoul",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date(value));
-  const part = (type: Intl.DateTimeFormatPartTypes) =>
-    parts.find((item) => item.type === type)?.value ?? "";
-  return `${part("year")}-${part("month")}-${part("day")}`;
-}
-
 function formatPhone(value: string) {
   return value.replace(/(\d{3})(\d{4})(\d{4})/, "$1-$2-$3");
 }
@@ -85,27 +84,6 @@ function channelTone(item: ConsultationListItem) {
   if (item.contactChannel === "naver_booking") return "naver";
   if (item.mode === "self_diagnosis") return "diagnosis";
   return "phone";
-}
-
-function requiresAttention(item: ConsultationListItem) {
-  return (
-    item.dedupeOutcome === "suspected_duplicate" ||
-    item.kakaoEntry?.status === "pending" ||
-    item.naverBooking?.status === "details_pending" ||
-    item.latestTelephony?.disposition === "no_answer" ||
-    item.latestTelephony?.disposition === "callback_required" ||
-    [
-      "reconsultation_required",
-      "no_answer",
-      "busy",
-      "manager_callback_requested",
-      "rejected",
-    ].includes(item.latestTelephony?.aftercareResult ?? "")
-  );
-}
-
-function isWaiting(item: ConsultationListItem) {
-  return item.state === "requested" && item.kakaoEntry?.status !== "invalid";
 }
 
 function searchText(item: ConsultationListItem) {
@@ -136,7 +114,14 @@ function searchText(item: ConsultationListItem) {
     .replace(/\D(?=\d)|(?<=\d)\D/g, "");
 }
 
-function QueueIcon({ kind }: { kind: "waiting" | "mine" | "attention" | "today" }) {
+function QueueIcon({ kind }: { kind: QueueFilter }) {
+  if (kind === "all") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path d="M4 5h16M4 12h16M4 19h16" />
+      </svg>
+    );
+  }
   if (kind === "waiting") {
     return (
       <svg aria-hidden="true" viewBox="0 0 24 24">
@@ -253,18 +238,21 @@ function StatusBadges({ item }: { item: ConsultationListItem }) {
 }
 
 export function ConsultationWorkspace({
-  consultations,
-  staffUserId,
+  initialSnapshot,
   todayKey,
 }: {
-  consultations: ConsultationListItem[];
-  staffUserId: string;
+  initialSnapshot: ConsultationListSnapshot;
   todayKey: string;
 }) {
   const [filter, setFilter] = useState<QueueFilter>("all");
   const [query, setQuery] = useState("");
-  const [liveConsultations, setLiveConsultations] =
-    useState(consultations);
+  const [snapshot, setSnapshot] = useState(initialSnapshot);
+  const [page, setPage] = useState(initialSnapshot.page);
+  const [pageSize, setPageSize] = useState<ListPageSize>(
+    initialSnapshot.pageSize,
+  );
+  const [dateFilter, setDateFilter] = useState<ListDateFilter>({ kind: "all" });
+  const [loading, setLoading] = useState(false);
   const [realtimeStatus, setRealtimeStatus] =
     useState<RealtimeStatus>("connecting");
 
@@ -273,25 +261,35 @@ export function ConsultationWorkspace({
     let refreshInFlight = false;
     let refreshQueued = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const params = new URLSearchParams({
+      page: String(page),
+      pageSize: String(pageSize),
+      filter,
+      ...listDateQuery(dateFilter),
+    });
 
     const synchronize = async () => {
+      await Promise.resolve();
       if (!active) return;
       if (refreshInFlight) {
         refreshQueued = true;
         return;
       }
       refreshInFlight = true;
+      setLoading(true);
       do {
         refreshQueued = false;
         try {
-          const response = await fetch("/api/consultations", {
+          const response = await fetch(`/api/consultations?${params}`, {
             cache: "no-store",
           });
           if (!response.ok) throw new Error("consultation_sync_failed");
-          const body = (await response.json()) as {
-            items?: ConsultationListItem[];
-          };
-          if (!Array.isArray(body.items)) {
+          const body = (await response.json()) as ConsultationListSnapshot;
+          if (
+            !Array.isArray(body.items) ||
+            typeof body.total !== "number" ||
+            typeof body.page !== "number"
+          ) {
             throw new Error("consultation_sync_invalid");
           }
           if (active) {
@@ -299,7 +297,8 @@ export function ConsultationWorkspace({
               clearTimeout(retryTimer);
               retryTimer = null;
             }
-            setLiveConsultations(body.items);
+            setSnapshot(body);
+            if (body.page !== page) setPage(body.page);
             setRealtimeStatus("connected");
           }
         } catch {
@@ -315,8 +314,10 @@ export function ConsultationWorkspace({
         }
       } while (active && refreshQueued);
       refreshInFlight = false;
+      if (active) setLoading(false);
     };
 
+    void synchronize();
     const stream = new EventSource("/api/consultations/stream");
     const handleChange = () => void synchronize();
     stream.addEventListener("consultation.sync", handleChange);
@@ -335,63 +336,44 @@ export function ConsultationWorkspace({
       stream.removeEventListener("consultation.changed", handleChange);
       stream.close();
     };
-  }, []);
-
-  const metrics = useMemo(
-    () => ({
-      waiting: liveConsultations.filter(isWaiting).length,
-      mine: liveConsultations.filter(
-        (item) => item.assigneeUserId === staffUserId,
-      ).length,
-      attention: liveConsultations.filter(requiresAttention).length,
-      today: liveConsultations.filter(
-        (item) => koreanDateKey(item.lastRequestedAt) === todayKey,
-      ).length,
-    }),
-    [liveConsultations, staffUserId, todayKey],
-  );
+  }, [dateFilter, filter, page, pageSize]);
 
   const filtered = useMemo(() => {
     const normalizedQuery = query
       .trim()
       .toLocaleLowerCase("ko-KR")
       .replace(/\D(?=\d)|(?<=\d)\D/g, "");
-    return liveConsultations.filter((item) => {
-      const matchesFilter =
-        filter === "all" ||
-        (filter === "waiting" && isWaiting(item)) ||
-        (filter === "mine" && item.assigneeUserId === staffUserId) ||
-        (filter === "attention" && requiresAttention(item)) ||
-        (filter === "today" && koreanDateKey(item.lastRequestedAt) === todayKey);
-      return (
-        matchesFilter &&
-        (!normalizedQuery || searchText(item).includes(normalizedQuery))
-      );
-    });
-  }, [liveConsultations, filter, query, staffUserId, todayKey]);
+    return snapshot.items.filter(
+      (item) => !normalizedQuery || searchText(item).includes(normalizedQuery),
+    );
+  }, [query, snapshot.items]);
 
   const queueFilters: Array<{ key: QueueFilter; label: string; count: number }> = [
-    { key: "all", label: "전체", count: liveConsultations.length },
-    { key: "waiting", label: "신규 대기", count: metrics.waiting },
-    { key: "mine", label: "내 담당", count: metrics.mine },
-    { key: "attention", label: "확인 필요", count: metrics.attention },
-    { key: "today", label: "오늘 접수", count: metrics.today },
+    { key: "all", label: "전체", count: snapshot.summary.all },
+    { key: "waiting", label: "신규 대기", count: snapshot.summary.waiting },
+    { key: "mine", label: "내 담당", count: snapshot.summary.mine },
+    { key: "attention", label: "확인 필요", count: snapshot.summary.attention },
+    { key: "today", label: "오늘 접수", count: snapshot.summary.today },
   ];
 
   return (
     <>
       <section aria-label="상담 현황" className="queue-metrics">
         {([
-          ["waiting", "배정 대기", metrics.waiting, "지금 확인할 신규 상담"],
-          ["mine", "내 담당", metrics.mine, "현재 내가 맡은 상담"],
-          ["attention", "확인 필요", metrics.attention, "부재·재상담·채널 확인 대상"],
-          ["today", "오늘 접수", metrics.today, "오늘 들어온 요청"],
+          ["all", "전체", snapshot.summary.all, "선택 기간의 모든 상담"],
+          ["waiting", "배정 대기", snapshot.summary.waiting, "지금 확인할 신규 상담"],
+          ["mine", "내 담당", snapshot.summary.mine, "현재 내가 맡은 상담"],
+          ["attention", "확인 필요", snapshot.summary.attention, "부재·재상담·채널 확인 대상"],
+          ["today", "오늘 접수", snapshot.summary.today, "오늘 들어온 요청"],
         ] as const).map(([key, label, value, description]) => (
           <button
             aria-pressed={filter === key}
             className={`queue-metric-card is-${key}`}
             key={key}
-            onClick={() => setFilter(key)}
+            onClick={() => {
+              setFilter(key);
+              setPage(1);
+            }}
             type="button"
           >
             <span className="queue-metric-icon"><QueueIcon kind={key} /></span>
@@ -403,6 +385,16 @@ export function ConsultationWorkspace({
           </button>
         ))}
       </section>
+
+      <ListDateControls
+        disabled={loading}
+        onChange={(value) => {
+          setDateFilter(value);
+          setPage(1);
+        }}
+        todayKey={todayKey}
+        value={dateFilter}
+      />
 
       <section className="erp-panel queue-panel" aria-labelledby="consultation-list-title">
         <div className="queue-toolbar">
@@ -423,7 +415,9 @@ export function ConsultationWorkspace({
                     ? "실시간 연결 중"
                     : "재연결 중"}
               </span>
-              <span className="queue-result-count">{filtered.length}건</span>
+              <span className="queue-result-count">
+                {query ? `${filtered.length}건 검색` : `총 ${snapshot.total}건`}
+              </span>
             </div>
           </div>
           <div className="queue-controls">
@@ -435,8 +429,11 @@ export function ConsultationWorkspace({
               <span className="sr-only">상담 검색</span>
               <input
                 autoComplete="off"
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="이름, 전화번호, 접수번호 검색"
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setPage(1);
+                }}
+                placeholder="현재 페이지에서 이름, 전화번호, 접수번호 검색"
                 type="search"
                 value={query}
               />
@@ -447,7 +444,10 @@ export function ConsultationWorkspace({
                   aria-pressed={filter === item.key}
                   className={filter === item.key ? "is-active" : undefined}
                   key={item.key}
-                  onClick={() => setFilter(item.key)}
+                  onClick={() => {
+                    setFilter(item.key);
+                    setPage(1);
+                  }}
                   type="button"
                 >
                   {item.label}
@@ -466,12 +466,12 @@ export function ConsultationWorkspace({
               </svg>
             </span>
             <strong>
-              {liveConsultations.length === 0
+              {snapshot.total === 0
                 ? "아직 접수된 상담이 없습니다"
                 : "조건에 맞는 상담이 없습니다"}
             </strong>
             <p>
-              {liveConsultations.length === 0
+              {snapshot.total === 0
                 ? "홈페이지·카카오 채널·네이버 예약의 새 요청이 이곳에 표시됩니다."
                 : "검색어를 지우거나 다른 작업 큐를 선택해 보세요."}
             </p>
@@ -537,6 +537,18 @@ export function ConsultationWorkspace({
             })}
           </ol>
         )}
+        <ListPagination
+          disabled={loading}
+          onPageChange={setPage}
+          onPageSizeChange={(value) => {
+            setPageSize(value);
+            setPage(1);
+          }}
+          page={snapshot.page}
+          pageCount={snapshot.pageCount}
+          pageSize={snapshot.pageSize}
+          total={snapshot.total}
+        />
       </section>
     </>
   );

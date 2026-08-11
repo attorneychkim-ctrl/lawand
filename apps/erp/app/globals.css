@@ -644,7 +644,7 @@ a.inbound-customer:hover { text-decoration: underline; }
 
 .queue-metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 14px;
   margin-bottom: 20px;
 }
@@ -734,6 +734,129 @@ a.inbound-customer:hover { text-decoration: underline; }
   overflow: hidden;
   box-shadow: var(--shadow-md);
 }
+
+.list-date-controls {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 15px 17px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.list-date-quick,
+.list-date-custom,
+.list-date-custom label,
+.list-pagination,
+.list-pagination-pages,
+.list-page-slot,
+.list-page-size {
+  display: flex;
+  align-items: center;
+}
+
+.list-date-quick {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.list-date-quick > span,
+.list-date-custom label > span,
+.list-page-size > span {
+  color: var(--muted);
+  font-size: .67rem;
+  font-weight: 780;
+  white-space: nowrap;
+}
+
+.list-date-quick > span { margin-right: 3px; }
+
+.list-date-quick button,
+.list-date-custom > button,
+.list-pagination-pages button {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-subtle);
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: .68rem;
+  font-weight: 760;
+}
+
+.list-date-quick button:hover:not(:disabled),
+.list-date-quick button.is-active,
+.list-pagination-pages button:hover:not(:disabled),
+.list-pagination-pages button.is-active {
+  border-color: color-mix(in srgb, var(--brand) 35%, var(--line));
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+}
+
+.list-date-quick button:disabled,
+.list-date-custom button:disabled,
+.list-pagination button:disabled,
+.list-page-size select:disabled {
+  cursor: default;
+  opacity: .55;
+}
+
+.list-date-custom {
+  flex-wrap: wrap;
+  gap: 7px;
+  padding-top: 11px;
+  border-top: 1px solid var(--line);
+}
+
+.list-date-custom label { gap: 7px; }
+
+.list-date-custom input,
+.list-page-size select {
+  min-height: 36px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--surface-subtle);
+  color: var(--ink);
+  font: inherit;
+  font-size: .7rem;
+}
+
+.list-date-custom input { padding: 0 9px; }
+.list-date-custom > span { color: var(--muted-2); }
+
+.list-date-custom > button {
+  border-color: color-mix(in srgb, var(--brand) 30%, var(--line));
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+}
+
+.list-pagination {
+  min-height: 64px;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-subtle);
+}
+
+.list-pagination > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: .68rem;
+  white-space: nowrap;
+}
+
+.list-pagination > p strong { color: var(--ink); }
+.list-pagination-pages { justify-content: center; gap: 5px; }
+.list-page-slot { gap: 5px; }
+.list-page-slot i { color: var(--muted-2); font-size: .7rem; font-style: normal; }
+.list-pagination-pages button { min-width: 34px; padding-inline: 8px; }
+.list-page-size { gap: 7px; }
+.list-page-size select { padding: 0 24px 0 9px; }
 
 .queue-toolbar {
   display: grid;
@@ -3358,7 +3481,7 @@ a.inbound-customer:hover { text-decoration: underline; }
   gap: 10px;
 }
 
-.phone-desk-metrics > div {
+.phone-desk-metrics > button {
   display: flex;
   min-height: 78px;
   align-items: center;
@@ -3368,13 +3491,24 @@ a.inbound-customer:hover { text-decoration: underline; }
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--surface);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
   box-shadow: var(--shadow-sm);
 }
 
-.phone-desk-metrics > div.is-active {
+.phone-desk-metrics > button:hover:not(:disabled),
+.phone-desk-metrics > button[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--brand) 42%, var(--line));
+  box-shadow: var(--shadow-md);
+}
+
+.phone-desk-metrics > button.is-active {
   border-color: color-mix(in srgb, var(--info) 35%, var(--line));
   background: color-mix(in srgb, var(--info) 7%, var(--surface));
 }
+
+.phone-desk-metrics > button:disabled { cursor: default; opacity: .65; }
 
 .phone-desk-metrics span {
   color: var(--muted);
@@ -4738,7 +4872,7 @@ a.inbound-customer:hover { text-decoration: underline; }
   .header-context { align-self: flex-start; }
 
   .phone-desk-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-  .phone-desk-metrics > div { min-height: 64px; padding: 13px 14px; }
+  .phone-desk-metrics > button { min-height: 64px; padding: 13px 14px; }
   .phone-desk-panel { overflow: visible; border: 0; background: transparent; box-shadow: none; }
   .phone-desk-toolbar { grid-template-columns: 1fr; padding: 0 0 16px; border: 0; background: transparent; }
   .phone-desk-filters { overflow-x: auto; justify-content: flex-start; }
@@ -4804,6 +4938,36 @@ a.inbound-customer:hover { text-decoration: underline; }
 
   .queue-search { background: var(--surface); }
   .queue-filter-tabs { margin-inline: -12px; padding-inline: 12px; }
+  .list-date-controls { padding: 13px; }
+  .list-date-quick {
+    flex-wrap: nowrap;
+    margin-inline: -13px;
+    padding-inline: 13px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .list-date-quick::-webkit-scrollbar { display: none; }
+  .list-date-quick > * { flex: 0 0 auto; }
+  .list-date-custom { align-items: flex-end; }
+  .list-date-custom label {
+    min-width: 130px;
+    flex: 1 1 140px;
+    align-items: stretch;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .list-date-custom > span { display: none; }
+  .list-date-custom > button { flex: 1 0 100%; }
+  .list-pagination {
+    align-items: stretch;
+    flex-direction: column;
+    margin-top: 12px;
+    border: 1px solid var(--line);
+    border-radius: 13px;
+  }
+  .list-pagination-pages { order: 1; flex-wrap: wrap; }
+  .list-pagination > p { order: 2; text-align: center; }
+  .list-page-size { order: 3; justify-content: center; }
   .consultation-list { gap: 9px; }
   .consultation-row {
     grid-template-columns: 1fr;

@@ -4,12 +4,20 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
+  ListPageSize,
   PhoneDeskCall,
   PhoneDeskCallResult,
   PhoneDeskCallSnapshot,
+  PhoneDeskListFilter,
 } from "../../lib/gateway";
+import {
+  ListDateControls,
+  ListPagination,
+  listDateQuery,
+  type ListDateFilter,
+} from "./list-navigation";
 
-type SourceFilter = "all" | PhoneDeskCall["source"];
+type SourceFilter = PhoneDeskListFilter;
 type ConnectionState = "connecting" | "connected" | "disconnected";
 type FollowUpAssignee = { staffUserId: string; displayName: string };
 
@@ -58,6 +66,7 @@ const filters: Array<{ key: SourceFilter; label: string }> = [
   { key: "inbound", label: "수신" },
   { key: "click_to_call", label: "ERP 발신" },
   { key: "centrex_direct", label: "직접 발신" },
+  { key: "active", label: "진행 중" },
 ];
 
 function formatPhone(phone: string) {
@@ -235,12 +244,20 @@ function CallTiming({
 export function PhoneDeskWorkspace({
   currentStaff,
   initialSnapshot,
+  todayKey,
 }: {
   currentStaff: { staffUserId: string; displayName: string };
   initialSnapshot: PhoneDeskCallSnapshot;
+  todayKey: string;
 }) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [filter, setFilter] = useState<SourceFilter>("all");
+  const [page, setPage] = useState(initialSnapshot.page);
+  const [pageSize, setPageSize] = useState<ListPageSize>(
+    initialSnapshot.pageSize,
+  );
+  const [dateFilter, setDateFilter] = useState<ListDateFilter>({ kind: "all" });
+  const [loading, setLoading] = useState(false);
   const [followUpAssigneeFilter, setFollowUpAssigneeFilter] = useState(
     currentStaff,
   );
@@ -263,28 +280,47 @@ export function PhoneDeskWorkspace({
   }, []);
 
   const refresh = useCallback(async () => {
+    await Promise.resolve();
     const sequence = ++requestSequence.current;
-    const response = await fetch("/api/phone-desk/calls", {
-      cache: "no-store",
-      headers: { accept: "application/json" },
-    });
-    if (!response.ok) throw new Error("phone_desk_sync_failed");
-    const next = (await response.json()) as PhoneDeskCallSnapshot;
-    if (
-      !Array.isArray(next.items) ||
-      typeof next.snapshotAt !== "string" ||
-      sequence !== requestSequence.current
-    ) {
-      if (sequence === requestSequence.current) {
-        throw new Error("phone_desk_sync_invalid");
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({
+        page: String(page),
+        pageSize: String(pageSize),
+        filter,
+        ...listDateQuery(dateFilter),
+      });
+      const response = await fetch(`/api/phone-desk/calls?${params}`, {
+        cache: "no-store",
+        headers: { accept: "application/json" },
+      });
+      if (!response.ok) throw new Error("phone_desk_sync_failed");
+      const next = (await response.json()) as PhoneDeskCallSnapshot;
+      if (
+        !Array.isArray(next.items) ||
+        typeof next.snapshotAt !== "string" ||
+        typeof next.total !== "number" ||
+        sequence !== requestSequence.current
+      ) {
+        if (sequence === requestSequence.current) {
+          throw new Error("phone_desk_sync_invalid");
+        }
+        return;
       }
-      return;
+      setSnapshot(next);
+      if (next.page !== page) setPage(next.page);
+    } finally {
+      if (sequence === requestSequence.current) setLoading(false);
     }
-    setSnapshot(next);
-  }, []);
+  }, [dateFilter, filter, page, pageSize]);
 
   useEffect(() => {
     let disposed = false;
+    const initialSyncTimer = window.setTimeout(() => {
+      void refresh().catch(() => {
+        if (!disposed) setConnection("disconnected");
+      });
+    }, 0);
     const stream = new EventSource("/api/phone-desk/stream");
     const handleChange = () => {
       void refresh().catch(() => {
@@ -301,6 +337,7 @@ export function PhoneDeskWorkspace({
     };
     return () => {
       disposed = true;
+      window.clearTimeout(initialSyncTimer);
       requestSequence.current += 1;
       stream.removeEventListener("telephony.desk.sync", handleChange);
       stream.removeEventListener("telephony.desk.changed", handleChange);
@@ -337,20 +374,9 @@ export function PhoneDeskWorkspace({
     }
   }, [refresh]);
 
-  const metrics = useMemo(() => ({
-    total: snapshot.items.length,
-    inbound: snapshot.items.filter((item) => item.source === "inbound").length,
-    click: snapshot.items.filter((item) => item.source === "click_to_call").length,
-    direct: snapshot.items.filter((item) => item.source === "centrex_direct").length,
-    active: snapshot.items.filter((item) =>
-      ["pending", "ringing", "connected"].includes(item.state),
-    ).length,
-  }), [snapshot.items]);
-
   const visibleItems = useMemo(() => {
     const normalizedQuery = query.replace(/\s/g, "").toLowerCase();
     return snapshot.items.filter((call) => {
-      if (filter !== "all" && call.source !== filter) return false;
       if (!normalizedQuery) return true;
       const staffNames = [
         ...call.endpointOwners.map((owner) => owner.displayName),
@@ -361,7 +387,7 @@ export function PhoneDeskWorkspace({
         .toLowerCase();
       return haystack.includes(normalizedQuery);
     });
-  }, [filter, query, snapshot.items]);
+  }, [query, snapshot.items]);
 
   const followUpAssignees = useMemo(() => {
     const assignees = [currentStaff];
@@ -395,14 +421,38 @@ export function PhoneDeskWorkspace({
   return (
     <section className="phone-desk-workspace">
       <div className="phone-desk-metrics" aria-label="전화 원장 요약">
-        <div><span>전체</span><strong>{metrics.total}</strong></div>
-        <div><span>수신</span><strong>{metrics.inbound}</strong></div>
-        <div><span>ERP 발신</span><strong>{metrics.click}</strong></div>
-        <div><span>직접 발신</span><strong>{metrics.direct}</strong></div>
-        <div className={metrics.active ? "is-active" : undefined}>
-          <span>진행 중</span><strong>{metrics.active}</strong>
-        </div>
+        {([
+          ["all", "전체", snapshot.summary.all],
+          ["inbound", "수신", snapshot.summary.inbound],
+          ["click_to_call", "ERP 발신", snapshot.summary.clickToCall],
+          ["centrex_direct", "직접 발신", snapshot.summary.centrexDirect],
+          ["active", "진행 중", snapshot.summary.active],
+        ] as const).map(([key, label, value]) => (
+          <button
+            aria-pressed={filter === key}
+            className={key === "active" && value ? "is-active" : undefined}
+            disabled={loading}
+            key={key}
+            onClick={() => {
+              setFilter(key);
+              setPage(1);
+            }}
+            type="button"
+          >
+            <span>{label}</span><strong>{value}</strong>
+          </button>
+        ))}
       </div>
+
+      <ListDateControls
+        disabled={loading}
+        onChange={(value) => {
+          setDateFilter(value);
+          setPage(1);
+        }}
+        todayKey={todayKey}
+        value={dateFilter}
+      />
 
       <section className="phone-follow-up-queue" aria-label="재통화 업무 큐">
         <div className="phone-follow-up-heading">
@@ -487,14 +537,17 @@ export function PhoneDeskWorkspace({
       <div className="phone-desk-panel">
         <div className="phone-desk-toolbar">
           <label className="phone-desk-search">
-            <span className="sr-only">전화번호, 고객명 또는 담당자 검색</span>
+            <span className="sr-only">현재 페이지의 전화번호, 고객명 또는 담당자 검색</span>
             <svg aria-hidden="true" viewBox="0 0 24 24">
               <circle cx="11" cy="11" r="6.5" />
               <path d="m16 16 4 4" />
             </svg>
             <input
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="전화번호, 고객명, 담당자 검색"
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setPage(1);
+              }}
+              placeholder="현재 페이지에서 전화번호, 고객명, 담당자 검색"
               type="search"
               value={query}
             />
@@ -505,7 +558,10 @@ export function PhoneDeskWorkspace({
                 aria-pressed={filter === item.key}
                 className={filter === item.key ? "is-active" : undefined}
                 key={item.key}
-                onClick={() => setFilter(item.key)}
+                onClick={() => {
+                  setFilter(item.key);
+                  setPage(1);
+                }}
                 type="button"
               >
                 {item.label}
@@ -583,6 +639,18 @@ export function PhoneDeskWorkspace({
             );
           })}
         </div>
+        <ListPagination
+          disabled={loading}
+          onPageChange={setPage}
+          onPageSizeChange={(value) => {
+            setPageSize(value);
+            setPage(1);
+          }}
+          page={snapshot.page}
+          pageCount={snapshot.pageCount}
+          pageSize={snapshot.pageSize}
+          total={snapshot.total}
+        />
       </div>
     </section>
   );

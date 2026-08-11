@@ -1,6 +1,7 @@
 import {
   and,
   asc,
+  count,
   desc,
   eq,
   gte,
@@ -77,8 +78,23 @@ const INBOUND_CONNECTED_SNAPSHOT_WINDOW_MS = 12 * 60 * 60_000;
 const INBOUND_ENDED_SNAPSHOT_WINDOW_MS = 20_000;
 const INBOUND_ANSWER_COMMAND_TTL_MS = 20_000;
 const INBOUND_ANSWER_DISPATCH_TIMEOUT_MS = 3 * 60_000;
-const PHONE_DESK_DEFAULT_LIMIT = 50;
+const PHONE_DESK_DEFAULT_LIMIT = 20;
 const PHONE_DESK_MAX_LIMIT = 100;
+
+export type PhoneDeskListFilter =
+  | "all"
+  | "inbound"
+  | "click_to_call"
+  | "centrex_direct"
+  | "active";
+
+export type PhoneDeskListQuery = {
+  page: number;
+  pageSize: 20 | 50 | 100;
+  filter?: PhoneDeskListFilter;
+  from?: Date;
+  to?: Date;
+};
 
 type InboundAnswerCommandStatus =
   | "queued"
@@ -711,14 +727,133 @@ export function createTelephonyService(options: {
   }
 
   async function getPhoneDeskCalls(
-    limit = PHONE_DESK_DEFAULT_LIMIT,
+    queryOrLimit: PhoneDeskListQuery | number = PHONE_DESK_DEFAULT_LIMIT,
     callId?: string,
   ) {
+    const requestedPage = typeof queryOrLimit === "number"
+      ? 1
+      : queryOrLimit.page;
     const normalizedLimit = Math.min(
-      Math.max(Math.trunc(limit) || PHONE_DESK_DEFAULT_LIMIT, 1),
+      Math.max(
+        Math.trunc(
+          typeof queryOrLimit === "number"
+            ? queryOrLimit
+            : queryOrLimit.pageSize,
+        ) || PHONE_DESK_DEFAULT_LIMIT,
+        1,
+      ),
       PHONE_DESK_MAX_LIMIT,
     );
+    const selectedFilter = typeof queryOrLimit === "number"
+      ? "all"
+      : queryOrLimit.filter ?? "all";
+    const from = typeof queryOrLimit === "number"
+      ? undefined
+      : queryOrLimit.from;
+    const to = typeof queryOrLimit === "number" ? undefined : queryOrLimit.to;
     const snapshotAt = now();
+    const observedDateCondition = and(
+      from ? gte(telephonyInboundCalls.ringingAt, from) : undefined,
+      to ? lt(telephonyInboundCalls.ringingAt, to) : undefined,
+    );
+    const standaloneDateCondition = and(
+      from ? gte(telephonyCalls.requestedAt, from) : undefined,
+      to ? lt(telephonyCalls.requestedAt, to) : undefined,
+    );
+    const emptySummary = {
+      all: 0,
+      inbound: 0,
+      clickToCall: 0,
+      centrexDirect: 0,
+      active: 0,
+    };
+    let summary = emptySummary;
+    if (!callId) {
+      const [[observedSummary], [standaloneSummary]] = await Promise.all([
+        db
+          .select({
+            all: count(),
+            inbound: sql<number>`count(*) filter (where ${telephonyInboundCalls.direction} = 'inbound')::int`,
+            clickToCall: sql<number>`count(*) filter (where ${telephonyInboundCalls.direction} = 'outbound' and ${telephonyCallObservationLinks.observedCallId} is not null)::int`,
+            centrexDirect: sql<number>`count(*) filter (where ${telephonyInboundCalls.direction} = 'outbound' and ${telephonyCallObservationLinks.observedCallId} is null)::int`,
+            active: sql<number>`count(*) filter (where ${telephonyInboundCalls.state} in ('ringing', 'connected'))::int`,
+          })
+          .from(telephonyInboundCalls)
+          .leftJoin(
+            telephonyCallObservationLinks,
+            eq(
+              telephonyCallObservationLinks.observedCallId,
+              telephonyInboundCalls.id,
+            ),
+          )
+          .where(observedDateCondition),
+        db
+          .select({
+            all: count(),
+            active: sql<number>`count(*) filter (where ${telephonyCalls.commandStatus} in ('queued', 'dispatching', 'succeeded') and ${telephonyCalls.reconciledAt} is null)::int`,
+          })
+          .from(telephonyCalls)
+          .leftJoin(
+            telephonyCallObservationLinks,
+            eq(
+              telephonyCallObservationLinks.telephonyCallId,
+              telephonyCalls.id,
+            ),
+          )
+          .where(
+            and(
+              isNull(telephonyCallObservationLinks.observedCallId),
+              standaloneDateCondition,
+            ),
+          ),
+      ]);
+      const observedAll = Number(observedSummary?.all ?? 0);
+      const standaloneAll = Number(standaloneSummary?.all ?? 0);
+      summary = {
+        all: observedAll + standaloneAll,
+        inbound: Number(observedSummary?.inbound ?? 0),
+        clickToCall:
+          Number(observedSummary?.clickToCall ?? 0) + standaloneAll,
+        centrexDirect: Number(observedSummary?.centrexDirect ?? 0),
+        active:
+          Number(observedSummary?.active ?? 0) +
+          Number(standaloneSummary?.active ?? 0),
+      };
+    }
+    const total = callId
+      ? 0
+      : selectedFilter === "click_to_call"
+        ? summary.clickToCall
+        : selectedFilter === "centrex_direct"
+          ? summary.centrexDirect
+          : summary[selectedFilter];
+    const pageCount = Math.max(1, Math.ceil(total / normalizedLimit));
+    const page = callId ? 1 : Math.min(requestedPage, pageCount);
+    const offset = callId ? 0 : (page - 1) * normalizedLimit;
+    const fetchLimit = callId
+      ? normalizedLimit * 2
+      : offset + normalizedLimit;
+    const observedFilterCondition = selectedFilter === "inbound"
+      ? eq(telephonyInboundCalls.direction, "inbound")
+      : selectedFilter === "click_to_call"
+        ? and(
+            eq(telephonyInboundCalls.direction, "outbound"),
+            isNotNull(telephonyCallObservationLinks.observedCallId),
+          )
+        : selectedFilter === "centrex_direct"
+          ? and(
+              eq(telephonyInboundCalls.direction, "outbound"),
+              isNull(telephonyCallObservationLinks.observedCallId),
+            )
+          : selectedFilter === "active"
+            ? inArray(telephonyInboundCalls.state, ["ringing", "connected"])
+            : undefined;
+    const standaloneFilterCondition =
+      selectedFilter === "all" || selectedFilter === "click_to_call"
+        ? undefined
+        : selectedFilter === "active"
+          ? sql<boolean>`${telephonyCalls.commandStatus} in ('queued', 'dispatching', 'succeeded') and ${telephonyCalls.reconciledAt} is null`
+          : sql<boolean>`false`;
     const observedRows = await db
       .select({
         id: telephonyInboundCalls.id,
@@ -799,10 +934,10 @@ export function createTelephonyService(options: {
               eq(telephonyInboundCalls.id, callId),
               eq(telephonyCallObservationLinks.telephonyCallId, callId),
             )
-          : undefined,
+          : and(observedDateCondition, observedFilterCondition),
       )
-      .orderBy(desc(telephonyInboundCalls.lastEventAt))
-      .limit(normalizedLimit * 2);
+      .orderBy(desc(telephonyInboundCalls.ringingAt))
+      .limit(fetchLimit);
 
     const standaloneClickRows = await db
       .select({
@@ -879,11 +1014,13 @@ export function createTelephonyService(options: {
       .where(
         and(
           isNull(telephonyCallObservationLinks.observedCallId),
-          callId ? eq(telephonyCalls.id, callId) : undefined,
+          callId
+            ? eq(telephonyCalls.id, callId)
+            : and(standaloneDateCondition, standaloneFilterCondition),
         ),
       )
       .orderBy(desc(telephonyCalls.requestedAt))
-      .limit(normalizedLimit * 2);
+      .limit(fetchLimit);
 
     const endpointIds = [
       ...new Set([
@@ -1242,7 +1379,7 @@ export function createTelephonyService(options: {
           new Date(right.occurredAt).getTime() -
           new Date(left.occurredAt).getTime(),
       )
-      .slice(0, normalizedLimit);
+      .slice(offset, offset + normalizedLimit);
     const observedIds = baseItems.flatMap((item) =>
       item.observedCallId ? [item.observedCallId] : [],
     );
@@ -1421,6 +1558,13 @@ export function createTelephonyService(options: {
     return {
       snapshotAt: snapshotAt.toISOString(),
       items,
+      total: callId ? items.length : total,
+      page,
+      pageSize: normalizedLimit,
+      pageCount: callId ? 1 : pageCount,
+      summary: callId
+        ? { ...emptySummary, all: items.length }
+        : summary,
       followUps: openFollowUps.map((task) => ({
         id: task.id,
         aftercareId: task.aftercareId,

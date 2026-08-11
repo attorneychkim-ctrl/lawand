@@ -220,7 +220,7 @@ export function InboundCallIndicator({
 
   const refreshDirectOutboundAftercare = useCallback(async () => {
     const sequence = ++deskRequestSequence.current;
-    const response = await fetch("/api/phone-desk/calls", {
+    const response = await fetch("/api/phone-desk/calls?pageSize=100", {
       cache: "no-store",
       headers: { accept: "application/json" },
     });

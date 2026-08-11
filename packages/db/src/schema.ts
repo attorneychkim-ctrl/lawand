@@ -1411,6 +1411,7 @@ export const consultations = pgTable(
       table.publicReceiptCode,
     ),
     index("consultations_phone_fingerprint_idx").on(table.phoneFingerprint),
+    index("consultations_last_requested_idx").on(table.lastRequestedAt),
     index("consultations_state_last_requested_idx").on(
       table.state,
       table.lastRequestedAt,
@@ -2576,6 +2577,7 @@ export const telephonyCalls = pgTable(
       table.staffUserId,
       table.requestedAt,
     ),
+    index("telephony_calls_requested_idx").on(table.requestedAt),
     index("telephony_calls_command_status_requested_idx").on(
       table.commandStatus,
       table.requestedAt,
@@ -2737,6 +2739,7 @@ export const telephonyInboundCalls = pgTable(
       table.remotePhoneFingerprint,
       table.ringingAt,
     ),
+    index("telephony_inbound_calls_ringing_idx").on(table.ringingAt),
     check(
       "telephony_inbound_calls_bridge_id_format",
       sql`${table.bridgeId} ~ '^[A-Za-z0-9][A-Za-z0-9_.-]{2,79}$'`,

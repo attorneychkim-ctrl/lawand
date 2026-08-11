@@ -2,11 +2,13 @@ import { randomBytes } from "node:crypto";
 
 import {
   and,
+  count,
   desc,
   eq,
   gte,
   inArray,
   isNotNull,
+  lt,
   sql,
 } from "drizzle-orm";
 
@@ -78,6 +80,22 @@ import {
 } from "./naver-booking.js";
 
 type Database = ReturnType<typeof createDatabaseClient>["db"];
+
+export type ConsultationListQuery = {
+  page: number;
+  pageSize: 20 | 50 | 100;
+  filter?: ConsultationListFilter;
+  staffUserId: string;
+  from?: Date;
+  to?: Date;
+};
+
+export type ConsultationListFilter =
+  | "all"
+  | "waiting"
+  | "mine"
+  | "attention"
+  | "today";
 
 export class ConsultationValidationError extends Error {}
 
@@ -2097,13 +2115,142 @@ export function createConsultationService(options: {
     });
   }
 
-  async function list(limit = 50) {
+  async function list(query: ConsultationListQuery) {
+    const dateCondition = and(
+      query.from
+        ? gte(consultations.lastRequestedAt, query.from)
+        : undefined,
+      query.to ? lt(consultations.lastRequestedAt, query.to) : undefined,
+    );
+    const waitingCondition = and(
+      eq(consultations.state, "requested"),
+      sql<boolean>`not exists (
+        select 1
+        from ${kakaoHomepageEntries}
+        where ${kakaoHomepageEntries.consultationId} = ${consultations.id}
+          and ${kakaoHomepageEntries.status} = 'invalid'
+      )`,
+    );
+    const mineCondition = sql<boolean>`exists (
+      select 1
+      from ${consultationAssignments}
+      where ${consultationAssignments.consultationId} = ${consultations.id}
+        and ${consultationAssignments.assigneeUserId} = ${query.staffUserId}
+    )`;
+    const attentionCondition = sql<boolean>`(
+      exists (
+        select 1
+        from ${consultationRequests}
+        where ${consultationRequests.consultationId} = ${consultations.id}
+          and ${consultationRequests.id} = (
+            select latest_request.id
+            from ${consultationRequests} latest_request
+            where latest_request.consultation_id = ${consultations.id}
+            order by latest_request.submitted_at desc
+            limit 1
+          )
+          and ${consultationRequests.dedupeOutcome} = 'suspected_duplicate'
+      )
+      or exists (
+        select 1
+        from ${kakaoHomepageEntries}
+        where ${kakaoHomepageEntries.consultationId} = ${consultations.id}
+          and ${kakaoHomepageEntries.status} = 'pending'
+      )
+      or exists (
+        select 1
+        from ${naverBookingEntries}
+        where ${naverBookingEntries.consultationId} = ${consultations.id}
+          and ${naverBookingEntries.status} = 'details_pending'
+      )
+      or exists (
+        select 1
+        from (
+          select *
+          from (
+            select ${telephonyCalls.disposition}::text as disposition,
+              null::text as aftercare_result,
+              ${telephonyCalls.requestedAt} as occurred_at
+            from ${telephonyCalls}
+            where ${telephonyCalls.consultationId} = ${consultations.id}
+              and ${telephonyCalls.disposition} is not null
+            union all
+            select null::text,
+              ${telephonyCallAftercare.result}::text,
+              ${telephonyCallAftercare.confirmedAt}
+            from ${telephonyCallAftercare}
+            where ${telephonyCallAftercare.consultationId} = ${consultations.id}
+          ) all_telephony
+          order by all_telephony.occurred_at desc
+          limit 1
+        ) latest_telephony
+        where latest_telephony.disposition in ('no_answer', 'callback_required')
+          or latest_telephony.aftercare_result in (
+            'reconsultation_required',
+            'no_answer',
+            'busy',
+            'manager_callback_requested',
+            'rejected'
+          )
+      )
+    )`;
+    const todayCondition = sql<boolean>`(
+      ${consultations.lastRequestedAt} >= (
+        date_trunc('day', now() at time zone 'Asia/Seoul')
+        at time zone 'Asia/Seoul'
+      )
+      and ${consultations.lastRequestedAt} < (
+        (date_trunc('day', now() at time zone 'Asia/Seoul') + interval '1 day')
+        at time zone 'Asia/Seoul'
+      )
+    )`;
+    const [summaryRow] = await db
+      .select({
+        all: count(),
+        waiting: sql<number>`count(*) filter (where ${waitingCondition})::int`,
+        mine: sql<number>`count(*) filter (where ${mineCondition})::int`,
+        attention: sql<number>`count(*) filter (where ${attentionCondition})::int`,
+        today: sql<number>`count(*) filter (where ${todayCondition})::int`,
+      })
+      .from(consultations)
+      .where(dateCondition);
+    const summary = {
+      all: Number(summaryRow?.all ?? 0),
+      waiting: Number(summaryRow?.waiting ?? 0),
+      mine: Number(summaryRow?.mine ?? 0),
+      attention: Number(summaryRow?.attention ?? 0),
+      today: Number(summaryRow?.today ?? 0),
+    };
+    const selectedFilter = query.filter ?? "all";
+    const selectedCondition = selectedFilter === "waiting"
+      ? waitingCondition
+      : selectedFilter === "mine"
+        ? mineCondition
+        : selectedFilter === "attention"
+          ? attentionCondition
+          : selectedFilter === "today"
+            ? todayCondition
+            : undefined;
+    const total = summary[selectedFilter];
+    const pageCount = Math.max(1, Math.ceil(total / query.pageSize));
+    const page = Math.min(query.page, pageCount);
     const consultationRows = await db
       .select()
       .from(consultations)
+      .where(and(dateCondition, selectedCondition))
       .orderBy(desc(consultations.lastRequestedAt))
-      .limit(Math.min(Math.max(limit, 1), 100));
-    if (consultationRows.length === 0) return { items: [] };
+      .limit(query.pageSize)
+      .offset((page - 1) * query.pageSize);
+    if (consultationRows.length === 0) {
+      return {
+        items: [],
+        total,
+        page,
+        pageSize: query.pageSize,
+        pageCount,
+        summary,
+      };
+    }
 
     const ids = consultationRows.map((row) => row.id);
     const requestRows = await db
@@ -2314,6 +2461,11 @@ export function createConsultationService(options: {
           lastRequestedAt: consultation.lastRequestedAt.toISOString(),
         };
       }),
+      total,
+      page,
+      pageSize: query.pageSize,
+      pageCount,
+      summary,
     };
   }
 
