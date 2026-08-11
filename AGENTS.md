@@ -71,6 +71,37 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-11 — 센트릭스 실통화 fixture 수집 완료·root/leg 구현 계약 확정
+- bridge v0.7.2의 4591·1208 통제 canary에서 일반 내선·무조건/통화 후 호전환·실패 복귀
+  네 fixture 수집을 완료했다. 일반 내선은 양쪽 공통 root·adjacent ID로 참여자를 결정적으로
+  연결하며 참여자에게만 표시한다. 통화 후 호전환 성공은 A/B 상담 leg까지는 연결되지만 B의
+  마지막 customer leg에 외부 root·고객 지문이 없어 passive event만으로 결정적으로 연결할
+  수 없다. 이 시나리오는 미해결이며 cause 또는 시간 근접으로 추정하지 않는다.
+- 무조건 호전환 성공에서는 최초 외부 root와 고객 지문이 B에 다시 나타났고
+  `line=4591`·`agent=1208`, B `CHANNEL_LIST`의 외부 root→B final leg 관계가 모두 확인돼
+  결정적 상관이 가능했다. 현재 `incoming_line_mismatch` 보호가 이를 정상 호전환으로 인식하지
+  못해 ringing 409와 후속 orphan 409 두 건, 총 3건을 1208 dead-letter로 보냈고 A 원장은
+  B 최종 종료보다 33.259초 먼저 닫혔다. 보호를 전체 완화하지 말고 동일 외부 root·고객 지문·
+  원수신 회선·B agent·`CHANNEL_LIST` 연결을 모두 검증하는 transfer 전용 경계를 구현한다.
+- 해당 암호화 원본 3건은 hash 확인 뒤
+  `C:\ProgramData\Lawand\CentrexBridge\instances\lawand-slot-001\gateway-dead-letter-archive\20260811T081527Z-blind-transfer-1208`
+  에 보존했고 재처리 없이 active dead-letter에서만 정확히 3건을 격리했다. 보존 3건·active
+  queue/dead-letter 0이며 관련 CloudWatch DPAPI 경보도 OK로 복귀했다.
+- 실패·복귀에서는 외부 root/channel이 connected로 유지된 상태에서 양쪽에 같은 internal
+  consultation root로 A→B ring이 왔고 B `CHANNEL_LIST`는 없었다. 종료 cause 207/16은
+  관측값일 뿐 의미를 일반화하지 않는다. 취소 중 외부 channel은 종료되지 않았고 12.10초 뒤
+  기존 외부 channel만 최종 종료됐으며 gateway 오류·DLQ는 0이었다. 명시적 return provider
+  event가 없으므로 bridge가 활성 외부 root 안의 consultation attempt/returned correlation
+  event를 만들어야 UI가 `호전환 시도 중`·`복귀`를 표시할 수 있다.
+- 구현 계약은 customer call root와 call legs 분리, transfer correlation evidence 보존,
+  마지막 customer leg 종료만 root 종료로 인정, A leg 종료로 root 종료 금지, 최종 고객
+  통화자에게만 1회 후처리, 일반 내선 참여자 전용 알림과 호전환 대상의 우선 `전달된 고객
+  전화` 알림이다. 증거가 부족하면 `호전환 확인 필요`로 남긴다. 최종 4591·1208 active 0,
+  target queue/dead-letter 0, CloudWatch ALARM 0이며 다른 업무 통화는 건드리지 않았다.
+- 이번 세션은 실통화 수집 결과를 문서화만 했고 구현·migration·배포·운영 데이터 변경은
+  수행하지 않았다. `docs/CENTREX_CALL_ACTIVITY_V2.md`를 상세 fixture와 acceptance 기준으로,
+  `PROJECT_PLAN.md` v1.12를 authoritative 상태로 갱신했다.
+
 ### 2026-08-11 — bridge v0.7.2 운영 배포·일반 내선/통화 후 호전환 실측
 - `PROJECT_PLAN.md` v1.10과 최신 인수인계를 다시 읽고 HERDR 관리 main·
   `quiet-field-0995`·`quiet-harbor-6e25`·`quiet-harbor-a725`, 로컬/원격

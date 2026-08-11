@@ -1,7 +1,7 @@
 # 센트릭스 통합 통화 활동 v2
 
-> 상태: 제품 정책 확정, 일반 내선·통화 후 호전환 event canary 완료,
-> 무조건 호전환·실패 복귀와 최종 B/고객 leg 상관키 보강 대기
+> 상태: 일반 내선·무조건/통화 후 호전환·실패 복귀 실통화 fixture 수집 완료,
+> 구현 전 root/leg·transfer evidence 계약 확정, 통화 후 호전환 final leg 상관은 미해결
 >
 > 기준일: 2026-08-11
 >
@@ -13,9 +13,10 @@
 `통화 활동 카드`로 확장한다. 동시에 전화가 실제로 필요한 직원에게는 화면 토스트와 브라우저
 알림을 보내고, 호전환은 하나의 고객 통화 아래 여러 통화 leg로 보존한다.
 
-이 문서는 제품 동작과 acceptance 기준을 고정한다. 센트릭스 OCX가 내선·호전환에서 보내는
-실제 식별자 관계는 운영과 같은 두 내선의 통제 canary로 확인한 뒤 구현한다. 확인되지 않은
-상태를 이벤트 이름만 보고 추정하지 않는다.
+이 문서는 제품 동작과 acceptance 기준을 고정한다. 센트릭스 OCX가 내선·호전환에서 보낸
+실제 식별자 관계는 운영과 같은 두 내선의 통제 canary로 수집했다. 구현은 아래 fixture와
+확정 계약을 먼저 테스트로 고정한 뒤 시작하며, 확인되지 않은 상태를 이벤트 이름·종료 cause·
+시간 근접만으로 추정하지 않는다.
 
 ## 2. 확정된 표시 정책
 
@@ -135,9 +136,10 @@ subscription 폐기와 잠금화면 운영 정책을 별도 검증한 뒤 다음
 - 현재 온라인이고 서로 다른 두 센트릭스 내선 A·B와 각각의 실물 전화기
 - 통제 가능한 외부 발신 전화 한 대
 - A·B 담당자의 시험 동의와 정확한 시험 시간
-- 통화 시작 전 활성 업무 통화, 실행 중 전화 명령, DPAPI 대기 큐가 없다는 확인
+- 통화 시작 전 A·B 대상 endpoint의 활성 통화·실행 중 전화 명령·DPAPI 대기 큐가 없다는 확인
 
-실제 업무 전화가 들어오거나 배정 endpoint 상태가 불안정하면 즉시 중단한다. 회선 재배정,
+A·B 대상에 실제 업무 전화가 들어오거나 배정 endpoint 상태가 불안정하면 즉시 중단한다.
+다른 회선의 업무 통화는 안전 게이트에서 제외하되 조회 외에는 개입하지 않는다. 회선 재배정,
 센트릭스 재로그인, 자격증명 변경, 프로세스 재시작과 DB 보정은 canary에 포함하지 않는다.
 
 ### 시나리오
@@ -184,6 +186,8 @@ gateway와 DB는 읽기 전용으로 provider ID, 방향, 상태, 시각과 연�
 관측 시간창은 16:52:55~16:53:53 KST이며 A는 4591, B는 1208이다. 문서의 ID 표기는
 실제 provider 값을 옮기지 않고 시간창 안에서만 부여한 비식별 label이다.
 
+#### 일반 내선
+
 일반 내선은 다음 순서였다.
 
 1. A `RING_EVENT(ISDIAL=1, CALLER_KIND=internal, sip/sip)`와 B
@@ -195,6 +199,8 @@ gateway와 DB는 읽기 전용으로 provider ID, 방향, 상태, 시각과 연�
    보냈고 A에는 root 자체의 종료도 추가로 왔다.
 4. 양쪽 4자리 leg는 각각 `invalid_outbound_number`·`invalid_inbound_number`로 기존 정책대로
    gateway 전송 전에 거부됐다. 운영 통화·이벤트 원장은 생성되지 않았다.
+
+#### 통화 후 호전환 성공
 
 통화 후 호전환은 다음 순서였다.
 
@@ -217,17 +223,87 @@ A/B 상담 leg까지는 연결할 수 있지만, 현재 OCX 로그와 payload만
 외부 root에 결정적으로 연결하거나 A leg 종료와 고객 root 최종 종료를 일반화해 구분할 수
 없다. 이 canary에서는 두 종료 사이가 19.13초였고 운영 원장이 먼저 닫힌 것이 확인됐다.
 
-다음 구현은 이 실측을 fixture로 고정하고 A가 외부 통화 중 시작한 internal 상담 leg를
-명시적 transfer candidate로 연결해야 한다. 단순 시각 근접 병합은 사용하지 않는다. 무조건
-호전환과 실패·복귀에서 같은 종료 패턴이 어떻게 달라지는지 추가 canary한 뒤, bridge/gateway
-payload에 transfer correlation을 보강하거나 확정 신호가 없으면 `호전환 확인 필요`로
-보존한다. 그 전에는 중간 A 종료를 고객 root 종료로 확정하거나 최종 통화자를 B로 자동
-지정하지 않는다.
+이 결과는 A가 외부 통화 중 시작한 internal 상담 leg를 transfer candidate로 연결해야 함을
+보여주지만, B/customer final leg를 외부 root에 연결할 결정적 passive evidence는 제공하지
+않는다. 따라서 이 시나리오는 미해결 fixture로 보존하고 증거가 보강되기 전에는 중간 A 종료를
+고객 root 종료로 확정하거나 최종 통화자를 B로 자동 지정하지 않는다.
 
-## 7. 구현 순서와 완료 기준
+#### 무조건 호전환 성공
 
-1. v0.7.2를 통제 배포하고 위 다섯 시나리오의 비식별 증거를 수집한다.
-2. root/leg 상관관계와 상태머신을 테스트 fixture로 먼저 고정한다.
+1. A의 최초 외부 `RING_EVENT` root와 고객 지문이 B의 `RING_EVENT`에 그대로 다시 나타났다.
+   B 이벤트는 원수신 회선 `line=4591`과 실제 수신 agent `1208`을 함께 보존했고, 외부 masked
+   suffix도 A와 같았다.
+2. B `CHANNEL_LIST`가 같은 외부 root와 B/customer final leg를 직접 연결했다. 최종 leg는
+   별도 provider group이지만 이 명시적 adjacent 관계로 외부 root에 결정적으로 상관할 수
+   있다. 관측 채널은 모두 `sip`이었고 `local_xfer`는 없었다.
+3. A의 외부 connected leg가 먼저 종료되자 현재 운영 원장도 닫혔고, B/customer final leg는
+   33.259초 뒤 종료됐다. 즉 현재 원장은 A leg 종료를 root 종료로 잘못 취급한다.
+4. gateway의 `incoming_line_mismatch`는 endpoint의 배정 회선과 수신 회선이 다른 이벤트가
+   다른 직원 통화에 섞이는 것을 막는 보호장치다. 이 fixture에서는 provider가 B endpoint에
+   원수신 회선 4591과 agent 1208을 함께 보낸 정상 호전환이어서 ringing이 409로 오탐됐고,
+   선행 원장이 없어진 후속 connected/ended도 orphan 409가 됐다. 정확히 3건이 1208 active
+   dead-letter에 쌓였다.
+5. 암호화 원본 3건은 hash를 확인해
+   `C:\ProgramData\Lawand\CentrexBridge\instances\lawand-slot-001\gateway-dead-letter-archive\20260811T081527Z-blind-transfer-1208`
+   에 보존하고 재처리 없이 active dead-letter에서만 격리했다. 보존 3건·active 0건이며
+   queue/dead-letter와 CloudWatch DPAPI 경보는 정상으로 복귀했다.
+
+보호 검사를 전체 완화하지 않는다. 무조건 호전환 전용 수용은 같은 외부 root, 같은 고객
+지문, 원수신 회선, B agent, 그리고 외부 root와 B final leg를 잇는 `CHANNEL_LIST`를 모두
+검증할 때만 허용한다. 하나라도 없으면 자동 병합하지 않고 `호전환 확인 필요`로 보존한다.
+
+#### 실패·복귀
+
+1. A의 외부 root와 adjacent channel은 `connected`로 유지된 채, A→B 상담 시 양쪽
+   `RING_EVENT`에 같은 별도 internal consultation root가 나타났다. 모든 채널은 `sip`이었고
+   `local_xfer`는 없었다.
+2. B가 응답하지 않아 B `CHANNEL_LIST`는 없었다. 상담 종료에서 A는 consultation root를
+   source로, B는 adjacent channel과 sentinel source를 보냈다. 이때 관측한 종료 cause
+   207/16은 이 fixture의 값일 뿐 성공·실패 의미로 일반화하지 않는다.
+3. 취소 과정에서 기존 외부 channel은 중간 종료 없이 계속 유지됐다. 명시적 return provider
+   이벤트나 추가 `RING_EVENT`·`CHANNEL_LIST`는 없었고, 취소 후 12.10초 뒤 기존 외부
+   channel이 최종 종료돼 gateway가 `inbound.ended`를 수용했다.
+4. gateway 409와 queue/dead-letter는 모두 0이었다. 현재 bridge 로그만으로는 `활성 외부
+   root + 연결되지 않은 internal consultation 시도 종료 + 외부 channel 유지`를 결합해
+   실패·복귀를 판별할 수 있지만 gateway와 UI에는 이 내부 문맥이 전달되지 않는다.
+
+따라서 bridge가 활성 외부 root 문맥에서 `consultation_attempt`와 `consultation_returned`
+correlation 이벤트를 명시적으로 생성해야 제품이 `호전환 시도 중`과 `복귀`를 표시할 수 있다.
+
+#### 전체 결론
+
+| 시나리오 | 실측 결론 | 구현 상태 |
+| --- | --- | --- |
+| 일반 내선 | 공통 root·adjacent ID로 양쪽 참여자를 결정적으로 연결 | 참여자에게만 표시 |
+| 무조건 호전환 성공 | B에 재노출된 외부 root와 `CHANNEL_LIST`로 B/customer final leg를 결정적으로 연결 | 엄격한 호전환 전용 수용 경계 필요 |
+| 실패·복귀 | 활성 외부 root 안의 미연결 consultation 종료와 외부 channel 유지로 bridge-local 판별 가능 | 명시적 attempt/returned correlation 이벤트 필요 |
+| 통화 후 호전환 성공 | A/B 상담 leg는 연결되지만 passive event만으로 B/customer final leg와 외부 root를 결정적으로 연결 불가 | 미해결, `호전환 확인 필요` 유지 |
+
+종료 cause 하나나 시간 근접만으로 성공·실패·복귀·root 관계를 추정하지 않는다. 최종 운영
+확인 시 4591·1208 active call과 실행 명령, target queue/dead-letter, 관련 CloudWatch
+ALARM은 모두 0이었고 다른 업무 통화는 조회만 했으며 개입하지 않았다.
+
+## 7. 구현 전 확정 계약
+
+1. 한 고객 통화를 `customer call root`로 두고 A/customer, A/B consultation,
+   B/customer를 각각 별도 call leg로 저장한다.
+2. transfer correlation evidence에는 외부 root, 고객 지문, 원수신 회선, 전달 대상 agent,
+   provider가 명시한 root/adjacent/source 관계와 bridge가 만든 consultation 상관 이벤트를
+   보존한다. 증거가 부족하면 `호전환 확인 필요`이며 cause나 시간 근접으로 채우지 않는다.
+3. customer call root는 마지막 customer leg가 종료될 때만 끝낸다. A leg 종료나 상담 leg
+   종료로 root를 닫지 않는다.
+4. 후처리는 마지막 customer leg에 실제 연결된 최종 고객 통화자에게 한 번만 자동으로 연다.
+   최종 통화자를 확정할 증거가 없으면 누구에게도 임의로 열지 않는다.
+5. 일반 내선은 발신자·수신자에게만 표시하고 수신자에게 개인 알림을 보낸다. 외부 고객
+   호전환 대상은 일반 내선과 구분해 우선순위가 높은 `전달된 고객 전화` 알림을 받는다.
+6. `incoming_line_mismatch` 보호는 유지한다. 무조건 호전환 fixture의 모든 증거를 만족하는
+   전용 경계만 별도로 허용하고, 일부 필드 일치만으로 일반 수신 검사를 우회하지 않는다.
+
+## 8. 구현 순서와 완료 기준
+
+1. **완료:** v0.7.2 통제 배포와 일반 내선·무조건/통화 후 호전환·실패 복귀 비식별 증거 수집.
+2. root/leg 상관관계, 엄격한 무조건 호전환 수용 경계와 실패·복귀 correlation을 테스트
+   fixture로 먼저 고정한다.
 3. gateway에 외부 통화 root, leg, 참여자와 전환 관계를 멱등 저장한다.
 4. 현재 수신 snapshot을 통합 통화 활동 snapshot으로 확장하고 외부 수·발신 공용 카드를
    연결한다.

@@ -1,4 +1,4 @@
-# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.11)
+# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.12)
 
 > 이 문서는 새 로앤 홈페이지 + 새 ERP + 리걸플로/리걸프렌즈 연동을 하나의 플랫폼으로
 > 묶기 위한 **저장소 구조·아키텍처 설계 초안**이다. 코덱스/클로드코드 세션이 번갈아
@@ -500,8 +500,35 @@
 > `CHANNEL_OUT`은 19.13초 뒤였다. B 로그에는 외부 고객 root·masked suffix가 없고 A/B
 > 상담 channel ID와 sentinel source만 있어 현재 정보만으로 B/고객 최종 leg를 외부 root에
 > 결정적으로 연결할 수 없다. 따라서 A leg 종료와 고객 root 최종 종료를 아직 구분할 수
-> 없으며, 무조건 호전환·실패 복귀 canary와 명시적 transfer correlation 설계 전에는 기존
-> 원장을 통합 통화 활동 상태머신의 근거로 사용하지 않는다.
+> 없으며, 이 통화 후 호전환 fixture는 명시적 transfer correlation 없이는 기존 원장을 통합
+> 통화 활동 상태머신의 근거로 사용할 수 없는 미해결 사례로 유지한다.
+>
+> 같은 날 무조건 호전환 성공 fixture에서는 최초 외부 root가 B에도 다시 나타났고,
+> `line=4591`·`agent=1208`인 B `RING_EVENT`의 고객 지문이 A와 일치했다. 이어 B
+> `CHANNEL_LIST`가 그 외부 root와 B/고객 최종 leg를 직접 연결해 이 시나리오는 결정적으로
+> 상관할 수 있었다. 그러나 현재 gateway는 B endpoint와 원수신 회선이 다른 이벤트를
+> `incoming_line_mismatch` 409로 거절하고, 뒤이은 connected/ended도 orphan 409로 거절해
+> 정확히 3건을 1208 dead-letter로 보냈다. 그 결과 A 원장은 실제 B 최종 종료보다 33.259초
+> 먼저 닫혔다. 암호화 원본 3건은 timestamp archive에 hash 검증 후 보존하고 active DLQ에서만
+> 격리해 target queue/dead-letter를 0으로 복구했으며 관련 경보도 OK를 확인했다. 이 보호를
+> 전체 완화하지 않는다. 호전환 전용 수용 경계는 동일 외부 root·고객 지문·원수신 회선·
+> B agent·외부 root와 B final leg를 잇는 `CHANNEL_LIST` 증거를 모두 만족해야 한다.
+>
+> 실패·복귀 fixture에서는 외부 root와 connected channel이 유지된 상태에서 양쪽에 같은
+> internal consultation root의 A→B `RING_EVENT`가 왔고 B `CHANNEL_LIST`는 없었다. B
+> 미응답 뒤 상담 leg 종료 cause 207/16이 관측됐지만 이는 fixture 값일 뿐 의미를 일반화하지
+> 않는다. 취소 과정에서 외부 channel의 중간 종료는 없었고, 12.10초 뒤 같은 외부 channel의
+> 최종 종료만 gateway가 수용했다. 오류와 DLQ는 0이었다. 제공자의 명시적 return 이벤트가
+> 없으므로 bridge가 활성 외부 root 문맥에서 consultation attempt/returned correlation
+> 이벤트를 생성해야 제품이 `호전환 시도 중`·`복귀`를 구분할 수 있다.
+>
+> 구현 계약은 고객 통화 root와 개별 call leg를 분리하고 transfer correlation evidence를
+> 보존하는 것이다. root는 마지막 customer leg가 끝날 때만 종료하며 A leg 종료로 닫지 않는다.
+> 후처리는 최종 고객 통화자에게만 한 번 열고, 일반 내선은 참여자에게만 알리되 호전환 대상은
+> `전달된 고객 전화` 정책을 적용한다. 일반 내선은 참여자 연결이 결정적이고 무조건 호전환은
+> 외부 root와 B final leg 연결이 결정적이며 실패·복귀는 bridge-local 문맥으로 판별 가능하다.
+> 통화 후 호전환 성공의 B/customer final leg는 passive event만으로 외부 root와 결정적으로
+> 연결할 수 없어 여전히 미해결이다. cause 또는 시간 근접만으로 상태·상관관계를 추정하지 않는다.
 > `Office_idx=56` 사건만 이름·전화·사건번호·원본 사건 ID 없이 추출한 자가진단
 > 런타임 읽기 모델을 만들었다. 현재 1,759건(회생 1,342·파산면책 417)이며 gateway만
 > 이 모델을 읽는다. `/bank/self-diagnosis`는 고객 상황과 유사한 다섯 건의 월 변제금·
@@ -1548,9 +1575,10 @@ Manager와 별도 역할·보안그룹·TLS 기준을 적용한다.
   통화 단일화 + 내부 4자리 leg 고아 이벤트 차단을 v0.7.1로 운영 배포
 - [x] 통합 통화 활동 v2 제품 정책 확정: 외부 수·발신 전 직원 카드, 내선 참여자 알림,
   `Member_idx` 기반 수신 담당자 라우팅, 고객 통화 root/호전환 leg/최종 통화자 후처리
-- [ ] bridge v0.7.2 비식별 관측 로그 통제 배포와 상관키 확정
+- [x] bridge v0.7.2 비식별 관측 로그 통제 배포와 시나리오별 상관 가능 범위 확정
   - [x] 4591·1208 일반 내선과 통화 후 호전환 양쪽 endpoint 실제 이벤트 canary
-  - [ ] 무조건 호전환·실패 복귀 canary, B/고객 최종 leg의 외부 root 상관키 보강
+  - [x] 무조건 호전환·실패 복귀 canary와 암호화 DLQ 3건 archive·active queue 정상화
+  - [ ] 통화 후 호전환 B/고객 final leg 상관 증거와 bridge transfer correlation 구현
 - [ ] 통합 통화 활동 구현: root/leg 원장·외부 수발신 공용 snapshot/card·정확한 알림 대상·
   토스트/Notification API·최종 고객 통화자 1회 후처리
 - [x] 실제 업무 통화를 포함한 10→25→50 프로세스 CPU·메모리 canary와 warm 5개 원복
@@ -1606,11 +1634,11 @@ Manager와 별도 역할·보안그룹·TLS 기준을 적용한다.
 11. 실제 수신·ERP 발신·직접 발신 한 건씩 통화 종료 후 공용 후처리 자동 열림과 담당자 기본값 UX 확인
 12. 센트릭스 조직용 코드 서명 인증서 배포; 실제 배정이 50개에 가까워지기 전
     t3.medium의 메모리 여유를 재확인하고 t3.large 상향 검토
-13. bridge v0.7.2에서 확인된 일반 내선·통화 후 호전환 fixture를 먼저 고정한다. A/B 상담
-    leg는 양쪽 공통 ID 쌍으로 연결하되, A 외부 channel 종료를 고객 root 종료로 확정하지
-    않는다. 무조건 호전환·실패 복귀 canary와 명시적 transfer correlation로 B/고객 최종
-    leg를 확정한 뒤 외부 수·발신 공용 상단 카드, 담당자 토스트·브라우저 알림과 최종
-    통화자 후처리를 통합 구현
+13. bridge v0.7.2의 일반 내선·무조건/통화 후 호전환·실패 복귀 fixture를 테스트로 고정한다.
+    고객 통화 root와 call legs, 엄격한 transfer evidence, 마지막 customer leg 기준 종료를
+    구현하고, 활성 외부 root 안의 consultation attempt/returned를 bridge가 명시적으로
+    상관한다. 통화 후 호전환 B/고객 final leg의 결정적 증거가 없으면 `호전환 확인 필요`로
+    남긴 뒤 외부 수·발신 공용 상단 카드, 담당자 알림과 최종 통화자 후처리를 통합 구현
 14. 비즈콜 앱 직접 발신 1건이 종료 후 전화데스크에 들어오는지만 운영 acceptance로 확인;
     실시간 모바일 ring·ERP 받기·원격 발신은 현재 범위에서 제외
 15. 전화 담당자의 실시간 근무현황과 회선 통화 중 여부를 전화데스크·수신 카드에 결합
