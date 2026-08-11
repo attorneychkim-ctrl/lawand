@@ -14,6 +14,8 @@ namespace Lawand.CentrexBridge
             Run("수신 이벤트 파싱", ParseInboundRing);
             Run("값 내부 콜론 보존", PreserveValueColon);
             Run("전화번호 마스킹", MaskPhone);
+            Run("통화 상대 종류 분류", CallPartyKind);
+            Run("호전환 채널 종류 분류", ChannelKind);
             Run("내선 suffix 비교", ExtensionSuffix);
             Run("로그 토큰 정제", SafeToken);
             Run("센트릭스 연관 leg 판정", RelatedUniqueId);
@@ -57,6 +59,26 @@ namespace Lawand.CentrexBridge
         {
             Equal("***5678", CentrexEventParser.MaskPhone("010-1234-5678"));
             Equal("unknown", CentrexEventParser.MaskPhone(""));
+        }
+
+        private static void CallPartyKind()
+        {
+            Equal("internal", CentrexEventParser.CallPartyKind("3322"));
+            Equal("internal", CentrexEventParser.CallPartyKind("10004591"));
+            Equal("external", CentrexEventParser.CallPartyKind("01012345678"));
+            Equal("unknown", CentrexEventParser.CallPartyKind("null"));
+        }
+
+        private static void ChannelKind()
+        {
+            Equal(
+                "local_xfer",
+                CentrexEventParser.ChannelKind("Local/3458@xfercontext-000001;2"));
+            Equal("local", CentrexEventParser.ChannelKind("Local/3458@test-000001;1"));
+            Equal("sip", CentrexEventParser.ChannelKind("SIP/10013458-c7fb"));
+            Equal("pjsip", CentrexEventParser.ChannelKind("PJSIP/10013458-0001"));
+            Equal("none", CentrexEventParser.ChannelKind("null"));
+            Equal("other", CentrexEventParser.ChannelKind("IAX2/provider-1"));
         }
 
         private static void ExtensionSuffix()

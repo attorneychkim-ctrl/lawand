@@ -100,6 +100,47 @@ namespace Lawand.CentrexBridge
             return "***" + digits.Substring(start);
         }
 
+        public static string CallPartyKind(string value)
+        {
+            string digits = DigitsOnly(value);
+            if (digits.Length >= 3 && digits.Length <= 8)
+            {
+                return "internal";
+            }
+            if (digits.Length >= 9 && digits.Length <= 15)
+            {
+                return "external";
+            }
+            return "unknown";
+        }
+
+        public static string ChannelKind(string value)
+        {
+            string source = (value ?? string.Empty).Trim();
+            if (source.Length == 0 ||
+                string.Equals(source, "null", StringComparison.OrdinalIgnoreCase))
+            {
+                return "none";
+            }
+            if (source.StartsWith("Local/", StringComparison.OrdinalIgnoreCase))
+            {
+                return source.IndexOf(
+                        "@xfercontext-",
+                        StringComparison.OrdinalIgnoreCase) >= 0
+                    ? "local_xfer"
+                    : "local";
+            }
+            if (source.StartsWith("PJSIP/", StringComparison.OrdinalIgnoreCase))
+            {
+                return "pjsip";
+            }
+            if (source.StartsWith("SIP/", StringComparison.OrdinalIgnoreCase))
+            {
+                return "sip";
+            }
+            return "other";
+        }
+
         public static bool EndsWithDigits(string actual, string expected)
         {
             string actualDigits = DigitsOnly(actual);
