@@ -221,7 +221,6 @@ ALTER TABLE "telephony_call_aftercare" ADD CONSTRAINT "telephony_call_aftercare_
 ALTER TABLE "telephony_inbound_calls" ADD CONSTRAINT "telephony_inbound_calls_call_root_id_telephony_call_roots_id_fk" FOREIGN KEY ("call_root_id") REFERENCES "public"."telephony_call_roots"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "telephony_inbound_calls" ADD CONSTRAINT "telephony_inbound_calls_call_leg_id_telephony_call_legs_id_fk" FOREIGN KEY ("call_leg_id") REFERENCES "public"."telephony_call_legs"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "telephony_call_aftercare_root_uidx" ON "telephony_call_aftercare" USING btree ("call_root_id") WHERE "telephony_call_aftercare"."call_root_id" IS NOT NULL;--> statement-breakpoint
-ALTER TABLE "telephony_call_aftercare" ADD CONSTRAINT "telephony_call_aftercare_source_present" CHECK (num_nonnulls("telephony_call_aftercare"."observed_call_id", "telephony_call_aftercare"."telephony_call_id", "telephony_call_aftercare"."call_root_id") = 1);--> statement-breakpoint
 
 -- 기존 수·발신 원장을 동일 UUID의 external root로 승격한다. root 복호화 AAD도 기존
 -- telephony_inbound_calls/{id}/remote_phone 계약을 그대로 사용하므로 재암호화가 필요 없다.
@@ -325,6 +324,23 @@ FROM telephony_call_legs AS leg
 WHERE leg.endpoint_id = call.endpoint_id
   AND leg.provider_call_id = call.provider_call_id
   AND call.call_root_id IS NULL;--> statement-breakpoint
+
+-- 기존 후처리는 관측 통화와 클릭 명령을 함께 참조할 수 있었다. 관측 원장이 있으면 같은
+-- UUID로 승격한 customer call root를 단일 원천으로 삼고 legacy 두 참조를 원자적으로
+-- 해제한다. 클릭 명령과 관측 원장의 관계는 telephony_call_observation_links에 보존된다.
+UPDATE telephony_call_aftercare AS aftercare
+SET
+  call_root_id = aftercare.observed_call_id,
+  observed_call_id = NULL,
+  telephony_call_id = NULL
+WHERE aftercare.observed_call_id IS NOT NULL
+  AND EXISTS (
+    SELECT 1
+    FROM telephony_call_roots AS root
+    WHERE root.id = aftercare.observed_call_id
+  );--> statement-breakpoint
+
+ALTER TABLE "telephony_call_aftercare" ADD CONSTRAINT "telephony_call_aftercare_source_present" CHECK (num_nonnulls("telephony_call_aftercare"."observed_call_id", "telephony_call_aftercare"."telephony_call_id", "telephony_call_aftercare"."call_root_id") = 1);--> statement-breakpoint
 
 INSERT INTO telephony_call_provider_identifiers (
   id, root_id, leg_id, endpoint_id, provider, role, provider_value,
