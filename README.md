@@ -108,11 +108,23 @@ pnpm install
 pnpm dev
 ```
 
-시스템 디렉터리에 Corepack shim을 만들 권한이 없는 환경에서는 다음처럼 실행한다.
+시스템 디렉터리에 Corepack shim을 만들 권한이 없는 환경에서는 사용자 `PATH`에 한 번만
+설치한다. `~/.local/bin`은 메인과 HERDR 작업트리가 함께 사용하므로 워크트리마다
+`node_modules/.bin/pnpm`을 다시 만들 필요가 없다.
+
+```bash
+mkdir -p ~/.local/bin
+corepack prepare pnpm@11.17.0 --activate
+corepack enable --install-directory ~/.local/bin pnpm
+pnpm --version
+pnpm install
+pnpm dev
+```
+
+사용자 `PATH`에 `~/.local/bin`을 추가할 수 없는 일회성 환경에서만 다음 명시형 명령을 쓴다.
 
 ```bash
 corepack pnpm install
-corepack enable --install-directory ./node_modules/.bin pnpm
 corepack pnpm dev
 ```
 
