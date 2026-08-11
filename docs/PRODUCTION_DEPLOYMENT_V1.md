@@ -5,8 +5,8 @@ CloudFormation 스택: `lawand-prod`
 리전: 서울(`ap-northeast-2`)
 최초 배포 릴리스: `20260804T085006Z-84e8708`
 현재 홈페이지 릴리스: `20260810T064408Z-homepage-cutover-ready-v3`
-현재 ERP 릴리스: `20260810T231946Z-client-directory-messaging-v1`
-현재 gateway 릴리스: `20260810T231946Z-client-directory-messaging-v1`
+현재 ERP 릴리스: `20260811T035307Z-centrex-message-inbox-v1`
+현재 gateway 릴리스: `20260811T035307Z-centrex-message-inbox-v1`
 
 이 문서는 정식 도메인 전환 전까지의 실제 AWS 구성, 접속점, 데이터 이관 범위와
 운영 체크리스트를 기록한다. 비밀번호·API 키·AWS 계정 ID·RDS 마스터 시크릿 ARN은
@@ -159,6 +159,39 @@ EC2에서 ARM64 네이티브 빌드한다. 서버 배포는
 systemd 앱 단위와 Caddy edge 단위는 부팅 시 자동 시작한다. 최종 검증에서 홈페이지·ERP는
 재기동 후 약 1초, gateway는 약 2초 안에 health를 회복했고 실패한 systemd unit과
 최근 error priority journal은 없었다.
+
+## 대표 문자 수신함·U+ 수신 이력 보정 통합 배포
+
+2026-08-11 HERDR 워크트리와 모든 로컬·원격 `worktree/*` HEAD가 `main`에 포함된 것을
+확인하고 릴리스 `20260811T035307Z-centrex-message-inbox-v1`을 gateway·ERP에 배포했다.
+배포 소스는 `main`/`origin/main` `22ec16a`다.
+
+- root Turbo 5개 패키지 typecheck·lint·production build, core 62개·gateway 97개 테스트,
+  Drizzle schema check와 `git diff --check`를 통과했다. HERDR 워크트리마다 달랐던 `pnpm`
+  실행 경로는 Corepack 11.17.0 사용자 공용 `~/.local/bin` shim으로 통일했다.
+- private S3 AES256 아티팩트 SHA-256은
+  `9787c5c93fd5c8cf87374c4be13374671e2f521d04f816ed83ccf825f4b13ec3`이다. gateway 이미지
+  ID는 `sha256:9e8f0826d7ec5c8fa33abd03fde258d5e6a3878dda2763e6d9ce9ef148caa4a2`, ERP 이미지 ID는
+  `sha256:683b11925237096d300db694cd34267071877ea2dc4350951a2d39ea37838ea7`이다.
+- 암호화 수동 스냅샷 `lawand-prod-pre-centrex-message-inbox-20260811t035307z`을 available까지
+  확인하고 migration `0044_sturdy_preak.sql`을 적용했다. 운영 migration은 45개이고 최신
+  해시 `a3a1a052348fb1c7c7ee770529673fe8fcc945d751d47d9f7c1064220dd1f0e2`가 Git과 일치한다.
+  신규 수신·mailbox 상태 테이블, 앱 CRUD·viewer SELECT 전용·PUBLIC 조회 차단과 대표
+  endpoint 7개·활성/인증/binding 0을 확인했다.
+- gateway와 ERP 새 이미지는 운영 전 별도 내부 포트에서 워커를 끈 채 health를 통과했다.
+  업무 통화가 계속 이어져 통화 자체가 아니라 실행 중 통화·받기·문자 명령과 통신 outbox,
+  회선 중복을 0으로 확인한 뒤 gateway만 짧게 전환했다. Windows bridge의 DPAPI 큐를
+  안전망으로 유지하고 Caddy·Windows는 재시작하지 않았다. 새 gateway는 시작 2초 뒤 기존
+  U+ `ringing` 고착 2건을 제공자 이력으로 실패 없이 복구했고 실제 연결 통화는 보존했다.
+- 인증 ERP `/messages`, `/message-templates`→`/messages`, `/clients`, `/phone-desk`,
+  `/profile`은 모두 200이다. 문자 API는 기존 대화 12개와 비활성 대표 mailbox 7개를
+  반환했고 임시 세션은 0건으로 삭제했다. 대표 계정 비밀번호는 현재 secret에 없으므로
+  TTY `userinfo` 검증 연결과 실제 수신 backfill·통제 회신 canary는 별도다.
+- 최종 gateway·ERP·각 Caddy active, systemd·컨테이너 재시작 0, error journal 0,
+  외부 health/login 200, CloudWatch ALARM 0이다. Windows는 설치 51, 배정 18+warm 5,
+  실행 23, 오프라인·로그인 실패·DPAPI 큐·dead-letter 0, supervisor 정상이다. 최종 읽기
+  시 실제 업무 통화 수신 1·발신 1이 진행 중이나 회선 중복과 실행 명령은 0이다. 기존
+  SOLAPI MMS 실패 4건과 일반 업무 pending outbox 9건은 변경하거나 재시도하지 않았다.
 
 ## ERP 고객 문자·개인 템플릿 운영 배포
 

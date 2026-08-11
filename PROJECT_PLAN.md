@@ -1,4 +1,4 @@
-# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.07)
+# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.08)
 
 > 이 문서는 새 로앤 홈페이지 + 새 ERP + 리걸플로/리걸프렌즈 연동을 하나의 플랫폼으로
 > 묶기 위한 **저장소 구조·아키텍처 설계 초안**이다. 코덱스/클로드코드 세션이 번갈아
@@ -696,7 +696,7 @@ JPG 이미지가 붙은 템플릿은 기존 SOLAPI 자격증명과 사전 등록
 허용 변수 치환과 실시간 휴대전화 미리보기를 제공한다. 운영 적용·통제 발송 게이트는
 [`docs/CENTREX_MESSAGING_V1.md`](docs/CENTREX_MESSAGING_V1.md)를 따른다.
 
-2026-08-11 대표 문자 수신함 출시 후보는 직원 개인 endpoint·binding·Windows bridge와
+2026-08-11 대표 문자 수신함은 직원 개인 endpoint·binding·Windows bridge와
 분리된 `representative` endpoint 7개를 migration `0044_sturdy_preak.sql`에 비활성
 메타데이터로 등록한다. 현재 클릭투콜 발신 회선과 대표전화의 U+ 순차착신 설정은 바꾸지
 않는다. 계정 비밀번호는 코드·문서·migration에 저장하지 않고 배포 뒤 TTY 전용 연결 명령에서
@@ -707,8 +707,11 @@ JPG 이미지가 붙은 템플릿은 기존 SOLAPI 자격증명과 사전 등록
 상담 또는 리걸프렌즈 `Case_idx`를 상속하며, 선행 발신이 없으면 고객을 추측하지 않고 미연결
 원장에 둔다. ERP 전역 `/messages`는 Case_idx별 센트릭스 SMS/LMS 수·발신과 SOLAPI MMS
 발신을 시간순으로 합치고, 기존 개인 템플릿 화면은 이 페이지의 모달로 옮긴다. 대표전화
-착신 대상·순서와 근무/휴무 조건 라우팅은 후속 범위이며 이 출시 후보의 운영 migration·계정
-연결·배포·수신 canary는 아직 수행하지 않았다.
+착신 대상·순서와 근무/휴무 조건 라우팅은 후속 범위다. 운영 migration과 gateway·ERP는
+릴리스 `20260811T035307Z-centrex-message-inbox-v1`로 배포했다. 인증 `/messages`와 API는
+기존 대화 12개·비활성 mailbox 7개를 정상 반환한다. 현재 대표 비밀번호는 운영 secret에
+없어 endpoint 활성·인증 원장은 0이며, TTY 연결과 실제 대표 수신 backfill·통제 회신
+Case_idx canary는 현재 계정 비밀번호를 안전하게 입력할 수 있을 때 수행한다.
 
 2026-08-10에는 HERDR와 모든 `origin/worktree/*`를 전수 대조해 누락된 문자 브랜치를
 `main`에 통합하고 고객 찾기 `0040` 다음의 migration `0041_late_talon.sql`을 운영에
@@ -1468,8 +1471,10 @@ Manager와 별도 역할·보안그룹·TLS 기준을 적용한다.
 - [x] 대표 문자 수신함 로컬 출시 후보: 직원 회선과 분리된 대표 endpoint 7개 metadata,
   `getrecvsmslist` 직렬 polling·암호화 수신 원장·최신 발신 Case_idx 매칭, `/messages`
   수·발신 통합 화면과 개인 템플릿 모달
-- [ ] 운영 migration `0044`·대표 계정 7개 TTY 검증 연결·gateway/ERP 통합 배포 → 통제
-  회신 1건의 Case_idx 연결·단말/ERP 수신 canary
+- [x] 운영 migration `0044`·gateway/ERP 통합 배포 → `/messages`와 대표 mailbox 7개 비활성
+  상태·권한·기존 대화 운영 검증
+- [ ] 대표 계정 7개 TTY `userinfo` 검증 연결 → 과거 수신 backfill·통제 회신 1건의
+  Case_idx 연결·단말/ERP 수신 canary
 - [x] SOLAPI 등록 MMS 발신번호를 운영 Secrets Manager·gateway에 적용
 - [ ] 200KB 이하 명함 JPG MMS 실제 발송·단말 수신 canary
 - [x] 임시 Windows Server 2022 x64 + 32비트 OpenAPI OCX 수신 canary:

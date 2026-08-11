@@ -71,6 +71,47 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-11 — HERDR 전수 통합·대표 문자 수신함 운영 배포·Turbo 공용 shim 복구
+- `git fetch --prune`·`git pull --ff-only origin main` 뒤 HERDR 관리 워크트리 3개와 로컬
+  `worktree/*` 15개, `origin/worktree/*` 9개를 전수 대조했다. 모든 HEAD가 `main`의
+  ancestor였고 대표 문자 수신함 `177572f`, U+ 이력 보정 `290a5a1`, 리걸프렌즈 무효 처리
+  `d7fbdf7`은 merge `80f96bb`에 이미 함께 들어 있어 추가 merge commit은 만들지 않았다.
+  최종 배포 소스는 README 환경 수정까지 포함한 `main`/`origin/main` `22ec16a`다.
+- WSL `PATH`에는 `~/.local/bin`이 있지만 `pnpm`이 없고 메인에만 우연히
+  `node_modules/.bin/pnpm`이 있어 HERDR 워크트리의 root Turbo 검증이 실패하던 원인을
+  확인했다. Corepack `pnpm@11.17.0` shim을 사용자 공용 `~/.local/bin`에 설치하고 README도
+  같은 기준으로 바꿨다. 현재 세 HERDR 워크트리 모두 `pnpm` 11.17.0과 Turbo 5개 패키지를
+  인식한다. root Turbo typecheck·lint·test·production build, core 62개·gateway 97개
+  테스트, Drizzle schema check와 `git diff --check`를 통과했다.
+- 통합 릴리스 `20260811T035307Z-centrex-message-inbox-v1`을 gateway·ERP에 배포했다. private
+  S3 AES256 아티팩트 SHA-256은
+  `9787c5c93fd5c8cf87374c4be13374671e2f521d04f816ed83ccf825f4b13ec3`, gateway 이미지 ID는
+  `sha256:9e8f0826d7ec5c8fa33abd03fde258d5e6a3878dda2763e6d9ce9ef148caa4a2`, ERP 이미지 ID는
+  `sha256:683b11925237096d300db694cd34267071877ea2dc4350951a2d39ea37838ea7`이다. 암호화 스냅샷
+  `lawand-prod-pre-centrex-message-inbox-20260811t035307z`을 available까지 확인하고 migration
+  `0044_sturdy_preak.sql`을 적용했다. 운영 migration은 45개이고 최신 해시
+  `a3a1a052348fb1c7c7ee770529673fe8fcc945d751d47d9f7c1064220dd1f0e2`가 Git과 일치한다.
+- 신규 수신·mailbox 상태 테이블, `lawand_app` CRUD·viewer SELECT 전용·PUBLIC 조회 차단,
+  대표 endpoint 7개·활성/인증/binding 0을 확인했다. 현재 secret에는 대표 계정 비밀번호가
+  없으므로 추정하거나 복사하지 않았다. 각 계정은 현재 비밀번호를 TTY 전용
+  `centrex:link-representative`에 넣어 U+ `userinfo` 회선·내선 일치를 통과시킨 뒤에만
+  활성화한다. 따라서 worker와 `/messages`는 운영 배포됐지만 실제 대표 수신 polling·과거
+  backfill·통제 회신 Case_idx canary는 이 계정 연결 뒤 남아 있다.
+- 업무 통화가 계속 이어져 0건 대기가 무기한 지연되는 상황에서 물리 통화 경로가 아닌
+  gateway만 무손실 전환했다. 통화·받기·문자 명령, 통신 outbox, 회선별 활성 중복이 모두
+  0인 명령 내부 gate를 통과했고 Windows DPAPI 큐를 안전망으로 유지했다. Caddy·Windows
+  bridge는 재시작하지 않았다. 새 gateway는 시작 2초 뒤 기존 U+ 수신 `ringing` 고착 2건을
+  제공자 이력으로 `failedCount=0` 복구했고, 실제 통화 중인 회선은 그대로 보존했다.
+- 인증 ERP `/messages`, `/message-templates`→`/messages`, `/clients`, `/phone-desk`, `/profile`
+  모두 200이며 새 문자 API는 기존 대화 12개와 비활성 대표 mailbox 7개를 반환했다. 임시
+  세션은 0건으로 정리했다. 최종 gateway·ERP·각 Caddy active, systemd·컨테이너 재시작 0,
+  error journal 0, 외부 health/login 200, CloudWatch ALARM 0이다. Windows는 설치 51,
+  배정 18+warm 5, 실행 프로세스 23, 오프라인·로그인 실패·DPAPI 큐·dead-letter 0,
+  supervisor 정상이다. 최종 읽기 시 실제 업무 통화 수신 1·발신 1이 진행 중이나 회선 중복과
+  실행 명령은 0이다. 기존 SOLAPI MMS 실패 4건과 일반 업무 pending outbox 9건은 재시도·
+  보정하지 않았다. 실제 문자 발송은 이번 배포에서 만들지 않았다. `PROJECT_PLAN.md`는
+  v1.08이다.
+
 ### 2026-08-11 — 대표 문자 수신함·Case_idx 통합 문자 화면 출시 후보
 - 직원 개인 회선·binding·Windows bridge와 분리된 `representative` 센트릭스 endpoint
   7개 메타데이터를 migration `0044_sturdy_preak.sql`에 비활성 상태로 추가했다. 원번호가

@@ -1,6 +1,6 @@
 # 센트릭스 문자 수·발신함·개인 템플릿
 
-## v2 출시 후보 — 대표번호 수신함과 통합 문자 화면
+## v2 운영 배포 — 대표번호 수신함과 통합 문자 화면
 
 - 2026-08-11 migration `0044_sturdy_preak.sql` 출시 후보는 직원 개인 회선과 별개인
   `representative` endpoint 7개를 비활성 메타데이터로 등록한다. 직원 binding이나 Windows
@@ -25,11 +25,19 @@
   확인한다.
 - 이 출시 후보는 현재 발신번호 선택 정책을 변경하지 않는다. 대표전화 착신 대상·순서 변경과
   근무/휴무 조건 라우팅은 별도 후속 범위다.
-- 이 문단의 변경은 아직 migration 적용, 대표 계정 연결, 실서비스 배포와 운영 수신 canary를
-  수행하지 않았다.
+- migration과 실서비스 배포는 완료했다. 대표 계정 연결과 운영 수신 canary는 현재
+  비밀번호를 TTY에서 안전하게 입력할 수 있을 때 수행한다.
 
 ## 운영 상태
 
+- 2026-08-11 migration `0044_sturdy_preak.sql`과 gateway·ERP 릴리스
+  `20260811T035307Z-centrex-message-inbox-v1`을 운영 배포했다. 운영 migration은 45개이며
+  최신 해시가 Git과 일치한다. 신규 수신·mailbox 상태 테이블의 앱 CRUD·viewer SELECT·
+  PUBLIC 차단과 대표 endpoint 7개·활성/인증/binding 0을 확인했다.
+- 인증 ERP `/messages`와 `/message-templates` 이동은 200이고 문자 API는 기존 대화 12개와
+  비활성 대표 mailbox 7개를 반환했다. 대표 비밀번호는 secret에 없으므로 추정하지 않았고,
+  `centrex:link-representative` TTY 검증 전에는 polling하지 않는다. 실제 수신 backfill과
+  Case_idx 통제 회신 canary는 남아 있다.
 - 2026-08-10 migration `0041_late_talon.sql`과 gateway·ERP 릴리스
   `20260810T090235Z-customer-messaging-v1`을 운영 배포했다.
 - 인증 ERP의 전역 템플릿 화면과 상담 상세 `문자 보내기`·발송 완료 원장을 확인했다.
