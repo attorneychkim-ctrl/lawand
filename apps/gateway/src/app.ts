@@ -68,6 +68,7 @@ import {
   ConsultationAssignmentError,
   ConsultationValidationError,
   KakaoHomepageEntryError,
+  LegalFriendsInvalidationError,
   SelfDiagnosisUnavailableError,
 } from "./service.js";
 import type { PublicIntakeProtection } from "./intake-protection.js";
@@ -1794,6 +1795,50 @@ export function createGatewayServer(options?: {
       if (
         request.method === "POST" &&
         url.pathname.startsWith("/v1/consultations/") &&
+        url.pathname.endsWith("/legalfriends/invalidate")
+      ) {
+        if (
+          !options?.service ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const consultationId = url.pathname.slice(
+          "/v1/consultations/".length,
+          -"/legalfriends/invalidate".length,
+        );
+        if (!validUuid(consultationId)) {
+          sendJson(response, 400, { error: "invalid_consultation_id" });
+          return;
+        }
+        const actor = await options.authService.authorize(
+          sessionToken,
+          [...consultationAccessRoles],
+        );
+        const result =
+          await options.service.invalidateLegalFriendsCase(
+            consultationId,
+            actor,
+          );
+        sendJson(response, result.replayed ? 200 : 201, result);
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        url.pathname.startsWith("/v1/consultations/") &&
         url.pathname.endsWith("/assign-to-me")
       ) {
         if (
@@ -2236,6 +2281,21 @@ export function createGatewayServer(options?: {
         sendJson(
           response,
           error.code === "consultation_not_found" ? 404 : 409,
+          {
+            error: error.code,
+            message: error.message,
+          },
+        );
+        return;
+      }
+      if (error instanceof LegalFriendsInvalidationError) {
+        sendJson(
+          response,
+          error.code === "consultation_not_found"
+            ? 404
+            : error.code === "invalidation_forbidden"
+              ? 403
+              : 409,
           {
             error: error.code,
             message: error.message,

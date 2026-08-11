@@ -13,6 +13,8 @@ import {
 import {
   consultationIntakeAnswersSchema,
   createEventId,
+  LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
+  legalfriendsInvalidationRequestedEventSchema,
   legalfriendsRegistrationRequestedEventSchema,
 } from "@lawand/core";
 import {
@@ -36,8 +38,14 @@ import {
 
 type Database = ReturnType<typeof createDatabaseClient>["db"];
 
-const EVENT_TYPE =
+const REGISTRATION_EVENT_TYPE =
   "legalfriends.consultation.registration.requested" as const;
+const INVALIDATION_EVENT_TYPE =
+  "legalfriends.consultation.invalidation.requested" as const;
+const EVENT_TYPES = [
+  REGISTRATION_EVENT_TYPE,
+  INVALIDATION_EVENT_TYPE,
+] as const;
 const MAX_ATTEMPTS = 5;
 const LEASE_TIMEOUT_MS = 2 * 60 * 1_000;
 const RETRY_DELAYS_SECONDS = [30, 120, 600, 1_800, 3_600] as const;
@@ -45,6 +53,7 @@ const RETRY_DELAYS_SECONDS = [30, 120, 600, 1_800, 3_600] as const;
 type ClaimedEvent = {
   id: string;
   aggregateId: string;
+  eventType: string;
   payload: unknown;
   attemptId: string;
   attemptNumber: number;
@@ -179,7 +188,7 @@ export function createOutboxWorker(options: {
         .from(outboxEvents)
         .where(
           and(
-            eq(outboxEvents.eventType, EVENT_TYPE),
+            inArray(outboxEvents.eventType, [...EVENT_TYPES]),
             eq(outboxEvents.status, "pending"),
             lt(
               outboxEvents.lockedAt,
@@ -192,7 +201,7 @@ export function createOutboxWorker(options: {
       if (expired.length === 0) return 0;
       const ids = expired.map((event) => event.id);
       const message =
-        "이전 전송 작업이 응답 기록 전에 중단됐습니다. 리걸프렌즈 중복 등록 여부를 확인해 주세요.";
+        "이전 리걸프렌즈 전송 작업이 응답 기록 전에 중단됐습니다. 리걸프렌즈에서 현재 사건 상태를 확인해 주세요.";
       await tx
         .update(outboxEvents)
         .set({
@@ -226,13 +235,14 @@ export function createOutboxWorker(options: {
         .select({
           id: outboxEvents.id,
           aggregateId: outboxEvents.aggregateId,
+          eventType: outboxEvents.eventType,
           payload: outboxEvents.payload,
           attempts: outboxEvents.attempts,
         })
         .from(outboxEvents)
         .where(
           and(
-            eq(outboxEvents.eventType, EVENT_TYPE),
+            inArray(outboxEvents.eventType, [...EVENT_TYPES]),
             eq(outboxEvents.status, "pending"),
             isNull(outboxEvents.lockedAt),
             lte(outboxEvents.availableAt, currentTime),
@@ -267,6 +277,7 @@ export function createOutboxWorker(options: {
       return {
         id: event.id,
         aggregateId: event.aggregateId,
+        eventType: event.eventType,
         payload: event.payload,
         attemptId,
         attemptNumber,
@@ -274,7 +285,7 @@ export function createOutboxWorker(options: {
     });
   }
 
-  async function preparePayload(event: ClaimedEvent) {
+  async function prepareRegistrationPayload(event: ClaimedEvent) {
     const envelope = legalfriendsRegistrationRequestedEventSchema.parse(
       event.payload,
     );
@@ -460,68 +471,103 @@ export function createOutboxWorker(options: {
     });
   }
 
-  async function runOnce(): Promise<boolean> {
-    const currentTime = now();
-    await recoverExpiredLeases(currentTime);
-    const event = await claimNext(currentTime);
-    if (!event) return false;
+  async function deliverRegistration(event: ClaimedEvent) {
+    const delivery = await prepareRegistrationPayload(event);
+    let [link] = await db
+      .select()
+      .from(legalFriendsCaseLinks)
+      .where(
+        eq(legalFriendsCaseLinks.consultationId, event.aggregateId),
+      )
+      .limit(1);
+    let httpStatus = 200;
+    if (!link) {
+      const created = await legalFriendsClient.createCase(
+        delivery.casePayload,
+        {
+          eventId: event.id,
+          consultationId: event.aggregateId,
+        },
+      );
+      httpStatus = created.httpStatus;
+      const createdAt = now();
+      [link] = await db
+        .insert(legalFriendsCaseLinks)
+        .values({
+          consultationId: event.aggregateId,
+          outboxEventId: event.id,
+          caseIdx: created.caseIdx,
+          managerExternalAccountId: delivery.assigneeExternalId,
+          caseCreatedAt: createdAt,
+          managerAssignedAt: createdAt,
+          createdAt,
+          updatedAt: createdAt,
+        })
+        .returning();
+    }
+    if (!link) throw new Error("legalfriends_case_link_not_created");
 
-    try {
-      const delivery = await preparePayload(event);
-      let [link] = await db
-        .select()
-        .from(legalFriendsCaseLinks)
+    if (
+      !link.managerAssignedAt ||
+      link.managerExternalAccountId !== delivery.assigneeExternalId
+    ) {
+      const changed = await legalFriendsClient.changeManager(
+        link.caseIdx,
+        delivery.assigneeExternalId,
+        {
+          eventId: event.id,
+          consultationId: event.aggregateId,
+        },
+      );
+      httpStatus = changed.httpStatus;
+      await db
+        .update(legalFriendsCaseLinks)
+        .set({
+          managerExternalAccountId: delivery.assigneeExternalId,
+          managerAssignedAt: now(),
+          updatedAt: now(),
+        })
         .where(
-          eq(legalFriendsCaseLinks.consultationId, event.aggregateId),
-        )
-        .limit(1);
-      let httpStatus = 200;
-      if (!link) {
-        const created = await legalFriendsClient.createCase(
-          delivery.casePayload,
-          {
-            eventId: event.id,
-            consultationId: event.aggregateId,
-          },
+          eq(
+            legalFriendsCaseLinks.consultationId,
+            event.aggregateId,
+          ),
         );
-        httpStatus = created.httpStatus;
-        const createdAt = now();
-        [link] = await db
-          .insert(legalFriendsCaseLinks)
-          .values({
-            consultationId: event.aggregateId,
-            outboxEventId: event.id,
-            caseIdx: created.caseIdx,
-            managerExternalAccountId: delivery.assigneeExternalId,
-            caseCreatedAt: createdAt,
-            managerAssignedAt: createdAt,
-            createdAt,
-            updatedAt: createdAt,
-          })
-          .returning();
-      }
-      if (!link) throw new Error("legalfriends_case_link_not_created");
+    }
+    return httpStatus;
+  }
 
-      if (
-        !link.managerAssignedAt ||
-        link.managerExternalAccountId !== delivery.assigneeExternalId
-      ) {
-        const changed = await legalFriendsClient.changeManager(
-          link.caseIdx,
-          delivery.assigneeExternalId,
-          {
-            eventId: event.id,
-            consultationId: event.aggregateId,
-          },
-        );
-        httpStatus = changed.httpStatus;
+  async function deliverInvalidation(event: ClaimedEvent) {
+    const envelope = legalfriendsInvalidationRequestedEventSchema.parse(
+      event.payload,
+    );
+    if (
+      envelope.correlationId !== event.aggregateId ||
+      envelope.data.consultationId !== event.aggregateId ||
+      envelope.data.caseLinkRef !==
+        `legalfriends_case_links/${event.aggregateId}`
+    ) {
+      throw new Error("legalfriends_invalidation_event_mismatch");
+    }
+
+    const [link] = await db
+      .select()
+      .from(legalFriendsCaseLinks)
+      .where(
+        eq(legalFriendsCaseLinks.consultationId, event.aggregateId),
+      )
+      .limit(1);
+    if (!link) throw new Error("legalfriends_case_link_not_found");
+
+    if (
+      link.managerExternalAccountId ===
+      LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID
+    ) {
+      if (!link.managerAssignedAt) {
+        const changedAt = now();
         await db
           .update(legalFriendsCaseLinks)
-          .set({
-            managerExternalAccountId: delivery.assigneeExternalId,
-            managerAssignedAt: now(),
-            updatedAt: now(),
-          })
+          .set({ managerAssignedAt: changedAt, updatedAt: changedAt })
           .where(
             eq(
               legalFriendsCaseLinks.consultationId,
@@ -529,12 +575,53 @@ export function createOutboxWorker(options: {
             ),
           );
       }
+      return 200;
+    }
+
+    const changed = await legalFriendsClient.changeManager(
+      link.caseIdx,
+      envelope.data.targetManagerExternalAccountId,
+      {
+        eventId: event.id,
+        consultationId: event.aggregateId,
+      },
+    );
+    const changedAt = now();
+    await db
+      .update(legalFriendsCaseLinks)
+      .set({
+        managerExternalAccountId:
+          envelope.data.targetManagerExternalAccountId,
+        managerAssignedAt: changedAt,
+        updatedAt: changedAt,
+      })
+      .where(
+        eq(legalFriendsCaseLinks.consultationId, event.aggregateId),
+      );
+    return changed.httpStatus;
+  }
+
+  async function runOnce(): Promise<boolean> {
+    const currentTime = now();
+    await recoverExpiredLeases(currentTime);
+    const event = await claimNext(currentTime);
+    if (!event) return false;
+
+    try {
+      const httpStatus =
+        event.eventType === REGISTRATION_EVENT_TYPE
+          ? await deliverRegistration(event)
+          : event.eventType === INVALIDATION_EVENT_TYPE
+            ? await deliverInvalidation(event)
+            : (() => {
+                throw new Error("unsupported_legalfriends_event");
+              })();
       await markSucceeded(event, now(), httpStatus);
       console.log(
         JSON.stringify({
           event: "outbox_delivery_succeeded",
           eventId: event.id,
-          eventType: EVENT_TYPE,
+          eventType: event.eventType,
           attempt: event.attemptNumber,
           occurredAt: now().toISOString(),
         }),
@@ -546,7 +633,7 @@ export function createOutboxWorker(options: {
         JSON.stringify({
           event: "outbox_delivery_failed",
           eventId: event.id,
-          eventType: EVENT_TYPE,
+          eventType: event.eventType,
           attempt: event.attemptNumber,
           errorCode: failure.code,
           retryable:

@@ -21,6 +21,8 @@ import {
   CURRENT_KAKAO_HOMEPAGE_ENTRY_NOTICE_VERSION,
   CURRENT_KAKAO_CONSULTATION_NOTICE_VERSION,
   DEDUPE_WINDOWS,
+  LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
+  LEGALFRIENDS_INVALID_MANAGER_MEMBER_IDX,
   residenceRegionSchema,
   assessSelfDiagnosis,
   SELF_DIAGNOSIS_INCOME_TYPES,
@@ -87,6 +89,18 @@ export class ConsultationAssignmentError extends Error {
       | "consultation_not_found"
       | "consultation_already_assigned"
       | "consultation_not_assignable",
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+export class LegalFriendsInvalidationError extends Error {
+  constructor(
+    readonly code:
+      | "consultation_not_found"
+      | "case_not_registered"
+      | "invalidation_forbidden",
     message: string,
   ) {
     super(message);
@@ -1928,6 +1942,161 @@ export function createConsultationService(options: {
     });
   }
 
+  async function invalidateLegalFriendsCase(
+    consultationId: string,
+    actor: StaffPrincipal,
+  ) {
+    const now = new Date();
+    return db.transaction(async (tx) => {
+      const [consultation] = await tx
+        .select({ id: consultations.id })
+        .from(consultations)
+        .where(eq(consultations.id, consultationId))
+        .limit(1)
+        .for("update");
+      if (!consultation) {
+        throw new LegalFriendsInvalidationError(
+          "consultation_not_found",
+          "상담을 찾을 수 없습니다.",
+        );
+      }
+
+      const [assignment] = await tx
+        .select({
+          assigneeUserId: consultationAssignments.assigneeUserId,
+        })
+        .from(consultationAssignments)
+        .where(
+          eq(consultationAssignments.consultationId, consultationId),
+        )
+        .limit(1);
+      if (
+        !assignment ||
+        (assignment.assigneeUserId !== actor.id &&
+          !actor.roles.includes("admin"))
+      ) {
+        throw new LegalFriendsInvalidationError(
+          "invalidation_forbidden",
+          "현재 상담 담당자 또는 관리자만 무효 처리할 수 있습니다.",
+        );
+      }
+
+      const [caseLink] = await tx
+        .select({
+          managerExternalAccountId:
+            legalFriendsCaseLinks.managerExternalAccountId,
+          registrationEventId: legalFriendsCaseLinks.outboxEventId,
+        })
+        .from(legalFriendsCaseLinks)
+        .where(
+          eq(legalFriendsCaseLinks.consultationId, consultationId),
+        )
+        .limit(1)
+        .for("update");
+      if (!caseLink) {
+        throw new LegalFriendsInvalidationError(
+          "case_not_registered",
+          "리걸프렌즈 사건 등록이 완료된 뒤 무효 처리할 수 있습니다.",
+        );
+      }
+
+      if (
+        caseLink.managerExternalAccountId ===
+        LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID
+      ) {
+        return {
+          consultationId,
+          eventId: null,
+          state: "invalidated" as const,
+          targetManagerExternalAccountId:
+            LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
+          targetManagerMemberIdx:
+            LEGALFRIENDS_INVALID_MANAGER_MEMBER_IDX,
+          replayed: true,
+        };
+      }
+
+      const [pendingEvent] = await tx
+        .select({ id: outboxEvents.id })
+        .from(outboxEvents)
+        .where(
+          and(
+            eq(outboxEvents.aggregateId, consultationId),
+            eq(
+              outboxEvents.eventType,
+              "legalfriends.consultation.invalidation.requested",
+            ),
+            eq(outboxEvents.status, "pending"),
+          ),
+        )
+        .orderBy(desc(outboxEvents.occurredAt))
+        .limit(1);
+      if (pendingEvent) {
+        return {
+          consultationId,
+          eventId: pendingEvent.id,
+          state: "queued" as const,
+          targetManagerExternalAccountId:
+            LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
+          targetManagerMemberIdx:
+            LEGALFRIENDS_INVALID_MANAGER_MEMBER_IDX,
+          replayed: true,
+        };
+      }
+
+      const eventId = createEventId();
+      const event = {
+        eventId,
+        eventType:
+          "legalfriends.consultation.invalidation.requested" as const,
+        eventVersion: 1 as const,
+        occurredAt: now.toISOString(),
+        producer: "lawand.gateway" as const,
+        correlationId: consultationId,
+        causationId: caseLink.registrationEventId,
+        data: {
+          consultationId,
+          caseLinkRef: `legalfriends_case_links/${consultationId}` as const,
+          requestedByUserId: actor.id,
+          targetManagerExternalAccountId:
+            LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
+          targetManagerMemberIdx:
+            LEGALFRIENDS_INVALID_MANAGER_MEMBER_IDX,
+        },
+      };
+      assertPlatformEvent(event);
+      await tx.insert(outboxEvents).values(eventRow(event));
+      await tx.insert(staffAuditLogs).values({
+        id: createEventId(),
+        actorUserId: actor.id,
+        action: "legalfriends.case.invalidation_requested",
+        targetType: "consultation",
+        targetId: consultationId,
+        metadata: {
+          eventId,
+          caseLinkRef: event.data.caseLinkRef,
+          targetManagerExternalAccountId:
+            LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
+          targetManagerMemberIdx:
+            LEGALFRIENDS_INVALID_MANAGER_MEMBER_IDX,
+        },
+        occurredAt: now,
+        createdAt: now,
+      });
+
+      return {
+        consultationId,
+        eventId,
+        state: "queued" as const,
+        targetManagerExternalAccountId:
+          LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
+        targetManagerMemberIdx:
+          LEGALFRIENDS_INVALID_MANAGER_MEMBER_IDX,
+        replayed: false,
+      };
+    });
+  }
+
   async function list(limit = 50) {
     const consultationRows = await db
       .select()
@@ -2221,6 +2390,7 @@ export function createConsultationService(options: {
     const integrationEventTypes = [
       "alimtalk.consultation.request_notification.requested",
       "legalfriends.consultation.registration.requested",
+      "legalfriends.consultation.invalidation.requested",
       "alimtalk.consultation.assignment_notification.requested",
     ];
     const integrationRows = await db
@@ -2240,7 +2410,8 @@ export function createConsultationService(options: {
           eq(outboxEvents.aggregateId, consultationId),
           inArray(outboxEvents.eventType, integrationEventTypes),
         ),
-      );
+      )
+      .orderBy(desc(outboxEvents.occurredAt));
     const deliveryAttemptRows =
       integrationRows.length > 0
         ? await db
@@ -2685,6 +2856,7 @@ export function createConsultationService(options: {
     confirmKakaoHomepageEntry,
     detail,
     ingestNaverBooking,
+    invalidateLegalFriendsCase,
     invalidateKakaoHomepageEntry,
     list,
     submit,

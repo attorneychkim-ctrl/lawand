@@ -7,6 +7,9 @@ import {
   alimtalkRequestNotificationRequestedEventSchema,
   consultationAssignedEventSchema,
   consultationRequestedEventSchema,
+  LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
+  LEGALFRIENDS_INVALID_MANAGER_MEMBER_IDX,
+  legalfriendsInvalidationRequestedEventSchema,
   legalfriendsRegistrationRequestedEventSchema,
   telephonyCallRequestedEventSchema,
   telephonyMessageRequestedEventSchema,
@@ -209,6 +212,39 @@ test("외부 실행 요청 payload에 전화번호를 직접 넣으면 거부한
       data: {
         ...assignmentReference,
         phone: "01012345678",
+      },
+    }).success,
+    false,
+  );
+});
+
+test("리걸프렌즈 무효 처리는 고정 담당자와 사건 연결 참조만 허용한다", () => {
+  const invalidationEvent = {
+    ...assignmentEnvelope,
+    eventType: "legalfriends.consultation.invalidation.requested",
+    data: {
+      consultationId: assignmentEnvelope.correlationId,
+      caseLinkRef:
+        `legalfriends_case_links/${assignmentEnvelope.correlationId}`,
+      requestedByUserId: "01984c7d-8500-7000-8000-000000000006",
+      targetManagerExternalAccountId:
+        LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
+      targetManagerMemberIdx: LEGALFRIENDS_INVALID_MANAGER_MEMBER_IDX,
+    },
+  } as const;
+
+  assert.equal(
+    legalfriendsInvalidationRequestedEventSchema.safeParse(
+      invalidationEvent,
+    ).success,
+    true,
+  );
+  assert.equal(
+    legalfriendsInvalidationRequestedEventSchema.safeParse({
+      ...invalidationEvent,
+      data: {
+        ...invalidationEvent.data,
+        targetManagerExternalAccountId: "arbitrary_manager",
       },
     }).success,
     false,

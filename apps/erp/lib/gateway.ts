@@ -700,6 +700,37 @@ export async function assignConsultationToMe(id: string): Promise<{
   };
 }
 
+export async function invalidateLegalFriendsCase(id: string): Promise<{
+  consultationId: string;
+  eventId: string | null;
+  state: "queued" | "invalidated";
+  targetManagerExternalAccountId: "lawandfirm_s999";
+  targetManagerMemberIdx: 1824;
+  replayed: boolean;
+}> {
+  const response = await gatewayFetch(
+    `/v1/consultations/${id}/legalfriends/invalidate`,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      message?: string;
+    } | null;
+    throw new ConsultationGatewayError(
+      response.status,
+      body?.message ?? `무효 처리 요청 실패 (${response.status})`,
+    );
+  }
+  return (await response.json()) as {
+    consultationId: string;
+    eventId: string | null;
+    state: "queued" | "invalidated";
+    targetManagerExternalAccountId: "lawandfirm_s999";
+    targetManagerMemberIdx: 1824;
+    replayed: boolean;
+  };
+}
+
 async function telephonyResponse(response: Response): Promise<TelephonyCall> {
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as {

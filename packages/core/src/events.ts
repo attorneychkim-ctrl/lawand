@@ -2,6 +2,10 @@ import { z } from "zod";
 
 import { consultationModeSchema } from "./consultation.js";
 
+export const LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID =
+  "lawandfirm_s999" as const;
+export const LEGALFRIENDS_INVALID_MANAGER_MEMBER_IDX = 1824 as const;
+
 const eventEnvelopeSchema = z
   .object({
     eventId: z.uuid(),
@@ -82,6 +86,22 @@ const assignmentReferenceDataSchema = z
       .string()
       .regex(/^consultation_assignments\/[0-9a-f-]{36}$/),
     intakeRef: z.string().regex(/^consultation_requests\/[0-9a-f-]{36}$/),
+  })
+  .strict();
+
+const legalFriendsInvalidationReferenceDataSchema = z
+  .object({
+    consultationId: z.uuid(),
+    caseLinkRef: z
+      .string()
+      .regex(/^legalfriends_case_links\/[0-9a-f-]{36}$/),
+    requestedByUserId: z.uuid(),
+    targetManagerExternalAccountId: z.literal(
+      LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
+    ),
+    targetManagerMemberIdx: z.literal(
+      LEGALFRIENDS_INVALID_MANAGER_MEMBER_IDX,
+    ),
   })
   .strict();
 
@@ -253,6 +273,16 @@ export const legalfriendsRegistrationRequestedEventSchema =
     })
     .strict();
 
+export const legalfriendsInvalidationRequestedEventSchema =
+  eventEnvelopeSchema
+    .extend({
+      eventType: z.literal(
+        "legalfriends.consultation.invalidation.requested",
+      ),
+      data: legalFriendsInvalidationReferenceDataSchema,
+    })
+    .strict();
+
 export const telephonyCallRequestedEventSchema = eventEnvelopeSchema
   .extend({
     eventType: z.literal("telephony.call.requested"),
@@ -301,6 +331,7 @@ export const platformEventSchema = z.discriminatedUnion("eventType", [
   telephonyCallRequestedEventSchema,
   telephonyMessageRequestedEventSchema,
   legalfriendsRegistrationRequestedEventSchema,
+  legalfriendsInvalidationRequestedEventSchema,
   alimtalkRequestNotificationRequestedEventSchema,
   alimtalkAssignmentNotificationRequestedEventSchema,
 ]);
@@ -325,6 +356,9 @@ export type ConsultationKakaoEntryInvalidatedEvent = z.infer<
 >;
 export type LegalfriendsRegistrationRequestedEvent = z.infer<
   typeof legalfriendsRegistrationRequestedEventSchema
+>;
+export type LegalFriendsInvalidationRequestedEvent = z.infer<
+  typeof legalfriendsInvalidationRequestedEventSchema
 >;
 export type TelephonyCallRequestedEvent = z.infer<
   typeof telephonyCallRequestedEventSchema

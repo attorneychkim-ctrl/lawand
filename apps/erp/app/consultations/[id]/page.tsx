@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import {
+  LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
   SELF_DIAGNOSIS_COURTS,
   SELF_DIAGNOSIS_INCOME_TYPES,
   SELF_DIAGNOSIS_LIVING_COST_TYPES,
@@ -21,6 +22,7 @@ import { ClaimConsultationButton } from "../../_components/claim-consultation-bu
 import { ClickToCallButton } from "../../_components/click-to-call-button";
 import { CopyButton } from "../../_components/copy-button";
 import { KakaoEntryPanel } from "../../_components/kakao-entry-panel";
+import { LegalFriendsInvalidationButton } from "../../_components/legalfriends-invalidation-button";
 import { MessageComposeButton } from "../../_components/message-compose-button";
 import { StaffBar } from "../../_components/staff-bar";
 
@@ -425,8 +427,16 @@ type IntegrationRequest = ConsultationDetail["integrationRequests"][number];
 const integrationLabels: Record<string, string> = {
   "alimtalk.consultation.request_notification.requested": "접수 알림톡",
   "legalfriends.consultation.registration.requested": "리걸프렌즈 사건 등록",
+  "legalfriends.consultation.invalidation.requested": "리걸프렌즈 무효 처리",
   "alimtalk.consultation.assignment_notification.requested": "담당 배정 알림톡",
 };
+
+function legalFriendsManagerLabel(externalAccountId: string) {
+  return externalAccountId ===
+    LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID
+    ? "무효"
+    : externalAccountId;
+}
 
 function integrationTone(request: IntegrationRequest) {
   if (request.status === "published") return "success";
@@ -445,6 +455,15 @@ function integrationStatus(request: IntegrationRequest | undefined): string {
 }
 
 function nextAction(consultation: ConsultationDetail) {
+  if (
+    consultation.legalFriendsCase?.managerExternalAccountId ===
+    LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID
+  ) {
+    return {
+      title: "리걸프렌즈 무효 처리가 완료됐습니다",
+      description: "사건 담당자가 사내 무효 계정으로 변경됐고 기존 상담·실행 원장은 보존됩니다.",
+    };
+  }
   if (consultation.kakaoEntry?.status === "pending") {
     return {
       title: "카카오 채팅을 확인해 주세요",
@@ -603,6 +622,25 @@ export default async function ConsultationDetailPage({
   const latestMyCall = consultation.telephonyCalls.find(
     (call) => call.staffUserId === staff.id,
   );
+  const legalFriendsInvalidated =
+    consultation.legalFriendsCase?.managerExternalAccountId ===
+    LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID;
+  const invalidationRequest = consultation.integrationRequests.find(
+    (request) =>
+      request.eventType ===
+      "legalfriends.consultation.invalidation.requested",
+  );
+  const invalidationStatus = legalFriendsInvalidated
+    ? "invalidated"
+    : invalidationRequest?.status === "pending"
+      ? "pending"
+      : invalidationRequest
+        ? "failed"
+        : "ready";
+  const canInvalidateLegalFriendsCase =
+    Boolean(consultation.legalFriendsCase) &&
+    (consultation.assignment?.assigneeUserId === staff.id ||
+      staff.roles.includes("admin"));
 
   return (
     <>
@@ -620,6 +658,9 @@ export default async function ConsultationDetailPage({
               <span className={`state-badge is-${consultation.state}`}>
                 {stateLabels[consultation.state] ?? consultation.state}
               </span>
+              {legalFriendsInvalidated ? (
+                <span className="flag-badge is-neutral">리걸프렌즈 무효</span>
+              ) : null}
             </div>
             <h1>{consultation.displayName}</h1>
             <p>
@@ -639,6 +680,12 @@ export default async function ConsultationDetailPage({
               <ClickToCallButton
                 consultationId={consultation.id}
                 initialCall={latestMyCall ?? null}
+              />
+            ) : null}
+            {canInvalidateLegalFriendsCase ? (
+              <LegalFriendsInvalidationButton
+                consultationId={consultation.id}
+                status={invalidationStatus}
               />
             ) : null}
             {canClaim ? (
@@ -952,7 +999,7 @@ export default async function ConsultationDetailPage({
                     <dl>
                       <div><dt>총 시도</dt><dd>{request.attempts}회</dd></div>
                       {request.eventType.startsWith("legalfriends.") && consultation.legalFriendsCase ? (
-                        <div><dt>리걸프렌즈 사건</dt><dd>{consultation.legalFriendsCase.caseIdx} · 담당 {consultation.legalFriendsCase.managerExternalAccountId}</dd></div>
+                        <div><dt>리걸프렌즈 사건</dt><dd>{consultation.legalFriendsCase.caseIdx} · 담당 {legalFriendsManagerLabel(consultation.legalFriendsCase.managerExternalAccountId)}</dd></div>
                       ) : null}
                       {request.providerDelivery ? (
                         <div><dt>솔라피 메시지</dt><dd>{request.providerDelivery.statusCode} · {request.providerDelivery.messageId}</dd></div>

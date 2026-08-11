@@ -211,7 +211,7 @@ test("신건 응답의 case_idx와 숫자형 data도 사건 식별자로 허용�
   assert.equal((await client.createCase(payload, context)).caseIdx, "333");
 });
 
-test("클라이언트는 저장된 case_idx로 담당자를 추후 변경할 수 있다", async () => {
+test("클라이언트는 저장된 case_idx와 무효 member_id로 담당자를 변경한다", async () => {
   let request: { url: string; init: RequestInit | undefined } | undefined;
   const client = createLegalFriendsClient({
     token: "test-token",
@@ -227,17 +227,24 @@ test("클라이언트는 저장된 case_idx로 담당자를 추후 변경할 수
     },
   });
 
-  const changed = await client.changeManager("111", "athene", {
+  const changed = await client.changeManager("111", "lawandfirm_s999", {
     eventId: "01984c7d-8500-7000-8000-000000000001",
     consultationId: "01984c7d-8500-7000-8000-000000000002",
   });
 
   assert.equal(changed.httpStatus, 200);
-  assert.equal(new Headers(request?.init?.headers).get("case_idx"), "111");
   assert.equal(
-    JSON.parse(String(request?.init?.body)).member_id,
-    "athene",
+    request?.url,
+    "https://www.legalfriends.co.kr/api/bankruptcy/case/changeManager",
   );
+  assert.equal(
+    new Headers(request?.init?.headers).get("authorization"),
+    "test-token",
+  );
+  assert.equal(new Headers(request?.init?.headers).get("case_idx"), "111");
+  assert.deepEqual(JSON.parse(String(request?.init?.body)), {
+    member_id: "lawandfirm_s999",
+  });
 });
 
 test("HTTP 200 안의 리걸프렌즈 업무 오류를 실패로 판정한다", async () => {

@@ -2261,3 +2261,65 @@ test("상담하기는 인증된 직원을 본인 담당 배정 서비스에 전�
   assert.equal(received?.consultationId, consultationId);
   assert.equal(received?.actor.id, actor.id);
 });
+
+test("상담 무효 처리는 인증된 직원과 상담 ID를 리걸프렌즈 변경 서비스에 전달한다", async (context) => {
+  const consultationId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2a4";
+  let received:
+    | { consultationId: string; actor: StaffPrincipal }
+    | undefined;
+  const authService = {
+    authorize: async () => realtimeActor,
+  } as unknown as StaffAuthService;
+  const service = {
+    invalidateLegalFriendsCase: async (
+      receivedConsultationId: string,
+      receivedActor: StaffPrincipal,
+    ) => {
+      received = {
+        consultationId: receivedConsultationId,
+        actor: receivedActor,
+      };
+      return {
+        consultationId: receivedConsultationId,
+        eventId: "019fa6a4-6834-7782-aa0b-4e71ffb8a2c1",
+        state: "queued" as const,
+        targetManagerExternalAccountId: "lawandfirm_s999" as const,
+        targetManagerMemberIdx: 1824 as const,
+        replayed: false,
+      };
+    },
+  } as unknown as ConsultationService;
+  const server = createGatewayServer({
+    authService,
+    internalApiKey: "test-internal-key",
+    service,
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const response = await fetch(
+    `http://127.0.0.1:${address.port}/v1/consultations/${consultationId}/legalfriends/invalidate`,
+    {
+      method: "POST",
+      headers: {
+        "x-lawand-internal-key": "test-internal-key",
+        "x-lawand-staff-session": "s".repeat(43),
+      },
+    },
+  );
+
+  assert.equal(response.status, 201);
+  assert.equal(received?.consultationId, consultationId);
+  assert.equal(received?.actor.id, realtimeActor.id);
+  assert.deepEqual(await response.json(), {
+    consultationId,
+    eventId: "019fa6a4-6834-7782-aa0b-4e71ffb8a2c1",
+    state: "queued",
+    targetManagerExternalAccountId: "lawandfirm_s999",
+    targetManagerMemberIdx: 1824,
+    replayed: false,
+  });
+});

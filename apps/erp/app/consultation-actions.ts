@@ -6,6 +6,7 @@ import {
   assignConsultationToMe,
   confirmKakaoHomepageEntry,
   ConsultationGatewayError,
+  invalidateLegalFriendsCase,
   invalidateKakaoHomepageEntry,
 } from "../lib/gateway";
 import { requireStaff } from "../lib/session";
@@ -28,6 +29,31 @@ export async function assignConsultationToMeAction(
         error instanceof ConsultationGatewayError
           ? error.message
           : "담당자를 지정하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+    };
+  }
+  revalidatePath("/");
+  revalidatePath(`/consultations/${consultationId}`);
+  return { error: "" };
+}
+
+export type LegalFriendsInvalidationActionState = {
+  error: string;
+};
+
+export async function invalidateLegalFriendsCaseAction(
+  consultationId: string,
+  previousState: LegalFriendsInvalidationActionState,
+): Promise<LegalFriendsInvalidationActionState> {
+  void previousState;
+  await requireStaff();
+  try {
+    await invalidateLegalFriendsCase(consultationId);
+  } catch (error) {
+    return {
+      error:
+        error instanceof ConsultationGatewayError
+          ? error.message
+          : "무효 처리를 요청하지 못했습니다. 잠시 후 다시 시도해 주세요.",
     };
   }
   revalidatePath("/");

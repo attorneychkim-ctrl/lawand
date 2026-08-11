@@ -4,7 +4,11 @@ import { resolve } from "node:path";
 
 import { eq } from "drizzle-orm";
 
-import { createEventId } from "@lawand/core";
+import {
+  createEventId,
+  LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
+  LEGALFRIENDS_INVALID_MANAGER_MEMBER_IDX,
+} from "@lawand/core";
 import {
   consultationRequests,
   consultations,
@@ -37,6 +41,7 @@ const protection = createDataProtection({
 const consultationId = createEventId();
 const requestId = createEventId();
 const eventId = createEventId();
+const invalidationEventId = createEventId();
 const assignmentId = createEventId();
 const idempotencyKey = createEventId();
 const initialTime = new Date("2026-07-29T12:00:00.000Z");
@@ -44,6 +49,9 @@ const currentTime = initialTime;
 let createCalls = 0;
 let changeCalls = 0;
 let deliveredPayload: LegalFriendsCasePayload | undefined;
+let deliveredManagerChange:
+  | { caseIdx: string; memberId: string }
+  | undefined;
 
 const phone = "01000000000";
 const intake = {
@@ -140,8 +148,9 @@ try {
         deliveredPayload = casePayload;
         return { httpStatus: 201, caseIdx: "verification-case-111" };
       },
-      changeManager: async () => {
+      changeManager: async (caseIdx, memberId) => {
         changeCalls += 1;
+        deliveredManagerChange = { caseIdx, memberId };
         return { httpStatus: 200 };
       },
     },
@@ -174,6 +183,59 @@ try {
   assert.equal(deliveredPayload?.member_idx, 138);
   assert.equal(deliveredPayload?.phone, "010-0000-0000");
   assert.equal(deliveredPayload?.living_place, "대전광역시");
+
+  const invalidationPayload = {
+    eventId: invalidationEventId,
+    eventType:
+      "legalfriends.consultation.invalidation.requested" as const,
+    eventVersion: 1 as const,
+    occurredAt: currentTime.toISOString(),
+    producer: "lawand.gateway" as const,
+    correlationId: consultationId,
+    causationId: eventId,
+    data: {
+      consultationId,
+      caseLinkRef: `legalfriends_case_links/${consultationId}` as const,
+      requestedByUserId: createEventId(),
+      targetManagerExternalAccountId:
+        LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
+      targetManagerMemberIdx:
+        LEGALFRIENDS_INVALID_MANAGER_MEMBER_IDX,
+    },
+  };
+  await database.db.insert(outboxEvents).values({
+    id: invalidationEventId,
+    aggregateType: "consultation",
+    aggregateId: consultationId,
+    eventType: invalidationPayload.eventType,
+    eventVersion: invalidationPayload.eventVersion,
+    correlationId: consultationId,
+    causationId: eventId,
+    payload: invalidationPayload,
+    status: "pending",
+    availableAt: currentTime,
+    occurredAt: currentTime,
+    createdAt: currentTime,
+  });
+  assert.equal(await worker.runOnce(), true);
+  const [invalidatedLink] = await database.db
+    .select()
+    .from(legalFriendsCaseLinks)
+    .where(eq(legalFriendsCaseLinks.consultationId, consultationId));
+  const [publishedInvalidation] = await database.db
+    .select()
+    .from(outboxEvents)
+    .where(eq(outboxEvents.id, invalidationEventId));
+  assert.equal(publishedInvalidation?.status, "published");
+  assert.equal(
+    invalidatedLink?.managerExternalAccountId,
+    LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
+  );
+  assert.equal(changeCalls, 1);
+  assert.deepEqual(deliveredManagerChange, {
+    caseIdx: "verification-case-111",
+    memberId: LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
+  });
   console.log("outbox 워커 로컬 통합 검증 완료");
 } finally {
   await database.db
@@ -181,7 +243,13 @@ try {
     .where(eq(legalFriendsCaseLinks.consultationId, consultationId));
   await database.db
     .delete(outboxDeliveryAttempts)
+    .where(eq(outboxDeliveryAttempts.outboxEventId, invalidationEventId));
+  await database.db
+    .delete(outboxDeliveryAttempts)
     .where(eq(outboxDeliveryAttempts.outboxEventId, eventId));
+  await database.db
+    .delete(outboxEvents)
+    .where(eq(outboxEvents.id, invalidationEventId));
   await database.db.delete(outboxEvents).where(eq(outboxEvents.id, eventId));
   await database.db
     .delete(consultationRequests)
