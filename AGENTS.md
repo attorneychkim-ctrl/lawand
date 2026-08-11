@@ -71,6 +71,25 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-11 — 대표 문자 수신함 U+ 비표준 SRC 격리 출시 후보
+- 사용자가 운영 gateway의 TTY 전용 `centrex:link-representative`로 대표 계정 7개를 모두
+  `userinfo` 검증 연결했다. ERP에서는 5개가 정상 동기화됐지만 `051-502-1919`와
+  `02-555-7455`가 `확인 필요`로 남았다. 개인정보 없이 운영 응답 구조를 대조한 결과 두
+  계정 모두 HTTP 200·`SVC_RT=0000`이며 인증 실패가 아니었다.
+- `051-502-1919`의 과거 3건 중 1건, `02-555-7455`의 총 46건 중 첫 페이지 10건의 4건에서
+  U+ `SRC`가 일반 국내 전화번호가 아니라 `숫자 1자리 + w + 숫자 6자리` 문자열이었다.
+  기존 파서는 이 한 기록만 격리하지 않고 페이지 전체를 `invalid_response`로 실패시켜
+  정상 번호 기록까지 수집하지 못했다. 응답 원문·전화번호·본문은 출력하거나 문서화하지 않았다.
+- gateway 출시 후보는 비표준 `SRC`를 불투명 provider 식별자로 AES-GCM 암호화하고 일반
+  전화번호와 다른 HMAC namespace를 사용한다. 이 기록은 직전 발신 상담·Case_idx 자동
+  매칭에서 제외하며 ERP에는 `발신번호 확인 필요`만 표시한다. 같은 페이지의 정상 전화번호
+  메시지는 계속 수집한다. DB migration·운영 데이터 직접 수정은 없으며 gateway만 배포하면
+  다음 polling에서 두 mailbox 오류가 자동 해제되고 backfill을 재개한다.
+- 관련 센트릭스 파서·source identity·표시 단위 테스트 16개, 전체 core 62개·gateway
+  99개 테스트와 5개 패키지 root typecheck·lint·production build, scripts lint, Drizzle
+  schema check와 `git diff --check`를 통과했다. 운영 배포·수신 원장 생성·통제 회신은 이
+  워크트리에서 수행하지 않았다. `PROJECT_PLAN.md`는 v1.10이다.
+
 ### 2026-08-11 — 통합 배포 지연 검증·외부 센트릭스 로그인 충돌 확인
 - 릴리스 `20260811T035307Z-centrex-message-inbox-v1`의 지연 검증에서도 gateway·ERP 외부
   HTTPS는 200이고 두 앱과 Caddy는 active, 배포 이미지 ID 일치, systemd·컨테이너 재시작

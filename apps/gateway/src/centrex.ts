@@ -88,6 +88,7 @@ export type CentrexReceivedMessageRecord = {
   number: string;
   time: string;
   source: string;
+  sourceKind: "phone" | "provider_opaque";
   message: string;
 };
 
@@ -263,14 +264,26 @@ function receivedMessageRecords(
   for (const item of data) {
     if (!item || typeof item !== "object" || Array.isArray(item)) return null;
     const record = item as Record<string, unknown>;
-    const source =
-      typeof record.SRC === "string" ? record.SRC.replace(/\D/g, "") : "";
+    const rawSource = typeof record.SRC === "string" ? record.SRC.trim() : "";
+    const normalizedPhone = rawSource.replace(/\D/g, "");
+    const sourceKind =
+      /^[0-9(). -]+$/.test(rawSource) &&
+      /^0[0-9]{8,10}$/.test(normalizedPhone)
+      ? "phone"
+      : "provider_opaque";
+    const source = sourceKind === "phone" ? normalizedPhone : rawSource;
+    const sourceHasControlCharacter = Array.from(source).some((character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint <= 31 || codePoint === 127;
+    });
     const message =
       typeof record.MNESSAGE === "string" ? record.MNESSAGE : "";
     if (
       (typeof record.NO !== "string" && typeof record.NO !== "number") ||
       typeof record.TIME !== "string" ||
-      !/^0[0-9]{8,10}$/.test(source) ||
+      !source ||
+      Buffer.byteLength(source, "utf8") > 100 ||
+      sourceHasControlCharacter ||
       !message.trim() ||
       centrexMessageByteLength(message) > CENTREX_LMS_MAX_BYTES
     ) {
@@ -280,6 +293,7 @@ function receivedMessageRecords(
       number: String(record.NO),
       time: record.TIME,
       source,
+      sourceKind,
       message,
     });
   }

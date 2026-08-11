@@ -107,6 +107,13 @@ function inboundAnswerCommandResponse(command: {
   };
 }
 
+export function maskedMessagePhone(value: string): string {
+  if (!/^0[0-9]{8,10}$/.test(value)) {
+    return "발신번호 확인 필요";
+  }
+  return `${value.slice(0, 3)}-${"*".repeat(Math.max(3, value.length - 7))}-${value.slice(-4)}`;
+}
+
 export type PhoneCustomerMatch =
   | {
       source: "consultation";
@@ -2295,12 +2302,6 @@ export function createTelephonyService(options: {
         replayed: false,
       };
     });
-  }
-
-  function maskedMessagePhone(value: string): string {
-    const digits = value.replace(/\D/g, "");
-    if (digits.length < 7) return "번호 미확인";
-    return `${digits.slice(0, 3)}-${"*".repeat(Math.max(3, digits.length - 7))}-${digits.slice(-4)}`;
   }
 
   function decryptedOptional(

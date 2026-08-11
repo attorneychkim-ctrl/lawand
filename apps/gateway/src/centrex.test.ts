@@ -326,10 +326,74 @@ test("대표 문자함 수신 목록은 고객번호와 본문을 POST로 조회
         number: "17",
         time: "2026-08-11 10:19:41",
         source: "01012345678",
+        sourceKind: "phone",
         message: "확인했습니다.",
       },
     ],
   });
+});
+
+test("전화번호가 아닌 센트릭스 SRC도 불투명 발신 식별자로 보존한다", async () => {
+  const client = createCentrexClient({
+    fetchImpl: async () =>
+      new Response(
+        JSON.stringify({
+          SVC_RT: "0000",
+          SVC_MSG: "OK",
+          LISTINFO: { page: "1", numperpage: 10, total: 3 },
+          DATAS: [
+            {
+              NO: 1,
+              TIME: "2026-08-11 10:19:41",
+              SRC: "1w234567",
+              MNESSAGE: "특수 발신 식별자 메시지",
+            },
+            {
+              NO: 2,
+              TIME: "2026-08-11 10:20:41",
+              SRC: "0w12345678",
+              MNESSAGE: "전화번호 길이와 같은 특수 식별자",
+            },
+            {
+              NO: 3,
+              TIME: "2026-08-11 10:21:41",
+              SRC: "010-1234-5678",
+              MNESSAGE: "일반 전화번호 메시지",
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+  });
+
+  const result = await client.getReceivedMessages({
+    apiLoginId: "07012345678",
+    passwordSha512,
+  });
+
+  assert.deepEqual(result.records, [
+    {
+      number: "1",
+      time: "2026-08-11 10:19:41",
+      source: "1w234567",
+      sourceKind: "provider_opaque",
+      message: "특수 발신 식별자 메시지",
+    },
+    {
+      number: "2",
+      time: "2026-08-11 10:20:41",
+      source: "0w12345678",
+      sourceKind: "provider_opaque",
+      message: "전화번호 길이와 같은 특수 식별자",
+    },
+    {
+      number: "3",
+      time: "2026-08-11 10:21:41",
+      source: "01012345678",
+      sourceKind: "phone",
+      message: "일반 전화번호 메시지",
+    },
+  ]);
 });
 
 test("수신문자가 없는 4004 응답은 정상적인 빈 목록으로 처리한다", async () => {

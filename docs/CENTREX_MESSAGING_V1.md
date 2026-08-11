@@ -15,6 +15,10 @@
 - gateway는 공식 `getrecvsmslist`를 계정당 직렬 조회한다. 최신 첫 페이지와 과거 페이지
   backfill을 번갈아 읽고 수신 원문·고객 번호를 로그에 남기지 않는다. 수신 번호·본문은
   AES-GCM, 매칭·중복 판정 값은 HMAC 지문으로 저장한다.
+- U+가 `SRC`를 일반 국내 전화번호가 아닌 문자열로 반환하는 기록도 페이지 전체를 막지
+  않는다. 이 값은 불투명 provider 식별자로 암호화하고 일반 전화번호와 다른 HMAC namespace에
+  두며 고객·사건 자동 매칭에서는 제외한다. ERP에는 원문을 노출하지 않고
+  `발신번호 확인 필요`로 표시한다.
 - 같은 휴대전화번호의 회신은 수신시각 이전에 발송 성공 또는 전달 여부 불명확 상태인 가장 최근
   `telephony_messages`를 찾아 그 발신 건의 상담 또는 리걸프렌즈 `Case_idx`를 상속한다.
   따라서 같은 번호를 쓰는 고객이 여럿이어도 발신 맥락별로 대화가 갈린다. 선행 발신이 없는
@@ -25,8 +29,8 @@
   확인한다.
 - 이 출시 후보는 현재 발신번호 선택 정책을 변경하지 않는다. 대표전화 착신 대상·순서 변경과
   근무/휴무 조건 라우팅은 별도 후속 범위다.
-- migration과 실서비스 배포는 완료했다. 대표 계정 연결과 운영 수신 canary는 현재
-  비밀번호를 TTY에서 안전하게 입력할 수 있을 때 수행한다.
+- migration과 실서비스 배포, 대표 계정 7개의 TTY 연결은 완료했다. 비표준 `SRC` 격리
+  gateway 수정과 실제 수신 backfill·통제 회신 canary는 운영 반영 전이다.
 
 ## 운영 상태
 
@@ -35,12 +39,18 @@
   최신 해시가 Git과 일치한다. 신규 수신·mailbox 상태 테이블의 앱 CRUD·viewer SELECT·
   PUBLIC 차단과 대표 endpoint 7개·활성/인증/binding 0을 확인했다.
 - 인증 ERP `/messages`와 `/message-templates` 이동은 200이고 문자 API는 기존 대화 12개와
-  비활성 대표 mailbox 7개를 반환했다. 대표 비밀번호는 secret에 없으므로 추정하지 않았고,
-  `centrex:link-representative` TTY 검증 전에는 polling하지 않는다. 실제 수신 backfill과
-  Case_idx 통제 회신 canary는 남아 있다.
+  대표 mailbox 7개를 반환했다. 이후 사용자가 `centrex:link-representative` TTY에서 7개를
+  모두 `userinfo` 검증 연결했고 5개는 정상 동기화됐다. `051-502-1919`와 `02-555-7455`는
+  HTTP 200·`SVC_RT=0000`에도 과거 첫 페이지의 `SRC` 각각 1건·4건이
+  `숫자 1자리 + w + 숫자 6자리` 형태라 기존 전체 전화번호 검증에서 페이지 전체가
+  `invalid_response`가 됐다. 비밀번호·계정 연결 문제는 아니다.
+- 출시 후보는 이 특수 식별자를 암호화·별도 HMAC namespace·자동 매칭 제외로 보존하고
+  ERP에는 `발신번호 확인 필요`로 표시한다. DB migration과 운영 데이터 직접 보정 없이
+  gateway 배포 뒤 기존 worker polling만으로 두 수신함 오류 해제와 backfill을 재개한다.
 - 지연 검증의 `lawand-centrex-login-failures` ALARM은 대표 mailbox가 아니라 직원용
-  Windows `lawand-slot-017`의 외부 중복 로그인 충돌로 추정한다. 대표 endpoint 7개는 계속
-  비활성·인증 0이고 문자 수신 worker 오류나 메시지 queue 적체는 없다.
+  Windows `lawand-slot-017`의 외부 중복 로그인 충돌로 추정한다. 당시 대표 endpoint 7개는
+  아직 비활성·인증 0이었으며, 이후 대표 계정 연결 뒤 확인된 mailbox 특수 `SRC` 오류와는
+  서로 독립된 현상이다.
 - 2026-08-10 migration `0041_late_talon.sql`과 gateway·ERP 릴리스
   `20260810T090235Z-customer-messaging-v1`을 운영 배포했다.
 - 인증 ERP의 전역 템플릿 화면과 상담 상세 `문자 보내기`·발송 완료 원장을 확인했다.
