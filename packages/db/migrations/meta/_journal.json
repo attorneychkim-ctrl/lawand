@@ -330,6 +330,13 @@
       "when": 1786443357535,
       "tag": "0046_small_cargill",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1786443430435,
+      "tag": "0047_wandering_maximus",
+      "breakpoints": true
     }
   ]
 }

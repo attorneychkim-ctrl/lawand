@@ -132,6 +132,13 @@ function inboundAnswerCommandResponse(command: {
   };
 }
 
+export function messagePhoneDisplay(value: string): string {
+  if (!/^0[0-9]{8,10}$/.test(value)) {
+    return "발신번호 확인 필요";
+  }
+  return value;
+}
+
 export type PhoneCustomerMatch =
   | {
       source: "consultation";
@@ -2934,12 +2941,6 @@ export function createTelephonyService(options: {
     });
   }
 
-  function maskedMessagePhone(value: string): string {
-    const digits = value.replace(/\D/g, "");
-    if (digits.length < 7) return "번호 미확인";
-    return `${digits.slice(0, 3)}-${"*".repeat(Math.max(3, digits.length - 7))}-${digits.slice(-4)}`;
-  }
-
   function decryptedOptional(
     encrypted: {
       ciphertext: Buffer | null;
@@ -2967,7 +2968,7 @@ export function createTelephonyService(options: {
     clientIdx: number | null;
     consultationId: string | null;
     customerName: string;
-    phoneMasked: string;
+    phone: string;
     receiptCode?: string | null;
   };
 
@@ -3008,6 +3009,7 @@ export function createTelephonyService(options: {
         bodyKeyVersion: telephonyMessages.bodyKeyVersion,
         bodyByteLength: telephonyMessages.bodyByteLength,
         imageFileId: telephonyMessages.imageFileIdSnapshot,
+        imageUrl: telephonyMessages.imageUrlSnapshot,
         imageName: telephonyMessages.imageOriginalNameSnapshot,
         requestedAt: telephonyMessages.requestedAt,
         staffUserId: telephonyMessages.staffUserId,
@@ -3171,7 +3173,7 @@ export function createTelephonyService(options: {
         clientIdx: row.directoryClientIdx,
         consultationId: null,
         customerName: customerName ?? "리걸프렌즈 고객",
-        phoneMasked: phone ? maskedMessagePhone(phone) : "번호 미확인",
+        phone: phone ?? "번호 미확인",
       };
     }
     if (!row.consultationId) return null;
@@ -3202,7 +3204,7 @@ export function createTelephonyService(options: {
       clientIdx: null,
       consultationId: row.consultationId,
       customerName,
-      phoneMasked: phone ? maskedMessagePhone(phone) : "번호 미확인",
+      phone: phone ?? "번호 미확인",
       receiptCode: row.consultationReceiptCode,
     };
   }
@@ -3238,7 +3240,7 @@ export function createTelephonyService(options: {
         clientIdx: row.directoryClientIdx,
         consultationId: null,
         customerName: customerName ?? "리걸프렌즈 고객",
-        phoneMasked: maskedMessagePhone(phone),
+        phone: messagePhoneDisplay(phone),
       };
     }
     if (row.targetSource === "consultation" && row.consultationId) {
@@ -3259,7 +3261,7 @@ export function createTelephonyService(options: {
         clientIdx: null,
         consultationId: row.consultationId,
         customerName,
-        phoneMasked: maskedMessagePhone(phone),
+        phone: messagePhoneDisplay(phone),
         receiptCode: row.consultationReceiptCode,
       };
     }
@@ -3269,7 +3271,7 @@ export function createTelephonyService(options: {
       clientIdx: null,
       consultationId: null,
       customerName: "고객 연결 확인 필요",
-      phoneMasked: maskedMessagePhone(phone),
+      phone: messagePhoneDisplay(phone),
     };
   }
 
@@ -3442,6 +3444,7 @@ export function createTelephonyService(options: {
       status: string;
       staffDisplayName: string | null;
       imageAttached: boolean;
+      imageUrl: string | null;
       imageName: string | null;
       endpoint: {
         id: string;
@@ -3475,6 +3478,7 @@ export function createTelephonyService(options: {
         status: row.commandStatus,
         staffDisplayName: row.staffDisplayName,
         imageAttached: Boolean(row.imageFileId),
+        imageUrl: row.imageUrl,
         imageName: row.imageName,
         endpoint: {
           id: row.endpointId,
@@ -3511,6 +3515,7 @@ export function createTelephonyService(options: {
         status: "received",
         staffDisplayName: null,
         imageAttached: false,
+        imageUrl: null,
         imageName: null,
         endpoint: {
           id: row.endpointId,
@@ -3933,6 +3938,7 @@ export function createTelephonyService(options: {
 
       let templateName: string | null = null;
       let imageFileId: string | null = null;
+      let imageUrl: string | null = null;
       let imageOriginalName: string | null = null;
       if (input.templateId) {
         const [template] = await tx
@@ -3941,6 +3947,7 @@ export function createTelephonyService(options: {
             name: messageTemplates.name,
             ownerUserId: messageTemplates.ownerUserId,
             imageFileId: messageTemplates.imageFileId,
+            imageUrl: messageTemplates.imageUrl,
             imageOriginalName: messageTemplates.imageOriginalName,
           })
           .from(messageTemplates)
@@ -3961,6 +3968,7 @@ export function createTelephonyService(options: {
         }
         templateName = template.name;
         imageFileId = template.imageFileId;
+        imageUrl = template.imageUrl;
         imageOriginalName = template.imageOriginalName;
       }
 
@@ -4031,6 +4039,7 @@ export function createTelephonyService(options: {
           templateId: input.templateId,
           templateNameSnapshot: templateName,
           imageFileIdSnapshot: imageFileId,
+          imageUrlSnapshot: imageUrl,
           imageOriginalNameSnapshot: imageOriginalName,
           outboxEventId: eventId,
           idempotencyKey: input.idempotencyKey,
@@ -4164,6 +4173,7 @@ export function createTelephonyService(options: {
 
       let templateName: string | null = null;
       let imageFileId: string | null = null;
+      let imageUrl: string | null = null;
       let imageOriginalName: string | null = null;
       if (input.templateId) {
         const [template] = await tx
@@ -4172,6 +4182,7 @@ export function createTelephonyService(options: {
             name: messageTemplates.name,
             ownerUserId: messageTemplates.ownerUserId,
             imageFileId: messageTemplates.imageFileId,
+            imageUrl: messageTemplates.imageUrl,
             imageOriginalName: messageTemplates.imageOriginalName,
           })
           .from(messageTemplates)
@@ -4192,6 +4203,7 @@ export function createTelephonyService(options: {
         }
         templateName = template.name;
         imageFileId = template.imageFileId;
+        imageUrl = template.imageUrl;
         imageOriginalName = template.imageOriginalName;
       }
 
@@ -4271,6 +4283,7 @@ export function createTelephonyService(options: {
           templateId: input.templateId,
           templateNameSnapshot: templateName,
           imageFileIdSnapshot: imageFileId,
+          imageUrlSnapshot: imageUrl,
           imageOriginalNameSnapshot: imageOriginalName,
           outboxEventId: eventId,
           idempotencyKey: input.idempotencyKey,

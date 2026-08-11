@@ -815,7 +815,7 @@ test("인증된 직원은 Case_idx 문자 목록과 통합 대화를 조회한�
             clientIdx: 123,
             consultationId: null,
             customerName: "테스트 고객",
-            phoneMasked: "010-****-5678",
+            phone: "01012345678",
             messageCount: 2,
             lastDirection: "inbound" as const,
             lastMessageKind: "sms" as const,
@@ -837,7 +837,7 @@ test("인증된 직원은 Case_idx 문자 목록과 통합 대화를 조회한�
           clientIdx: 123,
           consultationId: null,
           customerName: "테스트 고객",
-          phoneMasked: "010-****-5678",
+          phone: "01012345678",
         },
         timeline: [],
       };
@@ -866,11 +866,11 @@ test("인증된 직원은 Case_idx 문자 목록과 통합 대화를 조회한�
     { headers },
   );
   assert.equal(hubResponse.status, 200);
-  assert.equal(
-    ((await hubResponse.json()) as { items: Array<{ key: string }> }).items[0]
-      ?.key,
-    "case:456",
-  );
+  const hubBody = (await hubResponse.json()) as {
+    items: Array<{ key: string; phone: string }>;
+  };
+  assert.equal(hubBody.items[0]?.key, "case:456");
+  assert.equal(hubBody.items[0]?.phone, "01012345678");
   assert.equal(hubActorId, realtimeActor.id);
 
   const threadResponse = await fetch(

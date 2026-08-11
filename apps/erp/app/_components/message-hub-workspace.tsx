@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 "use client";
 
 import { useRouter } from "next/navigation";
@@ -5,6 +6,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { createPortal } from "react-dom";
@@ -63,10 +65,31 @@ function deliveryLabel(status: string) {
             : "결과 확인 중";
 }
 
+function MessageHistoryImage({ url }: { url: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <span className="message-history-image-unavailable">
+        첨부 이미지를 표시할 수 없습니다.
+      </span>
+    );
+  }
+  return (
+    <img
+      alt="문자에 첨부된 이미지"
+      className="message-history-image"
+      loading="lazy"
+      onError={() => setFailed(true)}
+      referrerPolicy="no-referrer"
+      src={url}
+    />
+  );
+}
+
 function threadSearchText(thread: MessageThreadSummary) {
   return [
     thread.customerName,
-    thread.phoneMasked,
+    thread.phone,
     thread.caseIdx,
     thread.receiptCode,
     thread.lastMessagePreview,
@@ -95,6 +118,7 @@ export function MessageHubWorkspace({
   );
   const [loadError, setLoadError] = useState("");
   const [templateOpen, setTemplateOpen] = useState(false);
+  const latestThreadRequest = useRef(0);
 
   const filteredThreads = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase("ko-KR");
@@ -128,6 +152,7 @@ export function MessageHubWorkspace({
   }, []);
 
   const loadThread = useCallback(async (key: string) => {
+    const requestSequence = ++latestThreadRequest.current;
     try {
       const response = await fetch(
         `/api/messages/thread?key=${encodeURIComponent(key)}`,
@@ -139,22 +164,30 @@ export function MessageHubWorkspace({
       if (!response.ok || !result) {
         throw new Error(result?.message ?? "문자 대화를 불러오지 못했습니다.");
       }
+      if (requestSequence !== latestThreadRequest.current) return;
       setThread(result);
       setLoadError("");
     } catch (error) {
+      if (requestSequence !== latestThreadRequest.current) return;
+      setThread(null);
       setLoadError(
         error instanceof Error
           ? error.message
           : "문자 대화를 불러오지 못했습니다.",
       );
     } finally {
-      setThreadLoading(false);
+      if (requestSequence === latestThreadRequest.current) {
+        setThreadLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
+    latestThreadRequest.current += 1;
     if (!selectedKey) return;
     const initialTimer = window.setTimeout(() => {
+      setLoadError("");
+      setThreadLoading(true);
       void loadThread(selectedKey);
     }, 0);
     const timer = window.setInterval(() => {
@@ -338,8 +371,10 @@ export function MessageHubWorkspace({
                   className={item.key === selectedKey ? "is-selected" : ""}
                   key={item.key}
                   onClick={() => {
+                    if (item.key === selectedKey) return;
                     setSelectedKey(item.key);
                     setThreadLoading(true);
+                    setLoadError("");
                   }}
                   type="button"
                 >
@@ -360,7 +395,7 @@ export function MessageHubWorkspace({
                     {item.lastMessagePreview}
                   </span>
                   <small>
-                    {item.phoneMasked} · {item.messageCount}건
+                    {formatPhone(item.phone)} · {item.messageCount}건
                   </small>
                 </button>
               ))
@@ -381,7 +416,7 @@ export function MessageHubWorkspace({
                     : selectedSummary?.needsConnection
                       ? "발신 맥락이 없어 고객 연결을 확인해야 합니다."
                       : "왼쪽에서 고객 대화를 선택해 주세요."}
-                {selectedSummary ? ` · ${selectedSummary.phoneMasked}` : ""}
+                {selectedSummary ? ` · ${formatPhone(selectedSummary.phone)}` : ""}
               </p>
             </div>
             <button
@@ -398,10 +433,10 @@ export function MessageHubWorkspace({
           ) : null}
 
           <div className="message-timeline" aria-live="polite">
-            {threadLoading || (selectedKey && thread?.thread.key !== selectedKey) ? (
-              <p className="message-conversation-empty">대화를 불러오는 중입니다…</p>
-            ) : !selectedKey ? (
+            {!selectedKey ? (
               <p className="message-conversation-empty">표시할 문자 대화가 없습니다.</p>
+            ) : threadLoading || (!loadError && thread?.thread.key !== selectedKey) ? (
+              <p className="message-conversation-empty">대화를 불러오는 중입니다…</p>
             ) : !thread ? (
               <p className="message-conversation-empty">대화를 불러오지 못했습니다.</p>
             ) : (
@@ -411,9 +446,11 @@ export function MessageHubWorkspace({
                   key={`${message.direction}-${message.id}`}
                 >
                   <div className="message-history-bubble">
-                    {message.imageAttached ? (
-                      <span className="message-history-image">
-                        이미지 첨부{message.imageName ? ` · ${message.imageName}` : ""}
+                    {message.imageUrl ? (
+                      <MessageHistoryImage key={message.imageUrl} url={message.imageUrl} />
+                    ) : message.imageAttached ? (
+                      <span className="message-history-image-unavailable">
+                        첨부 이미지를 표시할 수 없습니다.
                       </span>
                     ) : null}
                     <p>{message.body}</p>

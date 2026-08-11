@@ -2230,6 +2230,7 @@ export const telephonyMessages = pgTable(
     }),
     templateNameSnapshot: varchar("template_name_snapshot", { length: 80 }),
     imageFileIdSnapshot: varchar("image_file_id_snapshot", { length: 100 }),
+    imageUrlSnapshot: text("image_url_snapshot"),
     imageOriginalNameSnapshot: varchar("image_original_name_snapshot", {
       length: 100,
     }),

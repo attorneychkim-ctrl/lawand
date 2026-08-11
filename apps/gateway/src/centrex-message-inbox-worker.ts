@@ -84,6 +84,28 @@ export function parseCentrexReceivedAt(value: string): Date {
   return parsed;
 }
 
+export function centrexInboundSourceIdentity(
+  record: Pick<CentrexReceivedMessageRecord, "source" | "sourceKind">,
+): {
+  fingerprintInput: unknown;
+  matchOutbound: boolean;
+} {
+  if (record.sourceKind === "phone") {
+    return {
+      fingerprintInput: record.source,
+      matchOutbound: true,
+    };
+  }
+  return {
+    fingerprintInput: {
+      provider: "centrex",
+      sourceKind: "provider_opaque",
+      source: record.source,
+    },
+    matchOutbound: false,
+  };
+}
+
 function workerFailureCode(error: unknown): string {
   if (error instanceof CentrexDeliveryError) return error.code;
   if (error instanceof Error && /^[a-z0-9_]{3,100}$/.test(error.message)) {
@@ -207,7 +229,10 @@ export function createCentrexMessageInboxWorker(options: {
     if (messageKind === "too_long") {
       throw new Error("centrex_received_message_too_long");
     }
-    const remotePhoneFingerprint = protection.fingerprint(record.source);
+    const sourceIdentity = centrexInboundSourceIdentity(record);
+    const remotePhoneFingerprint = protection.fingerprint(
+      sourceIdentity.fingerprintInput,
+    );
     const providerIdentityFingerprint = protection.fingerprint({
       provider: "centrex",
       endpointId,
@@ -240,7 +265,9 @@ export function createCentrexMessageInboxWorker(options: {
       record.message,
       `telephony_inbound_messages/${inboundMessageId}/body`,
     );
-    const match = await matchOutbound(remotePhoneFingerprint, receivedAt);
+    const match = sourceIdentity.matchOutbound
+      ? await matchOutbound(remotePhoneFingerprint, receivedAt)
+      : null;
     const [inserted] = await db
       .insert(telephonyInboundMessages)
       .values({
