@@ -239,6 +239,23 @@ systemd 앱 단위와 Caddy edge 단위는 부팅 시 자동 시작한다. 최�
   v0.7.1.0 프로세스 16, 설치 51·배정/연결 11·warm 5, 오프라인·로그인 실패·DPAPI 큐·
   dead-letter 0이며 감독기·health task 결과도 0이다.
 
+고객 찾기 릴리스 뒤 실제 직원 JPG MMS 네 건이 SOLAPI 등록 단계에서 공통
+`1010(필수 입력 값 미입력)`으로 실패했다. 발신·수신번호, 본문, 이미지 ID는 정상이고
+`strict: true`의 MMS 제목 검사에 필요한 `subject`만 누락된 원인이었다. 동일 실패 요청에
+40바이트 이하 고정 제목을 추가한 비발송 임시 그룹은 `2000` 정상 접수됐고 즉시 삭제됐다.
+
+- 수정 커밋은 `352ff00`, gateway 전용 릴리스는
+  `20260811T001012Z-solapi-mms-subject-v1`이다. private S3 AES256 아티팩트 SHA-256은
+  `370c29644ce0b04aa724cfc32835fafca2071c74a8e30cf906aed98492c0cb94`, gateway 이미지
+  ID는 `sha256:6bdf549bc28c9263481390bf9bbe77e5089de7ff6915304fb3dd223c4cbe3a6c`다.
+- gateway 87개 테스트·typecheck·lint·production build와 `git diff --check`를 통과했다.
+  전환 직전 활성 통화·통화 명령·문자 명령·문자 pending outbox가 연속 두 번과 명령 내부
+  gate에서 모두 0임을 확인했다. gateway만 재시작했고 ERP·Caddy·Windows bridge는
+  재시작하지 않았다.
+- 수정 전 실패 네 건은 감사 원장과 dead outbox에 보존했으며 재시도·보정하지 않았다.
+  최종 gateway·ERP·Caddy active, 컨테이너 재시작 0, gateway error journal 0, 외부
+  health/login 200, CloudWatch ALARM 0이다. 실제 JPG 단말 수신 canary는 별도다.
+
 ## ERP 리걸프렌즈 고객 찾기 운영 배포
 
 2026-08-10 메인 누적 작업을 릴리스 `20260810T082342Z-client-directory-v1`로 묶어

@@ -21,6 +21,12 @@
   고객·사건 ID만 전달하고 gateway가 삭제 사건·전화번호를 다시 검증한다. 배포 smoke는
   발송 없이 수행했으며, 직후 직원이 실제 요청한 고객 찾기 LMS 1건은 Centrex
   `succeeded`·outbox `published`로 완료됐다.
+- 이후 직원이 실제 요청한 JPG MMS 네 건은 SOLAPI HTTP 200 응답 안에서 모두
+  `1010(필수 입력 값 미입력)`으로 등록 거절됐다. 요청에는 발신·수신번호, 본문과 이미지
+  ID가 있었지만 `strict: true`의 MMS 제목 검사에 필요한 `subject`가 없었다. 고정 제목을
+  추가한 동일 요청을 비발송 임시 그룹으로 검증해 `2000`을 확인하고 그룹을 삭제했으며,
+  gateway 릴리스 `20260811T001012Z-solapi-mms-subject-v1`로 수정했다. 실패 네 건은 자동
+  재발송하지 않고 감사 원장과 dead outbox에 보존한다.
 
 ## 범위
 
@@ -45,7 +51,8 @@
 
 - `POST /storage/v1/files`에 Base64와 `type=MMS`로 이미지를 템플릿 저장 시 한 번 업로드한다.
 - JPG, 200KB 이하, 최대 1500×1440px만 허용한다.
-- `POST /messages/v4/send-many/detail`에 등록 발신번호·수신번호·본문·`imageId`를 보낸다.
+- `POST /messages/v4/send-many/detail`에 등록 발신번호·수신번호·본문·`imageId`와 40바이트
+  이하 고정 제목 `법무법인 로앤 안내`를 보낸다. `strict: true`에서 제목을 생략하지 않는다.
 - 템플릿 원장에는 SOLAPI 파일 ID·미리보기 URL·파일명·크기·해상도만 저장하고 Base64 원문은 저장하지 않는다.
 - API 접수 성공은 단말 최종 수신 성공과 다르다. 최종 결과 웹훅/조회 소비자는 별도 후속 과제다.
 
@@ -87,5 +94,6 @@
 - `0043` 적용 뒤 운영 migration 44개와 최신 Git 해시 일치, 기존 상담 문자 2건 보존,
   `telephony_message_directory_targets`, `target_source NOT NULL`, 앱 CRUD·viewer SELECT 전용·
   PUBLIC 권한 0을 확인했다. 인증 `/clients`는 문자·전화 및 개인 템플릿 UI를 렌더한다.
-- SOLAPI MMS 등록 발신번호 설정은 완료했고 실제 JPG canary가 남았다. API 접수 뒤 최종
-  단말 결과를 자동 수집하는 웹훅/조회 소비자도 후속 범위다.
+- SOLAPI MMS 등록 발신번호와 strict 제목 수정은 완료했다. 동일 요청의 비발송 그룹 검증은
+  `2000`이지만 실제 JPG 단말 수신 canary는 남았다. 수정 전 `1010` 실패 네 건은 dead 원장에
+  보존했다. API 접수 뒤 최종 단말 결과를 자동 수집하는 웹훅/조회 소비자도 후속 범위다.

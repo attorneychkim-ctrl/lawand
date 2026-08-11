@@ -71,6 +71,28 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-11 — SOLAPI strict MMS 제목 누락 긴급 수정·gateway 운영 배포
+- 고객 찾기 통합 배포 뒤 직원이 실제 요청한 JPG MMS 네 건이 서로 다른 이미지 두 개에서도
+  모두 SOLAPI HTTP 200 안의 `1010(필수 입력 값 미입력)`으로 등록 거절됐다. 발신·수신번호,
+  본문, 이미지 ID는 실제 SOLAPI 원장에 모두 있었고, `strict: true`인 그룹이 검사하는 MMS
+  `subject`만 요청에 없었다. 오류 네 건은 고객정보를 출력하지 않고 상태·필드 존재 여부만
+  조회했으며 감사 원장과 dead outbox에 그대로 보존하고 재시도하지 않았다.
+- `SolapiMmsMessage`에 40바이트 이하 고정 제목 `법무법인 로앤 안내`를 추가했다. 실패 요청과
+  같은 발신·수신·본문·이미지를 발송하지 않는 strict 임시 그룹에 제목만 더해 `2000 정상
+  접수`를 확인한 뒤 그룹을 `DELETED`로 삭제했다. gateway 87개 테스트·typecheck·lint·
+  production build와 `git diff --check`를 통과했고 수정 커밋 `352ff00`을 main에 푸시했다.
+- gateway 전용 릴리스 `20260811T001012Z-solapi-mms-subject-v1`을 배포했다. private S3
+  AES256 아티팩트 SHA-256은
+  `370c29644ce0b04aa724cfc32835fafca2071c74a8e30cf906aed98492c0cb94`, 이미지 ID는
+  `sha256:6bdf549bc28c9263481390bf9bbe77e5089de7ff6915304fb3dd223c4cbe3a6c`다. 전환 직전 활성
+  통화·통화 명령·문자 명령·문자 pending outbox가 연속 두 번과 명령 내부 gate에서 모두
+  0이었고 gateway만 재시작했다. ERP·Caddy·Windows bridge는 재시작하지 않았다.
+- 최종 gateway·ERP·Caddy active, 컨테이너 재시작 0, gateway error journal 0, 외부
+  health/login 200, CloudWatch ALARM 0이다. EBS와 OS 파일시스템은 ERP·gateway·Windows
+  모두 100GB이며 여유는 약 76GB·63GB·79.31GB다. Windows bridge 프로세스 16개도 유지된다.
+  수정 뒤 실제 MMS 발송은 새로 만들지 않았으므로 명함 JPG 단말 수신 canary는 남아 있다.
+  `PROJECT_PLAN.md`는 v1.04다.
+
 ### 2026-08-11 — HERDR 전수 통합·고객 찾기 문자 운영 배포·EC2 100GB 반영
 - HERDR 작업트리 `calm-stone-97b1`, `silver-cloud-fa0f`와 모든 로컬 `worktree/*`,
   `origin/worktree/*`를 갱신·대조했다. 모든 HEAD가 `main`의 ancestor였고
