@@ -15,6 +15,8 @@ export const CENTREX_SET_RING_CALLBACK_URL =
   "https://centrex.uplus.co.kr/RestApi/setringcallback";
 export const CENTREX_INBOUND_CALL_HISTORY_URL =
   "https://centrex.uplus.co.kr/RestApi/getinboundcall";
+export const CENTREX_RECEIVED_SMS_LIST_URL =
+  "https://centrex.uplus.co.kr/RestApi/getrecvsmslist";
 
 export class CentrexDeliveryError extends Error {
   constructor(
@@ -80,6 +82,13 @@ export type CentrexInboundCallHistoryRecord = {
   destinationChannel: string;
   endTime: string;
   applicationData: string;
+};
+
+export type CentrexReceivedMessageRecord = {
+  number: string;
+  time: string;
+  source: string;
+  message: string;
 };
 
 function normalizedCredentials(input: CentrexCredentials) {
@@ -241,6 +250,58 @@ function inboundCallHistoryRecords(
     });
   }
   return records;
+}
+
+function receivedMessageRecords(
+  value: unknown,
+): CentrexReceivedMessageRecord[] | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const data = (value as Record<string, unknown>).DATAS;
+  if (data === null) return [];
+  if (!Array.isArray(data) || data.length > 200) return null;
+  const records: CentrexReceivedMessageRecord[] = [];
+  for (const item of data) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+    const record = item as Record<string, unknown>;
+    const source =
+      typeof record.SRC === "string" ? record.SRC.replace(/\D/g, "") : "";
+    const message =
+      typeof record.MNESSAGE === "string" ? record.MNESSAGE : "";
+    if (
+      (typeof record.NO !== "string" && typeof record.NO !== "number") ||
+      typeof record.TIME !== "string" ||
+      !/^0[0-9]{8,10}$/.test(source) ||
+      !message.trim() ||
+      centrexMessageByteLength(message) > CENTREX_LMS_MAX_BYTES
+    ) {
+      return null;
+    }
+    records.push({
+      number: String(record.NO),
+      time: record.TIME,
+      source,
+      message,
+    });
+  }
+  return records;
+}
+
+function listInfo(value: unknown): {
+  page: number;
+  pageSize: number;
+  total: number;
+} | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = (value as Record<string, unknown>).LISTINFO;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  const page = nonnegativeInteger(record.page);
+  const pageSize = nonnegativeInteger(record.numperpage);
+  const total = nonnegativeInteger(record.total);
+  if (page === null || page < 1 || pageSize === null || total === null) {
+    return null;
+  }
+  return { page, pageSize, total };
 }
 
 async function parsedResponse(
@@ -842,10 +903,102 @@ export function createCentrexClient(options: {
     };
   }
 
+  async function getReceivedMessages(
+    input: CentrexCredentials & { page?: number },
+  ): Promise<{
+    httpStatus: number;
+    providerCode: "0000" | "4002" | "4004";
+    page: number;
+    pageSize: number;
+    total: number;
+    records: CentrexReceivedMessageRecord[];
+  }> {
+    const normalized = normalizedCredentials(input);
+    const page = input.page ?? 1;
+    if (!Number.isInteger(page) || page < 1 || page > 10_000) {
+      throw new CentrexDeliveryError(
+        "invalid_request",
+        "센트릭스 수신문자 페이지 형식이 올바르지 않습니다.",
+        { commandStatus: "failed" },
+      );
+    }
+    let response: Response;
+    try {
+      response = await fetchImpl(CENTREX_RECEIVED_SMS_LIST_URL, {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
+        },
+        body: new URLSearchParams({
+          id: normalized.apiLoginId,
+          pass: normalized.passwordSha512,
+          page: String(page),
+        }),
+        signal: AbortSignal.timeout(Math.min(timeoutMs, 20_000)),
+      });
+    } catch {
+      throw new CentrexDeliveryError(
+        "ambiguous_delivery",
+        "센트릭스 수신문자 목록을 확인하지 못했습니다.",
+        { commandStatus: "unknown" },
+      );
+    }
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new CentrexDeliveryError(
+        "unexpected_http_status",
+        `센트릭스 수신문자 조회가 예상하지 못한 HTTP 상태를 반환했습니다. (${response.status})`,
+        { commandStatus: "unknown", httpStatus: response.status },
+      );
+    }
+    const parsed = await parsedResponse(response, "수신문자 목록", 1024 * 1024);
+    const code = responseCode(parsed);
+    if (!code) {
+      throw new CentrexDeliveryError(
+        "invalid_response",
+        "센트릭스 수신문자 응답에 결과 코드가 없습니다.",
+        { commandStatus: "unknown", httpStatus: response.status },
+      );
+    }
+    if (code === "4002" || code === "4004") {
+      const info = listInfo(parsed);
+      return {
+        httpStatus: response.status,
+        providerCode: code,
+        page: info?.page ?? page,
+        pageSize: info?.pageSize ?? 0,
+        total: info?.total ?? 0,
+        records: [],
+      };
+    }
+    if (code !== "0000") throw providerFailure(code, response.status);
+    const records = receivedMessageRecords(parsed);
+    const info = listInfo(parsed);
+    if (!records || !info) {
+      throw new CentrexDeliveryError(
+        "invalid_response",
+        "센트릭스 수신문자 목록 형식이 올바르지 않습니다.",
+        {
+          commandStatus: "unknown",
+          httpStatus: response.status,
+          providerCode: code,
+        },
+      );
+    }
+    return {
+      httpStatus: response.status,
+      providerCode: "0000",
+      ...info,
+      records,
+    };
+  }
+
   return {
     clickDial,
     getCallHistory,
     getInboundCallHistory,
+    getReceivedMessages,
     getUserInfo,
     sendMessage,
     setRingCallback,

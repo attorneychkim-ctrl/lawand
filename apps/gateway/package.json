@@ -13,6 +13,7 @@
     "alimtalk:verify": "tsx src/verify-alimtalk-worker.ts",
     "outbox:verify": "tsx src/verify-outbox-worker.ts",
     "centrex:link": "tsx src/link-centrex-account.ts",
+    "centrex:link-representative": "tsx src/link-centrex-representative-mailbox.ts",
     "centrex-bridge:verify": "tsx src/verify-centrex-bridge-ingress.ts",
     "centrex-bridge:verify-pool": "tsx src/verify-centrex-bridge-pool.ts",
     "centrex-ring:verify": "tsx src/verify-centrex-ring-callback.ts",

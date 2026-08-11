@@ -5,6 +5,7 @@ import {
   CENTREX_CALLHISTORY_URL,
   CENTREX_CLICKDIAL_URL,
   CENTREX_INBOUND_CALL_HISTORY_URL,
+  CENTREX_RECEIVED_SMS_LIST_URL,
   CENTREX_SET_RING_CALLBACK_URL,
   CENTREX_SMS_SEND_URL,
   CENTREX_USERINFO_URL,
@@ -272,6 +273,92 @@ test("문자 잔여 건수 부족은 재시도 없는 확정 실패로 분류한
       error instanceof CentrexDeliveryError &&
       error.code === "message_quota_exhausted" &&
       error.options.commandStatus === "failed",
+  );
+});
+
+test("대표 문자함 수신 목록은 고객번호와 본문을 POST로 조회해 정규화한다", async () => {
+  let receivedUrl = "";
+  let receivedBody = "";
+  const client = createCentrexClient({
+    fetchImpl: async (input, init) => {
+      receivedUrl = String(input);
+      receivedBody = String(init?.body);
+      return new Response(
+        JSON.stringify({
+          SVC_RT: "0000",
+          SVC_MSG: "OK",
+          LISTINFO: { page: "2", numperpage: 10, total: "11" },
+          DATAS: [
+            {
+              NO: 17,
+              TIME: "2026-08-11 10:19:41",
+              SRC: "010-1234-5678",
+              MNESSAGE: "확인했습니다.",
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    },
+  });
+
+  const result = await client.getReceivedMessages({
+    apiLoginId: "07012345678",
+    passwordSha512,
+    page: 2,
+  });
+
+  assert.equal(receivedUrl, CENTREX_RECEIVED_SMS_LIST_URL);
+  assert.equal(new URL(receivedUrl).search, "");
+  assert.deepEqual(Object.fromEntries(new URLSearchParams(receivedBody)), {
+    id: "07012345678",
+    pass: passwordSha512,
+    page: "2",
+  });
+  assert.deepEqual(result, {
+    httpStatus: 200,
+    providerCode: "0000",
+    page: 2,
+    pageSize: 10,
+    total: 11,
+    records: [
+      {
+        number: "17",
+        time: "2026-08-11 10:19:41",
+        source: "01012345678",
+        message: "확인했습니다.",
+      },
+    ],
+  });
+});
+
+test("수신문자가 없는 4004 응답은 정상적인 빈 목록으로 처리한다", async () => {
+  const client = createCentrexClient({
+    fetchImpl: async () =>
+      new Response(
+        JSON.stringify({
+          SVC_RT: "4004",
+          SVC_MSG: "NO_DATA",
+          LISTINFO: { page: "1", numperpage: 10, total: 0 },
+          DATAS: null,
+        }),
+        { status: 200 },
+      ),
+  });
+
+  assert.deepEqual(
+    await client.getReceivedMessages({
+      apiLoginId: "07012345678",
+      passwordSha512,
+    }),
+    {
+      httpStatus: 200,
+      providerCode: "4004",
+      page: 1,
+      pageSize: 10,
+      total: 0,
+      records: [],
+    },
   );
 });
 

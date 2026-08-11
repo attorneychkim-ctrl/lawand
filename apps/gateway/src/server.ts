@@ -11,6 +11,7 @@ import { createCentrexBridgeIngressService } from "./centrex-bridge-service.js";
 import { createCentrexBridgeProvisioningService } from "./centrex-bridge-provisioning.js";
 import { createCentrexCredentialVault } from "./centrex-credential-vault.js";
 import { createCentrexInboundObserver } from "./centrex-inbound-observer.js";
+import { createCentrexMessageInboxWorker } from "./centrex-message-inbox-worker.js";
 import { createCentrexWorker } from "./centrex-worker.js";
 import { readGatewayConfig } from "./config.js";
 import { createPostgresConsultationEventSource } from "./consultation-events.js";
@@ -205,6 +206,14 @@ const centrexWorker =
         solapiMmsSender: config.solapiMmsSender,
       })
     : null;
+const centrexMessageInboxWorker = config.centrexWorkerEnabled
+  ? createCentrexMessageInboxWorker({
+      db: database.db,
+      protection,
+      centrexClient,
+      credentialVault: centrexCredentialVault,
+    })
+  : null;
 
 await Promise.all([
   centrexBridgeProvisioning?.start(),
@@ -242,6 +251,12 @@ server.listen(port, host, () => {
   } else {
     console.log("lawand centrex click-to-call worker disabled");
   }
+  if (centrexMessageInboxWorker) {
+    centrexMessageInboxWorker.start();
+    console.log("lawand centrex message inbox worker started");
+  } else {
+    console.log("lawand centrex message inbox worker disabled");
+  }
   if (centrexInboundObserver) {
     centrexInboundObserver.start();
     console.log("lawand centrex inbound observer started");
@@ -267,6 +282,7 @@ function shutdown(signal: string) {
         alimtalkOutboxWorker?.stop(),
         naverBookingImapWorker?.stop(),
         centrexWorker?.stop(),
+        centrexMessageInboxWorker?.stop(),
         centrexInboundObserver?.stop(),
       ]);
       centrexBridgeProvisioning?.stop();

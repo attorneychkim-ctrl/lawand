@@ -62,9 +62,9 @@ export function ErpNav({ showStaff }: { showStaff: boolean }) {
         <span>전화</span>
       </Link>
       <Link
-        aria-current={pathname.startsWith("/message-templates") ? "page" : undefined}
-        className={pathname.startsWith("/message-templates") ? "is-active" : undefined}
-        href="/message-templates"
+        aria-current={pathname.startsWith("/messages") ? "page" : undefined}
+        className={pathname.startsWith("/messages") ? "is-active" : undefined}
+        href="/messages"
       >
         <NavIcon kind="messages" />
         <span>문자</span>

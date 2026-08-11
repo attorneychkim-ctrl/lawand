@@ -1624,6 +1624,73 @@ export function createGatewayServer(options?: {
 
       if (
         request.method === "GET" &&
+        url.pathname === "/v1/messages"
+      ) {
+        if (
+          !options?.telephonyService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        sendJson(
+          response,
+          200,
+          await options.telephonyService.getMessageHub(actor),
+        );
+        return;
+      }
+
+      if (
+        request.method === "GET" &&
+        url.pathname === "/v1/messages/thread"
+      ) {
+        if (
+          !options?.telephonyService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const threadKey = url.searchParams.get("key") ?? "";
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        sendJson(
+          response,
+          200,
+          await options.telephonyService.getMessageThread(threadKey, actor),
+        );
+        return;
+      }
+
+      if (
+        request.method === "GET" &&
         url.pathname === "/v1/message-templates"
       ) {
         if (
@@ -2254,6 +2321,7 @@ export function createGatewayServer(options?: {
           error.code === "inbound_call_not_found" ||
           error.code === "inbound_command_not_found" ||
           error.code === "message_not_found" ||
+          error.code === "message_thread_not_found" ||
           error.code === "message_template_not_found"
             ? 404
             : error.code === "call_owned_by_other_staff" ||

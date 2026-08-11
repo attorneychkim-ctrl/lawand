@@ -46,8 +46,10 @@ function readImage(file: File): Promise<ImageDraft> {
 
 export function MessageTemplateWorkspace({
   initialItems,
+  embedded = false,
 }: {
   initialItems: MessageTemplate[];
+  embedded?: boolean;
 }) {
   const [items, setItems] = useState(initialItems);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -85,7 +87,13 @@ export function MessageTemplateWorkspace({
     setRemoveImage(false);
     setError("");
     setSuccess("");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    if (embedded) {
+      document
+        .getElementById("template-editor-title")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
   }
 
   function insertVariable(variable: string) {

@@ -89,6 +89,74 @@ export type MessageTemplate = {
   updatedAt: string;
 };
 
+export type MessageThreadSummary = {
+  key: string;
+  caseIdx: string | null;
+  clientIdx: number | null;
+  consultationId: string | null;
+  customerName: string;
+  phoneMasked: string;
+  receiptCode?: string | null;
+  messageCount: number;
+  lastDirection: "outbound" | "inbound";
+  lastMessageKind: "sms" | "lms" | "mms";
+  lastMessagePreview: string;
+  lastMessageAt: string;
+  needsConnection: boolean;
+};
+
+export type MessageMailbox = {
+  id: string;
+  label: string;
+  lineNumber: string;
+  publicNumber: string | null;
+  extension: string;
+  isActive: boolean;
+  credentialConfigured: boolean;
+  lastSyncedAt: string | null;
+  lastFailedAt: string | null;
+  lastErrorCode: string | null;
+};
+
+export type MessageHub = {
+  items: MessageThreadSummary[];
+  mailboxes: MessageMailbox[];
+};
+
+export type MessageThread = {
+  thread: Pick<
+    MessageThreadSummary,
+    | "key"
+    | "caseIdx"
+    | "clientIdx"
+    | "consultationId"
+    | "customerName"
+    | "phoneMasked"
+    | "receiptCode"
+  >;
+  timeline: Array<{
+    id: string;
+    direction: "outbound" | "inbound";
+    provider: "centrex" | "solapi";
+    messageKind: "sms" | "lms" | "mms";
+    body: string;
+    bodyByteLength: number;
+    occurredAt: string;
+    status: string;
+    staffDisplayName: string | null;
+    imageAttached: boolean;
+    imageName: string | null;
+    endpoint: {
+      id: string;
+      label: string;
+      lineNumber: string;
+      publicNumber: string | null;
+      extension: string;
+    };
+    matchStrategy: string | null;
+  }>;
+};
+
 export type TelephonyMessage = {
   id: string;
   targetSource: "consultation" | "legal_friends_directory";
@@ -762,6 +830,16 @@ export async function getMessageTemplates(): Promise<MessageTemplate[]> {
     await gatewayFetch("/v1/message-templates"),
   );
   return body.items;
+}
+
+export async function getMessageHub(): Promise<MessageHub> {
+  return messageResponse(await gatewayFetch("/v1/messages"));
+}
+
+export async function getMessageThread(key: string): Promise<MessageThread> {
+  return messageResponse(
+    await gatewayFetch(`/v1/messages/thread?key=${encodeURIComponent(key)}`),
+  );
 }
 
 export async function createMessageTemplate(input: {

@@ -562,6 +562,7 @@ export const telephonyEndpoints = pgTable(
       .notNull(),
     label: varchar("label", { length: 100 }).notNull(),
     lineNumber: varchar("line_number", { length: 20 }).notNull(),
+    publicNumber: varchar("public_number", { length: 20 }),
     extension: varchar("extension", { length: 20 }).notNull(),
     apiLoginId: varchar("api_login_id", { length: 50 }).notNull(),
     credentialKey: varchar("credential_key", { length: 100 }).notNull(),
@@ -595,6 +596,19 @@ export const telephonyEndpoints = pgTable(
     check(
       "telephony_endpoints_line_number_format",
       sql`${table.lineNumber} ~ '^070[0-9]{8}$'`,
+    ),
+    check(
+      "telephony_endpoints_public_number_scope",
+      sql`(
+        ${table.endpointType} = 'personal'
+        AND ${table.publicNumber} IS NULL
+      ) OR (
+        ${table.endpointType} = 'representative'
+        AND (
+          ${table.publicNumber} IS NULL
+          OR ${table.publicNumber} ~ '^0[0-9]{8,10}$'
+        )
+      )`,
     ),
     check(
       "telephony_endpoints_extension_format",
@@ -2326,6 +2340,170 @@ export const telephonyMessageDirectoryTargets = pgTable(
         AND octet_length(${table.clientNameCiphertext}) >= 17
         AND octet_length(${table.phoneNonce}) = 12
         AND octet_length(${table.phoneCiphertext}) >= 17`,
+    ),
+  ],
+);
+
+export const telephonyInboundMessages = pgTable(
+  "telephony_inbound_messages",
+  {
+    id: uuid("id").primaryKey(),
+    provider: telephonyMessageProviderEnum("provider")
+      .default("centrex")
+      .notNull(),
+    endpointId: uuid("endpoint_id")
+      .notNull()
+      .references(() => telephonyEndpoints.id, { onDelete: "restrict" }),
+    providerSequence: varchar("provider_sequence", { length: 50 }).notNull(),
+    providerIdentityFingerprint: bytea(
+      "provider_identity_fingerprint",
+    ).notNull(),
+    remotePhoneFingerprint: bytea("remote_phone_fingerprint").notNull(),
+    remotePhoneCiphertext: bytea("remote_phone_ciphertext").notNull(),
+    remotePhoneNonce: bytea("remote_phone_nonce").notNull(),
+    remotePhoneKeyVersion: varchar("remote_phone_key_version", {
+      length: 50,
+    }).notNull(),
+    bodyCiphertext: bytea("body_ciphertext").notNull(),
+    bodyNonce: bytea("body_nonce").notNull(),
+    bodyKeyVersion: varchar("body_key_version", { length: 50 }).notNull(),
+    bodyFingerprint: bytea("body_fingerprint").notNull(),
+    messageKind: telephonyMessageKindEnum("message_kind").notNull(),
+    bodyByteLength: integer("body_byte_length").notNull(),
+    matchedOutboundMessageId: uuid("matched_outbound_message_id").references(
+      () => telephonyMessages.id,
+      { onDelete: "restrict" },
+    ),
+    targetSource: telephonyCallTargetSourceEnum("target_source"),
+    consultationId: uuid("consultation_id").references(
+      () => consultations.id,
+      { onDelete: "restrict" },
+    ),
+    directoryClientIdx: integer("directory_client_idx"),
+    directoryCaseIdx: integer("directory_case_idx"),
+    matchStrategy: varchar("match_strategy", { length: 30 })
+      .default("unmatched")
+      .notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("telephony_inbound_messages_provider_identity_uidx").on(
+      table.endpointId,
+      table.providerIdentityFingerprint,
+    ),
+    index("telephony_inbound_messages_endpoint_received_idx").on(
+      table.endpointId,
+      table.receivedAt,
+    ),
+    index("telephony_inbound_messages_remote_received_idx").on(
+      table.remotePhoneFingerprint,
+      table.receivedAt,
+    ),
+    index("telephony_inbound_messages_case_received_idx").on(
+      table.directoryCaseIdx,
+      table.receivedAt,
+    ),
+    index("telephony_inbound_messages_consultation_received_idx").on(
+      table.consultationId,
+      table.receivedAt,
+    ),
+    check(
+      "telephony_inbound_messages_provider",
+      sql`${table.provider} = 'centrex'`,
+    ),
+    check(
+      "telephony_inbound_messages_provider_identity_length",
+      sql`octet_length(${table.providerIdentityFingerprint}) = 32`,
+    ),
+    check(
+      "telephony_inbound_messages_remote_phone_crypto",
+      sql`octet_length(${table.remotePhoneFingerprint}) = 32
+        AND octet_length(${table.remotePhoneCiphertext}) >= 17
+        AND octet_length(${table.remotePhoneNonce}) = 12
+        AND length(btrim(${table.remotePhoneKeyVersion})) > 0`,
+    ),
+    check(
+      "telephony_inbound_messages_body_crypto",
+      sql`octet_length(${table.bodyFingerprint}) = 32
+        AND octet_length(${table.bodyCiphertext}) >= 17
+        AND octet_length(${table.bodyNonce}) = 12
+        AND length(btrim(${table.bodyKeyVersion})) > 0`,
+    ),
+    check(
+      "telephony_inbound_messages_kind_byte_length",
+      sql`(
+        ${table.messageKind} = 'sms'
+        AND ${table.bodyByteLength} BETWEEN 1 AND 80
+      ) OR (
+        ${table.messageKind} = 'lms'
+        AND ${table.bodyByteLength} BETWEEN 81 AND 720
+      )`,
+    ),
+    check(
+      "telephony_inbound_messages_match_reference",
+      sql`(
+        ${table.matchStrategy} = 'unmatched'
+        AND ${table.matchedOutboundMessageId} IS NULL
+        AND ${table.targetSource} IS NULL
+        AND ${table.consultationId} IS NULL
+        AND ${table.directoryClientIdx} IS NULL
+        AND ${table.directoryCaseIdx} IS NULL
+      ) OR (
+        ${table.matchStrategy} = 'latest_outbound'
+        AND ${table.matchedOutboundMessageId} IS NOT NULL
+        AND ${table.targetSource} = 'consultation'
+        AND ${table.consultationId} IS NOT NULL
+        AND ${table.directoryClientIdx} IS NULL
+        AND ${table.directoryCaseIdx} IS NULL
+      ) OR (
+        ${table.matchStrategy} = 'latest_outbound'
+        AND ${table.matchedOutboundMessageId} IS NOT NULL
+        AND ${table.targetSource} = 'legal_friends_directory'
+        AND ${table.consultationId} IS NULL
+        AND ${table.directoryClientIdx} > 0
+        AND ${table.directoryCaseIdx} > 0
+      )`,
+    ),
+    check(
+      "telephony_inbound_messages_fetch_time_order",
+      sql`${table.fetchedAt} >= ${table.receivedAt} - interval '5 minutes'`,
+    ),
+  ],
+);
+
+export const telephonyMessageMailboxStates = pgTable(
+  "telephony_message_mailbox_states",
+  {
+    endpointId: uuid("endpoint_id")
+      .primaryKey()
+      .references(() => telephonyEndpoints.id, { onDelete: "restrict" }),
+    nextPage: integer("next_page").default(1).notNull(),
+    pollBackfillNext: boolean("poll_backfill_next").default(false).notNull(),
+    backfillCompletedAt: timestamp("backfill_completed_at", {
+      withTimezone: true,
+    }),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    lastFailedAt: timestamp("last_failed_at", { withTimezone: true }),
+    lastErrorCode: varchar("last_error_code", { length: 100 }),
+    lastImportedMessageAt: timestamp("last_imported_message_at", {
+      withTimezone: true,
+    }),
+    ...timestamps,
+  },
+  (table) => [
+    index("telephony_message_mailbox_states_sync_idx").on(
+      table.lastSyncedAt,
+    ),
+    check(
+      "telephony_message_mailbox_states_next_page_positive",
+      sql`${table.nextPage} > 0`,
+    ),
+    check(
+      "telephony_message_mailbox_states_error_pair",
+      sql`(${table.lastFailedAt} IS NULL AND ${table.lastErrorCode} IS NULL)
+        OR (${table.lastFailedAt} IS NOT NULL AND ${table.lastErrorCode} IS NOT NULL)`,
     ),
   ],
 );

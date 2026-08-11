@@ -236,7 +236,7 @@ export function MessageComposeButton({
               <span className={byteLength > 720 ? "is-error" : ""}>{byteLength} / 720 byte</span>
             </div>
             <p className="message-compose-help">
-              이미지와 자주 쓰는 문구는 <Link href="/message-templates">내 문자 템플릿</Link>에서 만들 수 있습니다.
+              이미지와 자주 쓰는 문구는 <Link href="/messages">문자 화면의 템플릿 관리</Link>에서 만들 수 있습니다.
             </p>
             {error ? <p className="message-compose-error" role="alert">{error}</p> : null}
             {message ? (

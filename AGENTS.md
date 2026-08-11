@@ -71,6 +71,34 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-11 — 대표 문자 수신함·Case_idx 통합 문자 화면 출시 후보
+- 직원 개인 회선·binding·Windows bridge와 분리된 `representative` 센트릭스 endpoint
+  7개 메타데이터를 migration `0044_sturdy_preak.sql`에 비활성 상태로 추가했다. 원번호가
+  없는 070 회선 하나도 포함하며 현재 클릭투콜 발신 회선과 U+ 대표전화 순차착신 설정은
+  바꾸지 않는다. 비밀번호 원문·SHA-512·암호문은 코드·migration·문서에 넣지 않았고,
+  배포 뒤 TTY 전용 명령에서 `userinfo` 회선·내선 일치를 검증한 계정만 암호화 인증 원장과
+  활성 상태로 연결한다.
+- gateway에 공식 `getrecvsmslist` 수신 API와 대표 계정별 직렬 polling worker를 추가했다.
+  최신 첫 페이지와 과거 backfill을 번갈아 읽어 신규 회신이 과거 동기화에 굶지 않게 하고,
+  실패 계정도 전체 회전에서 다른 계정을 막지 않는다. 번호·본문은 AES-GCM, 중복·상대번호는
+  HMAC 지문으로 저장하며 로그에는 endpoint ID·건수·오류 코드만 남긴다.
+- 같은 상대번호의 수신은 수신시각 이전 최신 성공·전달 불명확 발신 원장을 찾아 그 발신의 상담 또는
+  리걸프렌즈 `Case_idx`를 상속한다. 동일 휴대전화번호를 공유하는 여러 고객도 최근 발신
+  맥락별로 분리되며 선행 발신이 없으면 고객을 추측하지 않고 `연결 확인 필요`로 보존한다.
+  기존 센트릭스 SMS/LMS와 SOLAPI MMS 발신은 그대로 유지한다.
+- ERP `문자` 메뉴를 `/messages` 통합 수·발신 화면으로 바꾸고 Case_idx별 시간순 말풍선,
+  고객 검색, 대표 수신함 연결·동기화 상태, 15초 대화·30초 목록 자동 보정을 추가했다. 기존
+  `/message-templates`는 새 화면으로 이동하며 개인 템플릿 생성·수정·삭제와 JPG 미리보기는
+  모달에서 재사용한다. 첫 SSR은 서버 props와 고정 state만 사용하고 portal은 사용자 클릭
+  뒤에만 연다.
+- 로컬 개발 DB 복제 임시 DB에 migration `0044`를 적용해 대표 endpoint 7·활성/인증/binding
+  0, 앱 CRUD·viewer SELECT 전용·PUBLIC 권한 0을 확인하고 임시 DB를 삭제했다. core 62개·
+  gateway 94개 테스트, 5개 패키지 typecheck·lint·production build, scripts lint, Drizzle
+  schema check와 `git diff --check`를 통과했다. root Turbo는 이 워크트리에서 package manager
+  binary 경로를 찾지 못해 같은 범위를 패키지별로 검증했다. 모바일 Chrome 실기기와 실제
+  대표계정 인증·수신 canary는 남아 있다. 운영 migration·운영 데이터 변경·배포는 수행하지
+  않았고 대표전화 조건 라우팅도 후속 범위다. `PROJECT_PLAN.md`는 v1.06이다.
+
 ### 2026-08-11 — ERP 상담 문자 배지·리걸프렌즈 무효 처리 출시 후보
 - 상담 상세 `고객 문자 발송 내역`의 grid 행이 긴 본문·오류로 높아질 때 오른쪽 상태 배지가
   행 전체 높이로 늘어나던 문제를 고쳤다. 행의 교차축 정렬을 시작점으로 고정해 `발송 완료`

@@ -800,6 +800,88 @@ test("일반 직원은 자신의 문자 템플릿을 만들고 담당 상담에 
   assert.equal(deleteActorId, realtimeActor.id);
 });
 
+test("인증된 직원은 Case_idx 문자 목록과 통합 대화를 조회한다", async (context) => {
+  let hubActorId = "";
+  let threadActorId = "";
+  let receivedThreadKey = "";
+  const telephonyService = {
+    getMessageHub: async (actor: StaffPrincipal) => {
+      hubActorId = actor.id;
+      return {
+        items: [
+          {
+            key: "case:456",
+            caseIdx: "456",
+            clientIdx: 123,
+            consultationId: null,
+            customerName: "테스트 고객",
+            phoneMasked: "010-****-5678",
+            messageCount: 2,
+            lastDirection: "inbound" as const,
+            lastMessageKind: "sms" as const,
+            lastMessagePreview: "확인했습니다.",
+            lastMessageAt: "2026-08-11T01:19:41.000Z",
+            needsConnection: false,
+          },
+        ],
+        mailboxes: [],
+      };
+    },
+    getMessageThread: async (threadKey: string, actor: StaffPrincipal) => {
+      receivedThreadKey = threadKey;
+      threadActorId = actor.id;
+      return {
+        thread: {
+          key: threadKey,
+          caseIdx: "456",
+          clientIdx: 123,
+          consultationId: null,
+          customerName: "테스트 고객",
+          phoneMasked: "010-****-5678",
+        },
+        timeline: [],
+      };
+    },
+  } as unknown as TelephonyService;
+  const authService = {
+    authorize: async () => realtimeActor,
+  } as unknown as StaffAuthService;
+  const server = createGatewayServer({
+    authService,
+    internalApiKey: "test-internal-key",
+    telephonyService,
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const headers = {
+    "x-lawand-internal-key": "test-internal-key",
+    "x-lawand-staff-session": "s".repeat(43),
+  };
+
+  const hubResponse = await fetch(
+    `http://127.0.0.1:${address.port}/v1/messages`,
+    { headers },
+  );
+  assert.equal(hubResponse.status, 200);
+  assert.equal(
+    ((await hubResponse.json()) as { items: Array<{ key: string }> }).items[0]
+      ?.key,
+    "case:456",
+  );
+  assert.equal(hubActorId, realtimeActor.id);
+
+  const threadResponse = await fetch(
+    `http://127.0.0.1:${address.port}/v1/messages/thread?key=case%3A456`,
+    { headers },
+  );
+  assert.equal(threadResponse.status, 200);
+  assert.equal(receivedThreadKey, "case:456");
+  assert.equal(threadActorId, realtimeActor.id);
+});
+
 test("통화 결과 API는 허용된 분류와 현재 직원을 서비스에 전달한다", async (context) => {
   const callId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2d1";
   let received:
