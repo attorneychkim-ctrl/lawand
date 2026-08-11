@@ -71,6 +71,23 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-11 — 통합 배포 지연 검증·외부 센트릭스 로그인 충돌 확인
+- 릴리스 `20260811T035307Z-centrex-message-inbox-v1`의 지연 검증에서도 gateway·ERP 외부
+  HTTPS는 200이고 두 앱과 Caddy는 active, 배포 이미지 ID 일치, systemd·컨테이너 재시작
+  0, error priority journal 0을 유지했다. 실제 통화와 통화/받기/문자 명령, outbox는
+  건드리지 않았다.
+- 배포 직후에는 0이던 Windows `LoginFailures`가 업무 중 2개, 이후 1개로 올라가
+  `lawand-centrex-login-failures` 경보가 ALARM으로 전환됐다. 최종 실패 대상은
+  `lawand-slot-017` 하나이며 설치 51, 배정 18, 실행 23, warm 5, assigned offline 0,
+  DPAPI queue·dead-letter 0, supervisor 정상이다. 해당 슬롯 로그는 성공 로그인 뒤
+  `STATUS=-1(NotFound)`와 자동 backoff 재로그인이 반복됐고 배정 원장은 계속
+  `connected`·heartbeat 최신이다.
+- 사용자는 해당 직원이 다른 곳에서 같은 센트릭스 계정으로 계속 로그인하는 상황일 가능성이
+  높다고 알려왔다. Windows·Caddy는 이번 릴리스에서 재시작하지 않았고 다른 슬롯은 정상이므로
+  배포 회귀가 아니라 외부 중복 로그인에 따른 세션 충돌로 추정한다. 운영 통화 보호를 위해
+  슬롯 재시작·강제 종료·재배정이나 DB 보정은 하지 않았다. 다른 기기 로그인을 종료하면
+  bridge의 다음 `STATUS=1`과 CloudWatch의 연속 정상 datapoint로 자동 해제되는지 확인한다.
+
 ### 2026-08-11 — HERDR 전수 통합·대표 문자 수신함 운영 배포·Turbo 공용 shim 복구
 - `git fetch --prune`·`git pull --ff-only origin main` 뒤 HERDR 관리 워크트리 3개와 로컬
   `worktree/*` 15개, `origin/worktree/*` 9개를 전수 대조했다. 모든 HEAD가 `main`의

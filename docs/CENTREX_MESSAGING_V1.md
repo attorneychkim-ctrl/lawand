@@ -38,6 +38,9 @@
   비활성 대표 mailbox 7개를 반환했다. 대표 비밀번호는 secret에 없으므로 추정하지 않았고,
   `centrex:link-representative` TTY 검증 전에는 polling하지 않는다. 실제 수신 backfill과
   Case_idx 통제 회신 canary는 남아 있다.
+- 지연 검증의 `lawand-centrex-login-failures` ALARM은 대표 mailbox가 아니라 직원용
+  Windows `lawand-slot-017`의 외부 중복 로그인 충돌로 추정한다. 대표 endpoint 7개는 계속
+  비활성·인증 0이고 문자 수신 worker 오류나 메시지 queue 적체는 없다.
 - 2026-08-10 migration `0041_late_talon.sql`과 gateway·ERP 릴리스
   `20260810T090235Z-customer-messaging-v1`을 운영 배포했다.
 - 인증 ERP의 전역 템플릿 화면과 상담 상세 `문자 보내기`·발송 완료 원장을 확인했다.

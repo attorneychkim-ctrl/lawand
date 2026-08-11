@@ -187,11 +187,18 @@ systemd 앱 단위와 Caddy edge 단위는 부팅 시 자동 시작한다. 최�
   `/profile`은 모두 200이다. 문자 API는 기존 대화 12개와 비활성 대표 mailbox 7개를
   반환했고 임시 세션은 0건으로 삭제했다. 대표 계정 비밀번호는 현재 secret에 없으므로
   TTY `userinfo` 검증 연결과 실제 수신 backfill·통제 회신 canary는 별도다.
-- 최종 gateway·ERP·각 Caddy active, systemd·컨테이너 재시작 0, error journal 0,
-  외부 health/login 200, CloudWatch ALARM 0이다. Windows는 설치 51, 배정 18+warm 5,
-  실행 23, 오프라인·로그인 실패·DPAPI 큐·dead-letter 0, supervisor 정상이다. 최종 읽기
-  시 실제 업무 통화 수신 1·발신 1이 진행 중이나 회선 중복과 실행 명령은 0이다. 기존
-  SOLAPI MMS 실패 4건과 일반 업무 pending outbox 9건은 변경하거나 재시도하지 않았다.
+- 배포 직후 gateway·ERP·각 Caddy active, systemd·컨테이너 재시작 0, error journal 0,
+  외부 health/login 200, CloudWatch ALARM 0이었다. Windows도 설치 51, 배정 18+warm 5,
+  실행 23, 오프라인·로그인 실패·DPAPI 큐·dead-letter 0, supervisor 정상이었다. 실제 업무
+  통화가 이어지는 동안 회선 중복과 실행 명령은 0이었고 기존 SOLAPI MMS 실패 4건과 일반
+  업무 pending outbox 9건은 변경하거나 재시도하지 않았다.
+- 지연 검증에서는 서비스·이미지·재시작·외부 HTTPS가 계속 정상인 가운데
+  `lawand-slot-017` 한 개가 성공 로그인 뒤 `STATUS=-1(NotFound)` 재접속을 반복해
+  `lawand-centrex-login-failures` 하나만 ALARM으로 바뀌었다. 배정 18+warm 5와 실행 23,
+  assigned offline 0, DPAPI 큐·dead-letter 0, supervisor와 DB heartbeat는 정상이다.
+  사용자가 같은 직원의 다른 장소 로그인 가능성이 높다고 알려와 외부 중복 로그인 충돌로 추정하고,
+  실제 통화를 보호하기 위해 슬롯 강제 종료·재배정·DB 보정은 하지 않았다. 외부 로그인이
+  끝나면 자동 `STATUS=1` 복구와 경보 해제를 확인한다.
 
 ## ERP 고객 문자·개인 템플릿 운영 배포
 
