@@ -71,6 +71,28 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-11 — 통합 문자 화면 전체 번호·MMS 이미지·대화 전환 UX 출시 후보
+- 인증·역할 검사를 통과한 `/messages` 목록과 선택 헤더는 고객 전화번호를 별표 없이 전체
+  하이픈 형식으로 표시한다. DB AES-GCM, outbox·로그 비식별과 기존 15분 단위 조회 감사는
+  유지하며 U+ 비표준 `SRC`는 원문 대신 `발신번호 확인 필요`로만 표시한다.
+- 말풍선 최대 폭을 데스크톱 360px·모바일 340px 이하로 제한하고 본문을 약 15px로 키워
+  휴대전화처럼 약 18~23자에서 줄바꿈되게 했다. 파일명 배지 대신 실제 JPG를 lazy-load하며
+  provider URL 오류 때만 `첨부 이미지를 표시할 수 없습니다`를 보여준다.
+- migration `0045_fat_ronan.sql`은 `telephony_messages.image_url_snapshot`을 추가한다. 신규
+  MMS는 파일 ID·원본명과 함께 발송 시점 SOLAPI URL을 보존하고, 기존 MMS는 현재 템플릿의
+  파일 ID가 발송 snapshot과 정확히 같은 경우에만 URL을 backfill한다. 템플릿 수정·삭제로
+  과거 문자에 다른 이미지가 표시되지 않으며 이미지 Base64는 저장하지 않는다.
+- 선택된 고객을 다시 클릭하면 `threadLoading`만 켜지고 key effect가 재실행되지 않아 다음
+  15초 polling까지 로딩이 지속되던 원인을 고쳤다. 같은 행 재클릭은 현재 대화를 유지하고,
+  요청 sequence로 빠른 고객 전환 중 늦게 끝난 이전 응답도 최신 선택을 덮어쓰지 못한다.
+- `lawand_dev`를 별도 임시 DB로 dump/restore한 뒤 migration `0045` 적용과 nullable text
+  컬럼·비 MMS URL 0건을 확인하고 임시 DB·dump를 삭제했다. 로컬에는 MMS 원장이 0건이라
+  실제 URL backfill 대상 검증은 운영 반영 전 snapshot에서 다시 집계한다. root Turbo의
+  5개 패키지 typecheck·lint·production build, core 62개·gateway 99개 테스트, Drizzle
+  schema check와 `git diff --check`를 통과했다. 운영 migration·배포·운영 데이터 변경은
+  수행하지 않았다. 메인 통합 시 `0045`와 gateway·ERP를 같은 릴리스로 배포하고 MMS 이미지,
+  전체 번호, 재클릭·빠른 전환을 인증 canary로 확인한다. `PROJECT_PLAN.md`는 v1.11이다.
+
 ### 2026-08-11 — 대표 문자 수신함 U+ 비표준 SRC 격리 출시 후보
 - 사용자가 운영 gateway의 TTY 전용 `centrex:link-representative`로 대표 계정 7개를 모두
   `userinfo` 검증 연결했다. ERP에서는 5개가 정상 동기화됐지만 `051-502-1919`와

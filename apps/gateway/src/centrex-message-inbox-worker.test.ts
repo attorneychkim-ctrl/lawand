@@ -7,7 +7,7 @@ import {
   centrexMailboxPollPage,
   parseCentrexReceivedAt,
 } from "./centrex-message-inbox-worker.js";
-import { maskedMessagePhone } from "./telephony-service.js";
+import { messagePhoneDisplay } from "./telephony-service.js";
 
 test("센트릭스 수신문자 시각을 한국 표준시로 해석한다", () => {
   assert.equal(
@@ -48,8 +48,8 @@ test("센트릭스 특수 발신 식별자는 고객 전화번호 매칭에서 �
       matchOutbound: true,
     },
   );
-  assert.equal(maskedMessagePhone("1w234567"), "발신번호 확인 필요");
-  assert.equal(maskedMessagePhone("01012345678"), "010-****-5678");
+  assert.equal(messagePhoneDisplay("1w234567"), "발신번호 확인 필요");
+  assert.equal(messagePhoneDisplay("01012345678"), "01012345678");
 });
 
 test("최신 수신함과 과거 페이지를 번갈아 읽고 backfill 완료를 보존한다", () => {

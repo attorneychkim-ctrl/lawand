@@ -95,7 +95,7 @@ export type MessageThreadSummary = {
   clientIdx: number | null;
   consultationId: string | null;
   customerName: string;
-  phoneMasked: string;
+  phone: string;
   receiptCode?: string | null;
   messageCount: number;
   lastDirection: "outbound" | "inbound";
@@ -131,7 +131,7 @@ export type MessageThread = {
     | "clientIdx"
     | "consultationId"
     | "customerName"
-    | "phoneMasked"
+    | "phone"
     | "receiptCode"
   >;
   timeline: Array<{
@@ -145,6 +145,7 @@ export type MessageThread = {
     status: string;
     staffDisplayName: string | null;
     imageAttached: boolean;
+    imageUrl: string | null;
     imageName: string | null;
     endpoint: {
       id: string;
