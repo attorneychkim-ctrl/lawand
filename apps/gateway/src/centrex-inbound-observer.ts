@@ -14,6 +14,9 @@ import {
 import { createEventId, createTelephonyCallId } from "@lawand/core";
 import {
   staffTelephonyBindings,
+  telephonyCallLegs,
+  telephonyCallProviderIdentifiers,
+  telephonyCallRoots,
   telephonyEndpoints,
   telephonyInboundCalls,
   telephonyInboundEvents,
@@ -33,6 +36,7 @@ import {
 import type { DataProtection } from "./crypto.js";
 
 type Database = ReturnType<typeof createDatabaseClient>["db"];
+type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 export const CENTREX_RING_CALLBACK_BRIDGE_ID = "uplus-ring-callback";
 export const CENTREX_INBOUND_HISTORY_BRIDGE_ID = "uplus-inbound-history";
@@ -245,6 +249,334 @@ export function createCentrexInboundObserver(options: {
   let timer: NodeJS.Timeout | undefined;
   let currentRun: Promise<void> | undefined;
 
+  async function persistObservedCallRoot(
+    tx: Transaction,
+    input: {
+      callId: string;
+      endpointId: string;
+      bridgeId: string;
+      providerCallId: string;
+      phoneCiphertext: Buffer;
+      phoneNonce: Buffer;
+      phoneKeyVersion: string;
+      phoneFingerprint: Buffer;
+      phoneMasked: string;
+      lineLast4: string;
+      state: "ringing" | "connected" | "ended";
+      ringingAt: Date;
+      connectedAt: Date | null;
+      endedAt: Date | null;
+      providerEndCause: string | null;
+      lastEventAt: Date;
+      receivedAt: Date;
+    },
+  ) {
+    const ownerRows = await tx
+      .select({ staffUserId: staffTelephonyBindings.staffUserId })
+      .from(staffTelephonyBindings)
+      .where(
+        and(
+          eq(staffTelephonyBindings.endpointId, input.endpointId),
+          eq(staffTelephonyBindings.isActive, true),
+        ),
+      )
+      .limit(2);
+    const staffUserId =
+      ownerRows.length === 1 ? ownerRows[0]!.staffUserId : null;
+    const [linkedCall] = await tx
+      .select({
+        rootId: telephonyInboundCalls.callRootId,
+        legId: telephonyInboundCalls.callLegId,
+      })
+      .from(telephonyInboundCalls)
+      .where(eq(telephonyInboundCalls.id, input.callId))
+      .limit(1);
+    const [identifierMatch] = !linkedCall?.rootId
+      ? await tx
+          .select({
+            rootId: telephonyCallProviderIdentifiers.rootId,
+            legId: telephonyCallProviderIdentifiers.legId,
+          })
+          .from(telephonyCallProviderIdentifiers)
+          .where(
+            and(
+              eq(telephonyCallProviderIdentifiers.endpointId, input.endpointId),
+              eq(telephonyCallProviderIdentifiers.provider, "centrex"),
+              eq(
+                telephonyCallProviderIdentifiers.providerValue,
+                input.providerCallId,
+              ),
+            ),
+          )
+          .limit(1)
+      : [];
+    const [timeMatch] = !linkedCall?.rootId && !identifierMatch
+      ? await tx
+          .select({
+            rootId: telephonyCallRoots.id,
+            legId: telephonyCallLegs.id,
+          })
+          .from(telephonyCallRoots)
+          .innerJoin(
+            telephonyCallLegs,
+            and(
+              eq(telephonyCallLegs.rootId, telephonyCallRoots.id),
+              eq(telephonyCallLegs.kind, "customer"),
+              eq(telephonyCallLegs.endpointId, input.endpointId),
+            ),
+          )
+          .where(
+            and(
+              eq(telephonyCallRoots.scope, "external"),
+              eq(telephonyCallRoots.direction, "inbound"),
+              eq(telephonyCallRoots.originalEndpointId, input.endpointId),
+              eq(
+                telephonyCallRoots.remotePhoneFingerprint,
+                input.phoneFingerprint,
+              ),
+              gte(
+                telephonyCallRoots.startedAt,
+                new Date(input.ringingAt.getTime() - 30_000),
+              ),
+              lte(
+                telephonyCallRoots.startedAt,
+                new Date(input.ringingAt.getTime() + 5_000),
+              ),
+            ),
+          )
+          .orderBy(desc(telephonyCallRoots.startedAt))
+          .limit(1)
+          .for("update")
+      : [];
+    const rootId =
+      linkedCall?.rootId ?? identifierMatch?.rootId ?? timeMatch?.rootId ?? input.callId;
+    let legId = linkedCall?.legId ?? identifierMatch?.legId ?? timeMatch?.legId ?? null;
+
+    let [root] = await tx
+      .select()
+      .from(telephonyCallRoots)
+      .where(eq(telephonyCallRoots.id, rootId))
+      .limit(1)
+      .for("update");
+    if (!root) {
+      [root] = await tx
+        .insert(telephonyCallRoots)
+        .values({
+          id: rootId,
+          provider: "centrex",
+          scope: "external",
+          direction: "inbound",
+          state: input.state,
+          correlationStatus: "confirmed",
+          originalEndpointId: input.endpointId,
+          currentEndpointId: input.endpointId,
+          finalEndpointId: input.state === "ended" ? input.endpointId : null,
+          finalStaffUserId: input.state === "ended" ? staffUserId : null,
+          remotePhoneCiphertext: input.phoneCiphertext,
+          remotePhoneNonce: input.phoneNonce,
+          remotePhoneKeyVersion: input.phoneKeyVersion,
+          remotePhoneFingerprint: input.phoneFingerprint,
+          remotePhoneMasked: input.phoneMasked,
+          originalLineLast4: input.lineLast4,
+          startedAt: input.ringingAt,
+          connectedAt: input.connectedAt,
+          endedAt: input.endedAt,
+          lastEventAt: input.lastEventAt,
+          createdAt: input.receivedAt,
+          updatedAt: input.receivedAt,
+        })
+        .returning();
+    }
+    if (!root) throw new Error("centrex_observed_call_root_not_persisted");
+
+    let [leg] = legId
+      ? await tx
+          .select()
+          .from(telephonyCallLegs)
+          .where(eq(telephonyCallLegs.id, legId))
+          .limit(1)
+          .for("update")
+      : [];
+    if (!leg) {
+      [leg] = await tx
+        .insert(telephonyCallLegs)
+        .values({
+          id: createTelephonyCallId(),
+          rootId,
+          endpointId: input.endpointId,
+          staffUserId,
+          bridgeId: input.bridgeId,
+          kind: "customer",
+          direction: "inbound",
+          state: input.state,
+          remotePartyKind: "external",
+          providerCallId: input.providerCallId,
+          providerEndCause:
+            input.state === "ended"
+              ? input.providerEndCause ?? "provider_history_unknown"
+              : null,
+          correlationStatus: "confirmed",
+          startedAt: input.ringingAt,
+          connectedAt: input.connectedAt,
+          endedAt: input.endedAt,
+          lastEventAt: input.lastEventAt,
+          createdAt: input.receivedAt,
+          updatedAt: input.receivedAt,
+        })
+        .onConflictDoNothing()
+        .returning();
+    }
+    if (!leg) {
+      [leg] = await tx
+        .select()
+        .from(telephonyCallLegs)
+        .where(
+          and(
+            eq(telephonyCallLegs.endpointId, input.endpointId),
+            eq(telephonyCallLegs.providerCallId, input.providerCallId),
+          ),
+        )
+        .limit(1)
+        .for("update");
+    }
+    if (!leg) throw new Error("centrex_observed_call_leg_not_persisted");
+    legId = leg.id;
+
+    if (input.state === "ended" && root.state !== "ended") {
+      const endedAt = input.endedAt ?? input.lastEventAt;
+      const [endedLeg] = await tx
+        .update(telephonyCallLegs)
+        .set({
+          state: "ended",
+          staffUserId: leg.staffUserId ?? staffUserId,
+          providerEndCause:
+            input.providerEndCause ?? "provider_history_unknown",
+          startedAt:
+            leg.startedAt <= input.ringingAt ? leg.startedAt : input.ringingAt,
+          connectedAt: leg.connectedAt ?? input.connectedAt,
+          endedAt: endedAt >= leg.startedAt ? endedAt : leg.startedAt,
+          lastEventAt:
+            leg.lastEventAt >= input.lastEventAt
+              ? leg.lastEventAt
+              : input.lastEventAt,
+          updatedAt: input.receivedAt,
+        })
+        .where(eq(telephonyCallLegs.id, leg.id))
+        .returning();
+      if (endedLeg) leg = endedLeg;
+      const activeLegs = await tx
+        .select({
+          kind: telephonyCallLegs.kind,
+          state: telephonyCallLegs.state,
+        })
+        .from(telephonyCallLegs)
+        .where(
+          and(
+            eq(telephonyCallLegs.rootId, rootId),
+            sql`${telephonyCallLegs.id} <> ${leg.id}`,
+            inArray(telephonyCallLegs.state, ["ringing", "connected"]),
+          ),
+        );
+      const activeCustomers = activeLegs.filter(
+        (item) => item.kind === "customer",
+      );
+      const nextState = activeCustomers.some(
+        (item) => item.state === "connected",
+      )
+        ? "connected"
+        : activeCustomers.length
+          ? "transferring"
+          : activeLegs.length
+            ? "needs_confirmation"
+            : "ended";
+      const rootEnded = nextState === "ended";
+      const normalizedEndedAt = endedAt >= root.startedAt ? endedAt : root.startedAt;
+      await tx
+        .update(telephonyCallRoots)
+        .set({
+          state: nextState,
+          correlationStatus:
+            nextState === "needs_confirmation"
+              ? "needs_confirmation"
+              : root.correlationStatus,
+          finalEndpointId: rootEnded ? leg.endpointId : root.finalEndpointId,
+          finalStaffUserId: rootEnded ? leg.staffUserId : root.finalStaffUserId,
+          endedAt: rootEnded ? normalizedEndedAt : null,
+          lastEventAt:
+            root.lastEventAt >= input.lastEventAt
+              ? root.lastEventAt
+              : input.lastEventAt,
+          updatedAt: input.receivedAt,
+        })
+        .where(eq(telephonyCallRoots.id, rootId));
+    } else if (input.state !== "ended" && root.state !== "ended") {
+      const nextLegState =
+        input.state === "connected" || leg.state === "connected"
+          ? "connected"
+          : leg.state;
+      await tx
+        .update(telephonyCallLegs)
+        .set({
+          state: nextLegState,
+          startedAt:
+            leg.startedAt <= input.ringingAt ? leg.startedAt : input.ringingAt,
+          connectedAt: leg.connectedAt ?? input.connectedAt,
+          lastEventAt:
+            leg.lastEventAt >= input.lastEventAt
+              ? leg.lastEventAt
+              : input.lastEventAt,
+          updatedAt: input.receivedAt,
+        })
+        .where(eq(telephonyCallLegs.id, leg.id));
+      await tx
+        .update(telephonyCallRoots)
+        .set({
+          state:
+            input.state === "connected" && root.state === "ringing"
+              ? "connected"
+              : root.state,
+          startedAt:
+            root.startedAt <= input.ringingAt ? root.startedAt : input.ringingAt,
+          connectedAt: root.connectedAt ?? input.connectedAt,
+          lastEventAt:
+            root.lastEventAt >= input.lastEventAt
+              ? root.lastEventAt
+              : input.lastEventAt,
+          updatedAt: input.receivedAt,
+        })
+        .where(eq(telephonyCallRoots.id, rootId));
+    }
+    await tx
+      .insert(telephonyCallProviderIdentifiers)
+      .values({
+        id: createEventId(),
+        rootId,
+        legId,
+        endpointId: input.endpointId,
+        provider: "centrex",
+        role: "root",
+        providerValue: input.providerCallId,
+        firstObservedAt: input.ringingAt,
+        lastObservedAt: input.lastEventAt,
+        createdAt: input.receivedAt,
+      })
+      .onConflictDoUpdate({
+        target: [
+          telephonyCallProviderIdentifiers.endpointId,
+          telephonyCallProviderIdentifiers.role,
+          telephonyCallProviderIdentifiers.providerValue,
+        ],
+        set: {
+          firstObservedAt: sql`least(${telephonyCallProviderIdentifiers.firstObservedAt}, ${input.ringingAt})`,
+          lastObservedAt: sql`greatest(${telephonyCallProviderIdentifiers.lastObservedAt}, ${input.lastEventAt})`,
+        },
+      });
+    await tx
+      .update(telephonyInboundCalls)
+      .set({ callRootId: rootId, callLegId: legId })
+      .where(eq(telephonyInboundCalls.id, input.callId));
+  }
+
   function matchesPath(pathname: string): boolean {
     const actual = Buffer.from(pathname);
     const expected = Buffer.from(callbackPath);
@@ -426,6 +758,25 @@ export function createCentrexInboundObserver(options: {
         lastEventAt: receivedAt,
         createdAt: receivedAt,
         updatedAt: receivedAt,
+      });
+      await persistObservedCallRoot(tx, {
+        callId,
+        endpointId: endpoint.id,
+        bridgeId: CENTREX_RING_CALLBACK_BRIDGE_ID,
+        providerCallId,
+        phoneCiphertext: encryptedPhone.ciphertext,
+        phoneNonce: encryptedPhone.nonce,
+        phoneKeyVersion: encryptedPhone.keyVersion,
+        phoneFingerprint,
+        phoneMasked: maskedPhone(sender),
+        lineLast4: receiver.slice(-4),
+        state: "ringing",
+        ringingAt: receivedAt,
+        connectedAt: null,
+        endedAt: null,
+        providerEndCause: null,
+        lastEventAt: receivedAt,
+        receivedAt,
       });
       const hashes = eventHashes(protection, {
         eventId,
@@ -647,6 +998,25 @@ export function createCentrexInboundObserver(options: {
             updatedAt: currentTime,
           })
           .where(eq(telephonyInboundCalls.id, call.id));
+        await persistObservedCallRoot(tx, {
+          callId: call.id,
+          endpointId: endpoint.id,
+          bridgeId: call.bridgeId,
+          providerCallId: call.providerCallId,
+          phoneCiphertext: call.remotePhoneCiphertext,
+          phoneNonce: call.remotePhoneNonce,
+          phoneKeyVersion: call.remotePhoneKeyVersion,
+          phoneFingerprint: call.remotePhoneFingerprint,
+          phoneMasked: call.remotePhoneMasked,
+          lineLast4: call.incomingLineLast4,
+          state: "ended",
+          ringingAt: timeline.ringingAt,
+          connectedAt: timeline.connectedAt,
+          endedAt: timeline.endedAt,
+          providerEndCause,
+          lastEventAt: timeline.endedAt,
+          receivedAt: currentTime,
+        });
         await persistHistoryEvent(tx, {
           eventType: "inbound.ended",
           inboundCallId: call.id,
@@ -692,6 +1062,25 @@ export function createCentrexInboundObserver(options: {
         lastEventAt: timeline.endedAt,
         createdAt: currentTime,
         updatedAt: currentTime,
+      });
+      await persistObservedCallRoot(tx, {
+        callId,
+        endpointId: endpoint.id,
+        bridgeId: CENTREX_INBOUND_HISTORY_BRIDGE_ID,
+        providerCallId,
+        phoneCiphertext: encryptedPhone.ciphertext,
+        phoneNonce: encryptedPhone.nonce,
+        phoneKeyVersion: encryptedPhone.keyVersion,
+        phoneFingerprint,
+        phoneMasked: maskedPhone(remotePhone),
+        lineLast4: endpoint.lineNumber.slice(-4),
+        state: "ended",
+        ringingAt: timeline.ringingAt,
+        connectedAt: timeline.connectedAt,
+        endedAt: timeline.endedAt,
+        providerEndCause,
+        lastEventAt: timeline.endedAt,
+        receivedAt: currentTime,
       });
       await persistHistoryEvent(tx, {
         eventType: "inbound.ringing",

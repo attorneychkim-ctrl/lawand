@@ -313,6 +313,12 @@ svg {
   box-shadow: 0 0 0 5px color-mix(in srgb, var(--info) 13%, transparent);
 }
 
+.inbound-call-card.is-transferring .inbound-call-icon,
+.inbound-call-card.is-needs_confirmation .inbound-call-icon {
+  background: var(--warning);
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--warning) 13%, transparent);
+}
+
 .inbound-call-card.is-ended .inbound-call-icon {
   background: var(--muted-2);
   box-shadow: none;
@@ -369,6 +375,46 @@ a.inbound-customer:hover { text-decoration: underline; }
 
 .inbound-call-card.is-connected .inbound-call-title strong {
   color: var(--info);
+}
+
+.inbound-call-card.is-transferring .inbound-call-title strong,
+.inbound-call-card.is-needs_confirmation .inbound-call-title strong {
+  color: var(--warning);
+}
+
+.telephony-toast-stack {
+  position: fixed;
+  z-index: 120;
+  right: 20px;
+  top: 86px;
+  display: grid;
+  width: min(390px, calc(100vw - 32px));
+  gap: 10px;
+}
+
+.telephony-toast {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--brand) 36%, var(--line));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 94%, var(--brand-soft));
+  color: var(--ink);
+  box-shadow: 0 16px 44px rgb(31 41 55 / 16%);
+  cursor: pointer;
+  text-align: left;
+}
+
+.telephony-toast strong {
+  color: var(--brand-strong);
+  font-size: .86rem;
+}
+
+.telephony-toast span {
+  color: var(--muted);
+  font-size: .74rem;
+  line-height: 1.55;
+  white-space: pre-line;
 }
 
 .inbound-call-card.is-ended .inbound-call-title strong {

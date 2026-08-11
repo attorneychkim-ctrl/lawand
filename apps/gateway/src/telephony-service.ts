@@ -12,6 +12,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 
 import {
   assertPlatformEvent,
@@ -41,6 +42,7 @@ import {
   messageTemplates,
   outboxEvents,
   staffAuditLogs,
+  staffExternalAccounts,
   staffMemberships,
   staffProfiles,
   staffUsers,
@@ -48,7 +50,10 @@ import {
   telephonyCallObservationLinks,
   telephonyCallAftercare,
   telephonyCallDirectoryTargets,
+  telephonyCallLegs,
   telephonyCalls,
+  telephonyCallRelations,
+  telephonyCallRoots,
   telephonyEndpointCredentials,
   telephonyEndpoints,
   telephonyInboundCalls,
@@ -79,6 +84,10 @@ const INBOUND_ANSWER_COMMAND_TTL_MS = 20_000;
 const INBOUND_ANSWER_DISPATCH_TIMEOUT_MS = 3 * 60_000;
 const PHONE_DESK_DEFAULT_LIMIT = 50;
 const PHONE_DESK_MAX_LIMIT = 100;
+const callRootCurrentEndpoint = alias(
+  telephonyEndpoints,
+  "call_root_current_endpoint",
+);
 
 type InboundAnswerCommandStatus =
   | "queued"
@@ -125,6 +134,9 @@ export type PhoneCustomerMatch =
       source: "legal_friends";
       clientName: string;
       cases: Array<{
+        caseIdx: number;
+        caseNumber: string | null;
+        caseName: string | null;
         caseType: number;
         caseState: number;
         isClosed: boolean;
@@ -133,12 +145,16 @@ export type PhoneCustomerMatch =
         caseCreatedOn: string;
         caseUpdatedOn: string;
         staffNames: string[];
+        staffUserIds: string[];
       }>;
     }
   | null;
 
 type LegalFriendsDirectoryRow = {
   client_name: string | null;
+  case_idx: number;
+  case_number: string | null;
+  case_name: string | null;
   case_type: number;
   case_state: number;
   is_closed: number | null;
@@ -146,6 +162,9 @@ type LegalFriendsDirectoryRow = {
   primary_staff_name: string | null;
   secondary_staff_name: string | null;
   tertiary_staff_name: string | null;
+  primary_member_idx: number | null;
+  secondary_member_idx: number | null;
+  tertiary_member_idx: number | null;
   court_name: string | null;
   case_created_on: string;
   case_updated_on: string;
@@ -394,11 +413,66 @@ export function createTelephonyService(options: {
     const rows = result.rows as LegalFriendsDirectoryRow[];
     if (rows.length === 0) return null;
 
+    const memberIndexes = [
+      ...new Set(
+        rows
+          .flatMap((row) => [
+            row.primary_member_idx,
+            row.secondary_member_idx,
+            row.tertiary_member_idx,
+          ])
+          .filter(
+            (value): value is number =>
+              Number.isInteger(value) && (value ?? 0) > 0,
+          ),
+      ),
+    ];
+    const linkedStaff = memberIndexes.length
+      ? await db
+          .select({
+            memberIdx: staffExternalAccounts.externalMemberIdx,
+            staffUserId: staffExternalAccounts.staffUserId,
+          })
+          .from(staffExternalAccounts)
+          .innerJoin(
+            staffUsers,
+            and(
+              eq(staffUsers.id, staffExternalAccounts.staffUserId),
+              eq(staffUsers.status, "active"),
+            ),
+          )
+          .innerJoin(
+            staffMemberships,
+            and(
+              eq(staffMemberships.userId, staffExternalAccounts.staffUserId),
+              eq(staffMemberships.isPrimary, true),
+              eq(staffMemberships.isActive, true),
+            ),
+          )
+          .where(
+            and(
+              eq(staffExternalAccounts.provider, "legalfriends"),
+              eq(staffExternalAccounts.isActive, true),
+              inArray(staffExternalAccounts.externalMemberIdx, memberIndexes),
+            ),
+          )
+      : [];
+    const staffByMemberIdx = new Map(
+      linkedStaff.flatMap((item) =>
+        item.memberIdx === null
+          ? []
+          : [[item.memberIdx, item.staffUserId] as const],
+      ),
+    );
+
     const clientName = rows.find((row) => row.client_name)?.client_name ?? "이름 미확인";
     return {
       source: "legal_friends",
       clientName,
       cases: rows.map((row) => ({
+        caseIdx: row.case_idx,
+        caseNumber: row.case_number,
+        caseName: row.case_name,
         caseType: row.case_type,
         caseState: row.case_state,
         isClosed: row.is_closed === 1,
@@ -411,6 +485,16 @@ export function createTelephonyService(options: {
           row.secondary_staff_name,
           row.tertiary_staff_name,
         ].filter((name): name is string => Boolean(name)),
+        staffUserIds: [
+          row.primary_member_idx,
+          row.secondary_member_idx,
+          row.tertiary_member_idx,
+        ].flatMap((memberIdx) => {
+          const staffUserId = memberIdx
+            ? staffByMemberIdx.get(memberIdx)
+            : undefined;
+          return staffUserId ? [staffUserId] : [];
+        }),
       })),
     };
   }
@@ -562,6 +646,312 @@ export function createTelephonyService(options: {
       .orderBy(desc(telephonyInboundCommands.requestedAt))
       .limit(1);
     return command ? inboundAnswerCommandResponse(command) : null;
+  }
+
+  async function getCallActivitySnapshot(actor: StaffPrincipal) {
+    const snapshotAt = now();
+    const rows = await db
+      .select({
+        id: telephonyCallRoots.id,
+        scope: telephonyCallRoots.scope,
+        direction: telephonyCallRoots.direction,
+        state: telephonyCallRoots.state,
+        correlationStatus: telephonyCallRoots.correlationStatus,
+        originalEndpointId: telephonyCallRoots.originalEndpointId,
+        currentEndpointId: telephonyCallRoots.currentEndpointId,
+        finalStaffUserId: telephonyCallRoots.finalStaffUserId,
+        remotePhoneCiphertext: telephonyCallRoots.remotePhoneCiphertext,
+        remotePhoneNonce: telephonyCallRoots.remotePhoneNonce,
+        remotePhoneKeyVersion: telephonyCallRoots.remotePhoneKeyVersion,
+        originalLineLast4: telephonyCallRoots.originalLineLast4,
+        startedAt: telephonyCallRoots.startedAt,
+        connectedAt: telephonyCallRoots.connectedAt,
+        endedAt: telephonyCallRoots.endedAt,
+        lastEventAt: telephonyCallRoots.lastEventAt,
+        endpointLabel: telephonyEndpoints.label,
+        endpointLineNumber: telephonyEndpoints.lineNumber,
+        endpointExtension: telephonyEndpoints.extension,
+        legId: telephonyCallLegs.id,
+        legEndpointId: telephonyCallLegs.endpointId,
+        legStaffUserId: telephonyCallLegs.staffUserId,
+        legKind: telephonyCallLegs.kind,
+        legDirection: telephonyCallLegs.direction,
+        legState: telephonyCallLegs.state,
+        legRemoteExtension: telephonyCallLegs.remoteExtension,
+        legStartedAt: telephonyCallLegs.startedAt,
+        legDisplayName: staffProfiles.displayName,
+      })
+      .from(telephonyCallRoots)
+      .innerJoin(
+        telephonyEndpoints,
+        eq(telephonyEndpoints.id, telephonyCallRoots.currentEndpointId),
+      )
+      .leftJoin(
+        telephonyCallLegs,
+        eq(telephonyCallLegs.rootId, telephonyCallRoots.id),
+      )
+      .leftJoin(
+        staffProfiles,
+        eq(staffProfiles.userId, telephonyCallLegs.staffUserId),
+      )
+      .where(
+        or(
+          and(
+            ne(telephonyCallRoots.state, "ended"),
+            gte(
+              telephonyCallRoots.lastEventAt,
+              new Date(snapshotAt.getTime() - INBOUND_CONNECTED_SNAPSHOT_WINDOW_MS),
+            ),
+          ),
+          and(
+            eq(telephonyCallRoots.state, "ended"),
+            gte(
+              telephonyCallRoots.endedAt,
+              new Date(snapshotAt.getTime() - INBOUND_ENDED_SNAPSHOT_WINDOW_MS),
+            ),
+          ),
+        ),
+      )
+      .orderBy(desc(telephonyCallRoots.lastEventAt));
+
+    const rootIds = [...new Set(rows.map((row) => row.id))];
+    if (rootIds.length === 0) {
+      return { snapshotAt: snapshotAt.toISOString(), items: [] };
+    }
+    const [relationRows, observedRows] = await Promise.all([
+      db
+        .select()
+        .from(telephonyCallRelations)
+        .where(inArray(telephonyCallRelations.rootId, rootIds))
+        .orderBy(desc(telephonyCallRelations.occurredAt)),
+      db
+        .select({
+          rootId: telephonyInboundCalls.callRootId,
+          observedCallId: telephonyInboundCalls.id,
+        })
+        .from(telephonyInboundCalls)
+        .where(inArray(telephonyInboundCalls.callRootId, rootIds)),
+    ]);
+    const observedByRoot = new Map(
+      observedRows.flatMap((row) =>
+        row.rootId ? [[row.rootId, row.observedCallId] as const] : [],
+      ),
+    );
+    const relationsByRoot = new Map<string, typeof relationRows>();
+    for (const relation of relationRows) {
+      const current = relationsByRoot.get(relation.rootId) ?? [];
+      current.push(relation);
+      relationsByRoot.set(relation.rootId, current);
+    }
+
+    const grouped = new Map<string, (typeof rows)[number][]>();
+    for (const row of rows) {
+      const current = grouped.get(row.id) ?? [];
+      current.push(row);
+      grouped.set(row.id, current);
+    }
+    const allActiveStaff = await activePhoneDeskStaff();
+    const activityEndpointIds = [
+      ...new Set(
+        rows
+          .flatMap((row) => [
+            row.originalEndpointId,
+            row.currentEndpointId,
+            row.legEndpointId,
+          ])
+          .filter((endpointId): endpointId is string => Boolean(endpointId)),
+      ),
+    ];
+    const activityOwnerRows = await db
+      .select({
+        endpointId: staffTelephonyBindings.endpointId,
+        staffUserId: staffTelephonyBindings.staffUserId,
+      })
+      .from(staffTelephonyBindings)
+      .innerJoin(
+        staffUsers,
+        and(
+          eq(staffUsers.id, staffTelephonyBindings.staffUserId),
+          eq(staffUsers.status, "active"),
+        ),
+      )
+      .innerJoin(
+        staffMemberships,
+        and(
+          eq(staffMemberships.userId, staffTelephonyBindings.staffUserId),
+          eq(staffMemberships.isPrimary, true),
+          eq(staffMemberships.isActive, true),
+        ),
+      )
+      .where(
+        and(
+          inArray(staffTelephonyBindings.endpointId, activityEndpointIds),
+          eq(staffTelephonyBindings.isActive, true),
+        ),
+      );
+    const ownersByActivityEndpoint = new Map<string, string[]>();
+    for (const owner of activityOwnerRows) {
+      const current = ownersByActivityEndpoint.get(owner.endpointId) ?? [];
+      current.push(owner.staffUserId);
+      ownersByActivityEndpoint.set(owner.endpointId, current);
+    }
+    const items = [];
+    for (const rootRows of grouped.values()) {
+      const root = rootRows[0];
+      if (!root) continue;
+      const participants = rootRows.flatMap((row) =>
+        row.legId
+          ? [
+              {
+                legId: row.legId,
+                endpointId: row.legEndpointId!,
+                staffUserId: row.legStaffUserId,
+                displayName: row.legDisplayName,
+                kind: row.legKind!,
+                direction: row.legDirection!,
+                state: row.legState!,
+                remoteExtension: row.legRemoteExtension,
+                startedAt: row.legStartedAt!.toISOString(),
+              },
+            ]
+          : [],
+      );
+      if (
+        root.scope === "internal" &&
+        !participants.some(
+          (participant) =>
+            participant.staffUserId === actor.id ||
+            ownersByActivityEndpoint
+              .get(participant.endpointId)
+              ?.includes(actor.id),
+        )
+      ) {
+        continue;
+      }
+      const remotePhone =
+        root.scope === "external" &&
+        root.remotePhoneCiphertext &&
+        root.remotePhoneNonce &&
+        root.remotePhoneKeyVersion
+          ? protection.decrypt(
+              {
+                ciphertext: root.remotePhoneCiphertext,
+                nonce: root.remotePhoneNonce,
+                keyVersion: root.remotePhoneKeyVersion,
+              },
+              `telephony_inbound_calls/${root.id}/remote_phone`,
+            )
+          : null;
+      const customerMatch = remotePhone
+        ? await resolvePhoneCustomer(remotePhone)
+        : null;
+      const relations = relationsByRoot.get(root.id) ?? [];
+      const latestRelation = relations[0] ?? null;
+      const participantByLeg = new Map(
+        participants.map((participant) => [participant.legId, participant]),
+      );
+      let notificationKind:
+        | "external_inbound"
+        | "internal_inbound"
+        | "transferred_customer"
+        | "transfer_returned"
+        | null = null;
+      let notificationTargetUserIds: string[] = [];
+      if (
+        latestRelation?.relationType === "transfer_completed" ||
+        latestRelation?.relationType === "transfer_attempted"
+      ) {
+        const targetParticipant = latestRelation.toLegId
+          ? participantByLeg.get(latestRelation.toLegId)
+          : null;
+        if (targetParticipant?.direction === "inbound") {
+          notificationKind = "transferred_customer";
+          notificationTargetUserIds.push(
+            ...(ownersByActivityEndpoint.get(targetParticipant.endpointId) ??
+              (targetParticipant.staffUserId
+                ? [targetParticipant.staffUserId]
+                : [])),
+          );
+        }
+      } else if (latestRelation?.relationType === "transfer_returned") {
+        notificationKind = "transfer_returned";
+        const targetParticipant = latestRelation.fromLegId
+          ? participantByLeg.get(latestRelation.fromLegId)
+          : null;
+        if (targetParticipant) {
+          notificationTargetUserIds.push(
+            ...(ownersByActivityEndpoint.get(targetParticipant.endpointId) ??
+              (targetParticipant.staffUserId
+                ? [targetParticipant.staffUserId]
+                : [])),
+          );
+        }
+      } else if (root.scope === "internal") {
+        notificationKind = "internal_inbound";
+        notificationTargetUserIds = participants.flatMap((participant) =>
+          participant.direction === "inbound"
+            ? ownersByActivityEndpoint.get(participant.endpointId) ??
+              (participant.staffUserId ? [participant.staffUserId] : [])
+            : [],
+        );
+      } else if (root.direction === "inbound") {
+        notificationKind = "external_inbound";
+        notificationTargetUserIds = [
+          ...new Set(
+            rootRows.flatMap((row) =>
+              ownersByActivityEndpoint.get(row.legEndpointId ?? "") ?? [],
+            ),
+          ),
+        ];
+        if (customerMatch?.source === "consultation") {
+          const assignee = customerMatch.consultation.assigneeUserId;
+          if (assignee) notificationTargetUserIds.push(assignee);
+        } else if (customerMatch?.source === "legal_friends") {
+          notificationTargetUserIds.push(
+            ...customerMatch.cases.flatMap((item) => item.staffUserIds),
+          );
+        }
+      }
+      notificationTargetUserIds = [...new Set(notificationTargetUserIds)];
+      if (notificationKind && notificationTargetUserIds.length === 0) {
+        notificationTargetUserIds = allActiveStaff.map(
+          (staff) => staff.staffUserId,
+        );
+      }
+      items.push({
+        id: root.id,
+        observedCallId: observedByRoot.get(root.id) ?? null,
+        scope: root.scope,
+        direction: root.direction,
+        state: root.state,
+        correlationStatus: root.correlationStatus,
+        remotePhone,
+        originalLineLast4: root.originalLineLast4,
+        startedAt: root.startedAt.toISOString(),
+        connectedAt: root.connectedAt?.toISOString() ?? null,
+        endedAt: root.endedAt?.toISOString() ?? null,
+        lastEventAt: root.lastEventAt.toISOString(),
+        currentEndpoint: {
+          id: root.currentEndpointId!,
+          label: root.endpointLabel,
+          lineNumber: root.endpointLineNumber,
+          extension: root.endpointExtension,
+        },
+        participants,
+        transfer: latestRelation
+          ? {
+              state: latestRelation.relationType,
+              correlationStatus: latestRelation.correlationStatus,
+            }
+          : null,
+        customerMatch,
+        notificationKind,
+        notificationTargetUserIds,
+        canOpenAftercare:
+          root.state === "ended" && root.finalStaffUserId === actor.id,
+      });
+    }
+    return { snapshotAt: snapshotAt.toISOString(), items };
   }
 
   async function getInboundCallSnapshot() {
@@ -722,6 +1112,13 @@ export function createTelephonyService(options: {
     const observedRows = await db
       .select({
         id: telephonyInboundCalls.id,
+        callRootId: telephonyInboundCalls.callRootId,
+        rootState: telephonyCallRoots.state,
+        rootStartedAt: telephonyCallRoots.startedAt,
+        rootConnectedAt: telephonyCallRoots.connectedAt,
+        rootEndedAt: telephonyCallRoots.endedAt,
+        rootLastEventAt: telephonyCallRoots.lastEventAt,
+        rootFinalStaffUserId: telephonyCallRoots.finalStaffUserId,
         direction: telephonyInboundCalls.direction,
         bridgeId: telephonyInboundCalls.bridgeId,
         state: telephonyInboundCalls.state,
@@ -737,6 +1134,10 @@ export function createTelephonyService(options: {
         endpointLabel: telephonyEndpoints.label,
         endpointLineNumber: telephonyEndpoints.lineNumber,
         endpointExtension: telephonyEndpoints.extension,
+        rootEndpointId: callRootCurrentEndpoint.id,
+        rootEndpointLabel: callRootCurrentEndpoint.label,
+        rootEndpointLineNumber: callRootCurrentEndpoint.lineNumber,
+        rootEndpointExtension: callRootCurrentEndpoint.extension,
         linkedCallId: telephonyCallObservationLinks.telephonyCallId,
         linkMethod: telephonyCallObservationLinks.matchMethod,
         linkTimeDeltaMs: telephonyCallObservationLinks.timeDeltaMs,
@@ -768,6 +1169,14 @@ export function createTelephonyService(options: {
         eq(telephonyEndpoints.id, telephonyInboundCalls.endpointId),
       )
       .leftJoin(
+        telephonyCallRoots,
+        eq(telephonyCallRoots.id, telephonyInboundCalls.callRootId),
+      )
+      .leftJoin(
+        callRootCurrentEndpoint,
+        eq(callRootCurrentEndpoint.id, telephonyCallRoots.currentEndpointId),
+      )
+      .leftJoin(
         telephonyCallObservationLinks,
         eq(
           telephonyCallObservationLinks.observedCallId,
@@ -797,6 +1206,7 @@ export function createTelephonyService(options: {
         callId
           ? or(
               eq(telephonyInboundCalls.id, callId),
+              eq(telephonyInboundCalls.callRootId, callId),
               eq(telephonyCallObservationLinks.telephonyCallId, callId),
             )
           : undefined,
@@ -888,6 +1298,9 @@ export function createTelephonyService(options: {
     const endpointIds = [
       ...new Set([
         ...observedRows.map((row) => row.endpointId),
+        ...observedRows.flatMap((row) =>
+          row.rootEndpointId ? [row.rootEndpointId] : [],
+        ),
         ...standaloneClickRows.map((row) => row.endpointId),
       ]),
     ];
@@ -984,11 +1397,14 @@ export function createTelephonyService(options: {
               ),
             )
           : null;
-        const durationSeconds = row.connectedAt && row.endedAt
+        const effectiveConnectedAt = row.rootConnectedAt ?? row.connectedAt;
+        const effectiveEndedAt = row.rootEndedAt ?? row.endedAt;
+        const durationSeconds = effectiveConnectedAt && effectiveEndedAt
           ? Math.max(
               0,
               Math.round(
-                (row.endedAt.getTime() - row.connectedAt.getTime()) / 1_000,
+                (effectiveEndedAt.getTime() - effectiveConnectedAt.getTime()) /
+                  1_000,
               ),
             )
           : null;
@@ -1019,8 +1435,9 @@ export function createTelephonyService(options: {
             (hasConsultationTarget || hasDirectoryTarget),
         );
         return {
-          id: row.id,
+          id: row.callRootId ?? row.id,
           observedCallId: row.id,
+          callRootId: row.callRootId,
           direction: row.direction,
           receptionMode:
             row.direction === "inbound"
@@ -1034,23 +1451,34 @@ export function createTelephonyService(options: {
               : hasClickToCall
                 ? ("click_to_call" as const)
                 : ("centrex_direct" as const),
-          state: row.state,
+          state: row.rootState
+            ? row.rootState === "ended"
+              ? ("ended" as const)
+              : row.rootState === "ringing"
+                ? ("ringing" as const)
+                : row.rootState === "needs_confirmation"
+                  ? ("unknown" as const)
+                  : ("connected" as const)
+            : row.state,
           remotePhone,
-          occurredAt: row.ringingAt.toISOString(),
-          ringingAt: row.ringingAt.toISOString(),
-          connectedAt: row.connectedAt?.toISOString() ?? null,
-          endedAt: row.endedAt?.toISOString() ?? null,
-          lastEventAt: row.lastEventAt.toISOString(),
+          occurredAt: (row.rootStartedAt ?? row.ringingAt).toISOString(),
+          ringingAt: (row.rootStartedAt ?? row.ringingAt).toISOString(),
+          connectedAt: effectiveConnectedAt?.toISOString() ?? null,
+          endedAt: effectiveEndedAt?.toISOString() ?? null,
+          lastEventAt: (row.rootLastEventAt ?? row.lastEventAt).toISOString(),
           ringSeconds,
           durationSeconds,
           providerEndCause: row.providerEndCause,
           endpoint: {
-            id: row.endpointId,
-            label: row.endpointLabel,
-            lineNumber: row.endpointLineNumber,
-            extension: row.endpointExtension,
+            id: row.rootEndpointId ?? row.endpointId,
+            label: row.rootEndpointLabel ?? row.endpointLabel,
+            lineNumber:
+              row.rootEndpointLineNumber ?? row.endpointLineNumber,
+            extension: row.rootEndpointExtension ?? row.endpointExtension,
           },
-          endpointOwners: ownersByEndpoint.get(row.endpointId) ?? [],
+          finalStaffUserId: row.rootFinalStaffUserId,
+          endpointOwners:
+            ownersByEndpoint.get(row.rootEndpointId ?? row.endpointId) ?? [],
           customerMatch: await customerMatch(remotePhone),
           clickToCall: hasClickToCall
             ? {
@@ -1162,6 +1590,7 @@ export function createTelephonyService(options: {
         return {
           id: row.id,
           observedCallId: null,
+          callRootId: null,
           direction: "outbound" as const,
           receptionMode: null,
           source: "click_to_call" as const,
@@ -1187,6 +1616,7 @@ export function createTelephonyService(options: {
             lineNumber: row.endpointLineNumber,
             extension: row.endpointExtension,
           },
+          finalStaffUserId: null,
           endpointOwners: ownersByEndpoint.get(row.endpointId) ?? [],
           customerMatch: await customerMatch(remotePhone),
           clickToCall: {
@@ -1249,13 +1679,17 @@ export function createTelephonyService(options: {
     const commandIds = baseItems.flatMap((item) =>
       item.clickToCall ? [item.clickToCall.id] : [],
     );
+    const callRootIds = baseItems.flatMap((item) =>
+      item.callRootId ? [item.callRootId] : [],
+    );
     const aftercareRows =
-      observedIds.length || commandIds.length
+      observedIds.length || commandIds.length || callRootIds.length
         ? await db
             .select({
               id: telephonyCallAftercare.id,
               observedCallId: telephonyCallAftercare.observedCallId,
               telephonyCallId: telephonyCallAftercare.telephonyCallId,
+              callRootId: telephonyCallAftercare.callRootId,
               consultationId: telephonyCallAftercare.consultationId,
               result: telephonyCallAftercare.result,
               otherTextCiphertext:
@@ -1290,6 +1724,9 @@ export function createTelephonyService(options: {
                       telephonyCallAftercare.telephonyCallId,
                       commandIds,
                     )
+                  : undefined,
+                callRootIds.length
+                  ? inArray(telephonyCallAftercare.callRootId, callRootIds)
                   : undefined,
               ),
             )
@@ -1331,6 +1768,11 @@ export function createTelephonyService(options: {
     const aftercareByCommand = new Map(
       aftercareRows.flatMap((row) =>
         row.telephonyCallId ? [[row.telephonyCallId, row] as const] : [],
+      ),
+    );
+    const aftercareByRoot = new Map(
+      aftercareRows.flatMap((row) =>
+        row.callRootId ? [[row.callRootId, row] as const] : [],
       ),
     );
     const aftercareResponse = (row: (typeof aftercareRows)[number]) => {
@@ -1386,6 +1828,9 @@ export function createTelephonyService(options: {
     };
     const items = baseItems.map((item) => {
       const row =
+        (item.callRootId
+          ? aftercareByRoot.get(item.callRootId)
+          : undefined) ??
         (item.observedCallId
           ? aftercareByObserved.get(item.observedCallId)
           : undefined) ??
@@ -1404,6 +1849,7 @@ export function createTelephonyService(options: {
         result: telephonyCallAftercare.result,
         observedCallId: telephonyCallAftercare.observedCallId,
         telephonyCallId: telephonyCallAftercare.telephonyCallId,
+        callRootId: telephonyCallAftercare.callRootId,
         consultationId: telephonyCallAftercare.consultationId,
       })
       .from(telephonyFollowUpTasks)
@@ -1424,7 +1870,7 @@ export function createTelephonyService(options: {
       followUps: openFollowUps.map((task) => ({
         id: task.id,
         aftercareId: task.aftercareId,
-        callId: task.observedCallId ?? task.telephonyCallId!,
+        callId: task.callRootId ?? task.observedCallId ?? task.telephonyCallId!,
         result: task.result,
         consultationId: task.consultationId,
         dueAt: task.dueAt.toISOString(),
@@ -1464,12 +1910,42 @@ export function createTelephonyService(options: {
       getPhoneDeskCalls(1, callId),
       activePhoneDeskStaff(),
     ]);
-    const call = snapshot.items[0];
-    if (!call) {
+    const initialCall = snapshot.items[0];
+    if (!initialCall) {
       throw new TelephonyCallError(
         "call_not_found",
         "전화 원장을 찾을 수 없습니다.",
       );
+    }
+    let call = initialCall;
+    if (call.callRootId === callId) {
+      const [root] = await db
+        .select({
+          state: telephonyCallRoots.state,
+          endedAt: telephonyCallRoots.endedAt,
+          lastEventAt: telephonyCallRoots.lastEventAt,
+          finalStaffUserId: telephonyCallRoots.finalStaffUserId,
+        })
+        .from(telephonyCallRoots)
+        .where(eq(telephonyCallRoots.id, callId))
+        .limit(1);
+      if (root) {
+        call = {
+          ...call,
+          id: callId,
+          state:
+            root.state === "ringing"
+              ? "ringing"
+              : root.state === "ended"
+                ? "ended"
+                : root.state === "needs_confirmation"
+                  ? "unknown"
+                  : "connected",
+          endedAt: root.endedAt?.toISOString() ?? null,
+          lastEventAt: root.lastEventAt.toISOString(),
+          finalStaffUserId: root.finalStaffUserId,
+        };
+      }
     }
     const legalFriendsMatch =
       call.customerMatch?.source === "legal_friends"
@@ -1481,11 +1957,13 @@ export function createTelephonyService(options: {
       if (assignee) recommended.add(assignee);
     }
     if (legalFriendsMatch) {
-      const names = new Set(
-        legalFriendsMatch.cases.flatMap((item) => item.staffNames),
+      const staffUserIds = new Set(
+        legalFriendsMatch.cases.flatMap((item) => item.staffUserIds),
       );
       for (const staff of staffOptions) {
-        if (names.has(staff.displayName)) recommended.add(staff.staffUserId);
+        if (staffUserIds.has(staff.staffUserId)) {
+          recommended.add(staff.staffUserId);
+        }
       }
     }
     if (recommended.size === 0 && call.clickToCall) {
@@ -1532,12 +2010,23 @@ export function createTelephonyService(options: {
         "통화 종료를 확인한 뒤 후처리를 저장해 주세요.",
       );
     }
+    const callRootId = call.callRootId === callId ? callId : null;
+    if (
+      callRootId &&
+      call.finalStaffUserId &&
+      call.finalStaffUserId !== actor.id
+    ) {
+      throw new TelephonyCallError(
+        "call_owned_by_other_staff",
+        "최종적으로 고객과 통화한 담당자만 후처리를 입력할 수 있습니다.",
+      );
+    }
     const confirmedAt = now();
     const dueAt = input.followUp.enabled
       ? assertValidFollowUpDueAt(input.followUp.dueAt, confirmedAt)
       : null;
-    const observedCallId = call.observedCallId;
-    const telephonyCallId = call.clickToCall?.id ?? null;
+    const observedCallId = callRootId ? null : call.observedCallId;
+    const telephonyCallId = callRootId ? null : call.clickToCall?.id ?? null;
     const remotePhoneFingerprint = protection.fingerprint(call.remotePhone);
 
     await db.transaction(async (tx) => {
@@ -1782,6 +2271,9 @@ export function createTelephonyService(options: {
             telephonyCallId
               ? eq(telephonyCallAftercare.telephonyCallId, telephonyCallId)
               : undefined,
+            callRootId
+              ? eq(telephonyCallAftercare.callRootId, callRootId)
+              : undefined,
           ),
         )
         .limit(1)
@@ -1803,6 +2295,7 @@ export function createTelephonyService(options: {
       const aftercareValues = {
         observedCallId,
         telephonyCallId,
+        callRootId,
         consultationId,
         result: input.result,
         otherTextCiphertext: otherTextEncrypted?.ciphertext ?? null,
@@ -4148,6 +4641,7 @@ export function createTelephonyService(options: {
     createMessageTemplate,
     deleteMessageTemplate,
     getCall,
+    getCallActivitySnapshot,
     getInboundCallSnapshot,
     getMessage,
     getMessageHub,

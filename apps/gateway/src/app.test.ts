@@ -1203,6 +1203,63 @@ test("직원 전화데스크 목록은 권한 확인 뒤 통합 원장을 반환
   assert.doesNotMatch(body, /remotePhoneCiphertext/);
 });
 
+test("통합 통화 활동 조회는 인증된 직원 문맥으로만 개인정보 snapshot을 반환한다", async (context) => {
+  let requestedBy = "";
+  const rootId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2f9";
+  const telephonyService = {
+    getCallActivitySnapshot: async (actor: StaffPrincipal) => {
+      requestedBy = actor.id;
+      return {
+        snapshotAt: "2026-08-11T09:00:00.000Z",
+        items: [
+          {
+            id: rootId,
+            scope: "external" as const,
+            direction: "inbound" as const,
+            state: "ringing" as const,
+            remotePhone: "01012345678",
+            notificationTargetUserIds: [actor.id],
+          },
+        ],
+      };
+    },
+  } as unknown as TelephonyService;
+  const authService = {
+    authorize: async () => realtimeActor,
+  } as unknown as StaffAuthService;
+  const server = createGatewayServer({
+    authService,
+    internalApiKey: "test-internal-key",
+    telephonyService,
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const denied = await fetch(
+    `http://127.0.0.1:${address.port}/v1/telephony-call-activities`,
+  );
+  assert.equal(denied.status, 401);
+
+  const accepted = await fetch(
+    `http://127.0.0.1:${address.port}/v1/telephony-call-activities`,
+    {
+      headers: {
+        "x-lawand-internal-key": "test-internal-key",
+        "x-lawand-staff-session": "test-session",
+      },
+    },
+  );
+  assert.equal(accepted.status, 200);
+  assert.equal(requestedBy, realtimeActor.id);
+  const body = await accepted.text();
+  assert.match(body, new RegExp(rootId));
+  assert.match(body, /01012345678/);
+  assert.doesNotMatch(body, /remotePhoneCiphertext|remotePhoneFingerprint/);
+});
+
 test("전화데스크 후처리와 재통화 완료 API는 통합 계약과 현재 직원을 전달한다", async (context) => {
   const callId = "019fa6a4-6834-7782-aa0b-4e71ffb8a301";
   const taskId = "019fa6a4-6834-7782-aa0b-4e71ffb8a302";

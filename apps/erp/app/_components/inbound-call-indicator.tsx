@@ -5,6 +5,9 @@ import Link from "next/link";
 
 import type {
   PhoneDeskCallSnapshot,
+  PhoneDeskCall,
+  TelephonyCallActivity,
+  TelephonyCallActivitySnapshot,
   TelephonyInboundCall,
   TelephonyInboundCallSnapshot,
 } from "../../lib/gateway";
@@ -68,7 +71,11 @@ function caseStateLabel(caseType: number, caseState: number) {
   return states.get(caseState) ?? `진행 상태 ${caseState}`;
 }
 
-function CustomerMatch({ call }: { call: TelephonyInboundCall }) {
+function CustomerMatch({
+  call,
+}: {
+  call: { customerMatch: TelephonyInboundCall["customerMatch"] };
+}) {
   if (!call.customerMatch) return <span className="inbound-customer unknown">발신자 정보 없음</span>;
   if (call.customerMatch.source === "consultation") {
     const { consultation } = call.customerMatch;
@@ -83,12 +90,125 @@ function CustomerMatch({ call }: { call: TelephonyInboundCall }) {
   </span>;
 }
 
+function activityCopy(
+  activity: TelephonyCallActivity,
+  staffUserId: string,
+) {
+  if (activity.scope === "internal") {
+    const myLeg = activity.participants.find(
+      (participant) => participant.staffUserId === staffUserId,
+    );
+    const prefix = myLeg?.direction === "outbound" ? "내선 발신" : "내선 수신";
+    if (activity.state === "ended") {
+      return { label: "내선 통화 종료", description: "내선 통화가 종료됐어요" };
+    }
+    if (activity.state === "connected") {
+      return { label: "내선 통화 중", description: "내선이 연결됐어요" };
+    }
+    return { label: `${prefix} 중`, description: "내선 연결을 기다리고 있어요" };
+  }
+  const prefix = activity.direction === "outbound" ? "발신" : "수신";
+  if (activity.state === "transferring") {
+    return { label: "호전환 중", description: "고객 전화를 전달하고 있어요" };
+  }
+  if (activity.state === "needs_confirmation") {
+    return {
+      label: "호전환 확인 필요",
+      description: "마지막 고객 연결 근거를 확인해 주세요",
+    };
+  }
+  if (activity.state === "ended") {
+    return { label: `${prefix} 통화 종료`, description: `${prefix} 통화가 종료됐어요` };
+  }
+  if (activity.state === "connected") {
+    return { label: `${prefix} 통화 중`, description: `${prefix} 통화가 연결됐어요` };
+  }
+  return { label: `${prefix} 중`, description: `${prefix} 연결을 기다리고 있어요` };
+}
+
+function outboundCopy(call: PhoneDeskCall) {
+  if (call.state === "pending") {
+    return { label: "발신 준비 중", description: "전화기에 발신을 요청하고 있어요" };
+  }
+  if (call.state === "ringing") {
+    return { label: "발신 중", description: "상대방 연결을 기다리고 있어요" };
+  }
+  if (call.state === "connected") {
+    return { label: "발신 통화 중", description: "발신 통화가 연결됐어요" };
+  }
+  if (call.state === "ended") {
+    return { label: "발신 통화 종료", description: "발신 통화가 종료됐어요" };
+  }
+  if (call.state === "failed") {
+    return { label: "발신 실패", description: "발신 요청을 완료하지 못했어요" };
+  }
+  return { label: "발신 확인 중", description: "센트릭스 결과를 확인하고 있어요" };
+}
+
+function notificationCopy(activity: TelephonyCallActivity) {
+  const kindLabel =
+    activity.notificationKind === "transferred_customer"
+      ? "전달된 고객 전화"
+      : activity.notificationKind === "transfer_returned"
+        ? "고객 전화 복귀"
+        : activity.notificationKind === "internal_inbound"
+          ? "내선 전화"
+          : "고객 전화 수신";
+  const customer = activity.customerMatch;
+  const details: string[] = [];
+  if (customer?.source === "consultation") {
+    details.push(
+      `${customer.consultation.displayName} · ${customer.consultation.publicReceiptCode}`,
+    );
+    if (customer.consultation.assigneeDisplayName) {
+      details.push(`담당 ${customer.consultation.assigneeDisplayName}`);
+    }
+  } else if (customer?.source === "legal_friends") {
+    const latestCase = customer.cases[0];
+    details.push(customer.clientName);
+    if (latestCase) {
+      details.push(
+        `${caseTypeLabel(latestCase.caseType)} · ${caseStateLabel(latestCase.caseType, latestCase.caseState)}`,
+      );
+    }
+    if (latestCase?.caseNumber) details.push(latestCase.caseNumber);
+    if (latestCase?.caseName) details.push(latestCase.caseName);
+    const names = [...new Set(customer.cases.flatMap((item) => item.staffNames))];
+    if (names.length) details.push(`담당 ${names.join("·")}`);
+  } else {
+    details.push("고객 정보 확인 중");
+  }
+  if (activity.remotePhone) details.push(formatPhone(activity.remotePhone));
+  details.push(
+    `${activity.currentEndpoint.label} · 내선 ${activity.currentEndpoint.extension}`,
+  );
+  const participantNames = [
+    ...new Set(
+      activity.participants.flatMap((participant) =>
+        participant.displayName ? [participant.displayName] : [],
+      ),
+    ),
+  ];
+  if (activity.notificationKind === "transferred_customer" && participantNames.length) {
+    details.push(`전달 ${participantNames.join(" → ")}`);
+  }
+  return { title: kindLabel, body: details.join("\n") };
+}
+
 export function InboundCallIndicator({
   staffUserId,
 }: {
   staffUserId: string;
 }) {
   const [calls, setCalls] = useState<TelephonyInboundCall[]>([]);
+  const [activities, setActivities] = useState<TelephonyCallActivity[]>([]);
+  const [deskCalls, setDeskCalls] = useState<PhoneDeskCall[]>([]);
+  const [toasts, setToasts] = useState<
+    Array<{ id: string; title: string; body: string }>
+  >([]);
+  const [notificationPermission, setNotificationPermission] = useState<
+    "default" | "denied" | "granted" | "unsupported"
+  >("default");
   const [connection, setConnection] =
     useState<ConnectionState>("connecting");
   const [answeringCallIds, setAnsweringCallIds] = useState<Set<string>>(
@@ -105,6 +225,67 @@ export function InboundCallIndicator({
   const deskRequestSequence = useRef(0);
   const deskStartedAt = useRef(0);
   const seenDeskEndedCallIds = useRef<Set<string>>(new Set());
+  const seenNotificationKeys = useRef<Set<string>>(new Set());
+  const notificationLeader = useRef(false);
+  const notificationTabId = useRef("");
+
+  useEffect(() => {
+    setNotificationPermission(
+      "Notification" in window ? Notification.permission : "unsupported",
+    );
+    notificationTabId.current = window.crypto.randomUUID();
+    const leaseKey = "lawand:telephony-notification-leader";
+    const claimLeadership = () => {
+      const current = Date.now();
+      let lease: { tabId: string; expiresAt: number } | null = null;
+      try {
+        lease = JSON.parse(window.localStorage.getItem(leaseKey) ?? "null") as
+          | { tabId: string; expiresAt: number }
+          | null;
+      } catch {
+        lease = null;
+      }
+      if (
+        !lease ||
+        lease.expiresAt <= current ||
+        lease.tabId === notificationTabId.current
+      ) {
+        window.localStorage.setItem(
+          leaseKey,
+          JSON.stringify({
+            tabId: notificationTabId.current,
+            expiresAt: current + 8_000,
+          }),
+        );
+        notificationLeader.current = true;
+      } else {
+        notificationLeader.current = false;
+      }
+    };
+    claimLeadership();
+    const timer = window.setInterval(claimLeadership, 3_000);
+    return () => {
+      window.clearInterval(timer);
+      try {
+        const lease = JSON.parse(
+          window.localStorage.getItem(leaseKey) ?? "null",
+        ) as { tabId?: string } | null;
+        if (lease?.tabId === notificationTabId.current) {
+          window.localStorage.removeItem(leaseKey);
+        }
+      } catch {
+        // 손상된 다른 탭 lease는 만료 뒤 자연스럽게 교체된다.
+      }
+    };
+  }, []);
+
+  const requestNotificationPermission = useCallback(async () => {
+    if (!("Notification" in window)) {
+      setNotificationPermission("unsupported");
+      return;
+    }
+    setNotificationPermission(await Notification.requestPermission());
+  }, []);
 
   const enqueueAftercareCalls = useCallback((callIds: string[]) => {
     setPendingAftercareCallIds((current) => {
@@ -220,12 +401,23 @@ export function InboundCallIndicator({
 
   const refreshDirectOutboundAftercare = useCallback(async () => {
     const sequence = ++deskRequestSequence.current;
-    const response = await fetch("/api/phone-desk/calls", {
-      cache: "no-store",
-      headers: { accept: "application/json" },
-    });
-    if (!response.ok) throw new Error("telephony_desk_sync_failed");
-    const snapshot = (await response.json()) as PhoneDeskCallSnapshot;
+    const [response, activityResponse] = await Promise.all([
+      fetch("/api/phone-desk/calls", {
+        cache: "no-store",
+        headers: { accept: "application/json" },
+      }),
+      fetch("/api/telephony-call-activities", {
+        cache: "no-store",
+        headers: { accept: "application/json" },
+      }),
+    ]);
+    if (!response.ok || !activityResponse.ok) {
+      throw new Error("telephony_desk_sync_failed");
+    }
+    const [snapshot, activitySnapshot] = await Promise.all([
+      response.json() as Promise<PhoneDeskCallSnapshot>,
+      activityResponse.json() as Promise<TelephonyCallActivitySnapshot>,
+    ]);
     if (
       !Array.isArray(snapshot.items) ||
       typeof snapshot.snapshotAt !== "string" ||
@@ -236,6 +428,14 @@ export function InboundCallIndicator({
       }
       return;
     }
+    if (
+      !Array.isArray(activitySnapshot.items) ||
+      typeof activitySnapshot.snapshotAt !== "string"
+    ) {
+      throw new Error("telephony_call_activity_sync_invalid");
+    }
+    setDeskCalls(snapshot.items);
+    setActivities(activitySnapshot.items);
 
     const candidates: string[] = [];
     for (const call of snapshot.items) {
@@ -244,6 +444,7 @@ export function InboundCallIndicator({
       seenDeskEndedCallIds.current.add(call.id);
       if (
         alreadySeen ||
+        Boolean(call.callRootId) ||
         call.source !== "centrex_direct" ||
         call.aftercare ||
         !call.endedAt ||
@@ -277,6 +478,52 @@ export function InboundCallIndicator({
   }, [refreshDirectOutboundAftercare]);
 
   useEffect(() => {
+    if (!notificationLeader.current) return;
+    const current = Date.now();
+    for (const activity of activities) {
+      if (
+        !activity.notificationKind ||
+        !activity.notificationTargetUserIds.includes(staffUserId) ||
+        current - new Date(activity.lastEventAt).getTime() > 2 * 60_000 ||
+        activity.state === "ended" ||
+        (activity.notificationKind === "external_inbound" &&
+          activity.state !== "ringing") ||
+        (activity.notificationKind === "internal_inbound" &&
+          activity.state !== "ringing")
+      ) {
+        continue;
+      }
+      const notificationKey = `${activity.id}:${activity.notificationKind}`;
+      if (seenNotificationKeys.current.has(notificationKey)) continue;
+      seenNotificationKeys.current.add(notificationKey);
+      const storageKey = `lawand:telephony-notified:${notificationKey}`;
+      if (window.localStorage.getItem(storageKey)) continue;
+      window.localStorage.setItem(storageKey, String(current));
+      const copy = notificationCopy(activity);
+      setToasts((items) => [
+        ...items.filter((item) => item.id !== notificationKey),
+        { id: notificationKey, ...copy },
+      ]);
+      window.setTimeout(() => {
+        setToasts((items) =>
+          items.filter((item) => item.id !== notificationKey),
+        );
+      }, 9_000);
+      if (notificationPermission === "granted") {
+        const notification = new Notification(copy.title, {
+          body: copy.body,
+          tag: notificationKey,
+        });
+        notification.onclick = () => {
+          window.focus();
+          window.location.assign(`/phone-desk/${activity.id}`);
+          notification.close();
+        };
+      }
+    }
+  }, [activities, notificationPermission, staffUserId]);
+
+  useEffect(() => {
     if (!calls.some((call) => call.state === "ended")) return;
     const timer = window.setTimeout(() => {
       void refresh().catch(() => setConnection("disconnected"));
@@ -285,14 +532,25 @@ export function InboundCallIndicator({
   }, [calls, refresh]);
 
   useEffect(() => {
+    const activityObservedIds = new Set(
+      activities.flatMap((activity) =>
+        activity.observedCallId ? [activity.observedCallId] : [],
+      ),
+    );
     enqueueAftercareCalls(
       calls.filter(
         (call) =>
+        !activityObservedIds.has(call.id) &&
         call.state === "ended" &&
         call.owners.some((owner) => owner.staffUserId === staffUserId),
       ).map((call) => call.id),
     );
-  }, [calls, enqueueAftercareCalls, staffUserId]);
+    enqueueAftercareCalls(
+      activities
+        .filter((activity) => activity.canOpenAftercare)
+        .map((activity) => activity.id),
+    );
+  }, [activities, calls, enqueueAftercareCalls, staffUserId]);
 
   useEffect(() => {
     if (aftercareCallId || pendingAftercareCallIds.length === 0) return;
@@ -304,17 +562,217 @@ export function InboundCallIndicator({
     setAftercareCallId(nextCallId);
   }, [aftercareCallId, pendingAftercareCallIds]);
 
-  if (calls.length === 0 && !aftercareCallId) return null;
+  const activityObservedIds = new Set(
+    activities.flatMap((activity) =>
+      activity.observedCallId ? [activity.observedCallId] : [],
+    ),
+  );
+  const visibleLegacyCalls = calls.filter(
+    (call) => !activityObservedIds.has(call.id),
+  );
+  const visibleOutboundCalls = deskCalls.filter(
+    (call) =>
+      call.direction === "outbound" &&
+      !activityObservedIds.has(call.observedCallId ?? "") &&
+      !activities.some(
+        (activity) =>
+          activity.observedCallId === call.observedCallId ||
+          activity.id === call.callRootId,
+      ) &&
+      (call.state === "ringing" || call.state === "connected"
+        ? new Date(call.lastEventAt).getTime() >=
+          deskStartedAt.current - 12 * 60 * 60_000
+        : call.state === "pending"
+          ? new Date(call.lastEventAt).getTime() >=
+            deskStartedAt.current - 3 * 60_000
+          : new Date(call.lastEventAt).getTime() >=
+            deskStartedAt.current - 20_000),
+  );
+  const hasCards =
+    activities.length > 0 ||
+    visibleLegacyCalls.length > 0 ||
+    visibleOutboundCalls.length > 0;
+
+  if (!hasCards && !aftercareCallId && toasts.length === 0) return null;
 
   return (
     <>
-      {calls.length > 0 ? <section
-        aria-label="현재 수신전화"
+      {hasCards ? <section
+        aria-label="현재 통화 활동"
         aria-live="assertive"
         className="inbound-call-strip"
       >
         <div className="inbound-call-strip-inner">
-        {calls.map((call) => {
+        {activities.map((activity) => {
+          const copy = activityCopy(activity, staffUserId);
+          const legacyCall = activity.observedCallId
+            ? calls.find((call) => call.id === activity.observedCallId)
+            : undefined;
+          const isOwner = legacyCall?.owners.some(
+            (owner) => owner.staffUserId === staffUserId,
+          ) ?? false;
+          const isAnswering = legacyCall
+            ? answeringCallIds.has(legacyCall.id)
+            : false;
+          const answerInProgress =
+            legacyCall?.answerCommand?.status === "queued" ||
+            legacyCall?.answerCommand?.status === "dispatching" ||
+            legacyCall?.answerCommand?.status === "succeeded";
+          const canAnswer =
+            activity.state === "ringing" &&
+            Boolean(legacyCall?.answerAvailable) &&
+            isOwner;
+          const answerLabel = isAnswering ||
+            legacyCall?.answerCommand?.status === "queued" ||
+            legacyCall?.answerCommand?.status === "dispatching"
+              ? "받는 중…"
+              : legacyCall?.answerCommand?.status === "succeeded"
+                ? "연결 확인 중"
+                : legacyCall?.answerCommand?.status === "failed" ||
+                    legacyCall?.answerCommand?.status === "expired"
+                  ? "다시 받기"
+                  : "전화 받기";
+          const myLeg = activity.participants.find(
+            (participant) => participant.staffUserId === staffUserId,
+          );
+          const participantNames = [
+            ...new Set(
+              activity.participants.flatMap((participant) =>
+                participant.displayName ? [participant.displayName] : [],
+              ),
+            ),
+          ];
+          return (
+            <article
+              className={`inbound-call-card is-${activity.state}`}
+              key={activity.id}
+            >
+              <span aria-hidden="true" className="inbound-call-icon">
+                <svg viewBox="0 0 24 24">
+                  <path d="M7.8 3.8 10 8.5 7.5 10a14.3 14.3 0 0 0 6.5 6.5l1.5-2.5 4.7 2.2v3a1.8 1.8 0 0 1-1.8 1.8A15.4 15.4 0 0 1 3 5.6a1.8 1.8 0 0 1 1.8-1.8h3Z" />
+                </svg>
+              </span>
+              <span className="inbound-call-copy">
+                <span className="inbound-call-title">
+                  <strong>{copy.label}</strong>
+                  <span>{copy.description}</span>
+                </span>
+                <span className="inbound-call-meta">
+                  <b>
+                    {activity.remotePhone
+                      ? formatPhone(activity.remotePhone)
+                      : `내선 ${myLeg?.remoteExtension ?? "확인 중"}`}
+                  </b>
+                  <span>내선 {activity.currentEndpoint.extension}</span>
+                  {participantNames.length ? (
+                    <span>{participantNames.join(" · ")}</span>
+                  ) : null}
+                </span>
+                {activity.scope === "external" ? (
+                  <CustomerMatch call={activity} />
+                ) : null}
+                {activity.transfer ? (
+                  <span className="inbound-customer">
+                    {activity.transfer.state === "transfer_completed"
+                      ? "호전환 연결 확인됨"
+                      : activity.transfer.state === "transfer_returned"
+                        ? "호전환 실패 · 원래 통화로 복귀"
+                        : activity.transfer.state === "transfer_unresolved"
+                          ? "최종 고객 연결 확인 필요"
+                          : "호전환 대상 연결 중"}
+                  </span>
+                ) : null}
+              </span>
+              <span className="inbound-call-actions">
+                {canAnswer && legacyCall ? (
+                  <button
+                    className="inbound-answer-button"
+                    disabled={isAnswering || answerInProgress}
+                    onClick={() => void answerCall(legacyCall.id)}
+                    type="button"
+                  >
+                    {answerLabel}
+                  </button>
+                ) : null}
+                {activity.canOpenAftercare ? (
+                  <button
+                    className="inbound-aftercare-button"
+                    onClick={() => setAftercareCallId(activity.id)}
+                    type="button"
+                  >
+                    후처리 입력
+                  </button>
+                ) : null}
+                {notificationPermission === "default" &&
+                activity.notificationTargetUserIds.includes(staffUserId) ? (
+                  <button
+                    className="inbound-aftercare-button"
+                    onClick={() => void requestNotificationPermission()}
+                    type="button"
+                  >
+                    브라우저 알림 켜기
+                  </button>
+                ) : null}
+                <span className={`inbound-call-realtime is-${connection}`}>
+                  <span aria-hidden="true" />
+                  {connection === "connected" ? "실시간" : "재연결 중"}
+                </span>
+              </span>
+            </article>
+          );
+        })}
+        {visibleOutboundCalls.map((call) => {
+          const copy = outboundCopy(call);
+          return (
+            <article
+              className={`inbound-call-card is-${call.state}`}
+              key={`outbound:${call.id}`}
+            >
+              <span aria-hidden="true" className="inbound-call-icon">
+                <svg viewBox="0 0 24 24">
+                  <path d="M7.8 3.8 10 8.5 7.5 10a14.3 14.3 0 0 0 6.5 6.5l1.5-2.5 4.7 2.2v3a1.8 1.8 0 0 1-1.8 1.8A15.4 15.4 0 0 1 3 5.6a1.8 1.8 0 0 1 1.8-1.8h3Z" />
+                </svg>
+              </span>
+              <span className="inbound-call-copy">
+                <span className="inbound-call-title">
+                  <strong>{copy.label}</strong>
+                  <span>{copy.description}</span>
+                </span>
+                <span className="inbound-call-meta">
+                  <b>{formatPhone(call.remotePhone)}</b>
+                  <span>내선 {call.endpoint.extension}</span>
+                  <span>
+                    {call.clickToCall
+                      ? `${call.clickToCall.requestedBy.displayName}님 클릭투콜`
+                      : call.endpointOwners.length
+                        ? `${call.endpointOwners.map((owner) => owner.displayName).join(" · ")}님 발신`
+                        : "센트릭스 직접발신"}
+                  </span>
+                </span>
+                <CustomerMatch call={call} />
+              </span>
+              <span className="inbound-call-actions">
+                {call.state === "ended" &&
+                call.endpointOwners.some(
+                  (owner) => owner.staffUserId === staffUserId,
+                ) ? (
+                  <button
+                    className="inbound-aftercare-button"
+                    onClick={() => setAftercareCallId(call.id)}
+                    type="button"
+                  >
+                    후처리 입력
+                  </button>
+                ) : null}
+                <span className={`inbound-call-realtime is-${connection}`}>
+                  <span aria-hidden="true" />
+                  {connection === "connected" ? "실시간" : "재연결 중"}
+                </span>
+              </span>
+            </article>
+          );
+        })}
+        {visibleLegacyCalls.map((call) => {
           const copy = stateCopy[call.state];
           const isOwner = call.owners.some(
             (owner) => owner.staffUserId === staffUserId,
@@ -406,6 +864,25 @@ export function InboundCallIndicator({
         })}
         </div>
       </section> : null}
+      {toasts.length ? (
+        <aside aria-live="assertive" className="telephony-toast-stack">
+          {toasts.map((toast) => (
+            <button
+              className="telephony-toast"
+              key={toast.id}
+              onClick={() =>
+                setToasts((items) =>
+                  items.filter((item) => item.id !== toast.id),
+                )
+              }
+              type="button"
+            >
+              <strong>{toast.title}</strong>
+              <span>{toast.body}</span>
+            </button>
+          ))}
+        </aside>
+      ) : null}
       <PhoneAftercareDialog
         callId={aftercareCallId}
         onClose={() => setAftercareCallId(null)}

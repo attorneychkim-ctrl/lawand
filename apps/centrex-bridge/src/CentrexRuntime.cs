@@ -605,6 +605,52 @@ namespace Lawand.CentrexBridge
                 return;
             }
 
+            string callerKind = CentrexEventParser.CallPartyKind(parsed.Get("CALLERID"));
+            string direction = string.Equals(isDial, "1", StringComparison.Ordinal)
+                ? "outbound"
+                : "inbound";
+            string observationIncomingLine = parsed.Get("INEXTEN");
+            if (CentrexEventParser.DigitsOnly(observationIncomingLine).Length < 2)
+            {
+                observationIncomingLine = _configuration.ExpectedExtension;
+            }
+            string contextProviderCallId = null;
+            if (string.Equals(callerKind, "internal", StringComparison.Ordinal))
+            {
+                contextProviderCallId = !string.IsNullOrWhiteSpace(_activeInboundUniqueId)
+                    ? _activeInboundUniqueId
+                    : _activeOutboundUniqueId;
+            }
+            try
+            {
+                RaiseGatewayEvent(GatewayEventPayload.ObservedRinging(
+                    _configuration,
+                    uniqueId,
+                    direction,
+                    callerKind,
+                    parsed.Get("CALLERID"),
+                    observationIncomingLine,
+                    contextProviderCallId,
+                    CentrexEventParser.ChannelKind(parsed.Get("CHANNEL")),
+                    CentrexEventParser.ChannelKind(parsed.Get("RECHANNEL"))));
+            }
+            catch (ArgumentException)
+            {
+                _logger.Warn(
+                    "CALL_OBSERVATION_REJECTED",
+                    "TYPE=ringing",
+                    "UNIQUEID=" + uniqueId);
+            }
+
+            if (!string.Equals(callerKind, "external", StringComparison.Ordinal))
+            {
+                _logger.Info(
+                    "LEGACY_CALL_EVENT_SKIPPED",
+                    "REASON=non_external_party",
+                    "UNIQUEID=" + uniqueId);
+                return;
+            }
+
             if (string.Equals(isDial, "1", StringComparison.Ordinal))
             {
                 GatewayEventPayload payload;
@@ -629,6 +675,17 @@ namespace Lawand.CentrexBridge
                 _activeOutboundAt = DateTimeOffset.UtcNow;
                 _activeOutboundConnectedEventSent = false;
                 RaiseGatewayEvent(payload);
+                return;
+            }
+
+            if (!CentrexEventParser.EndsWithDigits(
+                parsed.Get("INEXTEN"),
+                _configuration.ExpectedLineLast4))
+            {
+                _logger.Info(
+                    "LEGACY_CALL_EVENT_SKIPPED",
+                    "REASON=transferred_incoming_line",
+                    "UNIQUEID=" + uniqueId);
                 return;
             }
 
@@ -682,6 +739,30 @@ namespace Lawand.CentrexBridge
 
             string uniqueId1 = CentrexEventParser.SafeToken(parsed.Get("UNIQUEID1"), 80);
             string uniqueId2 = CentrexEventParser.SafeToken(parsed.Get("UNIQUEID2"), 80);
+            if (!string.IsNullOrWhiteSpace(uniqueId1) &&
+                !string.IsNullOrWhiteSpace(uniqueId2))
+            {
+                try
+                {
+                    RaiseGatewayEvent(GatewayEventPayload.ObservedChannels(
+                        _configuration,
+                        uniqueId1,
+                        uniqueId2,
+                        CentrexEventParser.CallPartyKind(parsed.Get("CALLER1ID")),
+                        CentrexEventParser.CallPartyKind(parsed.Get("CALLER2ID")),
+                        parsed.Get("CALLER1ID"),
+                        parsed.Get("CALLER2ID"),
+                        CentrexEventParser.ChannelKind(parsed.Get("CHANNEL1")),
+                        CentrexEventParser.ChannelKind(parsed.Get("CHANNEL2"))));
+                }
+                catch (ArgumentException)
+                {
+                    _logger.Warn(
+                        "CALL_OBSERVATION_REJECTED",
+                        "TYPE=channels",
+                        "UNIQUEID=" + uniqueId1);
+                }
+            }
             if (TryHandleInboundChannelList(uniqueId1, uniqueId2) ||
                 TryHandleOutboundChannelList(uniqueId1, uniqueId2))
             {
@@ -763,6 +844,27 @@ namespace Lawand.CentrexBridge
                 "UNIQUEID=" + uniqueId,
                 "SRCUNIQUEID=" + sourceUniqueId,
                 "HCAUSE=" + CentrexEventParser.SafeToken(parsed.Get("HCAUSE"), 20));
+
+            if (!string.IsNullOrWhiteSpace(uniqueId))
+            {
+                try
+                {
+                    RaiseGatewayEvent(GatewayEventPayload.ObservedEnded(
+                        _configuration,
+                        uniqueId,
+                        sourceUniqueId,
+                        parsed.Get("HCAUSE"),
+                        CentrexEventParser.ChannelKind(parsed.Get("CHANNEL")),
+                        CentrexEventParser.ChannelKind(parsed.Get("RECHANNEL"))));
+                }
+                catch (ArgumentException)
+                {
+                    _logger.Warn(
+                        "CALL_OBSERVATION_REJECTED",
+                        "TYPE=ended",
+                        "UNIQUEID=" + uniqueId);
+                }
+            }
 
             bool inboundCallCanEnd = !string.IsNullOrWhiteSpace(_activeInboundUniqueId) &&
                 (_activeInboundConnectedEventSent ||

@@ -22,6 +22,7 @@ namespace Lawand.CentrexBridge
             Run("연결 채널 종료 leg 판정", RelatedConnectedChannelUniqueId);
             Run("gateway 최소 이벤트 JSON", GatewayEventJson);
             Run("gateway 발신 이벤트 JSON", GatewayOutboundEventJson);
+            Run("gateway 통화 관측 v2 JSON", GatewayCallObservationJson);
             Run("gateway 영구 거절 격리 정책", GatewayPermanentFailureDisposition);
             Run("gateway 프로비저닝 암호문 호환", ProvisioningEnvelopeCompatibility);
             Run("회선 교체 중 network error 지연", ProvisioningNetworkErrorDeferred);
@@ -184,6 +185,54 @@ namespace Lawand.CentrexBridge
                 rejectedInternalExtension = true;
             }
             True(rejectedInternalExtension);
+        }
+
+        private static void GatewayCallObservationJson()
+        {
+            BridgeConfiguration configuration = new BridgeConfiguration
+            {
+                BridgeId = "seoul-phone-01",
+                EndpointId = "01980000-0000-7000-8000-000000000002",
+                ExpectedExtension = "4591"
+            };
+            string ringing = GatewayEventPayload.ObservedRinging(
+                configuration,
+                "1785994319.3000001",
+                "outbound",
+                "internal",
+                "1208",
+                string.Empty,
+                "1785994319.2999991",
+                "sip",
+                "sip").ToJson();
+            True(ringing.Contains("\"schemaVersion\":2"));
+            True(ringing.Contains("\"eventType\":\"call.ringing\""));
+            True(ringing.Contains("\"remotePartyNumber\":\"1208\""));
+            True(ringing.Contains("\"contextProviderCallId\":\"1785994319.2999991\""));
+            True(!ringing.Contains("incomingLineNumber"));
+
+            string channels = GatewayEventPayload.ObservedChannels(
+                configuration,
+                "1785994319.3000001",
+                "1785994319.3000002",
+                "internal",
+                "internal",
+                "4591",
+                "1208",
+                "sip",
+                "sip").ToJson();
+            True(channels.Contains("\"eventType\":\"call.channels\""));
+            True(channels.Contains("\"relatedProviderCallId\":\"1785994319.3000002\""));
+
+            string ended = GatewayEventPayload.ObservedEnded(
+                configuration,
+                "1785994319.3000002",
+                "0",
+                "16",
+                "sip",
+                "sip").ToJson();
+            True(ended.Contains("\"eventType\":\"call.ended\""));
+            True(!ended.Contains("sourceProviderCallId"));
         }
 
         private static void GatewayPermanentFailureDisposition()

@@ -71,6 +71,36 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-11 — 통합 통화 활동 root/leg·호전환·전 직원 카드/담당자 알림 출시 후보
+- migration `0045_safe_zarek.sql`에 고객 통화 root, 개별 customer/consultation/internal
+  leg, provider root/channel/source 식별자, transfer relation과 원본 v2 관측 원장을 추가했다.
+  기존 수·발신 원장은 같은 UUID의 external root로 승격하고 기존 AES-GCM AAD를 유지한다.
+  후처리는 기존 관측/클릭 통화 또는 새 root 중 정확히 하나만 참조하며 root당 한 번만
+  저장한다. provider 식별자·회선·시각 원장은 향후 녹취 메타데이터 매핑 키로 보존한다.
+- bridge v0.8.0 후보는 외부 수·발신 v1을 그대로 병행하면서 내선·호전환의
+  `RINGEVENT`·`CHANNELLIST`·`CHANNELOUT`을 v2 관측으로 전달한다. 종료는 실제
+  `UNIQUEID`를 `SRCUNIQUEID`보다 우선한다. gateway는 동일 외부 root·고객 지문·원수신
+  회선·대상 agent·root→adjacent 채널을 모두 만족하는 무조건 호전환만 확정하고, A/B
+  consultation attempt와 미연결 복귀를 같은 외부 root에 연결한다. 통화 후 호전환 final
+  customer leg 증거가 없으면 cause·시간으로 추정하지 않고 `호전환 확인 필요`로 남긴다.
+- U+ callback/history와 bridge 원장을 같은 root/leg로 합쳤다. 중간 A/customer 또는 상담
+  leg 종료 뒤 활성 customer leg가 있으면 root를 닫지 않고, 마지막 customer leg가 끝날
+  때만 최종 endpoint/직원을 확정한다. 공유 회선은 provider 근거만으로 실제 통화자를 알 수
+  없으므로 임의로 한 명을 선택하지 않는다. 클릭투콜은 정확한 요청 직원을 leg에 보강한다.
+- ERP 상단은 외부 수신·직접발신·클릭투콜을 전 직원에게 한 카드로 표시하고 일반 내선은
+  참여 endpoint 담당자에게만 표시한다. 호전환 진행·완료·복귀·확인 필요와 최종 통화자
+  1회 후처리를 연결했다. 리걸프렌즈 `Member_idx`·`sub_member_idx`·`sub_member2_idx`는
+  `staff_external_accounts.external_member_idx`로 정확히 매칭하며 이름은 표시용이다.
+  고객/회선 담당자 합집합, 미해석 시 활성 직원 전체에 9초 토스트와 명시적 브라우저
+  Notification을 보내고 8초 multi-tab leader lease와 통화 ID로 중복을 막는다. NOTIFY/SSE는
+  PII 없는 ID만 보내며 인증 snapshot이 전체 번호·고객·사건·담당자·회선을 제공한다.
+- 임시 `lawand_dev` 복제 DB에 전체 migration을 적용해 실제 v1 호환과 v2
+  `ringing→channels→ended` ingress를 수직 검증하고 DB를 삭제했다. core 64개·gateway
+  104개 테스트, 전체 5개 패키지 typecheck·lint·production build, Drizzle schema check,
+  Windows .NET Framework x86 Release compile·bridge self-test 19개와 `git diff --check`를
+  통과했다. 운영 DB migration·운영 데이터 변경·실서비스 배포·실통화 canary는 수행하지
+  않았다. `PROJECT_PLAN.md`는 v1.13이다.
+
 ### 2026-08-11 — 센트릭스 실통화 fixture 수집 완료·root/leg 구현 계약 확정
 - bridge v0.7.2의 4591·1208 통제 canary에서 일반 내선·무조건/통화 후 호전환·실패 복귀
   네 fixture 수집을 완료했다. 일반 내선은 양쪽 공통 root·adjacent ID로 참여자를 결정적으로
