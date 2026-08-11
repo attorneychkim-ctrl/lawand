@@ -1,6 +1,7 @@
 # 센트릭스 통합 통화 활동 v2
 
-> 상태: 제품 정책 확정, 실제 내선·호전환 event canary 대기
+> 상태: 제품 정책 확정, 일반 내선·통화 후 호전환 event canary 완료,
+> 무조건 호전환·실패 복귀와 최종 B/고객 leg 상관키 보강 대기
 >
 > 기준일: 2026-08-11
 >
@@ -177,6 +178,51 @@ gateway와 DB는 읽기 전용으로 provider ID, 방향, 상태, 시각과 연�
 식별자가 충분하지 않으면 시각 근접만으로 자동 병합하지 않는다. 그 경우 ERP가 시작한 명시적
 호전환 command ID를 상관키로 추가하거나, 제공자가 확정 신호를 주지 않는 구간은 `호전환 확인
 필요`로 보존하는 대안을 설계한다.
+
+### 2026-08-11 운영 실측 결과
+
+관측 시간창은 16:52:55~16:53:53 KST이며 A는 4591, B는 1208이다. 문서의 ID 표기는
+실제 provider 값을 옮기지 않고 시간창 안에서만 부여한 비식별 label이다.
+
+일반 내선은 다음 순서였다.
+
+1. A `RING_EVENT(ISDIAL=1, CALLER_KIND=internal, sip/sip)`와 B
+   `RING_EVENT(ISDIAL=0, CALLER_KIND=internal, sip/sip)`가 같은 root label을 보냈다.
+   양쪽 masked suffix는 각각 상대 내선과 일치했다.
+2. 양쪽 `CHANNEL_LIST`가 같은 root와 바로 다음 provider sequence의 channel ID 쌍,
+   `internal/internal`, `sip/sip`을 보냈다.
+3. 양쪽 `CHANNEL_OUT`이 같은 channel ID와 sentinel source, `sip/sip`, 정상 종료 원인을
+   보냈고 A에는 root 자체의 종료도 추가로 왔다.
+4. 양쪽 4자리 leg는 각각 `invalid_outbound_number`·`invalid_inbound_number`로 기존 정책대로
+   gateway 전송 전에 거부됐다. 운영 통화·이벤트 원장은 생성되지 않았다.
+
+통화 후 호전환은 다음 순서였다.
+
+1. 외부→A는 `RING_EVENT(CALLER_KIND=external, sip/sip)` 뒤 외부 root와 adjacent channel의
+   `CHANNEL_LIST(external/external, sip/sip)`가 왔고 gateway 원장도
+   `inbound.ringing → inbound.connected`로 기록됐다. 외부 masked suffix는 A에서만
+   일관되게 관측됐다.
+2. A가 B와 상담을 시작하자 양쪽에 같은 새 internal root가 왔고, 양쪽 `CHANNEL_LIST`도
+   같은 adjacent internal channel을 보냈다. 이 ID group은 외부 root/channel group과
+   달랐으며 모든 채널 종류는 `sip`이었다. `local_xfer`는 한 번도 관측되지 않았다.
+3. A에서 외부 connected channel의 `CHANNEL_OUT(HCAUSE=129)`이 발생하자 현재 bridge가
+   `inbound.ended`를 전송했고 운영 원장이 16:53:34.379 KST에 종료됐다. 직후 외부 root의
+   별도 `CHANNEL_OUT(HCAUSE=16)`은 이미 active call이 지워져 무시됐다.
+4. B의 마지막 `CHANNEL_OUT(HCAUSE=16)`은 16:53:53.509 KST에 왔다. 그러나 이 이벤트에는
+   A/B 상담 channel ID와 sentinel source만 있고 외부 root/channel ID나 외부 masked suffix가
+   없었다. gateway로 보낼 active call도 없어 `no_active_call`로 무시됐다.
+
+따라서 일반 내선 한 통화를 양쪽에서 연결하는 ID는 확인됐다. 반면 통화 후 호전환에서는
+A/B 상담 leg까지는 연결할 수 있지만, 현재 OCX 로그와 payload만으로 B/고객 최종 leg를 원래
+외부 root에 결정적으로 연결하거나 A leg 종료와 고객 root 최종 종료를 일반화해 구분할 수
+없다. 이 canary에서는 두 종료 사이가 19.13초였고 운영 원장이 먼저 닫힌 것이 확인됐다.
+
+다음 구현은 이 실측을 fixture로 고정하고 A가 외부 통화 중 시작한 internal 상담 leg를
+명시적 transfer candidate로 연결해야 한다. 단순 시각 근접 병합은 사용하지 않는다. 무조건
+호전환과 실패·복귀에서 같은 종료 패턴이 어떻게 달라지는지 추가 canary한 뒤, bridge/gateway
+payload에 transfer correlation을 보강하거나 확정 신호가 없으면 `호전환 확인 필요`로
+보존한다. 그 전에는 중간 A 종료를 고객 root 종료로 확정하거나 최종 통화자를 B로 자동
+지정하지 않는다.
 
 ## 7. 구현 순서와 완료 기준
 

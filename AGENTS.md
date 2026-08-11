@@ -71,6 +71,49 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-11 — bridge v0.7.2 운영 배포·일반 내선/통화 후 호전환 실측
+- `PROJECT_PLAN.md` v1.10과 최신 인수인계를 다시 읽고 HERDR 관리 main·
+  `quiet-field-0995`·`quiet-harbor-6e25`·`quiet-harbor-a725`, 로컬/원격
+  `worktree/*`를 전수 분류했다. 이번 bridge-only canary에는
+  `origin/worktree/quiet-field-0995`의 `f4c6d8f`만 merge commit `52cf3f8`로 main에
+  병합·push했다. ERP 후속 UI인 `quiet-harbor-6e25`와 migration·문자 작업 중인
+  `quiet-harbor-a725`는 명시적으로 제외했으며 다른 ancestor 브랜치는 추가 병합하지 않았다.
+- main 소스로 Windows .NET Framework x86 Release build와 self-test 18개를 다시 통과했다.
+  source ZIP SHA-256은
+  `B9003C8AB04FD14A7700F5F47976584B79A73560F64130632388D425E48E7218`, v0.7.2.0 exe는
+  `C4453BC29FC3AA541EF2C18CA2E479E7E44CF487BFAF14E6C817B4CA308A7012`다. 조직용
+  Authenticode 인증서 전의 통제 canary 예외라 exe는 unsigned이며, private S3 AES256
+  경로의 정확한 artifact read 임시 권한은 build 뒤 즉시 제거했다.
+- 업무 통화가 생길 때마다 전환을 중단했다. 최종 수신·발신·통화/받기/프로비저닝 명령·
+  회선 중복 0을 16:45:06·16:45:17 KST에 연속 확인한 뒤 공용 실행 파일을 v0.7.2로
+  교체했다. 첫 시도는 CIM process path가 null인 검증 스크립트 오류로 자동 v0.7.1 원복됐고,
+  실제 공용 파일·24개 프로세스·로그인을 모두 확인한 뒤 `MainModule` 검증으로만 고쳐
+  재시도했다. 최종 배정 19+warm 5, 프로세스 24개가 모두 v0.7.2이고 오프라인·로그인 실패·
+  DPAPI queue·dead-letter 0, supervisor 정상이다. v0.7.1 rollback SHA-256
+  `0EF80F01F74EE631FFF02E626A4681127A7F344430AF6D307DA34DACB30101D8`도 별도 보존했다.
+  side-by-side는 task 정의·supervisor/monitor 계약과 원복 가능성만 검토했고 적용하지 않았다.
+- 4591(`canary-4591`)과 1208(`lawand-slot-001`)은 v0.7.2 로그인 성공, heartbeat 최신,
+  queue/dead-letter 0과 비식별 로그 관측 준비를 확인했다. 실제 전화는 사용자가 준비 완료
+  신호 뒤 직접 수행했고 에이전트는 통화·task·프로세스·원장에 개입하지 않았다. 일반 내선은
+  양쪽 `RING_EVENT`가 같은 root ID, `CHANNEL_LIST`가 같은 adjacent channel ID 쌍을 보냈고
+  masked suffix도 서로의 내선과 일치했다. 양쪽 모두 `internal/sip`으로 분류됐으며 4자리
+  내부 leg는 기존처럼 gateway 전송 전 거부되어 운영 원장을 만들지 않았다.
+- 외부→4591 수신은 `external/sip`과 외부 root·adjacent channel로 ringing/connected 원장을
+  만들었다. 4591→1208 상담 leg는 양쪽에서 별도 공통 internal ID 쌍으로 관측됐지만 외부 ID
+  group과 연결되지 않았고 `local_xfer`도 없었다. 4591의 외부 connected channel 종료가
+  16:53:34.379 KST에 현재 `inbound.ended`를 발생시켰고, 1208의 실제 마지막
+  `CHANNEL_OUT`은 19.13초 뒤인 16:53:53.509 KST였다. 1208 최종 이벤트에는 상담 channel
+  ID와 sentinel source만 있고 외부 root·masked suffix가 없어 B/고객 최종 leg를 결정적으로
+  연결할 수 없다. 즉 현재 원장은 A leg에서 조기 종료되며 A leg 종료와 고객 root 최종 종료를
+  구분하지 못한다.
+- 최종 두 target 활성 통화·실행 명령·DPAPI queue·dead-letter는 0, assignment connected와
+  heartbeat는 정상이고 CloudWatch 5종 경보는 모두 OK다. 최종 시점의 전체 활성 2건은 다른
+  업무 회선 통화라 건드리지 않았다. gateway·ERP·Caddy는 active/외부 200·컨테이너 재시작
+  0을 유지했다. gateway/ERP 배포, DB migration·운영 데이터 보정은 수행하지 않았다.
+  다음은 이번 일반 내선·통화 후 호전환을 fixture로 고정하고, 무조건 호전환·실패 복귀
+  canary 뒤 명시적 transfer correlation 또는 `호전환 확인 필요` 상태를 설계하는 것이다.
+  `PROJECT_PLAN.md`는 v1.11이다.
+
 ### 2026-08-11 — 통합 통화 활동 v2 기준선·내선/호전환 canary 준비
 - 외부 수신·센트릭스 직접 발신·ERP 클릭투콜을 로그인 직원 전체의 상단 카드에 표시하고,
   일반 내선은 참여자에게만 표시하되 수신자에게 토스트·브라우저 알림을 보내는 제품 정책을
