@@ -22,5 +22,13 @@ namespace Lawand.CentrexBridge
 
             return nowUtc >= createdAtUtc.Add(PermanentFailureGrace);
         }
+
+        public static bool ShouldContinueQueue(int statusCode)
+        {
+            return statusCode == 400 ||
+                statusCode == 404 ||
+                statusCode == 409 ||
+                statusCode == 422;
+        }
     }
 }

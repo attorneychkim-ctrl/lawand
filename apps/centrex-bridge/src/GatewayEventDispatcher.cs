@@ -93,14 +93,16 @@ namespace Lawand.CentrexBridge
 
             try
             {
-                string path = Directory.GetFiles(_queueDirectory, "*.event")
+                string[] paths = Directory.GetFiles(_queueDirectory, "*.event")
                     .OrderBy(value => value, StringComparer.Ordinal)
-                    .FirstOrDefault();
-                if (path == null)
+                    .ToArray();
+                foreach (string path in paths)
                 {
-                    return;
+                    if (!await Send(path).ConfigureAwait(false))
+                    {
+                        break;
+                    }
                 }
-                await Send(path).ConfigureAwait(false);
             }
             catch (Exception exception)
             {
@@ -112,7 +114,7 @@ namespace Lawand.CentrexBridge
             }
         }
 
-        private async Task Send(string path)
+        private async Task<bool> Send(string path)
         {
             byte[] encrypted = null;
             byte[] body = null;
@@ -179,7 +181,7 @@ namespace Lawand.CentrexBridge
                                 "GATEWAY_EVENT_SENT",
                                 "STATUS=" + status.ToString(CultureInfo.InvariantCulture),
                                 "QUEUE=" + QueueCount().ToString(CultureInfo.InvariantCulture));
-                            return;
+                            return true;
                         }
 
                         if (GatewayDeliveryDispositionPolicy.ShouldDeadLetter(
@@ -196,12 +198,14 @@ namespace Lawand.CentrexBridge
                                 "STATUS=" + status.ToString(CultureInfo.InvariantCulture),
                                 "QUEUE=" + QueueCount().ToString(CultureInfo.InvariantCulture),
                                 "DEAD=" + DeadLetterCount().ToString(CultureInfo.InvariantCulture));
-                            return;
+                            return true;
                         }
 
                         _logger.Warn(
                             "GATEWAY_EVENT_RETRY",
                             "STATUS=" + status.ToString(CultureInfo.InvariantCulture));
+                        return GatewayDeliveryDispositionPolicy
+                            .ShouldContinueQueue(status);
                     }
                 }
             }

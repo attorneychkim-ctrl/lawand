@@ -266,6 +266,11 @@ namespace Lawand.CentrexBridge
                 401, old, now));
             True(!GatewayDeliveryDispositionPolicy.ShouldDeadLetter(
                 503, old, now));
+            True(GatewayDeliveryDispositionPolicy.ShouldContinueQueue(400));
+            True(GatewayDeliveryDispositionPolicy.ShouldContinueQueue(409));
+            True(!GatewayDeliveryDispositionPolicy.ShouldContinueQueue(401));
+            True(!GatewayDeliveryDispositionPolicy.ShouldContinueQueue(429));
+            True(!GatewayDeliveryDispositionPolicy.ShouldContinueQueue(503));
         }
 
         private static void ProvisioningEnvelopeCompatibility()

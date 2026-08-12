@@ -71,6 +71,37 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-12 — 4591 지연 수신·종료 선행·중복 13초 원장 근본 수정 후보
+- 운영 Windows 비식별 로그와 DB 시각을 읽기 전용으로 대조했다. 4591은 10:12:06 KST에
+  실제 ring을 즉시 관측·큐잉했지만 v0.8.0의 필수 `incomingLineNumber` 누락 v2 이벤트가
+  HTTP 400으로 FIFO 선두에서 1분간 재시도됐다. 이 때문에 정상 v1 ring은 68초 뒤,
+  v2/v1 종료는 그 뒤 순서대로 전달됐다. 브라우저 렌더나 SSE 자체가 느린 것이 아니라
+  영구 오류 한 건이 후속 정상 이벤트를 막는 head-of-line blocking이었다. 당시 pool은
+  설치 51·배정 19·실행 24·warm 5, 오프라인·로그인 실패·재시도 queue 0, dead-letter 16,
+  supervisor 정상이었다. 운영 변경·프로세스 재시작·dead-letter 이동은 하지 않았다.
+- U+ 종료 이력은 실제 종료 약 16초 뒤 root/leg가 있는 종료 원장을 먼저 만들었고, 늦은 v1
+  ring은 이미 종료된 `uplus-inbound-history`를 기존 30초/`ringing` 전용 상관이 찾지 못해
+  별도 13초 legacy 원장과 같은 상담·결과의 후처리를 하나 더 만들었다. 같은 기간 후보
+  6쌍을 개인정보 없이 대조했지만 시작·종료가 모두 엄격히 맞는 쌍은 이 건뿐이라 나머지는
+  추정 병합하지 않는다.
+- bridge v0.8.2는 이벤트 단위 400/404/409/422를 재시도하면서도 같은 큐의 후속 파일을 계속
+  보내고, 401/429/5xx·네트워크 장애에서만 배치를 멈춘다. gateway는 동일 endpoint·고객
+  지문·시작 5초 안의 유일한 U+ callback/history를 종료 상태여도 재사용하고 실제 provider
+  식별자를 root에 보존한다. 수신 이벤트가 15초 넘게 늦거나 근거가 없으면 ERP가 지연 안내를
+  표시하고 무효일 수 있는 `전화 받기` 버튼을 숨긴다.
+- 보강한 custom migration `0048_centrex_v2_ringing_recovery.sql`은 동일 회선·지문·시작 2초·
+  종료 3초 안의 유일한 종료 쌍만 합치며, 양쪽 후처리는 결과·상담·확정자가 같고 메모·재통화가
+  없을 때만 하나로 접는다. 운영형 로컬 fixture에서 통화 1건, 원본 이벤트 4건, 동일 후처리
+  1건, synthetic/실제 provider 식별자 2개와 root/leg를 보존했고 migration 2회 적용도
+  멱등 통과했다. core 65개·gateway 112개 테스트, 전체 5패키지 typecheck·lint·production
+  build, DB schema check와 `git diff --check`를 통과했다. Windows .NET Framework x86
+  self-test 19개도 통과했고 v0.8.2.0 unsigned 후보 exe SHA-256은
+  `FDEBCABDF8C0EB20A422BA796CCA9CF7BE152B4EF305A50E9A5B569F60EA5A0B`다.
+- `PROJECT_PLAN.md`는 v1.16이다. 이 워크트리에서는 아직 운영 migration·gateway/ERP 배포·
+  bridge 교체·운영 중복 원장 변경을 수행하지 않았다. 복구 릴리스는 v0.8.2와 0048,
+  gateway·ERP를 함께 배포하고 정확한 중복 1쌍·중복 후처리 1건만 정리한 뒤 queue/dead-letter
+  분리 경보와 통제 수신 순서를 확인해야 한다.
+
 ### 2026-08-12 — lawandfirm.com Route 53 무중단 전환·정식 HTTPS 발급
 - `HERDR_ENV=1`에서 main·HERDR worktree·로컬/원격 `worktree/*`를 전수 대조해 당시 모든
   원격 worktree HEAD가 main ancestor이고 작업 트리가 깨끗함을 확인했다. 정식 ERP/API
@@ -111,6 +142,7 @@
   돌린다. Cafe24 호스팅·DNS·SSL은 삭제하지 않았고 세 Caddy 원본과 Secrets Manager 직전
   버전도 보존했다. 다음은 DNS 전파 관찰, 무통화 앱 재시작, 정식 ERP 인증 smoke다. 실제
   상담/알림톡 canary와 Solapi IP 제한은 별도 승인·운영 게이트로 남긴다.
+
 ### 2026-08-12 — 센트릭스 DPAPI 경보 원인 제거·bridge v0.8.1 복구 출시 후보
 - CloudWatch·Windows SSM·운영 DB를 개인정보 없이 읽기 전용으로 대조했다. 08:20 KST
   전환된 `lawand-centrex-dpapi-queue`는 실제 재시도 queue 0이 아니라 영구 거부

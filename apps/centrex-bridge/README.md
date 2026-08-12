@@ -15,8 +15,10 @@ LG U+ 고급형 센트릭스 A타입의 32비트 OpenAPI OCX를 상시 호스팅
 - 발신번호는 로컬 로그와 트레이 알림에서 끝 4자리만 표시
 - 수신과 센트릭스 직접 발신 이벤트는 현재 Windows 사용자 DPAPI로 암호화한 디스크 큐에 먼저 저장하고,
   gateway 성공 응답 뒤에만 삭제
-- gateway가 영구 거부한 400/404/409/422 이벤트는 1분 동안 재시도한 뒤 DPAPI 암호문
-  dead-letter로 격리해 후속 정상 이벤트의 전달을 막지 않음
+- gateway가 이벤트 단위로 영구 거부한 400/404/409/422는 해당 파일만 1분 동안 재시도하되
+  같은 큐의 후속 이벤트를 계속 전달하고, 만료 뒤 DPAPI 암호문 dead-letter로 격리
+- 인증·rate limit·gateway 장애를 뜻하는 401/429/5xx와 네트워크 오류는 현재 배치를
+  중단해 장애 중 요청 폭주를 막고 다음 주기에 다시 시도
 - HTTPS 서버 인증과 요청별 HMAC-SHA256·5분 시각창·난수 nonce로 gateway에 전달
 - Windows 공용 proxy를 우회한 고정 gateway 직접 연결과 TLS 1.2 사용
 - 무응답 수신은 3분 안에서 같은 provider ID 또는 같은 prefix의 인접 sequence만 같은
@@ -176,13 +178,16 @@ bridge v0.7.2의 상대·채널 종류 로그로 내선과 호전환의 실측 �
 상관 경계에서만 수용한다. 통화 후 호전환의 최종 고객 leg처럼 증거가 부족한 관계는
 `호전환 확인 필요`로 남기며 `local_xfer`나 종료 cause만으로 완료를 추정하지 않는다.
 
-v0.8.1 출시 후보는 v2 `call.ringing`에서 `callerNumber` 유무와 관계없이
+v0.8.2 출시 후보는 v2 `call.ringing`에서 `callerNumber` 유무와 관계없이
 `incomingLineNumber`를 독립 직렬화한다. v2는 caller 원문을 보내지 않으므로 두 필드를 같은
 조건문으로 묶으면 gateway 필수 수신 회선이 누락돼 HTTP 400과 영구 dead-letter가 생긴다.
 C# self-test와 core schema test가 inbound v2의 수신 회선 존재와 caller 원문 부재를 양쪽에서
-고정한다. 결함이 들어간 과거 dead-letter는 필드가 이미 소실돼 그대로 재처리하지 않는다.
-병행 v1 원장을 migration `0048_centrex_v2_ringing_recovery.sql`로 승격한 뒤 암호문 hash를
-검증해 archive한다.
+고정한다. 또한 이벤트별 400이 FIFO 선두에서 정상 v1 수신·종료까지 1분간 막지 않도록
+영구 거부 재시도 중에도 다음 파일을 전달한다. 결함이 들어간 과거 dead-letter는 필드가 이미
+소실돼 그대로 재처리하지 않는다. 병행 v1 원장을 migration
+`0048_centrex_v2_ringing_recovery.sql`로 승격하고, 같은 장애 때문에 U+ 종료 이력과 늦은
+bridge 수신이 두 원장으로 갈라진 엄격한 일치 건만 하나로 합친 뒤 암호문 hash를 검증해
+archive한다.
 
 ## 운영 점검과 부하시험
 
@@ -190,7 +195,7 @@ C# self-test와 core schema test가 inbound v2의 수신 회선 존재와 caller
 부팅·1분 주기로 등록한다. 최신 비식별 상태는
 `C:\ProgramData\Lawand\CentrexBridge\pool-health.json`에서 확인한다. 기본 CloudWatch
 metric은 `AssignedOffline`, `LoginFailures`, `DpapiQueueDepth`, `SupervisorHealthy`,
-`RunningBridges`, `WarmIdleRunning`이며, v0.8.1부터 실제 재시도 대기분 `QueueDepth`와 영구
+`RunningBridges`, `WarmIdleRunning`이며, v0.8.2부터 실제 재시도 대기분 `QueueDepth`와 영구
 거부분 `DeadLetterDepth`도 별도로 발행한다. `DpapiQueueDepth`는 두 값의 합인 기존 경보
 호환 metric이다. 운영 경보는 두 세부 metric을 분리해 원인과 조치를 구분하고 합계 경보는
 전환 기간 동안만 호환용으로 유지한다.

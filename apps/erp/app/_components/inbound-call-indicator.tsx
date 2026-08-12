@@ -671,6 +671,11 @@ export function InboundCallIndicator({
                 {activity.scope === "external" ? (
                   <CustomerMatch call={activity} />
                 ) : null}
+                {activity.state === "ringing" && legacyCall?.deliveryDelayed ? (
+                  <span className="inbound-customer">
+                    수신 반영이 늦어 종료 여부를 확인하고 있어요 · 연결된 단말에서 상태를 확인해 주세요
+                  </span>
+                ) : null}
                 {activity.transfer ? (
                   <span className="inbound-customer">
                     {activity.transfer.state === "transfer_completed"
@@ -817,7 +822,9 @@ export function InboundCallIndicator({
                 <CustomerMatch call={call} />
                 {call.state === "ringing" && !call.answerAvailable ? (
                   <span className="inbound-customer">
-                    U+ 앱/망으로 온 전화예요 · 비즈콜 앱이나 연결된 단말에서 받아 주세요
+                    {call.deliveryDelayed
+                      ? "수신 반영이 늦어 종료 여부를 확인하고 있어요 · 연결된 단말에서 상태를 확인해 주세요"
+                      : "U+ 앱/망으로 온 전화예요 · 비즈콜 앱이나 연결된 단말에서 받아 주세요"}
                   </span>
                 ) : null}
               </span>
