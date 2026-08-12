@@ -4,7 +4,32 @@ import test from "node:test";
 import {
   isCentrexInboundAnswerDeliveryDelayed,
   legalFriendsResidenceRegion,
+  phoneDeskItemMatchesFilter,
 } from "./telephony-service.js";
+
+test("전화데스크 출처 필터는 다른 출처를 섞지 않고 진행 중 상태만 선별한다", () => {
+  const inboundEnded = {
+    source: "inbound" as const,
+    state: "ended" as const,
+  };
+  const erpOutbound = {
+    source: "click_to_call" as const,
+    state: "ended" as const,
+  };
+  const directOutbound = {
+    source: "centrex_direct" as const,
+    state: "connected" as const,
+  };
+
+  assert.equal(phoneDeskItemMatchesFilter(inboundEnded, "all"), true);
+  assert.equal(phoneDeskItemMatchesFilter(inboundEnded, "inbound"), true);
+  assert.equal(phoneDeskItemMatchesFilter(inboundEnded, "click_to_call"), false);
+  assert.equal(phoneDeskItemMatchesFilter(inboundEnded, "centrex_direct"), false);
+  assert.equal(phoneDeskItemMatchesFilter(inboundEnded, "active"), false);
+  assert.equal(phoneDeskItemMatchesFilter(erpOutbound, "click_to_call"), true);
+  assert.equal(phoneDeskItemMatchesFilter(directOutbound, "centrex_direct"), true);
+  assert.equal(phoneDeskItemMatchesFilter(directOutbound, "active"), true);
+});
 
 test("리걸프렌즈 거주지는 상세 주소를 노출하지 않고 광역 지역으로만 정규화한다", () => {
   assert.equal(legalFriendsResidenceRegion("서울특별시 강남구"), "seoul");
