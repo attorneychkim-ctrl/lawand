@@ -183,6 +183,20 @@ export const SELF_DIAGNOSIS_LIVING_COST_2026 = [
 ] as const;
 
 const moneySchema = z.number().int().min(0).max(100_000_000_000);
+export const SELF_DIAGNOSIS_MONEY_UNIT_WARNING_THRESHOLD = 100_000;
+export const SELF_DIAGNOSIS_MONEY_UNIT_FIELDS = [
+  "monthlyIncome",
+  "unsecuredDebt",
+  "securedDebt",
+  "liquidationValue",
+] as const;
+export type SelfDiagnosisMoneyUnitField =
+  (typeof SELF_DIAGNOSIS_MONEY_UNIT_FIELDS)[number];
+
+export function needsSelfDiagnosisMoneyUnitConfirmation(value: number) {
+  return value > 0 && value < SELF_DIAGNOSIS_MONEY_UNIT_WARNING_THRESHOLD;
+}
+
 const phoneSchema = z
   .string()
   .trim()
@@ -320,8 +334,29 @@ export const selfDiagnosisSubmissionSchema = z
     consentAgreedAt: z.iso.datetime({ offset: true }),
     attribution: consultationAttributionInputSchema,
     answers: selfDiagnosisAnswersSchema,
+    confirmedMoneyUnitFields: z
+      .array(z.enum(SELF_DIAGNOSIS_MONEY_UNIT_FIELDS))
+      .max(SELF_DIAGNOSIS_MONEY_UNIT_FIELDS.length)
+      .refine((fields) => new Set(fields).size === fields.length, {
+        message: "금액 단위 확인 항목이 중복되었습니다.",
+      })
+      .default([]),
   })
-  .strict();
+  .strict()
+  .superRefine((submission, context) => {
+    for (const field of SELF_DIAGNOSIS_MONEY_UNIT_FIELDS) {
+      if (
+        needsSelfDiagnosisMoneyUnitConfirmation(submission.answers[field]) &&
+        !submission.confirmedMoneyUnitFields.includes(field)
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "10만원 미만 금액의 원·만원 단위를 확인해 주세요.",
+          path: ["confirmedMoneyUnitFields"],
+        });
+      }
+    }
+  });
 
 export type SelfDiagnosisAnswers = z.infer<typeof selfDiagnosisAnswersSchema>;
 export type SelfDiagnosisRecord = z.infer<typeof selfDiagnosisRecordSchema>;
