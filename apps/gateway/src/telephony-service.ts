@@ -59,6 +59,7 @@ import {
   telephonyEndpoints,
   telephonyInboundCalls,
   telephonyInboundCommands,
+  telephonyInboundEvents,
   telephonyInboundMessages,
   telephonyMessageDirectoryTargets,
   telephonyMessageMailboxStates,
@@ -82,6 +83,7 @@ const INBOUND_RINGING_SNAPSHOT_WINDOW_MS = 3 * 60_000;
 const INBOUND_CONNECTED_SNAPSHOT_WINDOW_MS = 12 * 60 * 60_000;
 const INBOUND_ENDED_SNAPSHOT_WINDOW_MS = 20_000;
 const INBOUND_ANSWER_COMMAND_TTL_MS = 20_000;
+const INBOUND_ANSWER_EVENT_MAX_DELIVERY_DELAY_MS = 15_000;
 const INBOUND_ANSWER_DISPATCH_TIMEOUT_MS = 3 * 60_000;
 const PHONE_DESK_DEFAULT_LIMIT = 20;
 const PHONE_DESK_MAX_LIMIT = 100;
@@ -89,6 +91,17 @@ const callRootCurrentEndpoint = alias(
   telephonyEndpoints,
   "call_root_current_endpoint",
 );
+
+export function isCentrexInboundAnswerDeliveryDelayed(input: {
+  answerableBridge: boolean;
+  occurredAt: Date | null;
+  receivedAt: Date | null;
+}): boolean {
+  if (!input.answerableBridge) return false;
+  if (!input.occurredAt || !input.receivedAt) return true;
+  return input.receivedAt.getTime() - input.occurredAt.getTime() >
+    INBOUND_ANSWER_EVENT_MAX_DELIVERY_DELAY_MS;
+}
 
 export type PhoneDeskListFilter =
   | "all"
@@ -995,6 +1008,8 @@ export function createTelephonyService(options: {
         connectedAt: telephonyInboundCalls.connectedAt,
         endedAt: telephonyInboundCalls.endedAt,
         lastEventAt: telephonyInboundCalls.lastEventAt,
+        ringingEventOccurredAt: telephonyInboundEvents.occurredAt,
+        ringingEventReceivedAt: telephonyInboundEvents.receivedAt,
         extension: telephonyEndpoints.extension,
         ownerUserId: staffTelephonyBindings.staffUserId,
         ownerDisplayName: staffProfiles.displayName,
@@ -1003,6 +1018,20 @@ export function createTelephonyService(options: {
       .innerJoin(
         telephonyEndpoints,
         eq(telephonyEndpoints.id, telephonyInboundCalls.endpointId),
+      )
+      .leftJoin(
+        telephonyInboundEvents,
+        and(
+          eq(
+            telephonyInboundEvents.inboundCallId,
+            telephonyInboundCalls.id,
+          ),
+          eq(
+            telephonyInboundEvents.providerCallId,
+            telephonyInboundCalls.providerCallId,
+          ),
+          eq(telephonyInboundEvents.eventType, "inbound.ringing"),
+        ),
       )
       .leftJoin(
         staffTelephonyBindings,
@@ -1071,12 +1100,19 @@ export function createTelephonyService(options: {
         customerMatch: PhoneCustomerMatch;
         answerCommand: ReturnType<typeof inboundAnswerCommandResponse> | null;
         answerAvailable: boolean;
+        deliveryDelayed: boolean;
       }
     >();
 
     for (const row of rows) {
       let item = items.get(row.id);
       if (!item) {
+        const answerableBridge = answerableBridgeIds.has(row.bridgeId);
+        const deliveryDelayed = isCentrexInboundAnswerDeliveryDelayed({
+          answerableBridge,
+          occurredAt: row.ringingEventOccurredAt,
+          receivedAt: row.ringingEventReceivedAt,
+        });
         const remotePhone = protection.decrypt(
           {
             ciphertext: row.remotePhoneCiphertext,
@@ -1099,7 +1135,8 @@ export function createTelephonyService(options: {
           owners: [],
           customerMatch: await resolvePhoneCustomer(remotePhone),
           answerCommand: await latestInboundAnswerCommand(row.id),
-          answerAvailable: answerableBridgeIds.has(row.bridgeId),
+          answerAvailable: answerableBridge && !deliveryDelayed,
+          deliveryDelayed,
         };
         items.set(row.id, item);
       }

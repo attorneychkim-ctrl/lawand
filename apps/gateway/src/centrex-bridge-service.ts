@@ -8,10 +8,15 @@ import {
   sql,
 } from "drizzle-orm";
 
-import { createTelephonyCallId, type CentrexBridgeEvent } from "@lawand/core";
+import {
+  createEventId,
+  createTelephonyCallId,
+  type CentrexBridgeEvent,
+} from "@lawand/core";
 import {
   telephonyCallObservationLinks,
   telephonyCallLegs,
+  telephonyCallProviderIdentifiers,
   telephonyCalls,
   telephonyEndpoints,
   telephonyInboundCalls,
@@ -27,6 +32,7 @@ import {
   lockCentrexEndpointActiveCalls,
 } from "./centrex-active-call.js";
 import {
+  CENTREX_INBOUND_HISTORY_BRIDGE_ID,
   CENTREX_RING_CALLBACK_BRIDGE_ID,
   centrexInboundCorrelationLock,
 } from "./centrex-inbound-observer.js";
@@ -37,6 +43,32 @@ import {
 } from "./centrex-observation-link.js";
 
 type Database = ReturnType<typeof createDatabaseClient>["db"];
+
+const CENTREX_SYNTHETIC_INBOUND_BRIDGE_IDS = [
+  CENTREX_RING_CALLBACK_BRIDGE_ID,
+  CENTREX_INBOUND_HISTORY_BRIDGE_ID,
+] as const;
+const CENTREX_BRIDGE_RING_RECONCILIATION_WINDOW_MS = 5_000;
+
+export function selectCentrexSyntheticInboundCall<
+  T extends {
+    bridgeId: string;
+    ringingAt: Date;
+    endedAt: Date | null;
+  },
+>(eventOccurredAt: Date, candidates: readonly T[]): T | null {
+  const matches = candidates.filter(
+    (candidate) =>
+      CENTREX_SYNTHETIC_INBOUND_BRIDGE_IDS.includes(
+        candidate.bridgeId as (typeof CENTREX_SYNTHETIC_INBOUND_BRIDGE_IDS)[number],
+      ) &&
+      Math.abs(
+        candidate.ringingAt.getTime() - eventOccurredAt.getTime(),
+      ) <= CENTREX_BRIDGE_RING_RECONCILIATION_WINDOW_MS &&
+      (candidate.endedAt === null || candidate.endedAt >= eventOccurredAt),
+  );
+  return matches.length === 1 ? (matches[0] ?? null) : null;
+}
 
 export class CentrexBridgeIngressError extends Error {
   constructor(
@@ -332,52 +364,61 @@ export function createCentrexBridgeIngressService(options: {
             : endpoint.lineNumber;
         const phoneFingerprint = protection.fingerprint(remotePhone);
         if (!call && event.eventType === "inbound.ringing") {
-          const [callbackCall] = await tx
+          const syntheticCandidates = await tx
             .select()
             .from(telephonyInboundCalls)
             .where(
               and(
                 eq(telephonyInboundCalls.endpointId, event.endpointId),
                 eq(telephonyInboundCalls.direction, "inbound"),
-                eq(
+                inArray(
                   telephonyInboundCalls.bridgeId,
-                  CENTREX_RING_CALLBACK_BRIDGE_ID,
+                  [...CENTREX_SYNTHETIC_INBOUND_BRIDGE_IDS],
                 ),
                 eq(
                   telephonyInboundCalls.remotePhoneFingerprint,
                   phoneFingerprint,
                 ),
-                eq(telephonyInboundCalls.state, "ringing"),
                 gte(
                   telephonyInboundCalls.ringingAt,
-                  new Date(occurredAt.getTime() - 30_000),
+                  new Date(
+                    occurredAt.getTime() -
+                      CENTREX_BRIDGE_RING_RECONCILIATION_WINDOW_MS,
+                  ),
                 ),
                 lte(
                   telephonyInboundCalls.ringingAt,
-                  new Date(occurredAt.getTime() + 5_000),
+                  new Date(
+                    occurredAt.getTime() +
+                      CENTREX_BRIDGE_RING_RECONCILIATION_WINDOW_MS,
+                  ),
                 ),
               ),
             )
             .orderBy(sql`${telephonyInboundCalls.ringingAt} DESC`)
-            .limit(1)
+            .limit(3)
             .for("update");
-          if (callbackCall) {
+          const syntheticCall = selectCentrexSyntheticInboundCall(
+            occurredAt,
+            syntheticCandidates,
+          );
+          if (syntheticCall) {
             const [mergedCall] = await tx
               .update(telephonyInboundCalls)
               .set({
                 bridgeId: event.bridgeId,
                 providerCallId: event.providerCallId,
                 ringingAt:
-                  callbackCall.ringingAt < occurredAt
-                    ? callbackCall.ringingAt
+                  syntheticCall.ringingAt < occurredAt
+                    ? syntheticCall.ringingAt
                     : occurredAt,
                 lastEventAt:
-                  callbackCall.lastEventAt > occurredAt
-                    ? callbackCall.lastEventAt
+                  syntheticCall.lastEventAt > occurredAt
+                    ? syntheticCall.lastEventAt
                     : occurredAt,
                 updatedAt: receivedAt,
               })
-              .where(eq(telephonyInboundCalls.id, callbackCall.id))
+              .where(eq(telephonyInboundCalls.id, syntheticCall.id))
               .returning();
             call = mergedCall;
           }
@@ -525,6 +566,28 @@ export function createCentrexBridgeIngressService(options: {
           .where(eq(telephonyInboundCalls.id, persistedCall.id))
           .returning();
         if (linkedCall) persistedCall = linkedCall;
+      }
+
+      if (
+        ringing &&
+        persistedCall.callRootId &&
+        persistedCall.callLegId
+      ) {
+        await tx
+          .insert(telephonyCallProviderIdentifiers)
+          .values({
+            id: createEventId(),
+            rootId: persistedCall.callRootId,
+            legId: persistedCall.callLegId,
+            endpointId: persistedCall.endpointId,
+            provider: "centrex",
+            role: "root",
+            providerValue: event.providerCallId,
+            firstObservedAt: occurredAt,
+            lastObservedAt: occurredAt,
+            createdAt: receivedAt,
+          })
+          .onConflictDoNothing();
       }
 
       await tx.insert(telephonyInboundEvents).values({

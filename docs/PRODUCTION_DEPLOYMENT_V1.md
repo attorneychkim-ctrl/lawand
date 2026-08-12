@@ -9,9 +9,13 @@ CloudFormation 스택: `lawand-prod`
 현재 gateway 릴리스: `20260811T104143Z-integrated-call-messaging-v2`
 현재 Windows bridge: `v0.8.0.0`
 
-배포 대기: bridge `v0.8.1.0` + migration `0048_centrex_v2_ringing_recovery.sql`.
-이 후보는 v2 수신 관측의 `incomingLineNumber` 누락을 고치고 병행 v1 원장에서 빠진
-external root/leg를 멱등 복구한다. main 반영만으로 운영 반영으로 간주하지 않는다.
+배포 대기: bridge `v0.8.2.0` + migration `0048_centrex_v2_ringing_recovery.sql` +
+gateway·ERP. 이 후보는 v2 수신 관측의 `incomingLineNumber` 누락을 고치고, 영구 거부
+이벤트 하나가 정상 후속 이벤트를 막는 FIFO 적체를 제거한다. 병행 v1 원장에서 빠진
+external root/leg를 멱등 복구하며, 동일 회선·고객 지문·시작/종료시각이 엄격히 일치하는
+U+ 종료 이력/지연 bridge 중복 원장과 동일 후처리만 하나로 정리한다. 15초 넘게 늦게 온
+수신에는 이미 무효일 수 있는 `전화 받기` 버튼을 노출하지 않는다. main 반영만으로 운영
+반영으로 간주하지 않는다.
 
 이 문서는 정식 도메인 전환 이후를 포함한 실제 AWS 구성, 접속점, 데이터 이관 범위와
 운영 체크리스트를 기록한다. 비밀번호·API 키·AWS 계정 ID·RDS 마스터 시크릿 ARN은

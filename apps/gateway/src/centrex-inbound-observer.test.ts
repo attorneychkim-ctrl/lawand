@@ -1,10 +1,61 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { selectCentrexSyntheticInboundCall } from "./centrex-bridge-service.js";
 import {
   normalizeCentrexInboundHistoryTimeline,
   reconcileCentrexInboundHistoryBatch,
 } from "./centrex-inbound-observer.js";
+
+test("늦은 bridge 수신은 같은 시각의 종료된 U+ 이력 원장을 재사용한다", () => {
+  const history = {
+    id: "history-call",
+    bridgeId: "uplus-inbound-history",
+    ringingAt: new Date("2026-08-12T01:12:06.000Z"),
+    endedAt: new Date("2026-08-12T01:12:19.000Z"),
+  };
+  assert.equal(
+    selectCentrexSyntheticInboundCall(
+      new Date("2026-08-12T01:12:06.231Z"),
+      [history],
+    ),
+    history,
+  );
+});
+
+test("시간 근거가 멀거나 후보가 둘이면 늦은 수신을 임의 병합하지 않는다", () => {
+  const eventAt = new Date("2026-08-12T01:12:06.231Z");
+  const exact = {
+    bridgeId: "uplus-ring-callback",
+    ringingAt: new Date("2026-08-12T01:12:06.000Z"),
+    endedAt: null,
+  };
+  assert.equal(
+    selectCentrexSyntheticInboundCall(eventAt, [
+      exact,
+      { ...exact, bridgeId: "uplus-inbound-history" },
+    ]),
+    null,
+  );
+  assert.equal(
+    selectCentrexSyntheticInboundCall(eventAt, [
+      {
+        ...exact,
+        ringingAt: new Date("2026-08-12T01:12:12.000Z"),
+      },
+    ]),
+    null,
+  );
+  assert.equal(
+    selectCentrexSyntheticInboundCall(eventAt, [
+      {
+        ...exact,
+        endedAt: new Date("2026-08-12T01:12:05.000Z"),
+      },
+    ]),
+    null,
+  );
+});
 
 test("U+ 초 단위 시작 시각이 콜백보다 앞서도 유효한 수신 시간축으로 정규화한다", () => {
   const timeline = normalizeCentrexInboundHistoryTimeline({

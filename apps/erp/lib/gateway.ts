@@ -220,6 +220,7 @@ export type TelephonyInboundCall = {
   endedAt: string | null;
   lastEventAt: string;
   answerAvailable: boolean;
+  deliveryDelayed: boolean;
   owners: Array<{ staffUserId: string; displayName: string }>;
   answerCommand: {
     id: string;
