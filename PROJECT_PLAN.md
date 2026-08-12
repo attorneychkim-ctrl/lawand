@@ -698,7 +698,12 @@
 > 없는 reload로 정식 호스트를 활성화했고 apex·www·ERP·API의 Let's Encrypt 인증서를
 > 발급했다. 새 EIP 고정 smoke에서 홈페이지 루트→`/bank`, ERP 로그인, gateway health와
 > legacy fallback이 모두 200이며 구 EIP 고정 홈페이지도 200이라 DNS 전파 중 양쪽이
-> 정상이다. rollback은 NS 재변경이 아니라 Route 53 apex A를 구 `222.239.248.41`로
+> 정상이다. 일부 로컬·통신사 resolver가 권한 NS 전환 전의 Cafe24 wildcard 응답을 계속
+> 사용해 ERP를 구 apex로 보내는 인증서 오류를 차단하기 위해, 보존 중인 Cafe24 구 zone에도
+> ERP A `3.34.72.9`와 API A `3.36.255.226`을 명시했다. Cafe24 네임서버 4곳이 두 레코드를
+> TTL 1,800초로 반환하고 새 EIP의 Let's Encrypt 인증서와 ERP login·gateway health 200을
+> 확인했다. 기존 apex·`revivetouch`·wildcard·MX·SPF와 호스팅·SSL은 변경하지 않았다.
+> rollback은 NS 재변경이 아니라 Route 53 apex A를 구 `222.239.248.41`로
 > 되돌리는 것을 1차로 한다. Secrets Manager의 ERP 공개 URL만 정식 주소로 갱신했으나
 > 업무 통화가 이어져 gateway·ERP 프로세스 재시작은 무통화 시점으로 미뤘다. 실제
 > EIP·접속점·도메인 전환·rollback 기준은 `docs/PRODUCTION_DEPLOYMENT_V1.md`가 운영 단일

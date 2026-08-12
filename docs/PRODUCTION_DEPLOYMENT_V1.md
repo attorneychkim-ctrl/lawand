@@ -41,6 +41,13 @@ U+ 종료 이력/지연 bridge 중복 원장과 동일 후처리만 하나로 �
 삭제하지 않았다. 공개 resolver에 따라 잠시 구 A 또는 새 A가 보이지만 양쪽 HTTPS가
 모두 정상이다.
 
+권한 NS 전환 전의 Cafe24 wildcard 응답을 캐시한 resolver가 ERP/API를 구 apex로 보내는
+인증서 오류를 줄이기 위해, 2026-08-12 Cafe24 구 zone에도 ERP A `3.34.72.9`와 API A
+`3.36.255.226`을 명시했다. Cafe24 네임서버 4곳에서 두 레코드가 TTL 1,800초로 반환되고,
+각 새 EIP의 Let's Encrypt SAN과 ERP `/login`·gateway `/health` 200을 확인했다. 기존 apex,
+`revivetouch`, wildcard, MX, SPF와 Cafe24 호스팅·SSL은 그대로 유지한다. 잔여 resolver
+캐시가 끝날 때까지 이 두 구 zone 명시 레코드도 제거하지 않는다.
+
 ## 실제 AWS 구성
 
 ```text
