@@ -71,6 +71,21 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-12 — Cafe24 구 DNS ERP/API 명시 레코드 추가·인증서 경고 차단
+- 일부 로컬 resolver가 `erp.lawandfirm.com`을 Cafe24 구 wildcard 경유 apex
+  `222.239.248.41`로 보내고, 그 origin의 SAN 없는 사설 인증서 때문에 Chrome
+  `ERR_CERT_AUTHORITY_INVALID`가 발생하는 것을 재확인했다. 새 ERP EIP `3.34.72.9`는
+  `erp.lawandfirm.com` Let's Encrypt 인증서와 `/login` 200이 정상이고, gateway EIP
+  `3.36.255.226`도 `api.lawandfirm.com` 인증서와 `/health` 200이 정상이다.
+- 사용자의 명시적 요청으로 보존 중인 Cafe24 구 zone에 ERP A `3.34.72.9`와 API A
+  `3.36.255.226`을 추가했다. Cafe24 관리 화면의 저장 성공과 A 레코드 표를 대조했고,
+  Cafe24 네임서버 4곳이 두 레코드를 모두 TTL 1,800초로 반환하는 것을 확인했다. 기존
+  apex·`revivetouch`·wildcard CNAME·Daum MX·SPF, Cafe24 호스팅·SSL과 Route 53 zone은
+  변경하지 않았다.
+- 이 조치는 NS 전환 전 응답을 캐시한 resolver의 안전망이며 잔여 캐시가 끝날 때까지
+  명시 레코드를 유지한다. 소스·앱·DB·AWS 운영 구성 변경이나 재배포는 없었다.
+  `PROJECT_PLAN.md`는 v1.18이다.
+
 ### 2026-08-12 — 센트릭스 지연 수신 복구 v0.8.2·0048·gateway/ERP 운영 통합 배포
 - `HERDR_ENV=1`에서 main과 HERDR worktree 2개, 원격 `origin/worktree/*` 14개를 전수
   대조했다. 모든 원격 HEAD가 main ancestor이고 세 작업 트리가 깨끗해 추가 병합 없이
