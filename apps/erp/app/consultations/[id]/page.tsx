@@ -21,6 +21,7 @@ import { requireStaff } from "../../../lib/session";
 import { ClaimConsultationButton } from "../../_components/claim-consultation-button";
 import { ClickToCallButton } from "../../_components/click-to-call-button";
 import { CopyButton } from "../../_components/copy-button";
+import { KakaoEntryInvalidationButton } from "../../_components/kakao-entry-invalidation-button";
 import { KakaoEntryPanel } from "../../_components/kakao-entry-panel";
 import { LegalFriendsInvalidationButton } from "../../_components/legalfriends-invalidation-button";
 import { MessageComposeButton } from "../../_components/message-compose-button";
@@ -666,6 +667,9 @@ export default async function ConsultationDetailPage({
               <span className={`state-badge is-${consultation.state}`}>
                 {stateLabels[consultation.state] ?? consultation.state}
               </span>
+              {consultation.existingCustomer ? (
+                <span className="flag-badge is-existing">기존고객</span>
+              ) : null}
               {legalFriendsInvalidated ? (
                 <span className="flag-badge is-neutral">리걸프렌즈 무효</span>
               ) : null}
@@ -694,6 +698,11 @@ export default async function ConsultationDetailPage({
               <LegalFriendsInvalidationButton
                 consultationId={consultation.id}
                 status={invalidationStatus}
+              />
+            ) : null}
+            {consultation.kakaoEntry?.status === "pending" ? (
+              <KakaoEntryInvalidationButton
+                consultationId={consultation.id}
               />
             ) : null}
             {canClaim ? (

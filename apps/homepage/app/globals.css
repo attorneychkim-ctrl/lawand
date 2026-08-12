@@ -980,6 +980,12 @@ summary:focus-visible {
   font-weight: 800;
 }
 
+.kakao-entry-modal-form label span {
+  margin-left: 4px;
+  color: var(--action-700);
+  font-size: 11px;
+}
+
 .kakao-entry-modal-form input {
   width: 100%;
   min-height: 54px;
@@ -1045,6 +1051,11 @@ summary:focus-visible {
   border: 1px solid var(--action-600);
   background: var(--action-600);
   color: white;
+}
+
+.kakao-entry-modal-submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 @media (max-width: 640px) {

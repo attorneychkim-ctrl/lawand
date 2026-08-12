@@ -92,6 +92,7 @@ function searchText(item: ConsultationListItem) {
     item.phone,
     item.publicReceiptCode,
     item.assigneeDisplayName,
+    item.existingCustomer ? "기존고객" : null,
     residenceRegionLabels[item.residenceRegion ?? ""],
     modeLabel(item),
     item.latestTelephony?.disposition === "no_answer" ? "부재" : null,
@@ -186,6 +187,9 @@ function ChannelIcon({ tone }: { tone: ReturnType<typeof channelTone> }) {
 function StatusBadges({ item }: { item: ConsultationListItem }) {
   return (
     <div className="consultation-flags">
+      {item.existingCustomer ? (
+        <span className="flag-badge is-existing">기존고객</span>
+      ) : null}
       {item.latestTelephony?.disposition === "no_answer" ? (
         <span className="flag-badge is-attention">부재</span>
       ) : null}

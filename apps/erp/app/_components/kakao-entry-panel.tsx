@@ -4,7 +4,6 @@ import { useActionState } from "react";
 
 import {
   confirmKakaoHomepageEntryAction,
-  invalidateKakaoHomepageEntryAction,
   type KakaoEntryActionState,
 } from "../consultation-actions";
 
@@ -44,12 +43,6 @@ export function KakaoEntryPanel({
     confirmKakaoHomepageEntryAction.bind(null, consultationId),
     initialState,
   );
-  const [invalidateState, invalidateAction, invalidatePending] =
-    useActionState(
-      invalidateKakaoHomepageEntryAction.bind(null, consultationId),
-      initialState,
-    );
-
   return (
     <section
       className={`kakao-entry-panel is-${entry.status}`}
@@ -144,30 +137,6 @@ export function KakaoEntryPanel({
         </form>
       ) : null}
 
-      {entry.status === "pending" ? (
-        <form
-          action={invalidateAction}
-          className="kakao-invalidate-form"
-          onSubmit={(event) => {
-            if (
-              !window.confirm(
-                "채널 관리자센터에 고객 메시지가 없는지 확인했나요?\n확인하면 이 진입을 미진입·무효 처리합니다.",
-              )
-            ) {
-              event.preventDefault();
-            }
-          }}
-        >
-          <button disabled={invalidatePending} type="submit">
-            {invalidatePending ? "처리 중…" : "메시지 없음·무효 처리"}
-          </button>
-          {invalidateState.error ? (
-            <p className="form-error" role="alert">
-              {invalidateState.error}
-            </p>
-          ) : null}
-        </form>
-      ) : null}
     </section>
   );
 }

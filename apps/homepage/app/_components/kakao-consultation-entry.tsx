@@ -55,6 +55,7 @@ export function KakaoConsultationEntry({
   placement: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [displayName, setDisplayName] = useState("");
   const dialogTitleId = useId();
   const dialogDescriptionId = useId();
   const displayNameId = useId();
@@ -147,7 +148,15 @@ export function KakaoConsultationEntry({
           method="post"
           rel="noopener noreferrer"
           target="_blank"
-          onSubmit={() => {
+          onSubmit={(event) => {
+            if (!displayName.trim()) {
+              event.preventDefault();
+              displayNameRef.current?.setCustomValidity(
+                "이름 또는 카카오톡 표시명을 입력해 주세요.",
+              );
+              displayNameRef.current?.reportValidity();
+              return;
+            }
             if (idempotencyInput.current) {
               idempotencyInput.current.value = entryIdempotencyKey();
             }
@@ -166,16 +175,23 @@ export function KakaoConsultationEntry({
           />
           <input ref={attributionInput} name="attribution" type="hidden" />
 
-          <label htmlFor={displayNameId}>이름 또는 카카오톡 표시명</label>
+          <label htmlFor={displayNameId}>
+            이름 또는 카카오톡 표시명 <span>필수</span>
+          </label>
           <input
             ref={displayNameRef}
             autoComplete="name"
             id={displayNameId}
             maxLength={40}
             name="displayName"
+            onChange={(event) => {
+              event.currentTarget.setCustomValidity("");
+              setDisplayName(event.target.value);
+            }}
             placeholder="예: 김민수, 민수"
             required
             type="text"
+            value={displayName}
           />
           <p className="kakao-entry-modal-help">
             확인을 누르면 이 이름으로 상담이 접수되고 카카오톡 채팅방이 새로
@@ -198,7 +214,11 @@ export function KakaoConsultationEntry({
             >
               취소
             </button>
-            <button className="kakao-entry-modal-submit" type="submit">
+            <button
+              className="kakao-entry-modal-submit"
+              disabled={!displayName.trim()}
+              type="submit"
+            >
               확인하고 카카오톡 열기
             </button>
           </div>

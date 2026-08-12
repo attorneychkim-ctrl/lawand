@@ -212,6 +212,42 @@ export function createConsultationService(options: {
 }) {
   const { db, protection } = options;
 
+  async function existingLegalFriendsCustomerPhones(phones: string[]) {
+    const normalizedPhones = [
+      ...new Set(
+        phones
+          .map((phone) => phone.replace(/[^0-9]/g, ""))
+          .filter((phone) => phone.length >= 9 && phone.length <= 15),
+      ),
+    ];
+    if (normalizedPhones.length === 0) return new Set<string>();
+
+    try {
+      const result = await db.execute(
+        sql<{ phone: string }>`
+          select candidate.phone
+          from unnest(${normalizedPhones}::text[]) as candidate(phone)
+          where exists (
+            select 1
+            from public.resolve_inbound_phone_directory(candidate.phone)
+          )
+        `,
+      );
+      return new Set(
+        (result.rows as Array<{ phone: string }>).map((row) => row.phone),
+      );
+    } catch {
+      console.error(
+        JSON.stringify({
+          event: "consultation_existing_customer_lookup_failed",
+          phoneCount: normalizedPhones.length,
+          occurredAt: new Date().toISOString(),
+        }),
+      );
+      return new Set<string>();
+    }
+  }
+
   async function submitSelfDiagnosis(
     rawSubmission: SelfDiagnosisSubmission,
   ): Promise<SelfDiagnosisSubmissionResponse> {
@@ -2456,8 +2492,7 @@ export function createConsultationService(options: {
       }
     }
 
-    return {
-      items: consultationRows.map((consultation) => {
+    const items = consultationRows.map((consultation) => {
         const request = latestByConsultation.get(consultation.id);
         const preferredName =
           consultation.preferredNameCiphertext &&
@@ -2548,7 +2583,18 @@ export function createConsultationService(options: {
           firstRequestedAt: consultation.firstRequestedAt.toISOString(),
           lastRequestedAt: consultation.lastRequestedAt.toISOString(),
         };
-      }),
+      });
+    const existingCustomerPhones = await existingLegalFriendsCustomerPhones(
+      items.flatMap((item) => (item.phone ? [item.phone] : [])),
+    );
+
+    return {
+      items: items.map((item) => ({
+        ...item,
+        existingCustomer:
+          item.phone !== null &&
+          existingCustomerPhones.has(item.phone.replace(/[^0-9]/g, "")),
+      })),
       total,
       page,
       pageSize: query.pageSize,
@@ -2849,6 +2895,29 @@ export function createConsultationService(options: {
             `consultations.preferred_name:${consultation.id}`,
           )
         : null;
+    const phoneByRequest = new Map(
+      requestRows.map((request) => [
+        request.id,
+        request.phoneCiphertext &&
+        request.phoneNonce &&
+        request.phoneKeyVersion
+          ? protection.decrypt(
+              {
+                ciphertext: request.phoneCiphertext,
+                nonce: request.phoneNonce,
+                keyVersion: request.phoneKeyVersion,
+              },
+              `consultation_requests.phone:${request.id}`,
+            )
+          : null,
+      ]),
+    );
+    const latestPhone = requestRows[0]
+      ? phoneByRequest.get(requestRows[0].id) ?? null
+      : null;
+    const existingCustomerPhones = await existingLegalFriendsCustomerPhones(
+      latestPhone ? [latestPhone] : [],
+    );
 
     return {
       id: consultation.id,
@@ -2856,6 +2925,9 @@ export function createConsultationService(options: {
       state: consultation.state,
       displayName: preferredName ?? consultation.anonymousLabel,
       contactChannel: consultation.contactChannel,
+      existingCustomer:
+        latestPhone !== null &&
+        existingCustomerPhones.has(latestPhone.replace(/[^0-9]/g, "")),
       kakaoEntry: kakaoEntry
         ? {
             id: kakaoEntry.id,
@@ -3034,19 +3106,7 @@ export function createConsultationService(options: {
           mode: request.mode,
           source: request.source,
           contactChannel: request.contactChannel,
-          phone:
-            request.phoneCiphertext &&
-            request.phoneNonce &&
-            request.phoneKeyVersion
-              ? protection.decrypt(
-                  {
-                    ciphertext: request.phoneCiphertext,
-                    nonce: request.phoneNonce,
-                    keyVersion: request.phoneKeyVersion,
-                  },
-                  `consultation_requests.phone:${request.id}`,
-                )
-              : null,
+          phone: phoneByRequest.get(request.id) ?? null,
           name:
             request.nameCiphertext &&
             request.nameNonce &&
