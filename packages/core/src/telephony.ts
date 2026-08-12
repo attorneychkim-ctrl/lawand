@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { residenceRegionSchema } from "./intake.js";
+
 export const CENTREX_SMS_MAX_BYTES = 80;
 export const CENTREX_LMS_MAX_BYTES = 720;
 export const MMS_IMAGE_MAX_BYTES = 200 * 1024;
@@ -190,6 +192,31 @@ export const legalFriendsDirectoryMessageSendSchema = z
       });
     }
   });
+
+export const legalFriendsDirectoryConsultationCreateSchema = z
+  .object({
+    clientIdx: z.number().int().positive(),
+    caseIdx: z.number().int().positive(),
+    idempotencyKey: z.uuid(),
+    customerName: z.string().trim().min(1).max(50),
+    phone: z
+      .string()
+      .trim()
+      .transform((value) => value.replace(/\D/g, ""))
+      .pipe(
+        z
+          .string()
+          .regex(/^010\d{8}$/, "휴대전화는 010으로 시작하는 11자리 번호여야 합니다."),
+      ),
+    residenceRegion: residenceRegionSchema,
+    caseType: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+    isReferral: z.boolean(),
+  })
+  .strict();
+
+export type LegalFriendsDirectoryConsultationCreate = z.infer<
+  typeof legalFriendsDirectoryConsultationCreateSchema
+>;
 
 export type TelephonyCallDisposition = z.infer<
   typeof telephonyCallDispositionSchema

@@ -85,6 +85,39 @@ const residenceRegionLabels: Record<string, string> = {
   overseas_or_other: "해외·기타",
 };
 
+const revivalStateLabels = new Map([
+  [5, "상담대기"], [10, "상담완료"], [11, "재상담필요"], [15, "계약"],
+  [20, "서류준비"], [21, "부채증명서 발급중"], [22, "부채증명서 발급완료"],
+  [25, "신청서 작성 진행중"], [30, "신청서 제출"], [35, "금지명령"],
+  [40, "보정기간"], [45, "개시결정"], [50, "채권자 집회기일"], [55, "인가결정"],
+]);
+
+const bankruptcyStateLabels = new Map([
+  [5, "상담대기"], [10, "상담완료"], [11, "재상담필요"], [15, "계약"],
+  [20, "서류준비"], [21, "부채증명서 발급중"], [22, "부채증명서 발급완료"],
+  [25, "신청서 작성 진행중"], [30, "신청서 제출"], [40, "보정기간"],
+  [100, "파산선고"], [105, "의견청취기일"], [110, "재산환가 및 배당"],
+  [115, "파산폐지"], [120, "면책결정"], [125, "면책불허가"],
+]);
+
+function directoryCaseTypeLabel(caseType: number) {
+  return caseType === 1 ? "개인회생" : caseType === 2 ? "파산면책" : "기타사건";
+}
+
+function directoryCaseStateLabel(source: NonNullable<ConsultationDetail["directorySource"]>) {
+  const labels = source.caseType === 2 ? bankruptcyStateLabels : revivalStateLabels;
+  const state = labels.get(source.caseState) ?? `진행 상태 ${source.caseState}`;
+  return [state, source.isClosed ? "종결" : null, source.isRepealed ? "폐지" : null]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function formatDirectoryPhone(value: string | null) {
+  if (!value) return "미등록";
+  const digits = value.replace(/\D/g, "");
+  return /^010\d{8}$/.test(digits) ? formatPhone(digits) : value;
+}
+
 const answerLabels: Record<string, string> = {
   residenceRegion: "거주 지역",
   topic: "도움 분야",
@@ -162,6 +195,7 @@ function sourceLabel(request: ConsultationDetail["requests"][number]) {
     homepage_kakao: "홈페이지 카카오 진입",
     naver_booking_email: "네이버 예약",
     erp_phone_desk: "전화데스크 신건상담",
+    erp_client_directory: "고객찾기 신건상담",
   };
   return labels[request.source];
 }
@@ -661,6 +695,9 @@ export default async function ConsultationDetailPage({
               {legalFriendsInvalidated ? (
                 <span className="flag-badge is-neutral">리걸프렌즈 무효</span>
               ) : null}
+              {consultation.directorySource?.relationship === "referrer" ? (
+                <span className="flag-badge is-info">소개 상담</span>
+              ) : null}
             </div>
             <h1>{consultation.displayName}</h1>
             <p>
@@ -786,6 +823,51 @@ export default async function ConsultationDetailPage({
             </div>
           </aside>
         </div>
+
+        {consultation.directorySource ? (
+          <section className="detail-section directory-source-panel" aria-labelledby="directory-source-title">
+            <header className="detail-section-heading">
+              <div>
+                <p className="section-kicker">LEGALFRIENDS CONTEXT</p>
+                <h2 id="directory-source-title">
+                  {consultation.directorySource.relationship === "referrer"
+                    ? "소개자와 기존 사건"
+                    : "기존 고객과 사건"}
+                </h2>
+                <p>
+                  {consultation.directorySource.relationship === "referrer"
+                    ? `${consultation.directorySource.clientName ?? "기존 고객"} 고객이 소개한 상담입니다.`
+                    : "고객찾기에서 선택한 기존 고객의 새 상담입니다."}
+                </p>
+              </div>
+              <a
+                className="secondary-button directory-source-link"
+                href="https://www.legalfriends.co.kr"
+                rel="noreferrer"
+                target="_blank"
+              >
+                리걸프렌즈에서 확인
+              </a>
+            </header>
+            <div className="directory-source-alert">
+              <strong>상담 전 확인</strong>
+              <span>기존 수임료·계약 범위·상담 메모는 아래 Case ID로 리걸프렌즈 사건을 찾아 확인해 주세요.</span>
+            </div>
+            <dl className="directory-source-facts">
+              <div><dt>{consultation.directorySource.relationship === "referrer" ? "소개자" : "기존 고객"}</dt><dd>{consultation.directorySource.clientName ?? "이름 미확인"}</dd></div>
+              <div><dt>기존 전화</dt><dd>{formatDirectoryPhone(consultation.directorySource.phone)}</dd></div>
+              <div><dt>기존 담당</dt><dd>{consultation.directorySource.staffNames.join(" · ") || "미지정"}</dd></div>
+              <div><dt>사건 유형·상태</dt><dd>{directoryCaseTypeLabel(consultation.directorySource.caseType)} · {directoryCaseStateLabel(consultation.directorySource)}</dd></div>
+              <div><dt>사건번호</dt><dd>{consultation.directorySource.caseNumber || "미등록"}</dd></div>
+              <div><dt>사건명</dt><dd>{consultation.directorySource.caseName || "미등록"}</dd></div>
+              <div><dt>법원</dt><dd>{consultation.directorySource.courtName || "미등록"}</dd></div>
+              <div><dt>기존 거주지</dt><dd>{consultation.directorySource.residenceRegion ? residenceRegionLabels[consultation.directorySource.residenceRegion] : "미등록"}</dd></div>
+              <div><dt>Case ID</dt><dd className="code-value directory-case-id"><span>{consultation.directorySource.caseIdx}</span><CopyButton value={String(consultation.directorySource.caseIdx)} /></dd></div>
+              <div><dt>기존 사건 등록</dt><dd>{formatCaseDate(consultation.directorySource.caseCreatedOn)}</dd></div>
+              <div><dt>기존 사건 갱신</dt><dd>{formatCaseDate(consultation.directorySource.caseUpdatedOn)}</dd></div>
+            </dl>
+          </section>
+        ) : null}
 
         {consultation.telephonyMessages.length > 0 ? (
           <section className="detail-section message-ledger" aria-labelledby="message-ledger-title">

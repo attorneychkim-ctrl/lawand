@@ -18,13 +18,13 @@ export default async function ClientsPage() {
           <div>
             <p className="eyebrow">CLIENT DIRECTORY</p>
             <h1>고객 찾기</h1>
-            <p>리걸프렌즈를 따로 열지 않고 고객과 사건을 확인한 뒤 바로 문자하거나 전화합니다.</p>
+            <p>고객과 사건을 확인한 뒤 문자·전화하거나 기존 고객의 신건과 소개 상담을 등록합니다.</p>
           </div>
           <p className="header-context">검색 결과 <strong>최대 30건</strong></p>
         </header>
         <ClientDirectoryWorkspace staffName={staff.displayName} />
         <p className="security-note">
-          고객 검색과 문자·클릭투콜 요청은 직원 계정 기준으로 감사 기록에 남습니다.
+          고객 검색과 문자·클릭투콜·신건상담 등록은 직원 계정 기준으로 감사 기록에 남습니다.
         </p>
       </main>
     </>
