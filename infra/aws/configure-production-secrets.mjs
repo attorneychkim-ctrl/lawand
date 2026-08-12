@@ -163,7 +163,7 @@ const shared = {
 };
 
 const gatewayUrl = `http://${outputs.GatewayPrivateIp}:3022`;
-const erpBaseUrl = `https://${temporaryHost(outputs.ErpElasticIp)}`;
+const erpBaseUrl = "https://erp.lawandfirm.com";
 
 const gatewaySecret = {
   ...existingGateway,
@@ -293,7 +293,8 @@ const metadata = {
   erp: {
     instanceId: outputs.ErpInstanceId,
     elasticIp: outputs.ErpElasticIp,
-    temporaryHttpsUrl: erpBaseUrl,
+    publicHttpsUrl: erpBaseUrl,
+    temporaryHttpsUrl: `https://${temporaryHost(outputs.ErpElasticIp)}`,
   },
   gateway: {
     instanceId: outputs.GatewayInstanceId,
