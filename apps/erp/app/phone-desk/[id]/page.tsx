@@ -4,9 +4,11 @@ import { notFound } from "next/navigation";
 import { getPhoneDeskCall } from "../../../lib/gateway";
 import { requireStaff } from "../../../lib/session";
 import { PhoneAftercareForm } from "../../_components/phone-aftercare-form";
+import { PhoneCallResolutionForm } from "../../_components/phone-call-resolution-form";
 import { StaffBar } from "../../_components/staff-bar";
 
-function formatPhone(phone: string) {
+function formatPhone(phone: string | null) {
+  if (!phone) return "";
   const digits = phone.replace(/\D/g, "");
   if (/^\d{11}$/.test(digits)) {
     return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
@@ -15,6 +17,11 @@ function formatPhone(phone: string) {
     return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
   }
   return phone;
+}
+
+function internalCallTitle(call: Awaited<ReturnType<typeof getPhoneDeskCall>>["call"]) {
+  const extensions = [...new Set(call.participants.map((item) => item.extension))];
+  return `내선 ${extensions.join(" ↔ ") || call.endpoint.extension}`;
 }
 
 function formatDate(value: string | null) {
@@ -48,7 +55,11 @@ export default async function PhoneDeskDetailPage({
     notFound();
   }
   const call = detail.call;
-  const customerName = call.clickToCall?.consultation?.displayName ??
+  const customerName = call.scope === "internal"
+    ? call.participants
+        .map((item) => `${item.displayName ?? "직원 미연결"} ${item.extension}`)
+        .join(" ↔ ") || "사내 내선 통화"
+    : call.clickToCall?.consultation?.displayName ??
     call.clickToCall?.directoryClient?.displayName ??
     (call.customerMatch?.source === "consultation"
       ? call.customerMatch.consultation.displayName
@@ -63,7 +74,11 @@ export default async function PhoneDeskDetailPage({
         <header className="erp-header phone-desk-detail-header">
           <div>
             <p className="eyebrow">TELEPHONE DESK</p>
-            <h1>{formatPhone(call.remotePhone)}</h1>
+            <h1>
+              {call.scope === "internal"
+                ? internalCallTitle(call)
+                : formatPhone(call.remotePhone)}
+            </h1>
             <p>{customerName} · 통화 원장과 후처리를 한 화면에서 관리합니다.</p>
           </div>
           <Link className="secondary-button phone-desk-back-link" href="/phone-desk">
@@ -74,7 +89,15 @@ export default async function PhoneDeskDetailPage({
         <section className="phone-desk-detail-summary">
           <div>
             <span>구분</span>
-            <strong>{call.direction === "inbound" ? "수신전화" : call.source === "click_to_call" ? "ERP 발신" : "센트릭스 직접 발신"}</strong>
+            <strong>
+              {call.scope === "internal"
+                ? "내선전화"
+                : call.direction === "inbound"
+                  ? "수신전화"
+                  : call.source === "click_to_call"
+                    ? "ERP 발신"
+                    : "센트릭스 직접 발신"}
+            </strong>
           </div>
           <div>
             <span>통화 상태</span>
@@ -94,11 +117,20 @@ export default async function PhoneDeskDetailPage({
           </div>
           <div>
             <span>회선 담당</span>
-            <strong>{call.endpointOwners.map((owner) => owner.displayName).join(" · ") || "미지정"}</strong>
+            <strong>
+              {call.scope === "internal"
+                ? call.participants
+                    .map((item) => item.displayName)
+                    .filter(Boolean)
+                    .join(" · ") || "미지정"
+                : call.endpointOwners.map((owner) => owner.displayName).join(" · ") || "미지정"}
+            </strong>
           </div>
         </section>
 
-        {call.state === "ended" ? (
+        {call.state === "ended" && call.correlationStatus === "needs_confirmation" ? (
+          <PhoneCallResolutionForm call={call} />
+        ) : call.state === "ended" ? (
           <section className="phone-desk-aftercare-card">
             <div className="section-heading">
               <div>
@@ -114,7 +146,11 @@ export default async function PhoneDeskDetailPage({
             <PhoneAftercareForm detail={detail} returnTo="/phone-desk" />
           </section>
         ) : (
-          <p className="info-banner">통화가 종료되면 후처리 입력이 열립니다.</p>
+          <p className="info-banner">
+            {call.correlationStatus === "needs_confirmation"
+              ? "전화기 종료 신호를 확인하는 중입니다. 종료가 확인되면 실제 통화자를 선택할 수 있습니다."
+              : "통화가 종료되면 후처리 입력이 열립니다."}
+          </p>
         )}
       </main>
     </>

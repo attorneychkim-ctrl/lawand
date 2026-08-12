@@ -169,6 +169,35 @@
   이 워크트리에서는 운영 배포·운영 사건 생성·운영 데이터 변경을 하지 않으며 브랜치
   commit·push까지만 수행한다.
 
+### 2026-08-12 — 내선 원장·당겨받기 canonical 통화·호전환 종료 확인 UX 후보
+- 운영 원장과 비식별 bridge 관측을 읽기 전용으로 대조했다. 4591→1208 일반 내선은 v2
+  root/leg와 정확한 종료가 이미 있었지만 전화데스크가 legacy 수·발신 행만 읽어 목록·상세·
+  후처리에 없었다. 4425 수신을 1208이 당겨받은 건은 같은 root의 U+ 연결 176초와 bridge
+  `BRIDGE_RING_TIMEOUT` 190초가 별도 행으로 보인 것으로, 1208의 exact provider root→channel
+  관측과 종료가 있는 당겨받기였다. 4591 수신 후 1208 통화 후 호전환은 같은 consultation
+  provider root/channel의 한쪽만 종료돼 root가 `needs_confirmation`으로 남았고 최종 고객
+  leg의 수동 증거가 없어 마지막 통화자를 자동 확정할 수 없었다. 운영 데이터 쓰기·프로세스
+  변경은 하지 않았다.
+- 전화데스크를 call root 기준 canonical read model로 확장해 일반 내선을 한 원장으로 표시하고
+  `직접 발신`과 `진행 중` 사이에 `내선` 필터를 추가했다. 내선은 참여자·내선번호·통화시간을
+  표시하고 참여 직원이 `내선 통화 완료/내부 확인 필요/내선 미연결` 후처리와 내부 확인 업무를
+  저장할 수 있지만 고객 상담에는 연결하지 않는다. 같은 external root의 U+ 연결 이력과 bridge
+  timeout도 연결 근거가 강한 한 행으로 접고 `당겨받기` 배지를 표시한다.
+- 실시간 gateway는 호전환 관계가 없는 활성 외부 수신 root와 다른 endpoint의 exact
+  `CHANNEL_LIST`만 `call_picked_up`으로 확정한다. 원수신 leg를 `CALL_PICKED_UP`으로 끝내고
+  target leg로 현재·최종 통화자를 이동하며 늦은 원수신 timeout이 이를 덮어쓰지 않는다.
+  통화 후 호전환의 mirrored consultation leg는 exact 종료를 동기화하고, 모든 관측 leg가
+  끝났지만 final actor만 불명확하면 root 통화 상태는 `ended`, correlation은
+  `needs_confirmation`으로 분리한다. 상단 ghost 카드는 닫히고 상세에서 실제 직원을 선택하면
+  `staff_resolved` 관계·감사 로그를 남긴 뒤 그 직원의 후처리가 열린다.
+- enum migration `0051`과 exact-evidence 복구 migration `0052`를 분리했다. 운영형 임시 DB에
+  당겨받기와 호전환 fixture를 넣어 pickup 한 root/관계, mirrored 3개 leg 종료,
+  terminal-but-unresolved root를 확인했고 migration 재실행도 멱등 통과한 뒤 임시 DB를 삭제했다.
+  전체 5패키지 typecheck·lint·production build, core 68개·gateway 117개 테스트, DB schema
+  check와 `git diff --check`를 통과했다. `PROJECT_PLAN.md`는 v1.21이다. 이 워크트리에서는
+  main 병합·운영 migration·gateway/ERP 배포·운영 원장 변경을 수행하지 않았으며 운영 반영은
+   `0051`·`0052`·gateway·ERP를 같은 통합 릴리스로 배포한 뒤 세 실통화 회귀 canary로 확인한다.
+
 ### 2026-08-12 — 나머지 워크트리 main 통합·0049/0050·v0.8.3 전체 운영 배포
 - `HERDR_ENV=1`에서 main과 HERDR worktree 5개, 원격 `origin/worktree/*` 19개를 전수
   대조했다. 미반영이던 `brave-cloud-9c88`의 Cafe24 구 DNS 안전 문서는 merge commit

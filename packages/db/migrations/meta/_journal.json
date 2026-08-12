@@ -358,6 +358,20 @@
       "when": 1786514229082,
       "tag": "0050_secret_grey_gargoyle",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1786523613269,
+      "tag": "0051_unknown_scalphunter",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1786523640128,
+      "tag": "0052_centrex_pickup_terminal_recovery",
+      "breakpoints": true
     }
   ]
 }

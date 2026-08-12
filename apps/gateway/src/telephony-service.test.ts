@@ -2,9 +2,35 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  canonicalizePhoneDeskObservedCalls,
   isCentrexInboundAnswerDeliveryDelayed,
   legalFriendsResidenceRegion,
 } from "./telephony-service.js";
+
+test("같은 root의 U+ 연결 이력과 bridge 장시간 울림은 원장 한 건으로 접는다", () => {
+  const items = canonicalizePhoneDeskObservedCalls([
+    {
+      id: "root-1",
+      record: "bridge-timeout",
+      connectedAt: null,
+      lastEventAt: "2026-08-12T08:13:20.000Z",
+      receptionMode: "office_bridge" as const,
+      correlationStatus: "needs_confirmation" as const,
+    },
+    {
+      id: "root-1",
+      record: "uplus-answered",
+      connectedAt: "2026-08-12T08:10:13.000Z",
+      lastEventAt: "2026-08-12T08:13:05.000Z",
+      receptionMode: "uplus_network" as const,
+      correlationStatus: "confirmed" as const,
+    },
+  ]);
+  assert.equal(items.length, 1);
+  assert.equal(items[0]?.record, "uplus-answered");
+  assert.equal(items[0]?.receptionMode, "uplus_network");
+  assert.equal(items[0]?.correlationStatus, "needs_confirmation");
+});
 
 test("리걸프렌즈 거주지는 상세 주소를 노출하지 않고 광역 지역으로만 정규화한다", () => {
   assert.equal(legalFriendsResidenceRegion("서울특별시 강남구"), "seoul");

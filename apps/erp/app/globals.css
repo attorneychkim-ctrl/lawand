@@ -3906,7 +3906,7 @@ a.inbound-customer:hover { text-decoration: underline; }
 
 .phone-desk-metrics {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -4159,6 +4159,11 @@ a.inbound-customer:hover { text-decoration: underline; }
   color: var(--warning);
 }
 
+.phone-desk-source.is-internal {
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+}
+
 .phone-desk-linked {
   border: 1px solid color-mix(in srgb, var(--info) 25%, var(--line));
   color: var(--info);
@@ -4408,6 +4413,23 @@ a.inbound-customer:hover { text-decoration: underline; }
 }
 
 .phone-aftercare-form { display: grid; gap: 24px; }
+.phone-call-resolution {
+  display: grid;
+  gap: 18px;
+  padding: 24px;
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--line));
+  border-radius: 16px;
+  background: var(--warning-soft);
+}
+.phone-call-resolution h2 { margin: 4px 0 7px; font-size: 1.05rem; }
+.phone-call-resolution > div > p:last-child { margin: 0; color: var(--ink-soft); font-size: .72rem; line-height: 1.6; }
+.phone-call-resolution-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.phone-call-resolution-options label { display: flex; align-items: center; gap: 10px; padding: 13px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); cursor: pointer; }
+.phone-call-resolution-options label:has(input:checked) { border-color: var(--brand); box-shadow: 0 0 0 2px var(--brand-soft); }
+.phone-call-resolution-options label > span { display: grid; gap: 2px; }
+.phone-call-resolution-options strong { font-size: .75rem; }
+.phone-call-resolution-options small { color: var(--muted); font-size: .65rem; }
+.phone-call-resolution > button { justify-self: start; }
 .phone-aftercare-section { display: grid; gap: 15px; margin: 0; padding: 0; border: 0; }
 .phone-aftercare-section > legend,
 .phone-aftercare-field > span { color: var(--ink-soft); font-size: .72rem; font-weight: 830; }

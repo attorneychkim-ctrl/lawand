@@ -27,6 +27,7 @@ import {
   messageTemplateCreateSchema,
   messageTemplateUpdateSchema,
   phoneDeskAftercareSaveSchema,
+  phoneDeskCallResolutionSchema,
   phoneDeskFollowUpCompletionSchema,
   legalFriendsDirectoryConsultationCreateSchema,
   legalFriendsDirectoryClickToCallSchema,
@@ -1447,6 +1448,7 @@ export function createGatewayServer(options?: {
             "inbound",
             "click_to_call",
             "centrex_direct",
+            "internal",
             "active",
           ].includes(filter)
         ) {
@@ -1463,6 +1465,7 @@ export function createGatewayServer(options?: {
               | "inbound"
               | "click_to_call"
               | "centrex_direct"
+              | "internal"
               | "active",
           }),
         );
@@ -1711,6 +1714,55 @@ export function createGatewayServer(options?: {
           response,
           200,
           await options.telephonyService.savePhoneDeskAftercare(
+            callId,
+            parsed.data,
+            actor,
+          ),
+        );
+        return;
+      }
+
+      const phoneDeskResolutionMatch = url.pathname.match(
+        /^\/v1\/phone-desk\/calls\/([^/]+)\/resolve$/,
+      );
+      if (request.method === "POST" && phoneDeskResolutionMatch) {
+        if (
+          !options?.telephonyService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        const callId = phoneDeskResolutionMatch[1];
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        if (!callId || !validUuid(callId)) {
+          sendJson(response, 400, { error: "invalid_call_id" });
+          return;
+        }
+        const parsed = phoneDeskCallResolutionSchema.safeParse(
+          await readJson(request),
+        );
+        if (!parsed.success) {
+          sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        sendJson(
+          response,
+          200,
+          await options.telephonyService.resolvePhoneDeskCall(
             callId,
             parsed.data,
             actor,

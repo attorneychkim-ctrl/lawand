@@ -1,7 +1,7 @@
 # 센트릭스 통합 통화 활동 v2
 
-> 상태: 일반 내선·무조건/통화 후 호전환·실패 복귀 실통화 fixture 수집 완료,
-> root/leg·transfer evidence 출시 후보 구현 완료, 통화 후 호전환 final leg 상관은 미해결
+> 상태: 일반 내선·무조건/통화 후 호전환·실패 복귀·당겨받기 실통화 fixture 수집 완료,
+> root/leg·transfer/pickup evidence와 확인필요 terminal UX 출시 후보 구현 완료
 >
 > 기준일: 2026-08-11
 >
@@ -311,8 +311,13 @@ ALARM은 모두 0이었고 다른 업무 통화는 조회만 했으며 개입하
    snapshot을 구현한다.
 6. **완료:** 토스트·Notification API와 탭 간 중복 방지를 구현한다.
 7. **완료:** 결정적으로 확정된 최종 고객 통화자 한 명에게만 후처리를 자동으로 연다.
-8. **남음:** 권한·개인정보·재접속·중복 이벤트 회귀 검증은 로컬에서 통과했다. 운영
-   migration·bridge/gateway/ERP 통합 배포 뒤 네 실통화 시나리오 canary를 수행한다.
+8. **완료:** 일반 내선을 전화데스크 root 원장과 전용 필터·후처리에 포함하고, 같은 root의
+   legacy 수신 행은 연결 근거가 강한 canonical 한 건으로 접는다.
+9. **완료:** exact provider root→adjacent channel과 target 종료가 있는 당겨받기를 별도
+   relation으로 저장하고, terminal이지만 final actor만 불명확한 호전환은 직원 선택으로
+   확정한 뒤 후처리를 연다.
+10. **남음:** 운영 migration·gateway/ERP 통합 배포 뒤 일반 내선·당겨받기·통화 후 호전환과
+   기존 외부 수·발신 회귀 canary를 수행한다.
 
 완료 조건은 외부 수·발신 공용 카드가 한 통화당 하나로 일관되게 보이고, 일반 내선은 참여자만
 보며, 수신 담당자와 호전환 대상자가 정확히 한 번 알림을 받고, 중간 leg 종료가 고객 root를
@@ -368,3 +373,37 @@ root→channel→종료가 `.3081116`→`.3081117`→`.3081118`로 이어지는 
 추정 없이 복구 대상이다. 운영 읽기 dry-run은 유일 종료 4건·v1 종료 3건·순수 timeout 1건만
 선별했고 실제 활성 통화·호전환과 모호 후보는 제외했다. 로컬 fixture는 08:19 유형, 이전
 통화에 잘못 붙은 종료, v1 동기화, timeout, 진행 중 호전환과 모호 후보를 함께 고정한다.
+
+## 11. 2026-08-12 내선 원장·당겨받기·호전환 terminal UX 계약
+
+일반 내선 root는 상단 개인 카드만의 임시 데이터가 아니라 전화데스크의 영구 통화 사실
+원장이다. 전화데스크 목록은 legacy 관측 행이 아니라 `call_root_id`를 canonical key로 삼는다.
+따라서 같은 수신의 U+ 연결 이력과 bridge 울림/timeout 행이 함께 있어도 한 건만 표시하고,
+root가 없는 과거 직접 발신·클릭투콜만 기존 ID를 그대로 사용한다. 내선은 별도 필터와 참여자·
+내선번호·통화시간을 표시하며 고객 전화번호나 상담 연결을 만들지 않는다.
+
+당겨받기는 아래 증거가 모두 있을 때만 자동 확정한다.
+
+1. 기존 활성 root가 외부 수신이고 target이 원수신과 다른 endpoint다.
+2. target `CHANNEL_LIST`의 provider root가 기존 root identifier와 exact 일치한다.
+3. target의 adjacent channel 종료가 exact 관측되며, 같은 root에 target leg가 아직 없다.
+4. `transfer_attempted/completed/returned/unresolved` 관계가 하나도 없다.
+5. 같은 provider root가 둘 이상의 call root를 가리키면 후보를 버린다.
+
+확정되면 원수신 ringing leg는 `CALL_PICKED_UP`으로 끝내고 target customer leg와
+`call_picked_up` relation을 만든다. 이후 원수신 bridge에서 늦은 timeout 종료가 오더라도 이미
+종료된 leg와 최종 target을 다시 쓰지 않는다. 이 계약은 4425 수신을 1208이 당겨받아 U+ 연결
+3분 11초와 bridge 미연결 3분 10초가 두 행으로 남은 실측을 설명하며, 시간 근접만으로 일반화하지
+않는다.
+
+통화 후 호전환의 A/B consultation leg가 동일 root/channel을 공유하면 한쪽 exact 종료를
+mirrored leg에 동기화한다. 모든 관측 leg가 끝난 시점에는 root의 전화 상태를 `ended`로 닫아
+상단 카드를 종료하지만, B/customer final leg 근거가 없으면 correlation은
+`needs_confirmation`이고 final actor는 비워 둔다. 전화데스크 상세는 종료 대기 문구 대신
+관측된 직원·내선 후보를 제시한다. 직원이 실제 최종 통화자를 선택하면 `staff_resolved`
+relation과 감사 로그를 남기고 correlation을 확정하며, 선택된 최종 직원에게만 고객 후처리를
+허용한다. 이 선택은 종료 시각·cause 추정이 아니라 사람의 업무 확인으로 명시적으로 기록된다.
+
+`0051_unknown_scalphunter.sql`은 내선 후처리와 pickup/resolution enum만 추가하고,
+`0052_centrex_pickup_terminal_recovery.sql`은 기존 exact 당겨받기와 mirrored consultation
+terminal만 복구한다. enum과 데이터 복구를 서로 다른 migration transaction으로 분리한다.

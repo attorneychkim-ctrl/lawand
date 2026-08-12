@@ -14,6 +14,7 @@ import {
   messageTemplateCreateSchema,
   messageTemplateUpdateSchema,
   phoneDeskAftercareSaveSchema,
+  phoneDeskCallResolutionSchema,
   renderMessageTemplate,
   staffConsultationCreateSchema,
   telephonyCallDispositionConfirmationSchema,
@@ -258,6 +259,17 @@ test("전화데스크 후처리는 기타 설명과 재통화 담당·일시를 
       result: "consultation_completed",
       otherText: "입력하면 안 됨",
     }).success,
+    false,
+  );
+});
+
+test("확인 필요 통화의 최종 통화자는 root 참여 leg로 지정한다", () => {
+  const input = {
+    finalLegId: "01980000-0000-7000-8000-000000000001",
+  };
+  assert.deepEqual(phoneDeskCallResolutionSchema.parse(input), input);
+  assert.equal(
+    phoneDeskCallResolutionSchema.safeParse({ finalLegId: "1208" }).success,
     false,
   );
 });

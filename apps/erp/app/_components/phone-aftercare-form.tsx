@@ -27,12 +27,22 @@ const resultOptions = [
   label: string;
 }>;
 
+const internalResultOptions = [
+  { value: "internal_completed", label: "내선 통화 완료" },
+  { value: "internal_follow_up", label: "내부 확인 필요" },
+  { value: "internal_no_answer", label: "내선 미연결" },
+] as const satisfies ReadonlyArray<{
+  value: PhoneDeskCallResult;
+  label: string;
+}>;
+
 const followUpDefaultResults = new Set<PhoneDeskCallResult>([
   "reconsultation_required",
   "no_answer",
   "busy",
   "manager_callback_requested",
   "rejected",
+  "internal_follow_up",
 ]);
 
 const consultationStateLabels: Record<string, string> = {
@@ -97,7 +107,7 @@ type LinkedConsultationContext = {
 };
 
 export const phoneDeskResultLabels = Object.fromEntries(
-  resultOptions.map((item) => [item.value, item.label]),
+  [...resultOptions, ...internalResultOptions].map((item) => [item.value, item.label]),
 ) as Record<PhoneDeskCallResult, string>;
 
 function nextHalfHourValue() {
@@ -234,7 +244,8 @@ function caseStateLabel(caseType: number, caseState: number) {
   return label ?? `진행 상태 ${caseState}`;
 }
 
-function formatPhone(phone: string) {
+function formatPhone(phone: string | null) {
+  if (!phone) return "";
   const digits = phone.replace(/\D/g, "");
   if (/^02\d{7,8}$/.test(digits)) {
     const split = digits.length === 9 ? 5 : 6;
@@ -279,6 +290,7 @@ export function PhoneAftercareForm({
 }) {
   const router = useRouter();
   const existing = detail.call.aftercare;
+  const internal = detail.call.scope === "internal";
   const suggested = suggestedConsultation(detail);
   const recommendedAssignee = detail.recommendedAssigneeUserIds[0] ?? "";
   const [result, setResult] = useState<PhoneDeskCallResult | "">(
@@ -288,7 +300,7 @@ export function PhoneAftercareForm({
   const [memo, setMemo] = useState(existing?.memo ?? "");
   const [consultationMode, setConsultationMode] = useState<
     "none" | "link" | "create"
-  >(existing?.consultationId || suggested ? "link" : "none");
+  >(internal ? "none" : existing?.consultationId || suggested ? "link" : "none");
   const [customerName, setCustomerName] = useState(
     detail.legalFriendsMatch?.clientName ??
       (detail.call.customerMatch?.source === "legal_friends"
@@ -358,6 +370,7 @@ export function PhoneAftercareForm({
       (consultationMode !== "create" || customerName.trim()) &&
       (!followUpEnabled || (followUpDueValid && followUpAssignee)),
   );
+  const visibleResultOptions = internal ? internalResultOptions : resultOptions;
 
   function chooseResult(value: PhoneDeskCallResult) {
     setResult(value);
@@ -432,7 +445,7 @@ export function PhoneAftercareForm({
       <fieldset className="phone-aftercare-section">
         <legend>통화 결과</legend>
         <div className="phone-aftercare-results">
-          {resultOptions.map((option) => (
+          {visibleResultOptions.map((option) => (
             <button
               aria-pressed={result === option.value}
               className={result === option.value ? "is-selected" : undefined}
@@ -457,7 +470,7 @@ export function PhoneAftercareForm({
         ) : null}
       </fieldset>
 
-      <fieldset className="phone-aftercare-section">
+      {!internal ? <fieldset className="phone-aftercare-section">
         <legend>상담데스크 연결</legend>
         {suggested || existing?.consultationId ? (
           <div className={`phone-aftercare-choice-block${consultationMode === "link" ? " is-selected" : ""}`}>
@@ -597,10 +610,14 @@ export function PhoneAftercareForm({
             ) : null}
           </section>
         ) : null}
-      </fieldset>
+      </fieldset> : (
+        <p className="info-banner">
+          내선 통화는 고객 상담과 연결하지 않고 사내 통화 기록으로만 저장합니다.
+        </p>
+      )}
 
       <fieldset className="phone-aftercare-section is-follow-up">
-        <legend>재통화 업무</legend>
+        <legend>{internal ? "내부 확인 업무" : "재통화 업무"}</legend>
         <label className="phone-aftercare-toggle">
           <input
             checked={followUpEnabled}
@@ -608,7 +625,7 @@ export function PhoneAftercareForm({
             type="checkbox"
           />
           <span>
-            <strong>재통화 업무 큐에 추가</strong>
+            <strong>{internal ? "내부 확인 업무 큐에 추가" : "재통화 업무 큐에 추가"}</strong>
             <small>필요한 결과는 기본으로 체크되며 언제든 해제할 수 있습니다.</small>
           </span>
         </label>
@@ -829,7 +846,9 @@ export function PhoneAftercareDialog({
             <h2 id="phone-aftercare-dialog-title">통화 후처리</h2>
             <p>
               {detail
-                ? `${formatPhone(detail.call.remotePhone)} 통화 결과를 정리해 주세요.`
+                ? detail.call.scope === "internal"
+                  ? "내선 통화 결과를 정리해 주세요."
+                  : `${formatPhone(detail.call.remotePhone)} 통화 결과를 정리해 주세요.`
                 : "통화 정보를 불러오는 중입니다."}
             </p>
           </div>

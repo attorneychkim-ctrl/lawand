@@ -342,9 +342,10 @@ export type PhoneDeskCall = {
   id: string;
   observedCallId: string | null;
   callRootId: string | null;
-  direction: "inbound" | "outbound";
+  scope: "external" | "internal";
+  direction: "inbound" | "outbound" | "internal";
   receptionMode: "office_bridge" | "uplus_network" | null;
-  source: "inbound" | "click_to_call" | "centrex_direct";
+  source: "inbound" | "click_to_call" | "centrex_direct" | "internal";
   state:
     | "pending"
     | "ringing"
@@ -352,7 +353,8 @@ export type PhoneDeskCall = {
     | "ended"
     | "failed"
     | "unknown";
-  remotePhone: string;
+  correlationStatus: "pending" | "confirmed" | "needs_confirmation" | "rejected";
+  remotePhone: string | null;
   occurredAt: string;
   ringingAt: string | null;
   connectedAt: string | null;
@@ -369,6 +371,23 @@ export type PhoneDeskCall = {
     extension: string;
   };
   endpointOwners: Array<{ staffUserId: string; displayName: string }>;
+  participants: Array<{
+    legId: string;
+    endpointId: string;
+    extension: string;
+    staffUserId: string | null;
+    displayName: string | null;
+    direction: "inbound" | "outbound";
+    state: "ringing" | "connected" | "ended";
+  }>;
+  relationType:
+    | "transfer_attempted"
+    | "transfer_completed"
+    | "transfer_returned"
+    | "transfer_unresolved"
+    | "call_picked_up"
+    | "staff_resolved"
+    | null;
   customerMatch: TelephonyInboundCall["customerMatch"];
   clickToCall: {
     id: string;
@@ -406,6 +425,9 @@ export type PhoneDeskCallResult =
   | "public_institution"
   | "creditor"
   | "wrong_number"
+  | "internal_completed"
+  | "internal_follow_up"
+  | "internal_no_answer"
   | "other";
 
 export type PhoneDeskAftercare = {
@@ -447,6 +469,7 @@ export type PhoneDeskCallSnapshot = {
     inbound: number;
     clickToCall: number;
     centrexDirect: number;
+    internal: number;
     active: number;
   };
   followUps: PhoneDeskFollowUp[];
@@ -826,7 +849,12 @@ export type PhoneDeskListFilter =
   | "inbound"
   | "click_to_call"
   | "centrex_direct"
+  | "internal"
   | "active";
+
+export type PhoneDeskCallResolutionInput = {
+  finalLegId: string;
+};
 
 export async function getPhoneDeskCalls(
   options: PagedDateOptions<PhoneDeskListFilter> = {},
@@ -898,6 +926,18 @@ export async function savePhoneDeskAftercare(
 ): Promise<PhoneDeskCallDetail> {
   return phoneDeskResponse<PhoneDeskCallDetail>(
     await gatewayFetch(`/v1/phone-desk/calls/${callId}/aftercare`, {
+      method: "POST",
+      body: input,
+    }),
+  );
+}
+
+export async function resolvePhoneDeskCall(
+  callId: string,
+  input: PhoneDeskCallResolutionInput,
+): Promise<PhoneDeskCallDetail> {
+  return phoneDeskResponse<PhoneDeskCallDetail>(
+    await gatewayFetch(`/v1/phone-desk/calls/${callId}/resolve`, {
       method: "POST",
       body: input,
     }),

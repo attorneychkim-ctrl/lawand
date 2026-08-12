@@ -1079,7 +1079,7 @@ export function InboundCallIndicator({
                   <span>{copy.description}</span>
                 </span>
                 <span className="inbound-call-meta">
-                  <b>{formatPhone(call.remotePhone)}</b>
+                  <b>{call.remotePhone ? formatPhone(call.remotePhone) : "내선 통화"}</b>
                   <span>내선 {call.endpoint.extension}</span>
                   <span>
                     {call.clickToCall

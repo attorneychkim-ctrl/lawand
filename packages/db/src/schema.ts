@@ -241,6 +241,9 @@ export const telephonyAftercareResultEnum = pgEnum(
     "public_institution",
     "creditor",
     "wrong_number",
+    "internal_completed",
+    "internal_follow_up",
+    "internal_no_answer",
     "other",
   ],
 );
@@ -311,6 +314,8 @@ export const telephonyCallRelationTypeEnum = pgEnum(
     "transfer_completed",
     "transfer_returned",
     "transfer_unresolved",
+    "call_picked_up",
+    "staff_resolved",
   ],
 );
 
