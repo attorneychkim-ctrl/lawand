@@ -71,6 +71,32 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-13 — 상담 재요청 묶음·리걸프렌즈 기존 연락처 처리 main 통합
+- 홈페이지 상담·자가진단이 7일 안에 같은 정규화 이름·전화번호로 다시 들어오면 미종결
+  `consultation`에 새 `consultation_request`로 붙인다. 미배정이면 `repeat_unassigned`,
+  담당 배정 이후이면 `repeat_assigned`로 구분해 ERP 목록·상세에 요청 횟수와 함께 표시한다.
+  배정 전 재요청은 전 직원, 배정 뒤 재요청은 현재 담당자에게만 개인정보 없는 SSE 신호를
+  거쳐 탭·브라우저 알림을 보낸다. 전화만 같거나 이름이 다른 공유번호 후보는 자동 병합하지
+  않고 기존 `suspected_duplicate` 별도 상담을 유지한다. 요청별 암호화 원문과 광고 귀속도
+  모두 보존한다.
+- 홈페이지 접수 연락처가 리걸프렌즈에만 있으면 목록의 즉시 `상담하기`를 막고 상세에서
+  `기존 사건 문의/기존 고객의 새 사건/연락처를 함께 쓰는 다른 사람`을 선택하게 했다.
+  기존 사건 문의는 현재 조회된 `client_idx·case_idx`를 다시 검증해 암호화 snapshot과
+  결정 직원·시각 감사를 저장하고 리걸프렌즈 신건 등록을 생략한다. 새 사건·공유 연락처는
+  선택 원장을 남긴 뒤 기존 신건 등록을 계속한다. migration
+  `0054_cloudy_night_nurse.sql`은 재요청 enum, `consultation_legalfriends_handlings`와
+  개인정보 없는 재요청 알림 종류를 추가한다.
+- 전체 5패키지 typecheck·lint·production build, core 76개·gateway 120개 테스트, DB schema
+  check와 `git diff --check`를 통과했다. 합성 `CB` 빈 원천을 둔 `/tmp` PostgreSQL에서
+  migration `0000..0054` 55개를 한 번에 적용해 enum 6개 값·처리 제약·실시간 알림 함수를
+  확인한 뒤 임시 DB를 삭제했다. 구현 커밋은 `aa2ee4c`, main merge commit은 `bd121dd`이며
+  `PROJECT_PLAN.md`는 v1.24다.
+- `HERDR_ENV=1`에서 main과 HERDR worktree 8개, 원격 `origin/worktree/*` 26개를 전수
+  대조했다. 이번 `quiet-field-ec95`만 병합 대상으로 분류했고 나머지 25개 원격 HEAD는
+  병합 전 `origin/main`의 ancestor였다. 이번 세션에서는 운영 migration·앱 배포·운영 데이터
+  변경이나 실제 상담·리걸프렌즈 canary를 수행하지 않았다. 운영 반영 시 `0054`를 먼저
+  적용하고 gateway·ERP를 같은 릴리스로 배포해야 한다.
+
 ### 2026-08-12 — 모든 완료 워크트리 main 통합·홈페이지/ERP/gateway 운영 배포
 - `HERDR_ENV=1`에서 main과 HERDR worktree 7개, 원격 `origin/worktree/*` 26개를 전수
   대조했다. 새로 완료된 `calm-meadow-8129`, `clear-meadow-3f2a`, `clear-stone-47b2`,
