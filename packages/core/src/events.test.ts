@@ -218,6 +218,26 @@ test("외부 실행 요청 payload에 전화번호를 직접 넣으면 거부한
   );
 });
 
+test("배정 전 카카오 무효 처리는 고정 무효 담당자로 신건 등록을 요청한다", () => {
+  assert.equal(
+    legalfriendsRegistrationRequestedEventSchema.safeParse({
+      ...assignmentEnvelope,
+      eventType: "legalfriends.consultation.registration.requested",
+      data: {
+        consultationId: assignmentEnvelope.correlationId,
+        requestId: assignmentReference.requestId,
+        intakeRef: assignmentReference.intakeRef,
+        registrationTarget: "invalid_manager",
+        requestedByUserId: "01984c7d-8500-7000-8000-000000000006",
+        targetManagerExternalAccountId:
+          LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
+        targetManagerMemberIdx: LEGALFRIENDS_INVALID_MANAGER_MEMBER_IDX,
+      },
+    }).success,
+    true,
+  );
+});
+
 test("리걸프렌즈 무효 처리는 고정 담당자와 사건 연결 참조만 허용한다", () => {
   const invalidationEvent = {
     ...assignmentEnvelope,

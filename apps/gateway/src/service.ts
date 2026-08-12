@@ -1608,7 +1608,7 @@ export function createConsultationService(options: {
         createdAt: now,
       });
 
-      const event: PlatformEvent = {
+      const invalidatedEvent: PlatformEvent = {
         eventId: createEventId(),
         eventType: "consultation.kakao_entry.invalidated",
         eventVersion: 1,
@@ -1623,14 +1623,38 @@ export function createConsultationService(options: {
           actorUserId: actor.id,
         },
       };
-      assertPlatformEvent(event);
-      await tx.insert(outboxEvents).values(eventRow(event));
+      const registrationEvent: PlatformEvent = {
+        eventId: createEventId(),
+        eventType: "legalfriends.consultation.registration.requested",
+        eventVersion: 1,
+        occurredAt: now.toISOString(),
+        producer: "lawand.gateway",
+        correlationId: consultationId,
+        causationId: invalidatedEvent.eventId,
+        data: {
+          consultationId,
+          requestId: entry.firstRequestId,
+          intakeRef: `consultation_requests/${entry.firstRequestId}`,
+          registrationTarget: "invalid_manager",
+          requestedByUserId: actor.id,
+          targetManagerExternalAccountId:
+            LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
+          targetManagerMemberIdx:
+            LEGALFRIENDS_INVALID_MANAGER_MEMBER_IDX,
+        },
+      };
+      assertPlatformEvent(invalidatedEvent);
+      assertPlatformEvent(registrationEvent);
+      await tx
+        .insert(outboxEvents)
+        .values([eventRow(invalidatedEvent), eventRow(registrationEvent)]);
 
       return {
         consultationId,
         entryId: entry.id,
         status: "invalid" as const,
         invalidatedAt: now.toISOString(),
+        registrationEventId: registrationEvent.eventId,
         replayed: false,
       };
     });
@@ -2047,7 +2071,10 @@ export function createConsultationService(options: {
           assignmentMethod: "self_claim",
         },
       });
-      if (latestRequest.contactChannel === "phone") {
+      if (
+        latestRequest.contactChannel === "phone" ||
+        latestRequest.contactChannel === "kakao_channel"
+      ) {
         events.push({
           eventId: createEventId(),
           eventType: "legalfriends.consultation.registration.requested",
@@ -2058,6 +2085,8 @@ export function createConsultationService(options: {
           causationId: assignedEventId,
           data: referenceData,
         });
+      }
+      if (latestRequest.contactChannel === "phone") {
         events.push({
           eventId: createEventId(),
           eventType:
@@ -2103,7 +2132,10 @@ export function createConsultationService(options: {
     const now = new Date();
     return db.transaction(async (tx) => {
       const [consultation] = await tx
-        .select({ id: consultations.id })
+        .select({
+          id: consultations.id,
+          contactChannel: consultations.contactChannel,
+        })
         .from(consultations)
         .where(eq(consultations.id, consultationId))
         .limit(1)
@@ -2117,6 +2149,7 @@ export function createConsultationService(options: {
 
       const [assignment] = await tx
         .select({
+          id: consultationAssignments.id,
           assigneeUserId: consultationAssignments.assigneeUserId,
         })
         .from(consultationAssignments)
@@ -2147,15 +2180,8 @@ export function createConsultationService(options: {
         )
         .limit(1)
         .for("update");
-      if (!caseLink) {
-        throw new LegalFriendsInvalidationError(
-          "case_not_registered",
-          "리걸프렌즈 사건 등록이 완료된 뒤 무효 처리할 수 있습니다.",
-        );
-      }
-
       if (
-        caseLink.managerExternalAccountId ===
+        caseLink?.managerExternalAccountId ===
         LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID
       ) {
         return {
@@ -2198,6 +2224,79 @@ export function createConsultationService(options: {
         };
       }
 
+      let registrationEventId = caseLink?.registrationEventId ?? null;
+      const registrationNeedsCompletion = !caseLink;
+      if (!registrationEventId) {
+        if (consultation.contactChannel !== "kakao_channel") {
+          throw new LegalFriendsInvalidationError(
+            "case_not_registered",
+            "리걸프렌즈 사건 등록이 완료된 뒤 무효 처리할 수 있습니다.",
+          );
+        }
+
+        const [existingRegistration] = await tx
+          .select({
+            id: outboxEvents.id,
+            status: outboxEvents.status,
+          })
+          .from(outboxEvents)
+          .where(
+            and(
+              eq(outboxEvents.aggregateId, consultationId),
+              eq(
+                outboxEvents.eventType,
+                "legalfriends.consultation.registration.requested",
+              ),
+            ),
+          )
+          .orderBy(desc(outboxEvents.occurredAt))
+          .limit(1);
+        if (existingRegistration?.status === "dead") {
+          throw new LegalFriendsInvalidationError(
+            "case_not_registered",
+            "리걸프렌즈 신건 등록 실패를 먼저 확인해 주세요.",
+          );
+        }
+        registrationEventId = existingRegistration?.id ?? null;
+
+        if (!registrationEventId) {
+          const [latestRequest] = await tx
+            .select({ id: consultationRequests.id })
+            .from(consultationRequests)
+            .where(eq(consultationRequests.consultationId, consultationId))
+            .orderBy(desc(consultationRequests.submittedAt))
+            .limit(1);
+          if (!latestRequest) {
+            throw new LegalFriendsInvalidationError(
+              "case_not_registered",
+              "리걸프렌즈 신건 등록에 필요한 상담 요청을 찾을 수 없습니다.",
+            );
+          }
+          const registrationEvent: PlatformEvent = {
+            eventId: createEventId(),
+            eventType: "legalfriends.consultation.registration.requested",
+            eventVersion: 1,
+            occurredAt: now.toISOString(),
+            producer: "lawand.gateway",
+            correlationId: consultationId,
+            data: {
+              consultationId,
+              requestId: latestRequest.id,
+              assignmentId: assignment.id,
+              assignmentRef:
+                `consultation_assignments/${assignment.id}`,
+              intakeRef:
+                `consultation_requests/${latestRequest.id}`,
+            },
+          };
+          assertPlatformEvent(registrationEvent);
+          await tx
+            .insert(outboxEvents)
+            .values(eventRow(registrationEvent));
+          registrationEventId = registrationEvent.eventId;
+        }
+      }
+
       const eventId = createEventId();
       const event = {
         eventId,
@@ -2207,7 +2306,7 @@ export function createConsultationService(options: {
         occurredAt: now.toISOString(),
         producer: "lawand.gateway" as const,
         correlationId: consultationId,
-        causationId: caseLink.registrationEventId,
+        causationId: registrationEventId,
         data: {
           consultationId,
           caseLinkRef: `legalfriends_case_links/${consultationId}` as const,
@@ -2219,7 +2318,12 @@ export function createConsultationService(options: {
         },
       };
       assertPlatformEvent(event);
-      await tx.insert(outboxEvents).values(eventRow(event));
+      await tx.insert(outboxEvents).values({
+        ...eventRow(event),
+        ...(registrationNeedsCompletion
+          ? { availableAt: new Date(now.getTime() + 5_000) }
+          : {}),
+      });
       await tx.insert(staffAuditLogs).values({
         id: createEventId(),
         actorUserId: actor.id,

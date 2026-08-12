@@ -126,6 +126,25 @@ test("해외·기타는 지원되지 않는 지역으로 명시적으로 중단�
   );
 });
 
+test("카카오 상담은 미수집 전화·지역 자리표시자로 신건 payload를 만든다", () => {
+  const payload = createLegalFriendsCasePayload({
+    mode: "quick",
+    memberIdx: 1824,
+    name: "김민수_ABCDEFGH_플친",
+    phone: "01000000000",
+    livingPlaceOverride: "미수집",
+    intake: {
+      residenceRegion: "overseas_or_other",
+      urgencies: [],
+      incomes: [],
+      concern: "카카오 채팅방에서 상담 내용을 확인",
+    },
+  });
+  assert.equal(payload.phone, "010-0000-0000");
+  assert.equal(payload.living_place, "미수집");
+  assert.equal(payload.member_idx, 1824);
+});
+
 test("클라이언트는 최초 담당자를 포함해 신건을 만들고 case_idx를 반환한다", async () => {
   const requests: Array<{
     url: string;

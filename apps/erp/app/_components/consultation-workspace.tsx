@@ -11,6 +11,7 @@ import type {
 } from "../../lib/gateway";
 import { ClaimConsultationButton } from "./claim-consultation-button";
 import { ConsultationCreateButton } from "./consultation-create-button";
+import { subscribeConsultationRealtime } from "./consultation-realtime";
 import {
   ListDateControls,
   ListPagination,
@@ -331,23 +332,23 @@ export function ConsultationWorkspace({
     };
 
     void synchronize();
-    const stream = new EventSource("/api/consultations/stream");
-    const handleChange = () => void synchronize();
-    stream.addEventListener("consultation.sync", handleChange);
-    stream.addEventListener("consultation.changed", handleChange);
-    stream.onopen = () => {
-      if (active) setRealtimeStatus("connected");
-    };
-    stream.onerror = () => {
-      if (active) setRealtimeStatus("reconnecting");
-    };
+    const unsubscribe = subscribeConsultationRealtime((message) => {
+      if (!active) return;
+      if (message.kind === "error") {
+        setRealtimeStatus("reconnecting");
+        return;
+      }
+      if (message.kind === "open") {
+        setRealtimeStatus("connected");
+        return;
+      }
+      void synchronize();
+    });
 
     return () => {
       active = false;
       if (retryTimer) clearTimeout(retryTimer);
-      stream.removeEventListener("consultation.sync", handleChange);
-      stream.removeEventListener("consultation.changed", handleChange);
-      stream.close();
+      unsubscribe();
     };
   }, [dateFilter, filter, page, pageSize]);
 

@@ -31,6 +31,8 @@ import type { createDatabaseClient } from "@lawand/db";
 import type { DataProtection } from "./crypto.js";
 import {
   createLegalFriendsCasePayload,
+  KAKAO_LEGALFRIENDS_PLACEHOLDER_LIVING_PLACE,
+  KAKAO_LEGALFRIENDS_PLACEHOLDER_PHONE,
   LegalFriendsDeliveryError,
   type LegalFriendsClient,
   LegalFriendsPayloadError,
@@ -72,7 +74,16 @@ type LegalFriendsAssignee = {
   memberIdx: number;
 };
 
+class LegalFriendsDependencyPendingError extends Error {}
+
 function deliveryFailure(error: unknown): DeliveryFailure {
+  if (error instanceof LegalFriendsDependencyPendingError) {
+    return {
+      code: "case_registration_pending",
+      message: error.message,
+      retryable: true,
+    };
+  }
   if (error instanceof LegalFriendsDeliveryError) {
     return {
       code: error.code,
@@ -293,6 +304,7 @@ export function createOutboxWorker(options: {
       .select({
         id: consultationRequests.id,
         mode: consultationRequests.mode,
+        contactChannel: consultationRequests.contactChannel,
         phoneCiphertext: consultationRequests.phoneCiphertext,
         phoneNonce: consultationRequests.phoneNonce,
         phoneKeyVersion: consultationRequests.phoneKeyVersion,
@@ -317,34 +329,49 @@ export function createOutboxWorker(options: {
       )
       .limit(1);
     if (!request) throw new Error("consultation_request_not_found");
+    const isKakaoConsultation = request.contactChannel === "kakao_channel";
     if (
-      !request.phoneCiphertext ||
-      !request.phoneNonce ||
-      !request.phoneKeyVersion
+      !isKakaoConsultation &&
+      (!request.phoneCiphertext ||
+        !request.phoneNonce ||
+        !request.phoneKeyVersion)
     ) {
       throw new LegalFriendsPayloadError("consultation_phone_not_collected");
     }
 
-    const phone = protection.decrypt(
-      {
-        ciphertext: request.phoneCiphertext,
-        nonce: request.phoneNonce,
-        keyVersion: request.phoneKeyVersion,
-      },
-      `consultation_requests.phone:${request.id}`,
-    );
-    const intake = consultationIntakeAnswersSchema.parse(
-      JSON.parse(
-        protection.decrypt(
+    const phone = isKakaoConsultation
+      ? KAKAO_LEGALFRIENDS_PLACEHOLDER_PHONE
+      : protection.decrypt(
           {
-            ciphertext: request.intakeCiphertext,
-            nonce: request.intakeNonce,
-            keyVersion: request.intakeKeyVersion,
+            ciphertext: request.phoneCiphertext!,
+            nonce: request.phoneNonce!,
+            keyVersion: request.phoneKeyVersion!,
           },
-          `consultation_requests.intake:${request.id}`,
-        ),
+          `consultation_requests.phone:${request.id}`,
+        );
+    const storedIntake = JSON.parse(
+      protection.decrypt(
+        {
+          ciphertext: request.intakeCiphertext,
+          nonce: request.intakeNonce,
+          keyVersion: request.intakeKeyVersion,
+        },
+        `consultation_requests.intake:${request.id}`,
       ),
     );
+    const parsedIntake = consultationIntakeAnswersSchema.safeParse(
+      storedIntake,
+    );
+    const intake = parsedIntake.success
+      ? parsedIntake.data
+      : isKakaoConsultation
+        ? {
+            residenceRegion: "overseas_or_other" as const,
+            urgencies: [],
+            incomes: [],
+            concern: "카카오 채팅방에서 상담 내용을 확인",
+          }
+        : consultationIntakeAnswersSchema.parse(storedIntake);
     const name =
       request.preferredNameCiphertext &&
       request.preferredNameNonce &&
@@ -359,10 +386,16 @@ export function createOutboxWorker(options: {
           )
         : request.anonymousLabel;
 
-    const assignee = await resolveLegalFriendsAssignee(
-      envelope.data.assignmentId,
-      event.aggregateId,
-    );
+    const assignee = "registrationTarget" in envelope.data
+      ? {
+          externalAccountId:
+            envelope.data.targetManagerExternalAccountId,
+          memberIdx: envelope.data.targetManagerMemberIdx,
+        }
+      : await resolveLegalFriendsAssignee(
+          envelope.data.assignmentId,
+          event.aggregateId,
+        );
     if (!assignee) {
       throw new LegalFriendsPayloadError("assignee_mapping_missing");
     }
@@ -374,6 +407,12 @@ export function createOutboxWorker(options: {
         name,
         phone,
         intake,
+        ...(isKakaoConsultation
+          ? {
+              livingPlaceOverride:
+                KAKAO_LEGALFRIENDS_PLACEHOLDER_LIVING_PLACE,
+            }
+          : {}),
       }),
       assigneeExternalId: assignee.externalAccountId,
     };
@@ -557,7 +596,11 @@ export function createOutboxWorker(options: {
         eq(legalFriendsCaseLinks.consultationId, event.aggregateId),
       )
       .limit(1);
-    if (!link) throw new Error("legalfriends_case_link_not_found");
+    if (!link) {
+      throw new LegalFriendsDependencyPendingError(
+        "리걸프렌즈 신건 등록 완료를 기다리고 있습니다.",
+      );
+    }
 
     if (
       link.managerExternalAccountId ===

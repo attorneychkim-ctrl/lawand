@@ -52,7 +52,7 @@ export function LegalFriendsInvalidationButton({
       onSubmit={(event) => {
         if (
           !window.confirm(
-            "이 상담을 무효 처리할까요?\n확인하면 리걸프렌즈 사건 담당자가 ‘무효’로 변경됩니다. 상담·외부 연동 원장은 삭제되지 않습니다.",
+            "이 상담을 무효 처리할까요?\n리걸프렌즈 신건이 아직 없으면 먼저 현재 담당자로 등록한 뒤, 사건 담당자를 ‘무효’로 변경합니다. 상담·외부 연동 원장은 삭제되지 않습니다.",
           )
         ) {
           event.preventDefault();

@@ -28,7 +28,7 @@ export function ClaimConsultationButton({
       onSubmit={(event) => {
         if (
           !window.confirm(
-            "이 상담을 내가 맡을까요?\n확인하면 담당자로 지정되며, 연락정보가 갖춰진 접수만 필요한 외부 연동이 준비됩니다.",
+            "이 상담을 내가 맡을까요?\n확인하면 담당자로 지정되며, 전화·카카오 상담은 리걸프렌즈 신건 등록이 함께 준비됩니다.",
           )
         ) {
           event.preventDefault();
