@@ -30,6 +30,7 @@ namespace Lawand.CentrexBridge
             Run("다중 인스턴스 데이터 경로 격리", MultiInstanceDataDirectory);
             Run("격리 슬롯 유휴 초기화 설정", ResetPoolSlotConfiguration);
             Run("미연결 통화 관측 만료", CallObservationExpiry);
+            Run("v2 통화 관측 수명주기", CallObservationTracking);
 
             Console.WriteLine(_failed == 0
                 ? "Centrex bridge self-tests passed."
@@ -248,6 +249,15 @@ namespace Lawand.CentrexBridge
                 "sip").ToJson();
             True(ended.Contains("\"eventType\":\"call.ended\""));
             True(!ended.Contains("sourceProviderCallId"));
+
+            string sentinelEnded = GatewayEventPayload.ObservedEnded(
+                configuration,
+                "1785994319.3000002",
+                "NONE",
+                "16",
+                "sip",
+                "sip").ToJson();
+            True(!sentinelEnded.Contains("sourceProviderCallId"));
         }
 
         private static void GatewayPermanentFailureDisposition()
@@ -444,6 +454,52 @@ namespace Lawand.CentrexBridge
                 true,
                 currentTime.AddHours(-1),
                 currentTime));
+        }
+
+        private static void CallObservationTracking()
+        {
+            DateTimeOffset currentTime = new DateTimeOffset(
+                2026,
+                8,
+                12,
+                4,
+                30,
+                0,
+                TimeSpan.Zero);
+            CallObservationTracker tracker = new CallObservationTracker();
+            tracker.TrackRinging(
+                "1786502776.3124029",
+                currentTime,
+                "sip",
+                "sip");
+            True(tracker.TakeExpiredUnconnected(
+                currentTime.AddMinutes(2)).Count == 0);
+            True(tracker.TakeExpiredUnconnected(
+                currentTime.AddMinutes(3)).Count == 1);
+            True(tracker.Count == 0);
+
+            tracker.TrackRinging(
+                "1786490370.3081116",
+                currentTime,
+                "sip",
+                "sip");
+            True(tracker.MarkConnected(
+                "1786490370.3081116",
+                "1786490370.3081117") == 1);
+            True(tracker.TakeExpiredUnconnected(
+                currentTime.AddHours(1)).Count == 0);
+            True(tracker.RemoveRelated(
+                "1786490370.3081118",
+                "NONE") == 1);
+            True(tracker.Count == 0);
+
+            tracker.TrackRinging(
+                "1786505309.3128987",
+                currentTime,
+                "sip",
+                "local");
+            True(tracker.Drain().Count == 1);
+            True(tracker.Count == 0);
         }
 
         private static void Run(string name, Action test)

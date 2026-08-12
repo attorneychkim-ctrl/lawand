@@ -17,6 +17,10 @@ import {
 import type { createDatabaseClient } from "@lawand/db";
 
 import type { DataProtection } from "./crypto.js";
+import {
+  areCentrexProviderIdsRelated,
+  normalizeCentrexProviderReference,
+} from "./centrex-provider-id.js";
 
 type Database = ReturnType<typeof createDatabaseClient>["db"];
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -201,8 +205,22 @@ export function createCentrexCallActivityService(options: {
     endpointId: string,
     providerValues: string[],
   ): Promise<{ root: RootRow; leg: LegRow } | null> {
-    const [row] = await tx
-      .select({ root: telephonyCallRoots, leg: telephonyCallLegs })
+    const normalizedValues = [
+      ...new Set(
+        providerValues.flatMap((value) => {
+          const normalized = normalizeCentrexProviderReference(value);
+          return normalized ? [normalized] : [];
+        }),
+      ),
+    ];
+    if (normalizedValues.length === 0) return null;
+
+    const exactRows = await tx
+      .select({
+        root: telephonyCallRoots,
+        leg: telephonyCallLegs,
+        providerValue: telephonyCallProviderIdentifiers.providerValue,
+      })
       .from(telephonyCallProviderIdentifiers)
       .innerJoin(
         telephonyCallRoots,
@@ -218,16 +236,71 @@ export function createCentrexCallActivityService(options: {
           eq(telephonyCallProviderIdentifiers.provider, "centrex"),
           inArray(
             telephonyCallProviderIdentifiers.providerValue,
-            [...new Set(providerValues)],
+            normalizedValues,
           ),
         ),
       )
       .orderBy(
-        sql`CASE WHEN ${telephonyCallProviderIdentifiers.providerValue} = ${providerValues[0]} THEN 0 ELSE 1 END`,
+        sql`CASE WHEN ${telephonyCallProviderIdentifiers.providerValue} = ${normalizedValues[0]} THEN 0 ELSE 1 END`,
       )
-      .limit(1)
       .for("update");
-    return row ?? null;
+
+    function uniqueMatch(
+      rows: Array<{ root: RootRow; leg: LegRow }>,
+    ): { root: RootRow; leg: LegRow } | null | "ambiguous" {
+      const matches = new Map<string, { root: RootRow; leg: LegRow }>();
+      for (const row of rows) {
+        matches.set(`${row.root.id}:${row.leg.id}`, row);
+      }
+      if (matches.size === 0) return null;
+      if (matches.size > 1) return "ambiguous";
+      return matches.values().next().value ?? null;
+    }
+
+    const activeExact = uniqueMatch(
+      exactRows.filter(
+        (row) => row.root.state !== "ended" && row.leg.state !== "ended",
+      ),
+    );
+    if (activeExact === "ambiguous") return null;
+    if (activeExact) return activeExact;
+
+    const anyExact = uniqueMatch(exactRows);
+    if (anyExact === "ambiguous") return null;
+    if (anyExact) return anyExact;
+
+    const siblingRows = await tx
+      .select({
+        root: telephonyCallRoots,
+        leg: telephonyCallLegs,
+        providerValue: telephonyCallProviderIdentifiers.providerValue,
+      })
+      .from(telephonyCallProviderIdentifiers)
+      .innerJoin(
+        telephonyCallRoots,
+        eq(telephonyCallRoots.id, telephonyCallProviderIdentifiers.rootId),
+      )
+      .innerJoin(
+        telephonyCallLegs,
+        eq(telephonyCallLegs.id, telephonyCallProviderIdentifiers.legId),
+      )
+      .where(
+        and(
+          eq(telephonyCallProviderIdentifiers.endpointId, endpointId),
+          eq(telephonyCallProviderIdentifiers.provider, "centrex"),
+          ne(telephonyCallRoots.state, "ended"),
+          ne(telephonyCallLegs.state, "ended"),
+        ),
+      )
+      .for("update");
+    const related = uniqueMatch(
+      siblingRows.filter((row) =>
+        normalizedValues.some((value) =>
+          areCentrexProviderIdsRelated(row.providerValue, value),
+        ),
+      ),
+    );
+    return related === "ambiguous" ? null : related;
   }
 
   async function recordIdentifier(
@@ -768,19 +841,22 @@ export function createCentrexCallActivityService(options: {
     occurredAt: Date,
     receivedAt: Date,
   ) {
+    const sourceProviderCallId = normalizeCentrexProviderReference(
+      event.sourceProviderCallId,
+    );
     const found = await legByAnyProviderValue(tx, event.endpointId, [
       event.providerCallId,
-      ...(event.sourceProviderCallId ? [event.sourceProviderCallId] : []),
+      ...(sourceProviderCallId ? [sourceProviderCallId] : []),
     ]);
     if (!found) return null;
     const endedWasConnected = found.leg.state === "connected";
-    if (event.sourceProviderCallId) {
+    if (sourceProviderCallId) {
       await recordIdentifier(tx, {
         rootId: found.root.id,
         legId: found.leg.id,
         endpointId: found.leg.endpointId,
         role: "source",
-        providerValue: event.sourceProviderCallId,
+        providerValue: sourceProviderCallId,
         occurredAt,
       });
     }
@@ -895,6 +971,137 @@ export function createCentrexCallActivityService(options: {
     return { root: found.root, leg };
   }
 
+  async function syncLegacyCall(
+    tx: Transaction,
+    input: {
+      endpointId: string;
+      providerCallId: string;
+      callRootId: string | null;
+      callLegId: string | null;
+      state: "ringing" | "connected" | "ended";
+      ringingAt: Date;
+      connectedAt: Date | null;
+      endedAt: Date | null;
+      providerEndCause: string | null;
+      lastEventAt: Date;
+      receivedAt: Date;
+    },
+  ) {
+    if (!input.callRootId || !input.callLegId) return;
+
+    const [linked] = await tx
+      .select({ root: telephonyCallRoots, leg: telephonyCallLegs })
+      .from(telephonyCallRoots)
+      .innerJoin(
+        telephonyCallLegs,
+        and(
+          eq(telephonyCallLegs.id, input.callLegId),
+          eq(telephonyCallLegs.rootId, telephonyCallRoots.id),
+        ),
+      )
+      .where(
+        and(
+          eq(telephonyCallRoots.id, input.callRootId),
+          eq(telephonyCallLegs.endpointId, input.endpointId),
+          eq(telephonyCallLegs.providerCallId, input.providerCallId),
+        ),
+      )
+      .limit(1)
+      .for("update");
+    if (!linked || linked.root.state === "ended") return;
+
+    if (input.state === "connected" && linked.leg.state === "ringing") {
+      const connectedAt = input.connectedAt ?? input.lastEventAt;
+      await tx
+        .update(telephonyCallLegs)
+        .set({
+          state: "connected",
+          connectedAt: latest(linked.leg.startedAt, connectedAt),
+          lastEventAt: latest(linked.leg.lastEventAt, input.lastEventAt),
+          updatedAt: input.receivedAt,
+        })
+        .where(eq(telephonyCallLegs.id, linked.leg.id));
+      await tx
+        .update(telephonyCallRoots)
+        .set({
+          state:
+            linked.root.state === "ringing" ? "connected" : linked.root.state,
+          connectedAt: linked.root.connectedAt
+            ? earliest(linked.root.connectedAt, connectedAt)
+            : latest(linked.root.startedAt, connectedAt),
+          lastEventAt: latest(linked.root.lastEventAt, input.lastEventAt),
+          updatedAt: input.receivedAt,
+        })
+        .where(eq(telephonyCallRoots.id, linked.root.id));
+      return;
+    }
+
+    if (input.state !== "ended" || linked.leg.state === "ended") return;
+
+    const endedAt = latest(
+      linked.leg.startedAt,
+      input.endedAt ?? input.lastEventAt,
+    );
+    const endedWasConnected = linked.leg.state === "connected";
+    const [endedLeg] = await tx
+      .update(telephonyCallLegs)
+      .set({
+        state: "ended",
+        connectedAt: linked.leg.connectedAt ?? input.connectedAt,
+        endedAt,
+        providerEndCause: input.providerEndCause ?? "legacy_unknown",
+        lastEventAt: latest(linked.leg.lastEventAt, input.lastEventAt),
+        updatedAt: input.receivedAt,
+      })
+      .where(eq(telephonyCallLegs.id, linked.leg.id))
+      .returning();
+    if (!endedLeg) return;
+
+    const activeLegs = await tx
+      .select({
+        kind: telephonyCallLegs.kind,
+        state: telephonyCallLegs.state,
+      })
+      .from(telephonyCallLegs)
+      .where(
+        and(
+          eq(telephonyCallLegs.rootId, linked.root.id),
+          ne(telephonyCallLegs.id, endedLeg.id),
+          inArray(telephonyCallLegs.state, ["ringing", "connected"]),
+        ),
+      );
+    const nextState = resolveCentrexRootAfterLegEnd({
+      scope: linked.root.scope,
+      endedKind: endedLeg.kind,
+      endedWasConnected,
+      hasActiveCustomerLeg: activeLegs.some((leg) => leg.kind === "customer"),
+      hasActiveConsultationLeg: activeLegs.some(
+        (leg) => leg.kind === "consultation",
+      ),
+      hasAnyActiveLeg: activeLegs.length > 0,
+    });
+    const ended = nextState === "ended";
+    await tx
+      .update(telephonyCallRoots)
+      .set({
+        state: nextState,
+        correlationStatus:
+          nextState === "needs_confirmation"
+            ? "needs_confirmation"
+            : linked.root.correlationStatus,
+        finalEndpointId: ended
+          ? endedLeg.endpointId
+          : linked.root.finalEndpointId,
+        finalStaffUserId: ended
+          ? endedLeg.staffUserId
+          : linked.root.finalStaffUserId,
+        endedAt: ended ? latest(linked.root.startedAt, endedAt) : null,
+        lastEventAt: latest(linked.root.lastEventAt, input.lastEventAt),
+        updatedAt: input.receivedAt,
+      })
+      .where(eq(telephonyCallRoots.id, linked.root.id));
+  }
+
   async function ingest(
     event: CentrexBridgeCallObservation,
     authentication: {
@@ -1001,7 +1208,7 @@ export function createCentrexCallActivityService(options: {
             : null,
         sourceProviderCallId:
           event.eventType === "call.ended"
-            ? event.sourceProviderCallId ?? null
+            ? normalizeCentrexProviderReference(event.sourceProviderCallId)
             : null,
         contextProviderCallId:
           event.eventType === "call.ringing"
@@ -1049,7 +1256,7 @@ export function createCentrexCallActivityService(options: {
     });
   }
 
-  return { ingest };
+  return { ingest, syncLegacyCall };
 }
 
 export type CentrexCallActivityService = ReturnType<

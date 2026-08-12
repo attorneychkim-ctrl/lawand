@@ -69,6 +69,7 @@ namespace Lawand.CentrexBridge
         private readonly CentrexActiveXHost _host;
         private readonly Timer _healthTimer;
         private readonly Timer _alternateLoginTimer;
+        private readonly CallObservationTracker _callObservationTracker;
 
         private BridgeConnectionState _state;
         private bool _hostInitialized;
@@ -110,6 +111,7 @@ namespace Lawand.CentrexBridge
             _alternateLoginTimer = new Timer();
             _alternateLoginTimer.Interval = 1000;
             _alternateLoginTimer.Tick += AlternateLoginTimerTick;
+            _callObservationTracker = new CallObservationTracker();
 
             _host.RingReceived += HostRingReceived;
             _host.ChannelListReceived += HostChannelListReceived;
@@ -623,6 +625,10 @@ namespace Lawand.CentrexBridge
             }
             try
             {
+                string channelKind = CentrexEventParser.ChannelKind(
+                    parsed.Get("CHANNEL"));
+                string relatedChannelKind = CentrexEventParser.ChannelKind(
+                    parsed.Get("RECHANNEL"));
                 RaiseGatewayEvent(GatewayEventPayload.ObservedRinging(
                     _configuration,
                     uniqueId,
@@ -631,8 +637,13 @@ namespace Lawand.CentrexBridge
                     parsed.Get("CALLERID"),
                     observationIncomingLine,
                     contextProviderCallId,
-                    CentrexEventParser.ChannelKind(parsed.Get("CHANNEL")),
-                    CentrexEventParser.ChannelKind(parsed.Get("RECHANNEL"))));
+                    channelKind,
+                    relatedChannelKind));
+                _callObservationTracker.TrackRinging(
+                    uniqueId,
+                    DateTimeOffset.UtcNow,
+                    channelKind,
+                    relatedChannelKind);
             }
             catch (ArgumentException)
             {
@@ -754,6 +765,7 @@ namespace Lawand.CentrexBridge
                         parsed.Get("CALLER2ID"),
                         CentrexEventParser.ChannelKind(parsed.Get("CHANNEL1")),
                         CentrexEventParser.ChannelKind(parsed.Get("CHANNEL2"))));
+                    _callObservationTracker.MarkConnected(uniqueId1, uniqueId2);
                 }
                 catch (ArgumentException)
                 {
@@ -845,6 +857,7 @@ namespace Lawand.CentrexBridge
                 "SRCUNIQUEID=" + sourceUniqueId,
                 "HCAUSE=" + CentrexEventParser.SafeToken(parsed.Get("HCAUSE"), 20));
 
+            bool observationSent = false;
             if (!string.IsNullOrWhiteSpace(uniqueId))
             {
                 try
@@ -856,6 +869,7 @@ namespace Lawand.CentrexBridge
                         parsed.Get("HCAUSE"),
                         CentrexEventParser.ChannelKind(parsed.Get("CHANNEL")),
                         CentrexEventParser.ChannelKind(parsed.Get("RECHANNEL"))));
+                    observationSent = true;
                 }
                 catch (ArgumentException)
                 {
@@ -864,6 +878,10 @@ namespace Lawand.CentrexBridge
                         "TYPE=ended",
                         "UNIQUEID=" + uniqueId);
                 }
+            }
+            if (observationSent)
+            {
+                _callObservationTracker.RemoveRelated(uniqueId, sourceUniqueId);
             }
 
             bool inboundCallCanEnd = !string.IsNullOrWhiteSpace(_activeInboundUniqueId) &&
@@ -1004,6 +1022,28 @@ namespace Lawand.CentrexBridge
 
         private void CompensateActiveCalls(string providerEndCause)
         {
+            foreach (TrackedCallObservation observation in
+                _callObservationTracker.Drain())
+            {
+                try
+                {
+                    RaiseGatewayEvent(GatewayEventPayload.ObservedEnded(
+                        _configuration,
+                        observation.ProviderCallId,
+                        null,
+                        providerEndCause,
+                        observation.ChannelKind,
+                        observation.RelatedChannelKind));
+                    _logger.Warn(
+                        "CALL_OBSERVATION_COMPENSATED",
+                        "CAUSE=" + providerEndCause,
+                        "UNIQUEID=" + observation.ProviderCallId);
+                }
+                catch (Exception exception)
+                {
+                    _logger.Error("CALL_OBSERVATION_COMPENSATION_FAILED", exception);
+                }
+            }
             CompensateActiveInboundCall(providerEndCause);
             CompensateActiveOutboundCall(providerEndCause);
         }
@@ -1208,6 +1248,20 @@ namespace Lawand.CentrexBridge
         private void ExpireStaleUnconnectedCalls()
         {
             DateTimeOffset currentTime = DateTimeOffset.UtcNow;
+            foreach (TrackedCallObservation observation in
+                _callObservationTracker.TakeExpiredUnconnected(currentTime))
+            {
+                RaiseGatewayEvent(GatewayEventPayload.ObservedEnded(
+                    _configuration,
+                    observation.ProviderCallId,
+                    null,
+                    "BRIDGE_RING_TIMEOUT",
+                    observation.ChannelKind,
+                    observation.RelatedChannelKind));
+                _logger.Warn(
+                    "CALL_OBSERVATION_RING_EXPIRED",
+                    "UNIQUEID=" + observation.ProviderCallId);
+            }
             if (!string.IsNullOrWhiteSpace(_activeInboundUniqueId) &&
                 CallObservationExpiryPolicy.ShouldExpire(
                     _activeInboundConnectedEventSent,

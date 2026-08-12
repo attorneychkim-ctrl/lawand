@@ -341,3 +341,30 @@ ALARM은 모두 0이었고 다른 업무 통화는 조회만 했으며 개입하
   104개 테스트, 전체 typecheck·lint·production build, Drizzle schema check, Windows
   .NET Framework x86 Release compile·self-test 19개를 통과했다. 운영 migration·배포와
   실통화 canary는 수행하지 않았다.
+
+## 10. 2026-08-12 terminal state 후속 계약
+
+상단 바 ghost 카드의 공통 원인은 UI가 아니라 종료 상관과 상태 전파의 세 단절이었다.
+
+1. U+ `CHANNELOUT`의 `SRCUNIQUEID=NONE`을 실제 provider ID로 저장해 여러 endpoint의 종료가
+   이전 통화에 붙었다. `0/NIL/NONE/NULL/UNKNOWN`은 이제 입력·저장 양쪽에서 sentinel로
+   폐기한다.
+2. 병행 v1 원장이 종료되어도 이미 같은 UUID의 v2 root/leg가 계속 `ringing/connected`로
+   남았다. exact endpoint·root·leg·provider ID가 모두 같은 v1 상태만 v2로 전파한다.
+3. bridge의 재접속 보정과 3분 미연결 만료가 외부 v1 활성 상태만 추적했다. v0.8.3은 모든
+   v2 ring과 `CHANNELLIST` ID를 함께 추적하고 재접속·해제·종료 또는 3분 미연결 만료 때
+   root ID의 `call.ended`를 내구 큐에 남긴다.
+
+gateway의 종료 상관은 exact ID를 활성 leg에서 먼저 찾는다. exact가 없을 때만 동일 endpoint,
+같은 숫자 prefix, 마지막 sequence 차이 1인 유일한 활성 root/leg를 sibling으로 인정한다.
+후보가 둘 이상이면 자동 연결하지 않는다. 마지막 고객 leg가 아닌 v1 종료도 호전환 root를
+닫지 않으며 기존 `resolveCentrexRootAfterLegEnd` 정책을 그대로 따른다. snapshot은 저장 상태와
+별개로 3분을 넘긴 `ringing`을 반환하지 않아 새 결함이 생겨도 상단 바가 장시간 오염되지 않는다.
+
+migration `0049_centrex_terminal_state_recovery.sql`은 sentinel로 잘못 연결된 종료 관측만 먼저
+분리하고, exact/sibling 종료가 양쪽에서 유일한 활성 leg, 동일 root/leg의 v1 terminal state,
+다른 상태·relation이 전혀 없는 3분 초과 ringing 순서로 복구한다. 08:19 KST 내부 root는
+root→channel→종료가 `.3081116`→`.3081117`→`.3081118`로 이어지는 provider 증거가 있어
+추정 없이 복구 대상이다. 운영 읽기 dry-run은 유일 종료 4건·v1 종료 3건·순수 timeout 1건만
+선별했고 실제 활성 통화·호전환과 모호 후보는 제외했다. 로컬 fixture는 08:19 유형, 이전
+통화에 잘못 붙은 종료, v1 동기화, timeout, 진행 중 호전환과 모호 후보를 함께 고정한다.

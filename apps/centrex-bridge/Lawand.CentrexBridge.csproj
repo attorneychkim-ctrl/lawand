@@ -44,6 +44,7 @@
     <Compile Include="src\BridgeApplicationContext.cs" />
     <Compile Include="src\BridgeConfiguration.cs" />
     <Compile Include="src\CallObservationExpiryPolicy.cs" />
+    <Compile Include="src\CallObservationTracker.cs" />
     <Compile Include="src\CentrexActiveXHost.cs" />
     <Compile Include="src\CentrexEventParser.cs" />
     <Compile Include="src\CentrexRuntime.cs" />

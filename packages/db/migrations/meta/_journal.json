@@ -344,6 +344,13 @@
       "when": 1786494732033,
       "tag": "0048_centrex_v2_ringing_recovery",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1786513251787,
+      "tag": "0049_centrex_terminal_state_recovery",
+      "breakpoints": true
     }
   ]
 }

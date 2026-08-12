@@ -1,4 +1,4 @@
-# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.17)
+# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.18)
 
 > 이 문서는 새 로앤 홈페이지 + 새 ERP + 리걸플로/리걸프렌즈 연동을 하나의 플랫폼으로
 > 묶기 위한 **저장소 구조·아키텍처 설계 초안**이다. 코덱스/클로드코드 세션이 번갈아
@@ -601,6 +601,30 @@
 > 전화데스크 첫 페이지 계약을 통과했고 임시 세션은 0건으로 정리했다. 별도 과제로 남은
 > 08:19 KST의 내부 통화 root 1건은 실제 활성 관측이 없는 기존 orphan이라 이번 migration이나
 > 배포에서 추정 종료하지 않았다.
+> 같은 날 상단 바에 실제 2건보다 `발신통화중` 2건·`발신중`·`수신중` 4건이 보이는 후속
+> 장애를 운영 원장과 비식별 Windows 이벤트로 다시 대조했다. U+ `CHANNELOUT`은 실제 종료
+> ID를 보내면서 `SRCUNIQUEID=NONE`도 함께 보냈고, 기존 bridge/gateway가 `NONE`을 정상
+> provider 식별자로 저장해 여러 endpoint의 종료 이벤트가 이전 통화에 잘못 붙었다. 또한
+> 병행 v1 원장은 정상 종료돼도 이미 연결된 v2 root/leg에 terminal state를 전파하지 않았고,
+> v2 내부 통화는 bridge 재접속 전 메모리 보정과 3분 미연결 만료의 대상이 아니었다. snapshot도
+> 모든 비종료 root를 12시간 노출해 세 결함이 상단 ghost 카드로 합쳐졌다. 08:19 내부 root에는
+> root `.3081116`→channel `.3081117`→실제 종료 `.3081118`의 동일 prefix·인접 sequence
+> 증거가 남아 있어 시간이나 HCAUSE 추정 없이 정확히 종결할 수 있음을 확인했다.
+> 출시 후보 v0.8.3은 `0/NIL/NONE/NULL/UNKNOWN`을 provider sentinel로 폐기하고, 외부 v1뿐
+> 아니라 모든 v2 ring/channel도 메모리에서 추적해 미연결 3분 timeout·재접속·명시적 해제·
+> 프로세스 종료 시 정확한 v2 `call.ended` 보정 이벤트를 내구 큐에 남긴다. gateway는 exact
+> 식별자를 활성 leg 우선으로 찾고, 동일 endpoint·같은 prefix·인접 sequence가 유일한 활성
+> leg에만 sibling 종료를 연결한다. 병행 v1의 connected/ended는 동일 root/leg에 즉시
+> 동기화하되 다른 활성 customer leg가 있는 호전환 root는 닫지 않는다. 인증 snapshot은
+> `ringing`을 3분까지만 반환하는 마지막 UI 안전망도 둔다. migration
+> `0049_centrex_terminal_state_recovery.sql`은 sentinel 관측 64건·식별자 7건을 정규화하고,
+> 잘못 연결된 종료 11건을 분리한 뒤 유일한 provider 종료 증거, 동일 root/leg의 v1 terminal
+> state, 관계 없는 3분 초과 ringing만 순서대로 복구한다. 운영 읽기 dry-run 기준 현재 영향은
+> 유일한 종료 증거 4건·v1 종료 3건·순수 ring timeout 1건이며 실제 활성/호전환과 모호한
+> 후보는 제외된다. 로컬 운영형 fixture에서 08:19·잘못 연결된 외부 종료·v1 동기화·timeout·
+> 호전환 보존·모호 후보 비병합을 검증했고 gateway 114개 테스트, DB schema 검사, Windows
+> x86 self-test 20개를 통과했다. 이 후보는 main 반영까지만 수행하며 운영 migration·gateway
+> 배포·bridge 교체는 같은 통합 릴리스의 별도 안전 게이트로 남긴다.
 > `Office_idx=56` 사건만 이름·전화·사건번호·원본 사건 ID 없이 추출한 자가진단
 > 런타임 읽기 모델을 만들었다. 현재 1,759건(회생 1,342·파산면책 417)이며 gateway만
 > 이 모델을 읽는다. `/bank/self-diagnosis`는 고객 상황과 유사한 다섯 건의 월 변제금·
@@ -1693,6 +1717,9 @@ Manager와 별도 역할·보안그룹·TLS 기준을 적용한다.
 - [x] v0.8.2 운영 통합 배포: v2 수신 필수 회선 직렬화·이벤트별 영구 오류 큐 비차단·
   종료된 U+ 이력과 지연 bridge ring 엄격 상관·늦은 `전화 받기` 차단·0048 중복 원장 복구,
   암호화 dead-letter 32건 SHA archive와 queue/dead-letter 분리 경보
+- [x] v0.8.3·0049 출시 후보: U+ sentinel provider ID 폐기·유일한 인접 sequence 종료 상관·
+  v1→v2 terminal state 동기화·전체 v2 재접속/3분 ring 보정·snapshot 3분 안전망·08:19 정확
+  종료 복구 fixture와 운영 읽기 dry-run
 - [ ] v0.8.0 일반 내선·무조건/통화 후 호전환·실패 복귀 운영 acceptance 재수행
 - [x] 실제 업무 통화를 포함한 10→25→50 프로세스 CPU·메모리 canary와 warm 5개 원복
 - [ ] bridge 조직용 Authenticode 인증서 발급·서명 배포
@@ -1757,6 +1784,9 @@ Manager와 별도 역할·보안그룹·TLS 기준을 적용한다.
     실시간 모바일 ring·ERP 받기·원격 발신은 현재 범위에서 제외
 15. 전화 담당자의 실시간 근무현황과 회선 통화 중 여부를 전화데스크·수신 카드에 결합
 16. `lawandfirm.com` DNS 전파 관찰, Solapi IP 제한·승인된 운영 canary·경보 통지 연결
-17. 실제 관측이 없는 08:19 KST 내부 active root 1건의 provider 종료 증거를 대조하고,
-    추정 없이 안전한 종결 또는 별도 orphan 상태 모델을 결정
+17. v0.8.3·migration `0049_centrex_terminal_state_recovery.sql`·gateway를 같은 운영
+    릴리스로 배포한다. 전환 직전 활성 통화·실행 명령·queue/dead-letter 0을 연속 확인하고,
+    08:19 포함 유일한 provider 종료 증거 4건·동일 root/leg v1 종료 3건·관계 없는 3분 초과
+    ring 1건만 종결되는지, sentinel 0·모호 후보 비병합·실제 활성/호전환 보존·상단 ghost 0을
+    재대조한다.
 18. 기준점 이후 신규 네이버 예약 확정 메일 → IMAP 전용 ERP 접수 실제 canary

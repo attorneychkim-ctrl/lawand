@@ -71,6 +71,37 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-12 — 센트릭스 ghost 카드·08:19 terminal state 근본 수정 후보
+- 상단 바가 실제 통화 2건보다 `발신통화중` 2건·`발신중`·`수신중` 4건을 표시한 시점의 운영
+  원장과 비식별 Windows 이벤트를 읽기 전용으로 대조했다. U+ `CHANNELOUT`의
+  `SRCUNIQUEID=NONE`을 provider ID로 저장해 여러 endpoint의 종료가 이전 통화에 붙은 결함,
+  병행 v1 종료가 동일 root/leg의 v2 상태를 닫지 않는 결함, v2 내선이 bridge 재접속/3분
+  미연결 보정에서 빠진 결함, snapshot이 모든 비종료 root를 12시간 노출한 결함이 겹쳤다.
+  08:19 내부 root는 root `.3081116`·channel `.3081117`·종료 `.3081118`의 정확한 provider
+  sequence 증거가 있어 HCAUSE나 시간 추정 없이 종료할 수 있다. 운영 변경·DB 쓰기·프로세스
+  재시작은 하지 않았다.
+- bridge v0.8.3은 `0/NIL/NONE/NULL/UNKNOWN` sentinel을 식별자에서 폐기하고 모든 v2
+  ring/channel을 추적해 미연결 3분 timeout·재접속·명시적 해제·프로세스 종료 때 정확한
+  `call.ended` 보정 이벤트를 내구 큐에 남긴다. gateway는 active exact를 우선하고 동일
+  endpoint·prefix·인접 sequence가 유일한 active leg에만 종료를 연결한다. 동일 root/leg의
+  v1 connected/ended를 v2에 동기화하되 다른 customer leg가 살아 있는 호전환 root는 닫지
+  않는다. snapshot은 ringing 3분 범위를 별도 적용한다.
+- migration `0049_centrex_terminal_state_recovery.sql`은 sentinel 관측·식별자를 정규화하고
+  sentinel로 이전 통화에 잘못 붙은 종료를 분리한 뒤 유일한 provider 종료, 동일 root/leg v1
+  terminal state, relation 없는 3분 초과 ringing만 복구한다. 14:30~14:44 KST 운영 읽기
+  dry-run은 sentinel 관측 64건·식별자 7건, 잘못 연결 11건, 유일 종료 증거 4건, v1 종료
+  3건, 순수 timeout 1건을 선별했고 실제 active/호전환과 모호 후보를 제외했다. 운영형 로컬
+  fixture에서 08:19·외부 오연결·v1 동기화·timeout·호전환 보존·모호 후보 비병합과 새 DB
+  constraint를 통과한 뒤 임시 DB를 삭제했다.
+- 전체 5패키지 typecheck·lint·production build, core 65개·gateway 114개 테스트, DB schema
+  check와 `git diff --check`를 통과했다. Windows Server 2022 .NET Framework x86 Release
+  compile·self-test 20개도 통과했고 unsigned v0.8.3.0 후보 SHA-256은
+  `448750CFC014CAA7266CC30368DD708871C723D8EE9D7B7A0C88E89EA62D6791`이다. 구현 커밋
+  `716e528`은 `origin/worktree/rapid-harbor-5a66`에 push했다. `PROJECT_PLAN.md`는 v1.18이다.
+  이 세션의 사용자 범위는 main 반영까지이며 운영 migration·gateway 배포·bridge 교체는
+  수행하지 않는다. 다음 운영 반영은 v0.8.3·0049·gateway를 한 릴리스로 묶고 무통화 게이트와
+  예상 8건만 종결·sentinel 0·ghost 0·실제 active/호전환 보존을 재검증한다.
+
 ### 2026-08-12 — 센트릭스 지연 수신 복구 v0.8.2·0048·gateway/ERP 운영 통합 배포
 - `HERDR_ENV=1`에서 main과 HERDR worktree 2개, 원격 `origin/worktree/*` 14개를 전수
   대조했다. 모든 원격 HEAD가 main ancestor이고 세 작업 트리가 깨끗해 추가 병합 없이

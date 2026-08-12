@@ -403,7 +403,14 @@ namespace Lawand.CentrexBridge
         private static string OptionalProviderId(string value)
         {
             string safe = CentrexEventParser.SafeToken(value, 100);
-            return ProviderIdPattern.IsMatch(safe) && safe != "0" ? safe : null;
+            return ProviderIdPattern.IsMatch(safe) &&
+                !string.Equals(safe, "0", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(safe, "NIL", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(safe, "NONE", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(safe, "NULL", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(safe, "UNKNOWN", StringComparison.OrdinalIgnoreCase)
+                    ? safe
+                    : null;
         }
 
         private static string ValidExtension(string value)

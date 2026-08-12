@@ -73,6 +73,7 @@ $testArguments = @(
     (Join-Path $projectRoot 'src\CentrexEventParser.cs'),
     (Join-Path $projectRoot 'src\BridgeConfiguration.cs'),
     (Join-Path $projectRoot 'src\CallObservationExpiryPolicy.cs'),
+    (Join-Path $projectRoot 'src\CallObservationTracker.cs'),
     (Join-Path $projectRoot 'src\CredentialStore.cs'),
     (Join-Path $projectRoot 'src\GatewaySecretEncoding.cs'),
     (Join-Path $projectRoot 'src\GatewayEventPayload.cs'),
