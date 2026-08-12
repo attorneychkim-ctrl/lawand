@@ -508,6 +508,246 @@ a.inbound-customer:hover { text-decoration: underline; }
   white-space: pre-line;
 }
 
+.consultation-alert-toast {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--brand) 42%, var(--line));
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 100% 0, color-mix(in srgb, var(--brand-soft) 78%, transparent), transparent 42%),
+    var(--surface);
+  box-shadow: 0 24px 70px rgb(15 23 42 / 24%);
+  color: var(--ink);
+  animation: consultation-alert-enter 220ms ease-out both;
+}
+
+@keyframes consultation-alert-enter {
+  from { opacity: 0; transform: translateY(-10px) scale(.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.consultation-alert-heading,
+.consultation-alert-heading > div,
+.consultation-alert-actions,
+.consultation-alert-identity {
+  display: flex;
+  align-items: center;
+}
+
+.consultation-alert-heading {
+  justify-content: space-between;
+  padding: 13px 14px 10px 16px;
+  border-bottom: 1px solid color-mix(in srgb, var(--brand) 16%, var(--line));
+}
+
+.consultation-alert-heading > div { gap: 8px; }
+
+.consultation-alert-kicker,
+.consultation-alert-channel {
+  border-radius: 999px;
+  font-size: .68rem;
+  font-weight: 850;
+  letter-spacing: .02em;
+}
+
+.consultation-alert-kicker {
+  color: var(--brand-strong);
+  text-transform: uppercase;
+}
+
+.consultation-alert-channel {
+  padding: 4px 8px;
+  background: color-mix(in srgb, var(--brand-soft) 78%, var(--surface));
+  color: var(--brand-strong);
+}
+
+.consultation-alert-close {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  place-items: center;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.consultation-alert-close:hover {
+  background: var(--surface-muted);
+  color: var(--ink);
+}
+
+.consultation-alert-close svg {
+  width: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-width: 1.8;
+}
+
+.consultation-alert-body {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px 16px;
+}
+
+.consultation-alert-identity {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.consultation-alert-identity strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 1.02rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.consultation-alert-identity span {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: .68rem;
+  font-weight: 700;
+}
+
+.consultation-alert-facts {
+  display: grid;
+  grid-template-columns: .8fr 1.2fr;
+  gap: 8px;
+  margin: 0;
+}
+
+.consultation-alert-facts > div {
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface-muted) 78%, transparent);
+}
+
+.consultation-alert-facts > div.is-region {
+  border-color: color-mix(in srgb, var(--brand) 40%, var(--line));
+  background: color-mix(in srgb, var(--brand-soft) 72%, var(--surface));
+}
+
+.consultation-alert-facts dt {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: .64rem;
+  font-weight: 750;
+}
+
+.consultation-alert-facts dt svg {
+  width: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+}
+
+.consultation-alert-facts dd {
+  overflow: hidden;
+  margin: 0;
+  color: var(--ink);
+  font-size: .79rem;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.consultation-alert-facts .is-region dd {
+  color: var(--brand-strong);
+  font-size: .9rem;
+}
+
+.consultation-alert-actions {
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.consultation-alert-detail,
+.consultation-alert-claim {
+  min-height: 38px;
+  padding: 9px 14px;
+  border-radius: 10px;
+  font-size: .74rem;
+  font-weight: 850;
+  text-decoration: none;
+}
+
+.consultation-alert-detail {
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.consultation-alert-claim {
+  border: 1px solid var(--brand);
+  background: var(--brand);
+  color: white;
+  cursor: pointer;
+}
+
+.consultation-alert-claim:hover:not(:disabled) {
+  filter: brightness(.94);
+  transform: translateY(-1px);
+}
+
+.consultation-alert-claim:disabled {
+  cursor: wait;
+  opacity: .65;
+}
+
+.consultation-alert-error {
+  margin: -2px 0 0;
+  color: var(--danger);
+  font-size: .7rem;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.consultation-alert-timer {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  transform-origin: left;
+  background: var(--brand);
+  animation: consultation-alert-timer 10s linear forwards;
+}
+
+.consultation-alert-toast.is-actioning .consultation-alert-timer {
+  display: none;
+}
+
+@keyframes consultation-alert-timer {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+
+@media (max-width: 520px) {
+  .telephony-toast-stack {
+    top: 74px;
+    right: 12px;
+    width: calc(100vw - 24px);
+  }
+
+  .consultation-alert-facts { grid-template-columns: 1fr; }
+  .consultation-alert-actions > * { flex: 1; text-align: center; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .consultation-alert-toast { animation: none; }
+  .consultation-alert-timer { animation: none; }
+}
+
 .inbound-call-card.is-ended .inbound-call-title strong {
   color: var(--muted);
 }

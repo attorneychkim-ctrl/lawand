@@ -17,6 +17,56 @@ import { PhoneAftercareDialog } from "./phone-aftercare-form";
 
 type ConnectionState = "connecting" | "connected" | "disconnected";
 
+type ConsultationNotificationSummary = {
+  id: string;
+  publicReceiptCode: string;
+  displayName: string;
+  contactChannel: "phone" | "kakao_channel" | "naver_booking";
+  phone: string | null;
+  residenceRegion: string | null;
+  canClaim: boolean;
+};
+
+type IndicatorToast = {
+  id: string;
+  title: string;
+  body: string;
+  href?: string;
+  consultation?: ConsultationNotificationSummary;
+  claimStatus?: "idle" | "claiming" | "failed";
+  claimError?: string;
+};
+
+const residenceRegionLabels: Record<string, string> = {
+  seoul: "서울",
+  busan: "부산",
+  daegu: "대구",
+  incheon: "인천",
+  gwangju: "광주",
+  daejeon: "대전",
+  ulsan: "울산",
+  sejong: "세종",
+  gyeonggi: "경기",
+  gangwon: "강원",
+  chungbuk: "충북",
+  chungnam: "충남",
+  jeonbuk: "전북",
+  jeonnam: "전남",
+  gyeongbuk: "경북",
+  gyeongnam: "경남",
+  jeju: "제주",
+  overseas_or_other: "해외·기타",
+};
+
+const consultationChannelLabels: Record<
+  ConsultationNotificationSummary["contactChannel"],
+  string
+> = {
+  phone: "전화 상담",
+  kakao_channel: "카카오 상담",
+  naver_booking: "네이버 예약",
+};
+
 const stateCopy: Record<
   TelephonyInboundCall["state"],
   { label: string; description: string }
@@ -60,6 +110,44 @@ function formatPhone(phone: string) {
     return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
   }
   return phone;
+}
+
+function consultationPhoneLabel(
+  consultation: ConsultationNotificationSummary,
+) {
+  return consultation.phone
+    ? formatPhone(consultation.phone)
+    : "010-0000-0000 · 미수집";
+}
+
+function consultationRegionLabel(
+  consultation: ConsultationNotificationSummary,
+) {
+  return consultation.residenceRegion
+    ? residenceRegionLabels[consultation.residenceRegion] ??
+        consultation.residenceRegion
+    : "지역 미기록";
+}
+
+function isConsultationNotificationSummary(
+  value: unknown,
+): value is ConsultationNotificationSummary {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.id === "string" &&
+    typeof record.publicReceiptCode === "string" &&
+    typeof record.displayName === "string" &&
+    ["phone", "kakao_channel", "naver_booking"].includes(
+      String(record.contactChannel),
+    ) &&
+    (typeof record.phone === "string" || record.phone === null) &&
+    (typeof record.residenceRegion === "string" ||
+      record.residenceRegion === null) &&
+    typeof record.canClaim === "boolean"
+  );
 }
 
 function caseTypeLabel(caseType: number) {
@@ -205,9 +293,7 @@ export function InboundCallIndicator({
   const [calls, setCalls] = useState<TelephonyInboundCall[]>([]);
   const [activities, setActivities] = useState<TelephonyCallActivity[]>([]);
   const [deskCalls, setDeskCalls] = useState<PhoneDeskCall[]>([]);
-  const [toasts, setToasts] = useState<
-    Array<{ id: string; title: string; body: string; href?: string }>
-  >([]);
+  const [toasts, setToasts] = useState<IndicatorToast[]>([]);
   const [callsExpanded, setCallsExpanded] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<
     "default" | "denied" | "granted" | "unsupported"
@@ -232,6 +318,7 @@ export function InboundCallIndicator({
   const seenConsultationEventIds = useRef<Set<string>>(new Set());
   const notificationLeader = useRef(false);
   const notificationTabId = useRef("");
+  const toastTimers = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     const synchronizeNotificationPermission = () => {
@@ -303,19 +390,89 @@ export function InboundCallIndicator({
     window.dispatchEvent(new Event(notificationPermissionChangedEvent));
   }, []);
 
-  const enqueueToast = useCallback((toast: {
-    id: string;
-    title: string;
-    body: string;
-    href?: string;
-  }) => {
+  const dismissToast = useCallback((toastId: string) => {
+    const timer = toastTimers.current.get(toastId);
+    if (timer !== undefined) window.clearTimeout(timer);
+    toastTimers.current.delete(toastId);
+    setToasts((items) => items.filter((item) => item.id !== toastId));
+  }, []);
+
+  const enqueueToast = useCallback((toast: IndicatorToast) => {
+    const existingTimer = toastTimers.current.get(toast.id);
+    if (existingTimer !== undefined) window.clearTimeout(existingTimer);
     setToasts((items) => [
       ...items.filter((item) => item.id !== toast.id),
       toast,
     ]);
-    window.setTimeout(() => {
+    const timer = window.setTimeout(() => {
       setToasts((items) => items.filter((item) => item.id !== toast.id));
-    }, 9_000);
+      toastTimers.current.delete(toast.id);
+    }, 10_000);
+    toastTimers.current.set(toast.id, timer);
+  }, []);
+
+  const claimConsultationFromToast = useCallback(
+    async (toast: IndicatorToast) => {
+      const consultation = toast.consultation;
+      if (!consultation || !consultation.canClaim) return;
+      const timer = toastTimers.current.get(toast.id);
+      if (timer !== undefined) window.clearTimeout(timer);
+      toastTimers.current.delete(toast.id);
+      setToasts((items) =>
+        items.map((item) =>
+          item.id === toast.id
+            ? {
+                ...item,
+                claimStatus: "claiming",
+                claimError: undefined,
+              }
+            : item,
+        ),
+      );
+      try {
+        const response = await fetch(
+          `/api/consultations/${consultation.id}/claim`,
+          {
+            method: "POST",
+            cache: "no-store",
+            headers: { accept: "application/json" },
+          },
+        );
+        const body = (await response.json().catch(() => null)) as {
+          message?: string;
+        } | null;
+        if (!response.ok) {
+          throw new Error(
+            body?.message ?? "상담하기 요청을 완료하지 못했습니다.",
+          );
+        }
+        window.location.assign(`/consultations/${consultation.id}`);
+      } catch (error) {
+        setToasts((items) =>
+          items.map((item) =>
+            item.id === toast.id
+              ? {
+                  ...item,
+                  claimStatus: "failed",
+                  claimError:
+                    error instanceof Error
+                      ? error.message
+                      : "상담하기 요청을 완료하지 못했습니다.",
+                }
+              : item,
+          ),
+        );
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const timers = toastTimers.current;
+    return () => {
+      for (const timer of timers.values()) window.clearTimeout(timer);
+      timers.clear();
+    };
   }, []);
 
   const enqueueAftercareCalls = useCallback((callIds: string[]) => {
@@ -551,6 +708,7 @@ export function InboundCallIndicator({
   }, [activities, enqueueToast, notificationPermission, staffUserId]);
 
   useEffect(() => {
+    let active = true;
     const unsubscribe = subscribeConsultationRealtime((message) => {
       if (message.kind !== "changed") return;
       const payload = message.payload;
@@ -564,46 +722,93 @@ export function InboundCallIndicator({
 
       const notificationKey = `consultation:${payload.eventId}`;
       const href = `/consultations/${payload.consultationId}`;
-      const title = "새 상담이 등록됐습니다";
-      const body = "상담 데스크에서 접수 내용과 거주지역을 확인해 주세요.";
+      const visibleAtEvent = document.visibilityState === "visible";
+      const shouldShowNotification =
+        notificationPermission === "granted" &&
+        (visibleAtEvent || notificationLeader.current);
+      if (!visibleAtEvent && !shouldShowNotification) return;
 
-      if (document.visibilityState === "visible") {
-        enqueueToast({ id: notificationKey, title, body, href });
-      }
-      if (
-        notificationPermission !== "granted" ||
-        (document.visibilityState !== "visible" &&
-          !notificationLeader.current)
-      ) {
-        return;
-      }
-
-      const storageKey = `lawand:consultation-notified:${payload.eventId}`;
-      let alreadyNotified = false;
-      try {
-        alreadyNotified = Boolean(window.localStorage.getItem(storageKey));
-        if (!alreadyNotified) {
-          window.localStorage.setItem(storageKey, String(Date.now()));
+      void (async () => {
+        let consultation: ConsultationNotificationSummary | null = null;
+        try {
+          const response = await fetch(
+            `/api/consultations/${payload.consultationId}/notification`,
+            {
+              cache: "no-store",
+              headers: { accept: "application/json" },
+            },
+          );
+          const value = await response.json();
+          if (
+            response.ok &&
+            isConsultationNotificationSummary(value) &&
+            value.id === payload.consultationId
+          ) {
+            consultation = value;
+          }
+        } catch {
+          consultation = null;
         }
-      } catch {
-        // 저장소가 막힌 브라우저에서도 Notification API는 별도로 시도한다.
-      }
-      if (alreadyNotified) return;
-      try {
-        const notification = new Notification(title, {
-          body,
-          tag: notificationKey,
-        });
-        notification.onclick = () => {
-          window.focus();
-          window.location.assign(href);
-          notification.close();
-        };
-      } catch {
-        // Notification API가 막힌 환경에서도 페이지 토스트는 유지한다.
-      }
+        if (!active) return;
+
+        const title = consultation
+          ? `새 상담 · ${consultation.displayName}`
+          : "새 상담이 등록됐습니다";
+        const body = consultation
+          ? [
+              consultationPhoneLabel(consultation),
+              `거주지역 ${consultationRegionLabel(consultation)}`,
+            ].join("\n")
+          : "상담 데스크에서 접수 내용을 확인해 주세요.";
+
+        if (visibleAtEvent) {
+          enqueueToast({
+            id: notificationKey,
+            title,
+            body,
+            href,
+            ...(consultation
+              ? { consultation, claimStatus: "idle" as const }
+              : {}),
+          });
+        }
+        if (!shouldShowNotification) return;
+
+        const storageKey = `lawand:consultation-notified:${payload.eventId}`;
+        let alreadyNotified = false;
+        try {
+          alreadyNotified = Boolean(window.localStorage.getItem(storageKey));
+          if (!alreadyNotified) {
+            window.localStorage.setItem(storageKey, String(Date.now()));
+          }
+        } catch {
+          // 저장소가 막힌 브라우저에서도 Notification API는 별도로 시도한다.
+        }
+        if (alreadyNotified) return;
+        try {
+          const notification = new Notification(title, {
+            body,
+            tag: notificationKey,
+          });
+          const closeTimer = window.setTimeout(
+            () => notification.close(),
+            10_000,
+          );
+          notification.onclick = () => {
+            window.clearTimeout(closeTimer);
+            window.focus();
+            window.location.assign(href);
+            notification.close();
+          };
+        } catch {
+          // Notification API가 막힌 환경에서도 페이지 토스트는 유지한다.
+        }
+      })();
     });
-    return unsubscribe;
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, [enqueueToast, notificationPermission]);
 
   useEffect(() => {
@@ -1005,22 +1210,110 @@ export function InboundCallIndicator({
       </section> : null}
       {toasts.length ? (
         <aside aria-live="assertive" className="telephony-toast-stack">
-          {toasts.map((toast) => (
-            <button
-              className="telephony-toast"
-              key={toast.id}
-              onClick={() => {
-                setToasts((items) =>
-                  items.filter((item) => item.id !== toast.id),
-                );
-                if (toast.href) window.location.assign(toast.href);
-              }}
-              type="button"
-            >
-              <strong>{toast.title}</strong>
-              <span>{toast.body}</span>
-            </button>
-          ))}
+          {toasts.map((toast) => {
+            const consultation = toast.consultation;
+            if (!consultation) {
+              return (
+                <button
+                  className="telephony-toast"
+                  key={toast.id}
+                  onClick={() => {
+                    dismissToast(toast.id);
+                    if (toast.href) window.location.assign(toast.href);
+                  }}
+                  type="button"
+                >
+                  <strong>{toast.title}</strong>
+                  <span>{toast.body}</span>
+                </button>
+              );
+            }
+            return (
+              <article
+                className={`consultation-alert-toast${
+                  toast.claimStatus && toast.claimStatus !== "idle"
+                    ? " is-actioning"
+                    : ""
+                }`}
+                key={toast.id}
+              >
+                <header className="consultation-alert-heading">
+                  <div>
+                    <span className="consultation-alert-kicker">
+                      새 상담 접수
+                    </span>
+                    <span className="consultation-alert-channel">
+                      {consultationChannelLabels[consultation.contactChannel]}
+                    </span>
+                  </div>
+                  <button
+                    aria-label="상담 알림 닫기"
+                    className="consultation-alert-close"
+                    onClick={() => dismissToast(toast.id)}
+                    type="button"
+                  >
+                    <svg aria-hidden="true" viewBox="0 0 24 24">
+                      <path d="m6 6 12 12M18 6 6 18" />
+                    </svg>
+                  </button>
+                </header>
+                <div className="consultation-alert-body">
+                  <div className="consultation-alert-identity">
+                    <strong>{consultation.displayName}</strong>
+                    <span>{consultation.publicReceiptCode}</span>
+                  </div>
+                  <dl className="consultation-alert-facts">
+                    <div className="is-region">
+                      <dt>
+                        <svg aria-hidden="true" viewBox="0 0 24 24">
+                          <path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z" />
+                          <circle cx="12" cy="10" r="2.5" />
+                        </svg>
+                        거주지역
+                      </dt>
+                      <dd>{consultationRegionLabel(consultation)}</dd>
+                    </div>
+                    <div>
+                      <dt>휴대전화</dt>
+                      <dd>{consultationPhoneLabel(consultation)}</dd>
+                    </div>
+                  </dl>
+                  {toast.claimError ? (
+                    <p className="consultation-alert-error" role="alert">
+                      {toast.claimError}
+                    </p>
+                  ) : null}
+                  <div className="consultation-alert-actions">
+                    <a
+                      className="consultation-alert-detail"
+                      href={`/consultations/${consultation.id}`}
+                      onClick={() => dismissToast(toast.id)}
+                    >
+                      상세 보기
+                    </a>
+                    {consultation.canClaim ? (
+                      <button
+                        className="consultation-alert-claim"
+                        disabled={toast.claimStatus === "claiming"}
+                        onClick={() => void claimConsultationFromToast(toast)}
+                        type="button"
+                      >
+                        {toast.claimStatus === "claiming"
+                          ? "등록 중…"
+                          : toast.claimStatus === "failed"
+                            ? "상담하기 재시도"
+                            : "상담하기"}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+                <span
+                  aria-hidden="true"
+                  className="consultation-alert-timer"
+                />
+              </article>
+            );
+          })}
         </aside>
       ) : null}
       <PhoneAftercareDialog
