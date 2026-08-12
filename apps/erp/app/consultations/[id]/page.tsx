@@ -565,6 +565,9 @@ const phoneAftercareLabels = {
   public_institution: "법원 등 관공서",
   creditor: "채권자 등",
   wrong_number: "잘못 걸린 전화",
+  internal_completed: "내선 통화 완료",
+  internal_follow_up: "내부 확인 필요",
+  internal_no_answer: "내선 미연결",
   other: "기타",
 } satisfies Record<
   NonNullable<ConsultationDetail["telephonyCalls"][number]["aftercareResult"]>,

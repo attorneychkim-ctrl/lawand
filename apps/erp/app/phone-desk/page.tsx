@@ -18,6 +18,7 @@ const emptySnapshot: PhoneDeskCallSnapshot = {
     inbound: 0,
     clickToCall: 0,
     centrexDirect: 0,
+    internal: 0,
     active: 0,
   },
   followUps: [],

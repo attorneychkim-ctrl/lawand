@@ -37,6 +37,7 @@ const sourceCopy: Record<
     label: "직접 발신",
     description: "센트릭스 직접 발신",
   },
+  internal: { label: "내선", description: "사내 내선 통화" },
 };
 
 const stateCopy: Record<PhoneDeskCall["state"], string> = {
@@ -58,6 +59,9 @@ const resultCopy: Record<PhoneDeskCallResult, string> = {
   public_institution: "법원 등 관공서",
   creditor: "채권자 등",
   wrong_number: "잘못 걸린 전화",
+  internal_completed: "내선 통화 완료",
+  internal_follow_up: "내부 확인 필요",
+  internal_no_answer: "내선 미연결",
   other: "기타",
 };
 
@@ -66,10 +70,12 @@ const filters: Array<{ key: SourceFilter; label: string }> = [
   { key: "inbound", label: "수신" },
   { key: "click_to_call", label: "ERP 발신" },
   { key: "centrex_direct", label: "직접 발신" },
+  { key: "internal", label: "내선" },
   { key: "active", label: "진행 중" },
 ];
 
-function formatPhone(phone: string) {
+function formatPhone(phone: string | null) {
+  if (!phone) return "";
   const digits = phone.replace(/\D/g, "");
   if (/^02\d{7}$/.test(digits)) {
     return `${digits.slice(0, 2)}-${digits.slice(2, 5)}-${digits.slice(5)}`;
@@ -84,6 +90,13 @@ function formatPhone(phone: string) {
     return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
   }
   return phone;
+}
+
+function internalCallTitle(call: PhoneDeskCall) {
+  const extensions = [...new Set(call.participants.map((item) => item.extension))];
+  return extensions.length > 1
+    ? `내선 ${extensions.join(" ↔ ")}`
+    : `내선 ${extensions[0] ?? call.endpoint.extension}`;
 }
 
 function formatDateTime(value: string) {
@@ -116,6 +129,12 @@ function isUplusHistoryDelayed(
 }
 
 function callStateLabel(call: PhoneDeskCall, currentTime: number | null) {
+  if (
+    call.state === "ended" &&
+    call.correlationStatus === "needs_confirmation"
+  ) {
+    return "통화자 확인 필요";
+  }
   if (call.state === "ringing" && call.receptionMode === "uplus_network") {
     return isUplusHistoryDelayed(call, currentTime)
       ? "이력 반영 지연"
@@ -133,6 +152,11 @@ function caseTypeLabel(caseType: number) {
 }
 
 function customerSearchText(call: PhoneDeskCall) {
+  if (call.scope === "internal") {
+    return call.participants
+      .flatMap((item) => [item.displayName ?? "", item.extension])
+      .join(" ");
+  }
   const clickTarget = call.clickToCall?.consultation?.displayName ??
     call.clickToCall?.directoryClient?.displayName ?? "";
   const match = call.customerMatch;
@@ -144,6 +168,17 @@ function customerSearchText(call: PhoneDeskCall) {
 }
 
 function CustomerSummary({ call }: { call: PhoneDeskCall }) {
+  if (call.scope === "internal") {
+    const participants = call.participants.map((item) =>
+      `${item.displayName ?? "직원 미연결"} ${item.extension}`,
+    );
+    return (
+      <span className="phone-desk-customer">
+        <strong>{participants.join(" ↔ ") || "내선 참여자 확인 중"}</strong>
+        <span>고객 전화번호가 없는 사내 통화</span>
+      </span>
+    );
+  }
   if (call.clickToCall?.consultation) {
     const consultation = call.clickToCall.consultation;
     return (
@@ -217,6 +252,12 @@ function CallTiming({
   call: PhoneDeskCall;
   currentTime: number | null;
 }) {
+  if (
+    call.state === "ended" &&
+    call.correlationStatus === "needs_confirmation"
+  ) {
+    return <span>상세에서 최종 통화자를 선택해 주세요</span>;
+  }
   if (call.state === "pending") return <span>센트릭스 응답 대기</span>;
   if (call.state === "failed") return <span>발신 명령 실패</span>;
   if (call.state === "unknown") return <span>전화기 상태 확인 필요</span>;
@@ -382,7 +423,10 @@ export function PhoneDeskWorkspace({
         ...call.endpointOwners.map((owner) => owner.displayName),
         call.clickToCall?.requestedBy.displayName ?? "",
       ].join(" ");
-      const haystack = `${call.remotePhone} ${formatPhone(call.remotePhone)} ${customerSearchText(call)} ${staffNames} ${call.endpoint.extension}`
+      const participantText = call.participants
+        .flatMap((item) => [item.displayName ?? "", item.extension])
+        .join(" ");
+      const haystack = `${call.remotePhone ?? ""} ${formatPhone(call.remotePhone)} ${customerSearchText(call)} ${staffNames} ${participantText} ${call.endpoint.extension}`
         .replace(/\s/g, "")
         .toLowerCase();
       return haystack.includes(normalizedQuery);
@@ -426,6 +470,7 @@ export function PhoneDeskWorkspace({
           ["inbound", "수신", snapshot.summary.inbound],
           ["click_to_call", "ERP 발신", snapshot.summary.clickToCall],
           ["centrex_direct", "직접 발신", snapshot.summary.centrexDirect],
+          ["internal", "내선", snapshot.summary.internal],
           ["active", "진행 중", snapshot.summary.active],
         ] as const).map(([key, label, value]) => (
           <button
@@ -584,6 +629,11 @@ export function PhoneDeskWorkspace({
             const historyDelayed = isUplusHistoryDelayed(call, currentTime);
             const staffLabel = call.clickToCall
               ? call.clickToCall.requestedBy.displayName
+              : call.scope === "internal"
+                ? call.participants
+                    .map((item) => item.displayName)
+                    .filter(Boolean)
+                    .join(" · ") || "내선 담당 미지정"
               : call.endpointOwners.map((owner) => owner.displayName).join(" · ") ||
                 "회선 담당 미지정";
             return (
@@ -601,7 +651,11 @@ export function PhoneDeskWorkspace({
                     <span className={`phone-desk-source is-${call.source}`}>
                       {source.label}
                     </span>
-                    <strong>{formatPhone(call.remotePhone)}</strong>
+                    <strong>
+                      {call.scope === "internal"
+                        ? internalCallTitle(call)
+                        : formatPhone(call.remotePhone)}
+                    </strong>
                     <span>{source.description}</span>
                     {call.receptionMode === "uplus_network" ? (
                       <span className="phone-desk-linked">U+ 앱/망 수신</span>
@@ -609,12 +663,19 @@ export function PhoneDeskWorkspace({
                     {call.clickToCall?.observationLink ? (
                       <span className="phone-desk-linked">관측 연결됨</span>
                     ) : null}
+                    {call.relationType === "call_picked_up" ? (
+                      <span className="phone-desk-linked">당겨받기</span>
+                    ) : null}
                     {call.aftercare ? (
                       <span className={`phone-desk-result is-${call.aftercare.result}`}>
                         {resultCopy[call.aftercare.result]}
                       </span>
                     ) : call.state === "ended" ? (
-                      <span className="phone-desk-result is-needed">후처리 필요</span>
+                      <span className="phone-desk-result is-needed">
+                        {call.correlationStatus === "needs_confirmation"
+                          ? "통화자 확인 필요"
+                          : "후처리 필요"}
+                      </span>
                     ) : null}
                   </div>
                   <CustomerSummary call={call} />

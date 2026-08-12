@@ -26,6 +26,7 @@ export async function GET(request: Request) {
       "inbound",
       "click_to_call",
       "centrex_direct",
+      "internal",
       "active",
     ].includes(filter) ||
     (from && Number.isNaN(from.getTime())) ||

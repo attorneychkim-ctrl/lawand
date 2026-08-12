@@ -1417,12 +1417,14 @@ test("통합 통화 활동 조회는 인증된 직원 문맥으로만 개인정�
   assert.doesNotMatch(body, /remotePhoneCiphertext|remotePhoneFingerprint/);
 });
 
-test("전화데스크 후처리와 재통화 완료 API는 통합 계약과 현재 직원을 전달한다", async (context) => {
+test("전화데스크 통화자 확정·후처리·재통화 완료 API는 통합 계약과 현재 직원을 전달한다", async (context) => {
   const callId = "019fa6a4-6834-7782-aa0b-4e71ffb8a301";
   const taskId = "019fa6a4-6834-7782-aa0b-4e71ffb8a302";
+  const finalLegId = "019fa6a4-6834-7782-aa0b-4e71ffb8a303";
   let savedResult = "";
   let savedAssignee = "";
   let completedBy = "";
+  let resolvedBy = "";
   const telephonyService = {
     getPhoneDeskCall: async () => ({
       snapshotAt: "2026-08-07T05:00:00.000Z",
@@ -1440,6 +1442,16 @@ test("전화데스크 후처리와 재통화 완료 API는 통합 계약과 현�
       savedResult = input.result;
       savedAssignee = input.followUp.assigneeUserId ?? "";
       return { call: { id: callId, aftercare: { result: input.result } } };
+    },
+    resolvePhoneDeskCall: async (
+      receivedCallId: string,
+      input: { finalLegId: string },
+      actor: StaffPrincipal,
+    ) => {
+      assert.equal(receivedCallId, callId);
+      assert.equal(input.finalLegId, finalLegId);
+      resolvedBy = actor.id;
+      return { call: { id: callId, correlationStatus: "confirmed" as const } };
     },
     completePhoneDeskFollowUp: async (
       receivedTaskId: string,
@@ -1478,6 +1490,17 @@ test("전화데스크 후처리와 재통화 완료 API는 통합 계약과 현�
     { headers },
   );
   assert.equal(detail.status, 200);
+
+  const resolved = await fetch(
+    `http://127.0.0.1:${address.port}/v1/phone-desk/calls/${callId}/resolve`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ finalLegId }),
+    },
+  );
+  assert.equal(resolved.status, 200);
+  assert.equal(resolvedBy, realtimeActor.id);
 
   const saved = await fetch(
     `http://127.0.0.1:${address.port}/v1/phone-desk/calls/${callId}/aftercare`,

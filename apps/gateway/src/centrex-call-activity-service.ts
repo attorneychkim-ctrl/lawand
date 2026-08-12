@@ -92,6 +92,21 @@ export function resolveCentrexRootAfterLegEnd(input: {
   return input.hasAnyActiveLeg ? "needs_confirmation" : "needs_confirmation";
 }
 
+export function isConfirmedCallPickupEvidence(input: {
+  rootScope: "external" | "internal";
+  rootEnded: boolean;
+  sourceEndpointId: string;
+  targetEndpointId: string;
+  hasTargetLeg: boolean;
+  hasTransferRelation: boolean;
+}): boolean {
+  return input.rootScope === "external" &&
+    !input.rootEnded &&
+    input.sourceEndpointId !== input.targetEndpointId &&
+    !input.hasTargetLeg &&
+    !input.hasTransferRelation;
+}
+
 function maskedParty(value: string) {
   return `***${value.slice(-Math.min(4, value.length))}`;
 }
@@ -173,7 +188,7 @@ export function createCentrexCallActivityService(options: {
     endpointId?: string,
     activeOnly = false,
   ): Promise<{ root: RootRow; leg: LegRow } | null> {
-    const [row] = await tx
+    const rows = await tx
       .select({ root: telephonyCallRoots, leg: telephonyCallLegs })
       .from(telephonyCallProviderIdentifiers)
       .innerJoin(
@@ -195,9 +210,10 @@ export function createCentrexCallActivityService(options: {
             : []),
         ),
       )
-      .limit(1)
       .for("update");
-    return row ?? null;
+    const rootIds = new Set(rows.map((row) => row.root.id));
+    if (rootIds.size !== 1) return null;
+    return rows.find((row) => row.leg.state !== "ended") ?? rows[0] ?? null;
   }
 
   async function legByAnyProviderValue(
@@ -753,13 +769,149 @@ export function createCentrexCallActivityService(options: {
   async function handleChannels(
     tx: Transaction,
     event: Extract<CentrexBridgeCallObservation, { eventType: "call.channels" }>,
+    endpoint: Awaited<ReturnType<typeof endpointForEvent>>,
     occurredAt: Date,
     receivedAt: Date,
   ) {
-    const found = await legByAnyProviderValue(tx, event.endpointId, [
+    let found = await legByAnyProviderValue(tx, event.endpointId, [
       event.providerCallId,
       event.relatedProviderCallId,
     ]);
+    let pickupConfirmed = false;
+    if (!found) {
+      const shared = await rootByProviderValue(
+        tx,
+        event.providerCallId,
+        undefined,
+        true,
+      );
+      if (shared) {
+        const [targetLeg, transferRelation] = await Promise.all([
+          tx
+            .select({ id: telephonyCallLegs.id })
+            .from(telephonyCallLegs)
+            .where(
+              and(
+                eq(telephonyCallLegs.rootId, shared.root.id),
+                eq(telephonyCallLegs.endpointId, event.endpointId),
+              ),
+            )
+            .limit(1),
+          tx
+            .select({ id: telephonyCallRelations.id })
+            .from(telephonyCallRelations)
+            .where(
+              and(
+                eq(telephonyCallRelations.rootId, shared.root.id),
+                inArray(telephonyCallRelations.relationType, [
+                  "transfer_attempted",
+                  "transfer_completed",
+                  "transfer_returned",
+                  "transfer_unresolved",
+                ]),
+              ),
+            )
+            .limit(1),
+        ]);
+        if (
+          isConfirmedCallPickupEvidence({
+            rootScope: shared.root.scope,
+            rootEnded: shared.root.state === "ended",
+            sourceEndpointId: shared.leg.endpointId,
+            targetEndpointId: event.endpointId,
+            hasTargetLeg: targetLeg.length > 0,
+            hasTransferRelation: transferRelation.length > 0,
+          })
+        ) {
+          const [pickedUpLeg] = await tx
+            .insert(telephonyCallLegs)
+            .values({
+              id: createTelephonyCallId(),
+              rootId: shared.root.id,
+              endpointId: event.endpointId,
+              staffUserId: endpoint.staffUserId,
+              bridgeId: event.bridgeId,
+              kind: "customer",
+              direction: "inbound",
+              state: "connected",
+              remotePartyKind: "external",
+              remoteExtension: null,
+              providerCallId: event.providerCallId,
+              providerChannelId: event.relatedProviderCallId,
+              correlationStatus: "confirmed",
+              startedAt: occurredAt,
+              connectedAt: occurredAt,
+              lastEventAt: occurredAt,
+              createdAt: receivedAt,
+              updatedAt: receivedAt,
+            })
+            .returning();
+          if (!pickedUpLeg) return null;
+          if (shared.leg.state !== "ended") {
+            await tx
+              .update(telephonyCallLegs)
+              .set({
+                state: "ended",
+                endedAt: latest(shared.leg.startedAt, occurredAt),
+                providerEndCause: "CALL_PICKED_UP",
+                lastEventAt: latest(shared.leg.lastEventAt, occurredAt),
+                updatedAt: receivedAt,
+              })
+              .where(eq(telephonyCallLegs.id, shared.leg.id));
+          }
+          await recordIdentifier(tx, {
+            rootId: shared.root.id,
+            legId: pickedUpLeg.id,
+            endpointId: pickedUpLeg.endpointId,
+            role: "root",
+            providerValue: event.providerCallId,
+            occurredAt,
+          });
+          await recordIdentifier(tx, {
+            rootId: shared.root.id,
+            legId: pickedUpLeg.id,
+            endpointId: pickedUpLeg.endpointId,
+            role: "channel",
+            providerValue: event.relatedProviderCallId,
+            occurredAt,
+          });
+          await tx.insert(telephonyCallRelations).values({
+            id: createEventId(),
+            rootId: shared.root.id,
+            fromLegId: shared.leg.id,
+            toLegId: pickedUpLeg.id,
+            relationType: "call_picked_up",
+            correlationStatus: "confirmed",
+            correlationKey:
+              `pickup:${shared.root.id}:${event.endpointId}`,
+            evidence: {
+              sameProviderRoot: true,
+              providerRootToAdjacentChannel: true,
+              sourceAndTargetEndpointsDiffer: true,
+              noTransferAttempt: true,
+            },
+            occurredAt,
+            createdAt: receivedAt,
+            updatedAt: receivedAt,
+          });
+          await tx
+            .update(telephonyCallRoots)
+            .set({
+              state: "connected",
+              correlationStatus: "confirmed",
+              currentEndpointId: event.endpointId,
+              connectedAt: shared.root.connectedAt
+                ? earliest(shared.root.connectedAt, occurredAt)
+                : occurredAt,
+              lastEventAt: latest(shared.root.lastEventAt, occurredAt),
+              updatedAt: receivedAt,
+            })
+            .where(eq(telephonyCallRoots.id, shared.root.id));
+          found = { root: shared.root, leg: pickedUpLeg };
+          pickupConfirmed = true;
+        }
+      }
+    }
     if (!found) return null;
     const connectedAt = found.leg.connectedAt
       ? earliest(found.leg.connectedAt, occurredAt)
@@ -781,6 +933,7 @@ export function createCentrexCallActivityService(options: {
       .where(eq(telephonyCallLegs.id, found.leg.id))
       .returning();
     if (!leg) return null;
+
     await recordIdentifier(tx, {
       rootId: found.root.id,
       legId: leg.id,
@@ -796,10 +949,10 @@ export function createCentrexCallActivityService(options: {
       .update(telephonyCallRoots)
       .set({
         state: leg.kind === "consultation" ? "transferring" : "connected",
-        correlationStatus: transferConfirmed
+        correlationStatus: transferConfirmed || pickupConfirmed
           ? "confirmed"
           : found.root.correlationStatus,
-        currentEndpointId: transferConfirmed
+        currentEndpointId: transferConfirmed || pickupConfirmed
           ? leg.endpointId
           : found.root.currentEndpointId,
         connectedAt: found.root.connectedAt
@@ -860,6 +1013,9 @@ export function createCentrexCallActivityService(options: {
         occurredAt,
       });
     }
+    if (found.leg.state === "ended") {
+      return { root: found.root, leg: found.leg };
+    }
     const endedAt = latest(found.leg.startedAt, occurredAt);
     const [leg] = await tx
       .update(telephonyCallLegs)
@@ -873,6 +1029,27 @@ export function createCentrexCallActivityService(options: {
       .where(eq(telephonyCallLegs.id, found.leg.id))
       .returning();
     if (!leg) return null;
+
+    if (leg.kind === "consultation") {
+      await tx
+        .update(telephonyCallLegs)
+        .set({
+          state: "ended",
+          endedAt,
+          providerEndCause: event.providerEndCause,
+          lastEventAt: sql`greatest(${telephonyCallLegs.lastEventAt}, ${occurredAt})`,
+          updatedAt: receivedAt,
+        })
+        .where(
+          and(
+            eq(telephonyCallLegs.rootId, found.root.id),
+            ne(telephonyCallLegs.id, leg.id),
+            eq(telephonyCallLegs.kind, "consultation"),
+            eq(telephonyCallLegs.providerCallId, leg.providerCallId),
+            inArray(telephonyCallLegs.state, ["ringing", "connected"]),
+          ),
+        );
+    }
 
     const activeLegs = await tx
       .select({
@@ -908,17 +1085,27 @@ export function createCentrexCallActivityService(options: {
       )
         ? "transferring"
         : resolvedState;
-    const ended = nextState === "ended";
-    const needsConfirmation = nextState === "needs_confirmation";
+    const unresolvedButTerminal =
+      found.root.scope === "external" &&
+      activeLegs.length === 0 &&
+      (found.root.state === "needs_confirmation" ||
+        found.root.correlationStatus === "needs_confirmation" ||
+        nextState === "needs_confirmation");
+    const finalState = unresolvedButTerminal ? "ended" : nextState;
+    const ended = finalState === "ended";
+    const needsConfirmation =
+      unresolvedButTerminal || finalState === "needs_confirmation";
     await tx
       .update(telephonyCallRoots)
       .set({
-        state: nextState,
+        state: finalState,
         correlationStatus: needsConfirmation
           ? "needs_confirmation"
           : found.root.correlationStatus,
-        finalEndpointId: ended ? leg.endpointId : found.root.finalEndpointId,
-        finalStaffUserId: ended
+        finalEndpointId: ended && !needsConfirmation
+          ? leg.endpointId
+          : found.root.finalEndpointId,
+        finalStaffUserId: ended && !needsConfirmation
           ? leg.staffUserId
           : found.root.finalStaffUserId,
         endedAt: ended ? latest(found.root.startedAt, occurredAt) : null,
@@ -1181,7 +1368,7 @@ export function createCentrexCallActivityService(options: {
         event.eventType === "call.ringing"
           ? await handleRinging(tx, event, endpoint, occurredAt, receivedAt)
           : event.eventType === "call.channels"
-            ? await handleChannels(tx, event, occurredAt, receivedAt)
+            ? await handleChannels(tx, event, endpoint, occurredAt, receivedAt)
             : await handleEnded(tx, event, occurredAt, receivedAt);
       const kinds = channelKinds(event);
       const remoteParty =

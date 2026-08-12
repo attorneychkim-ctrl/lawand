@@ -232,8 +232,17 @@ export const phoneDeskCallResultSchema = z.enum([
   "public_institution",
   "creditor",
   "wrong_number",
+  "internal_completed",
+  "internal_follow_up",
+  "internal_no_answer",
   "other",
 ]);
+
+export const phoneDeskCallResolutionSchema = z
+  .object({
+    finalLegId: z.uuid(),
+  })
+  .strict();
 
 const phoneDeskConsultationActionSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("none") }).strict(),
@@ -300,6 +309,9 @@ export type PhoneDeskCallResult = z.infer<
 >;
 export type PhoneDeskAftercareSave = z.infer<
   typeof phoneDeskAftercareSaveSchema
+>;
+export type PhoneDeskCallResolution = z.infer<
+  typeof phoneDeskCallResolutionSchema
 >;
 
 const bridgeIdSchema = z

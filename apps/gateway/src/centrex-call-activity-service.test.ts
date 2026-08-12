@@ -2,9 +2,57 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  isConfirmedCallPickupEvidence,
   resolveCentrexRingingRoot,
   resolveCentrexRootAfterLegEnd,
 } from "./centrex-call-activity-service.js";
+
+test("당겨받기는 같은 외부 root의 다른 endpoint CHANNEL_LIST만 수용한다", () => {
+  assert.equal(
+    isConfirmedCallPickupEvidence({
+      rootScope: "external",
+      rootEnded: false,
+      sourceEndpointId: "endpoint-4425",
+      targetEndpointId: "endpoint-1208",
+      hasTargetLeg: false,
+      hasTransferRelation: false,
+    }),
+    true,
+  );
+  assert.equal(
+    isConfirmedCallPickupEvidence({
+      rootScope: "external",
+      rootEnded: false,
+      sourceEndpointId: "endpoint-4425",
+      targetEndpointId: "endpoint-1208",
+      hasTargetLeg: false,
+      hasTransferRelation: true,
+    }),
+    false,
+  );
+  assert.equal(
+    isConfirmedCallPickupEvidence({
+      rootScope: "external",
+      rootEnded: false,
+      sourceEndpointId: "endpoint-4425",
+      targetEndpointId: "endpoint-4425",
+      hasTargetLeg: false,
+      hasTransferRelation: false,
+    }),
+    false,
+  );
+  assert.equal(
+    isConfirmedCallPickupEvidence({
+      rootScope: "external",
+      rootEnded: true,
+      sourceEndpointId: "endpoint-4425",
+      targetEndpointId: "endpoint-1208",
+      hasTargetLeg: false,
+      hasTransferRelation: false,
+    }),
+    false,
+  );
+});
 
 test("무조건 호전환은 동일 외부 root의 엄격한 근거가 있을 때만 후보로 연결한다", () => {
   assert.equal(
