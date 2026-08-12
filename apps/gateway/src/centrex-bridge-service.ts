@@ -590,6 +590,20 @@ export function createCentrexBridgeIngressService(options: {
           .onConflictDoNothing();
       }
 
+      await callActivity.syncLegacyCall(tx, {
+        endpointId: persistedCall.endpointId,
+        providerCallId: persistedCall.providerCallId,
+        callRootId: persistedCall.callRootId,
+        callLegId: persistedCall.callLegId,
+        state: persistedCall.state,
+        ringingAt: persistedCall.ringingAt,
+        connectedAt: persistedCall.connectedAt,
+        endedAt: persistedCall.endedAt,
+        providerEndCause: persistedCall.providerEndCause,
+        lastEventAt: persistedCall.lastEventAt,
+        receivedAt,
+      });
+
       await tx.insert(telephonyInboundEvents).values({
         id: event.eventId,
         inboundCallId: persistedCall.id,

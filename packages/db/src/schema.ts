@@ -3335,6 +3335,10 @@ export const telephonyCallProviderIdentifiers = pgTable(
       sql`${table.providerValue} ~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$'`,
     ),
     check(
+      "telephony_call_provider_identifiers_not_sentinel",
+      sql`upper(${table.providerValue}) NOT IN ('0', 'NIL', 'NONE', 'NULL', 'UNKNOWN')`,
+    ),
+    check(
       "telephony_call_provider_identifiers_time_order",
       sql`${table.lastObservedAt} >= ${table.firstObservedAt}`,
     ),
@@ -3446,6 +3450,10 @@ export const telephonyCallObservations = pgTable(
         AND (${table.relatedProviderCallId} IS NULL OR ${table.relatedProviderCallId} ~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$')
         AND (${table.sourceProviderCallId} IS NULL OR ${table.sourceProviderCallId} ~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$')
         AND (${table.contextProviderCallId} IS NULL OR ${table.contextProviderCallId} ~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$')`,
+    ),
+    check(
+      "telephony_call_observations_source_not_sentinel",
+      sql`${table.sourceProviderCallId} IS NULL OR upper(${table.sourceProviderCallId}) NOT IN ('0', 'NIL', 'NONE', 'NULL', 'UNKNOWN')`,
     ),
     check(
       "telephony_call_observations_hash_lengths",

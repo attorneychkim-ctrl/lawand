@@ -738,6 +738,15 @@ export function createTelephonyService(options: {
               telephonyCallRoots.lastEventAt,
               new Date(snapshotAt.getTime() - INBOUND_CONNECTED_SNAPSHOT_WINDOW_MS),
             ),
+            or(
+              ne(telephonyCallRoots.state, "ringing"),
+              gte(
+                telephonyCallRoots.lastEventAt,
+                new Date(
+                  snapshotAt.getTime() - INBOUND_RINGING_SNAPSHOT_WINDOW_MS,
+                ),
+              ),
+            ),
           ),
           and(
             eq(telephonyCallRoots.state, "ended"),

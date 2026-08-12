@@ -9,8 +9,8 @@ LG U+ 고급형 센트릭스 A타입의 32비트 OpenAPI OCX를 상시 호스팅
 - 인스턴스별 설정·로그·DPAPI 큐·mutex·작업 스케줄러 격리
 - 최대 50개 논리 슬롯을 미리 준비하되 배정된 슬롯과 유휴 warm pool 5개만 상시 실행
 - 센트릭스 네트워크 오류·health check 기반 지수 backoff 재연결
-- 재접속·명시적 연결 해제·프로세스 종료 전에 메모리의 활성 수신·발신을 각각
-  `ended` 보정 이벤트로 내구 큐에 넣은 뒤 상태를 비움
+- 재접속·명시적 연결 해제·프로세스 종료 전에 메모리의 활성 외부 수·발신과 v2
+  내선·호전환 관측을 각각 `ended` 보정 이벤트로 내구 큐에 넣은 뒤 상태를 비움
 - 비밀번호는 Windows 자격 증명 관리자에만 저장
 - 발신번호는 로컬 로그와 트레이 알림에서 끝 4자리만 표시
 - 수신과 센트릭스 직접 발신 이벤트는 현재 Windows 사용자 DPAPI로 암호화한 디스크 큐에 먼저 저장하고,
@@ -27,6 +27,8 @@ LG U+ 고급형 센트릭스 A타입의 32비트 OpenAPI OCX를 상시 호스팅
   `outbound.ringing → outbound.connected → outbound.ended` 계약으로 전달
 - 기존 외부 수·발신 v1 계약은 유지하고, 4자리 내선과 호전환도 v2 관측 계약으로
   `RINGEVENT`·`CHANNELLIST`·`CHANNELOUT`의 root/adjacent/source 문맥을 gateway에 전달
+- U+가 식별자 자리에 보내는 `0/NIL/NONE/NULL/UNKNOWN`은 provider ID로 저장하지 않으며,
+  모든 v2 ring을 추적해 연결되지 않은 관측은 3분 뒤 정확한 root ID로 timeout 종료
 - 내선·호전환 canary용 진단 로그는 전화번호 원문이나 raw OCX payload 대신 상대 종류
   (`internal/external`)와 채널 종류(`sip/pjsip/local/local_xfer`)만 기록
 - gateway의 전화 받기 명령을 0.75초 간격의 서명된 polling으로 가져오며 전화번호는
