@@ -22,9 +22,14 @@ import { MessageComposeButton } from "./message-compose-button";
 type SourceFilter = PhoneDeskListFilter;
 type ConnectionState = "connecting" | "connected" | "disconnected";
 type FollowUpAssignee = { staffUserId: string; displayName: string };
+type CallAssignee = { staffUserId: string; displayName: string };
 
 const UPLUS_HISTORY_DELAY_MS = 2 * 60 * 1_000;
 const allFollowUpAssignees: FollowUpAssignee = {
+  staffUserId: "all",
+  displayName: "전체 담당자",
+};
+const allCallAssignees: CallAssignee = {
   staffUserId: "all",
   displayName: "전체 담당자",
 };
@@ -159,14 +164,58 @@ function customerSearchText(call: PhoneDeskCall) {
       .flatMap((item) => [item.displayName ?? "", item.extension])
       .join(" ");
   }
-  const clickTarget = call.clickToCall?.consultation?.displayName ??
-    call.clickToCall?.directoryClient?.displayName ?? "";
+  const names = [
+    call.clickToCall?.consultation?.displayName,
+    call.clickToCall?.directoryClient?.displayName,
+  ];
   const match = call.customerMatch;
-  if (!match) return clickTarget;
-  if (match.source === "consultation") {
-    return `${clickTarget} ${match.consultation.displayName} ${match.consultation.publicReceiptCode} ${match.consultation.assigneeDisplayName ?? ""}`;
+  if (match?.source === "consultation") {
+    names.push(match.consultation.displayName);
+  } else if (match?.source === "legal_friends") {
+    names.push(match.clientName);
   }
-  return `${clickTarget} ${match.clientName} ${match.cases.flatMap((item) => item.staffNames).join(" ")}`;
+  return names.filter(Boolean).join(" ");
+}
+
+function callAssignees(call: PhoneDeskCall): CallAssignee[] {
+  if (call.scope === "internal") {
+    const seen = new Set<string>();
+    return call.participants.flatMap((participant) => {
+      if (
+        !participant.staffUserId ||
+        !participant.displayName ||
+        seen.has(participant.staffUserId)
+      ) {
+        return [];
+      }
+      seen.add(participant.staffUserId);
+      return [
+        {
+          staffUserId: participant.staffUserId,
+          displayName: participant.displayName,
+        },
+      ];
+    });
+  }
+  if (call.clickToCall) return [call.clickToCall.requestedBy];
+  return call.endpointOwners;
+}
+
+function matchesSourceFilter(call: PhoneDeskCall, filter: SourceFilter) {
+  if (filter === "all") return true;
+  if (filter === "active") {
+    return ["pending", "ringing", "connected"].includes(call.state);
+  }
+  return call.source === filter;
+}
+
+function matchesCustomerQuery(call: PhoneDeskCall, query: string) {
+  const normalizedQuery = query.replace(/\s/g, "").toLowerCase();
+  if (!normalizedQuery) return true;
+  const haystack = `${call.remotePhone} ${formatPhone(call.remotePhone)} ${customerSearchText(call)}`
+    .replace(/\s/g, "")
+    .toLowerCase();
+  return haystack.includes(normalizedQuery);
 }
 
 function CustomerSummary({ call }: { call: PhoneDeskCall }) {
@@ -304,6 +353,9 @@ export function PhoneDeskWorkspace({
   const [followUpAssigneeFilter, setFollowUpAssigneeFilter] = useState(
     currentStaff,
   );
+  const [callAssigneeFilter, setCallAssigneeFilter] = useState<CallAssignee>(
+    allCallAssignees,
+  );
   const [query, setQuery] = useState("");
   const [connection, setConnection] =
     useState<ConnectionState>("connecting");
@@ -418,22 +470,39 @@ export function PhoneDeskWorkspace({
   }, [refresh]);
 
   const visibleItems = useMemo(() => {
-    const normalizedQuery = query.replace(/\s/g, "").toLowerCase();
     return snapshot.items.filter((call) => {
-      if (!normalizedQuery) return true;
-      const staffNames = [
-        ...call.endpointOwners.map((owner) => owner.displayName),
-        call.clickToCall?.requestedBy.displayName ?? "",
-      ].join(" ");
-      const participantText = call.participants
-        .flatMap((item) => [item.displayName ?? "", item.extension])
-        .join(" ");
-      const haystack = `${call.remotePhone ?? ""} ${formatPhone(call.remotePhone)} ${customerSearchText(call)} ${staffNames} ${participantText} ${call.endpoint.extension}`
-        .replace(/\s/g, "")
-        .toLowerCase();
-      return haystack.includes(normalizedQuery);
+      if (!matchesSourceFilter(call, filter)) return false;
+      if (
+        callAssigneeFilter.staffUserId !== "all" &&
+        !callAssignees(call).some(
+          (assignee) =>
+            assignee.staffUserId === callAssigneeFilter.staffUserId,
+        )
+      ) {
+        return false;
+      }
+      return matchesCustomerQuery(call, query);
     });
-  }, [query, snapshot.items]);
+  }, [callAssigneeFilter.staffUserId, filter, query, snapshot.items]);
+
+  const callAssigneeOptions = useMemo(() => {
+    const assignees: CallAssignee[] = [];
+    const seen = new Set<string>();
+    for (const call of snapshot.items) {
+      for (const assignee of callAssignees(call)) {
+        if (seen.has(assignee.staffUserId)) continue;
+        seen.add(assignee.staffUserId);
+        assignees.push(assignee);
+      }
+    }
+    if (
+      callAssigneeFilter.staffUserId !== "all" &&
+      !seen.has(callAssigneeFilter.staffUserId)
+    ) {
+      assignees.push(callAssigneeFilter);
+    }
+    return assignees;
+  }, [callAssigneeFilter, snapshot.items]);
 
   const followUpAssignees = useMemo(() => {
     const assignees = [currentStaff];
@@ -632,7 +701,7 @@ export function PhoneDeskWorkspace({
       <div className="phone-desk-panel">
         <div className="phone-desk-toolbar">
           <label className="phone-desk-search">
-            <span className="sr-only">현재 페이지의 전화번호, 고객명 또는 담당자 검색</span>
+            <span className="sr-only">현재 페이지의 전화번호 또는 고객명 검색</span>
             <svg aria-hidden="true" viewBox="0 0 24 24">
               <circle cx="11" cy="11" r="6.5" />
               <path d="m16 16 4 4" />
@@ -640,12 +709,38 @@ export function PhoneDeskWorkspace({
             <input
               onChange={(event) => {
                 setQuery(event.target.value);
-                setPage(1);
               }}
-              placeholder="현재 페이지에서 전화번호, 고객명, 담당자 검색"
+              placeholder="현재 페이지에서 전화번호 또는 고객명 검색"
               type="search"
               value={query}
             />
+          </label>
+          <label className="phone-desk-assignee-filter">
+            <span>담당자</span>
+            <select
+              onChange={(event) => {
+                const staffUserId = event.target.value;
+                setCallAssigneeFilter(
+                  staffUserId === "all"
+                    ? allCallAssignees
+                    : callAssigneeOptions.find(
+                        (assignee) =>
+                          assignee.staffUserId === staffUserId,
+                      ) ?? allCallAssignees,
+                );
+              }}
+              value={callAssigneeFilter.staffUserId}
+            >
+              <option value="all">전체 담당자</option>
+              {callAssigneeOptions.map((assignee) => (
+                <option
+                  key={assignee.staffUserId}
+                  value={assignee.staffUserId}
+                >
+                  {assignee.displayName}
+                </option>
+              ))}
+            </select>
           </label>
           <div className="phone-desk-filters" role="group" aria-label="통화 구분">
             {filters.map((item) => (

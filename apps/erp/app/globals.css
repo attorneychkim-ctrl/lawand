@@ -3961,7 +3961,7 @@ a.inbound-customer:hover { text-decoration: underline; }
 
 .phone-desk-toolbar {
   display: grid;
-  grid-template-columns: minmax(240px, 1fr) auto auto;
+  grid-template-columns: minmax(220px, 1fr) minmax(160px, 200px) auto auto;
   align-items: center;
   gap: 14px;
   padding: 16px 18px;
@@ -4008,6 +4008,43 @@ a.inbound-customer:hover { text-decoration: underline; }
 }
 
 .phone-desk-search input::placeholder { color: var(--muted-2); }
+
+.phone-desk-assignee-filter {
+  display: flex;
+  min-width: 0;
+  min-height: 42px;
+  align-items: center;
+  gap: 9px;
+  padding: 0 10px 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface);
+}
+
+.phone-desk-assignee-filter > span {
+  color: var(--muted);
+  font-size: .66rem;
+  font-weight: 780;
+  white-space: nowrap;
+}
+
+.phone-desk-assignee-filter select {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font: inherit;
+  font-size: .7rem;
+  font-weight: 760;
+}
+
+.phone-desk-assignee-filter:focus-within {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 12%, transparent);
+}
 
 .phone-desk-filters {
   display: flex;
@@ -5232,8 +5269,9 @@ a.inbound-customer:hover { text-decoration: underline; }
   .summary-facts > div:nth-last-child(-n + 3) { border-bottom: 1px solid var(--line); }
   .summary-facts > div:nth-last-child(-n + 2) { border-bottom: 0; }
   .data-list { grid-template-columns: 1fr; }
-  .phone-desk-toolbar { grid-template-columns: 1fr auto; }
-  .phone-desk-realtime { grid-column: 1 / -1; justify-self: end; }
+  .phone-desk-toolbar { grid-template-columns: minmax(240px, 1fr) minmax(160px, 200px); }
+  .phone-desk-filters { grid-column: 1; }
+  .phone-desk-realtime { grid-column: 2; justify-self: end; }
   .phone-desk-row { grid-template-columns: 42px minmax(230px, 1.2fr) minmax(130px, .55fr) minmax(120px, .5fr) 88px; }
   .phone-desk-row > time { grid-column: 2; grid-row: 2; justify-self: start; }
   .staff-directory-integrations { grid-template-columns: 1fr; }
@@ -5391,7 +5429,7 @@ a.inbound-customer:hover { text-decoration: underline; }
   .phone-desk-metrics > button { min-height: 64px; padding: 13px 14px; }
   .phone-desk-panel { overflow: visible; border: 0; background: transparent; box-shadow: none; }
   .phone-desk-toolbar { grid-template-columns: 1fr; padding: 0 0 16px; border: 0; background: transparent; }
-  .phone-desk-filters { overflow-x: auto; justify-content: flex-start; }
+  .phone-desk-filters { grid-column: 1; overflow-x: auto; justify-content: flex-start; }
   .phone-desk-realtime { grid-column: 1; justify-self: start; }
   .phone-desk-list { gap: 9px; }
   .phone-desk-row {

@@ -166,6 +166,20 @@ export function canonicalizePhoneDeskObservedCalls<
   return [...byCall.values()];
 }
 
+export function phoneDeskItemMatchesFilter(
+  item: {
+    source: "inbound" | "click_to_call" | "centrex_direct" | "internal";
+    state: "pending" | "ringing" | "connected" | "ended" | "failed" | "unknown";
+  },
+  filter: PhoneDeskListFilter,
+): boolean {
+  if (filter === "all") return true;
+  if (filter === "active") {
+    return ["pending", "ringing", "connected"].includes(item.state);
+  }
+  return item.source === filter;
+}
+
 type InboundAnswerCommandStatus =
   | "queued"
   | "dispatching"
@@ -1618,6 +1632,10 @@ export function createTelephonyService(options: {
       from ? gte(telephonyCallRoots.startedAt, from) : undefined,
       to ? lt(telephonyCallRoots.startedAt, to) : undefined,
     );
+    const observedActiveCondition = sql<boolean>`case
+      when ${telephonyCallRoots.id} is not null then ${telephonyCallRoots.state} in ('ringing', 'connected', 'transferring')
+      else ${telephonyInboundCalls.state} in ('ringing', 'connected')
+    end`;
     const emptySummary = {
       all: 0,
       inbound: 0,
@@ -1636,7 +1654,7 @@ export function createTelephonyService(options: {
             inbound: sql<number>`count(distinct coalesce(${telephonyInboundCalls.callRootId}, ${telephonyInboundCalls.id})) filter (where ${telephonyInboundCalls.direction} = 'inbound')::int`,
             clickToCall: sql<number>`count(distinct coalesce(${telephonyInboundCalls.callRootId}, ${telephonyInboundCalls.id})) filter (where ${telephonyInboundCalls.direction} = 'outbound' and ${telephonyCallObservationLinks.observedCallId} is not null)::int`,
             centrexDirect: sql<number>`count(distinct coalesce(${telephonyInboundCalls.callRootId}, ${telephonyInboundCalls.id})) filter (where ${telephonyInboundCalls.direction} = 'outbound' and ${telephonyCallObservationLinks.observedCallId} is null)::int`,
-            active: sql<number>`count(distinct coalesce(${telephonyInboundCalls.callRootId}, ${telephonyInboundCalls.id})) filter (where coalesce((${telephonyCallRoots.state})::text, (${telephonyInboundCalls.state})::text) in ('ringing', 'connected', 'transferring', 'needs_confirmation'))::int`,
+            active: sql<number>`count(distinct coalesce(${telephonyInboundCalls.callRootId}, ${telephonyInboundCalls.id})) filter (where ${observedActiveCondition})::int`,
           })
           .from(telephonyInboundCalls)
           .leftJoin(
@@ -1726,7 +1744,7 @@ export function createTelephonyService(options: {
           : selectedFilter === "internal"
             ? sql<boolean>`false`
           : selectedFilter === "active"
-            ? sql<boolean>`coalesce((${telephonyCallRoots.state})::text, (${telephonyInboundCalls.state})::text) in ('ringing', 'connected', 'transferring', 'needs_confirmation')`
+            ? observedActiveCondition
             : undefined;
     const standaloneFilterCondition =
       selectedFilter === "all" || selectedFilter === "click_to_call"
@@ -2457,6 +2475,7 @@ export function createTelephonyService(options: {
           new Date(right.occurredAt).getTime() -
           new Date(left.occurredAt).getTime(),
       )
+      .filter((item) => phoneDeskItemMatchesFilter(item, selectedFilter))
       .slice(offset, offset + normalizedLimit);
     const observedIds = baseItems.flatMap((item) =>
       item.observedCallId ? [item.observedCallId] : [],
