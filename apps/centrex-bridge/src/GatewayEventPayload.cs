@@ -321,7 +321,6 @@ namespace Lawand.CentrexBridge
             if (CallerNumber != null)
             {
                 value["callerNumber"] = CallerNumber;
-                value["incomingLineNumber"] = IncomingLineNumber;
             }
             if (CalledNumber != null)
             {
@@ -339,6 +338,7 @@ namespace Lawand.CentrexBridge
             Add(value, "agentExtension", AgentExtension);
             Add(value, "remotePartyKind", RemotePartyKind);
             Add(value, "remotePartyNumber", RemotePartyNumber);
+            Add(value, "incomingLineNumber", IncomingLineNumber);
             Add(value, "contextProviderCallId", ContextProviderCallId);
             Add(value, "relatedProviderCallId", RelatedProviderCallId);
             Add(value, "sourceProviderCallId", SourceProviderCallId);

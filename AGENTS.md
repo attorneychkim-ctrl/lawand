@@ -111,7 +111,33 @@
   돌린다. Cafe24 호스팅·DNS·SSL은 삭제하지 않았고 세 Caddy 원본과 Secrets Manager 직전
   버전도 보존했다. 다음은 DNS 전파 관찰, 무통화 앱 재시작, 정식 ERP 인증 smoke다. 실제
   상담/알림톡 canary와 Solapi IP 제한은 별도 승인·운영 게이트로 남긴다.
-
+### 2026-08-12 — 센트릭스 DPAPI 경보 원인 제거·bridge v0.8.1 복구 출시 후보
+- CloudWatch·Windows SSM·운영 DB를 개인정보 없이 읽기 전용으로 대조했다. 08:20 KST
+  전환된 `lawand-centrex-dpapi-queue`는 실제 재시도 queue 0이 아니라 영구 거부
+  dead-letter 8건 때문에 발생했다. pool은 설치 51, 배정 19, 실행 24, warm 5,
+  assigned offline·로그인 실패 0, supervisor 정상이었다. dead-letter는 모두 HTTP 400의
+  `call.ringing`이며 외부 6건·내선 2건이었다. 같은 구간의 병행 v1 수신 8건은 모두 종료
+  상태로 보존됐고 그중 4건은 새 call root/leg 연결이 없었다. 운영 변경·재시작·복호화·
+  dead-letter 이동은 하지 않았다.
+- 원인은 bridge v0.8.0 `GatewayEventPayload.ToJson()`이 `incomingLineNumber`를
+  `callerNumber != null` 조건 안에서만 직렬화한 것이었다. caller 원문을 의도적으로 보내지
+  않는 v2 관측은 수신 필수 필드까지 빠져 gateway core schema에서 400이 됐다. v0.8.1은
+  수신 회선을 독립 직렬화하고 C# self-test에 inbound external v2의 회선 존재·caller 원문
+  부재를, core schema test에 회선 필수 계약의 성공·실패를 함께 고정했다. health monitor는
+  `QueueDepth`와 `DeadLetterDepth`를 별도 CloudWatch metric으로 추가하고 기존 합계
+  `DpapiQueueDepth`를 호환 유지한다.
+- custom migration `0048_centrex_v2_ringing_recovery.sql`은 v1 원장의 동일 UUID와 기존
+  AES-GCM AAD를 유지해 누락 external root/customer leg/root·channel 식별자를 만들고,
+  이미 v2 leg가 있으면 재사용하며 후처리 원천을 root로 승격한다. 0041 기준 개발 스키마
+  복제본에 `0042..0047`을 적용한 뒤 완전 누락·기존 v2 leg·후처리 fixture로 `0048`을 두 번
+  실행해 중복 0과 제약 통과를 확인하고 임시 DB를 삭제했다. 필수 필드가 이미 빠진 과거
+  dead-letter는 재처리하지 않고 운영 배포에서 migration 대조 후 hash 보존 archive로 옮긴다.
+- Windows .NET Framework x86 Release compile과 self-test 19개를 통과했고 unsigned 후보
+  exe SHA-256은 `5A0964D9A896EC3CAC317888FD36001EFE0E25C9CEF34C382E8A8E84610239E9`이다.
+  core 65개·gateway 108개 테스트, 전체 5패키지 typecheck·lint·production build, Drizzle
+  schema check, health monitor PowerShell parse와 `git diff --check`를 통과했다. 이번 세션은
+  사용자의 명시적 승인에 따라 main 커밋·push까지만 수행하며 운영 bridge 교체, 운영 DB
+  migration, dead-letter 이동과 경보 재구성은 수행하지 않는다. `PROJECT_PLAN.md`는 v1.15다.
 ### 2026-08-11 — main 누적 브랜치 통합·통화 활동 v2/페이지네이션/문자 UX 운영 배포
 - `HERDR_ENV=1`에서 main과 HERDR worktree 4개, 로컬 worktree, 원격
   `origin/worktree/*` 12개를 전수 대조했다. 통화 활동 v2 브랜치는 이미 main에 포함돼 있었고,

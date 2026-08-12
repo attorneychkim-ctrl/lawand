@@ -198,6 +198,8 @@ if (-not $SkipCloudWatch) {
     $metricData = @(
         @{ MetricName = 'AssignedOffline'; Unit = 'Count'; Value = $offline.Count; Dimensions = $dimensions },
         @{ MetricName = 'LoginFailures'; Unit = 'Count'; Value = $loginFailures.Count; Dimensions = $dimensions },
+        @{ MetricName = 'QueueDepth'; Unit = 'Count'; Value = [int]$queueDepth; Dimensions = $dimensions },
+        @{ MetricName = 'DeadLetterDepth'; Unit = 'Count'; Value = [int]$deadLetterDepth; Dimensions = $dimensions },
         @{ MetricName = 'DpapiQueueDepth'; Unit = 'Count'; Value = $dpapiQueueDepth; Dimensions = $dimensions },
         @{ MetricName = 'SupervisorHealthy'; Unit = 'Count'; Value = $supervisorMetricValue; Dimensions = $dimensions },
         @{ MetricName = 'RunningBridges'; Unit = 'Count'; Value = @($instances | Where-Object ProcessRunning).Count; Dimensions = $dimensions },
