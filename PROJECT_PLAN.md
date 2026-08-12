@@ -1,4 +1,4 @@
-# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.20)
+# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.21)
 
 > 이 문서는 새 로앤 홈페이지 + 새 ERP + 리걸플로/리걸프렌즈 연동을 하나의 플랫폼으로
 > 묶기 위한 **저장소 구조·아키텍처 설계 초안**이다. 코덱스/클로드코드 세션이 번갈아
@@ -938,6 +938,11 @@ HTTP 200, outbox published를 확인했으며 통제 상담은 감사 원장을 
 2026-08-10 SOLAPI 활성 발신번호 목록에서 운영 계정의 등록 번호 `010-****-1382`를 확인하고
 `LAWAND_SOLAPI_MMS_SENDER`로 Secrets Manager와 실행 중 gateway에 적용했다. 이미지 MMS
 발송 경계는 활성화됐으며 명함 JPG 실제 수신 canary는 남아 있다.
+2026-08-12에는 인증이 완료된 대표번호 `02-555-7455`를 SOLAPI MMS 발신번호의 새 기준으로
+확정했다. 출시 후보는 운영 secret 생성기가 과거 로컬·secret 값 대신 `025557455`를
+명시적으로 기록하게 하며, main 통합 뒤 운영 Secrets Manager와 gateway 권한 600 환경파일을
+같이 갱신하고 gateway를 전환해야 실제 MMS 발신번호가 바뀐다. 센트릭스 SMS/LMS 경로와
+대표 문자 수신함 번호는 변경하지 않는다.
 후속 migration `0042_bright_midnight.sql`은 기본 템플릿 세 건과 `is_active`를 제거하고
 개인 템플릿만 허용한다. 템플릿 삭제 시 `telephony_messages.template_id`는 `SET NULL`로
 해제하되 발송 당시 템플릿명·본문·이미지 스냅샷은 유지한다. 이 migration과 gateway·ERP

@@ -71,6 +71,19 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-12 — SOLAPI MMS 발신번호 대표번호 전환 후보
+- SOLAPI 인증이 완료된 대표번호 `02-555-7455`를 이미지 MMS의 새 발신번호로 확정했다.
+  운영 secret 생성기는 기존 로컬 환경파일이나 Secrets Manager의 과거 `010` 번호를 다시
+  승계하지 않고 `LAWAND_SOLAPI_MMS_SENDER=025557455`를 명시적으로 기록한다. gateway 런타임의
+  국내번호 정규화와 MMS 요청 본문 `from` 계약은 그대로 재사용한다.
+- 센트릭스 SMS/LMS와 대표 문자 수신함 번호는 바꾸지 않았다. `configure-production-secrets`
+  syntax, gateway 전체 테스트·typecheck·lint·production build와 `git diff --check`를
+  통과했다. `PROJECT_PLAN.md`는 v1.21이다.
+- 이 워크트리에서는 main 병합·운영 Secrets Manager/환경파일 변경·gateway 재시작·실제 MMS
+  발송을 수행하지 않았다. main 통합 뒤 문자 queued/dispatching과 outbox가 0인지 확인하고
+  secret과 권한 600 환경파일을 같은 값으로 갱신한 다음 gateway 전환과 통제 MMS 1건으로
+  제공자 접수 및 단말 표시 발신번호를 확인한다.
+
 ### 2026-08-12 — 나머지 워크트리 main 통합·0049/0050·v0.8.3 전체 운영 배포
 - `HERDR_ENV=1`에서 main과 HERDR worktree 5개, 원격 `origin/worktree/*` 19개를 전수
   대조했다. 미반영이던 `brave-cloud-9c88`의 Cafe24 구 DNS 안전 문서는 merge commit

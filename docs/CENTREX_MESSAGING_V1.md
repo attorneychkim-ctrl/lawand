@@ -70,6 +70,11 @@
 - SOLAPI 활성 발신번호 목록에서 운영 계정의 등록 번호 `010-****-1382`를 확인하고
   `LAWAND_SOLAPI_MMS_SENDER`로 Secrets Manager와 실행 중 gateway에 적용했다. 따라서
   이미지 MMS 발송 경계는 활성화됐고, 명함 JPG 실제 수신 canary만 별도로 남아 있다.
+- 2026-08-12 인증이 완료된 대표번호 `02-555-7455`를 새 MMS 발신번호로 확정했다. 출시
+  후보의 운영 secret 생성기는 `LAWAND_SOLAPI_MMS_SENDER=025557455`를 명시적으로 기록해
+  기존 로컬 설정이나 과거 secret의 `010` 번호가 다시 선택되지 않게 한다. main 통합 뒤
+  Secrets Manager와 실행 중 gateway 환경파일을 함께 갱신하기 전까지 운영 발신번호는
+  바뀌지 않는다. 센트릭스 SMS/LMS 발신과 대표 문자 수신함에는 영향이 없다.
 - 기본 템플릿·활성화 체크 제거와 개인 템플릿 삭제를 위한 migration
   `0042_bright_midnight.sql` 및 gateway·ERP 변경을 릴리스
   `20260810T135657Z-profile-message-templates-v1`로 운영 배포했다. 배포 직후 기본 템플릿 0건,

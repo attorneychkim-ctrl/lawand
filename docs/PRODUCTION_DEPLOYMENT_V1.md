@@ -405,6 +405,11 @@ main ancestor임을 확인하고, `main`/`origin/main` `b5f8beb`을 단일 배�
   `LAWAND_SOLAPI_MMS_SENDER`로 Secrets Manager와 실행 중 gateway에 적용했다. 기존 gateway
   이미지 그대로 재시작해 내부·외부 health와 worker 대기열을 확인했으며 명함 JPG MMS 실제
   수신 canary만 남았다.
+- 2026-08-12 인증이 완료된 대표번호 `02-555-7455`를 SOLAPI MMS의 새 발신번호로 확정했다.
+  출시 후보의 `configure-production-secrets.mjs`는 기존 로컬·secret 값을 승계하지 않고
+  `LAWAND_SOLAPI_MMS_SENDER=025557455`를 기록한다. main 통합 뒤 운영 Secrets Manager와
+  gateway 권한 600 환경파일을 같은 값으로 바꾸고, 문자 대기열이 빈 상태에서 gateway만
+  전환한 뒤 통제 MMS 한 건으로 제공자 접수와 단말 표시 발신번호를 확인한다.
 - 최종 gateway·ERP·각 Caddy는 active, 컨테이너 재시작·릴리스 뒤 error journal 0,
   외부 health/login 200이고 CloudWatch ALARM은 없다. Windows bridge는 배정 11·warm 5,
   v0.7.1.0 프로세스 16개, 오프라인·로그인 실패·DPAPI 큐·dead-letter 0이며 감독기와
