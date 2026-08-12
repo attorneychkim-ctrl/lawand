@@ -40,6 +40,7 @@ import {
   type ConsultationSubmissionResponse,
   type DedupeOutcome,
   type ExistingConsultationCandidate,
+  type ResidenceRegion,
   type SelfDiagnosisCaseProfile,
   type SelfDiagnosisSubmission,
   type SelfDiagnosisSubmissionResponse,
@@ -48,6 +49,7 @@ import {
   alimtalkDeliveries,
   consultationAssignments,
   consultationAttributions,
+  consultationDirectorySources,
   consultationRequests,
   consultationStatusHistory,
   consultations,
@@ -81,6 +83,22 @@ import {
 } from "./naver-booking.js";
 
 type Database = ReturnType<typeof createDatabaseClient>["db"];
+
+type ConsultationDirectorySnapshot = {
+  clientName: string | null;
+  phone: string | null;
+  residenceRegion: ResidenceRegion | null;
+  caseType: number;
+  caseState: number;
+  isClosed: boolean;
+  isRepealed: boolean;
+  courtName: string | null;
+  caseNumber: string | null;
+  caseName: string | null;
+  staffNames: string[];
+  caseCreatedOn: string;
+  caseUpdatedOn: string;
+};
 
 export type ConsultationListQuery = {
   page: number;
@@ -2640,6 +2658,30 @@ export function createConsultationService(options: {
       .from(naverBookingEntries)
       .where(eq(naverBookingEntries.consultationId, consultationId))
       .limit(1);
+    const [directorySourceRow] = await db
+      .select({
+        clientIdx: consultationDirectorySources.directoryClientIdx,
+        caseIdx: consultationDirectorySources.directoryCaseIdx,
+        relationship: consultationDirectorySources.relationship,
+        snapshotCiphertext: consultationDirectorySources.snapshotCiphertext,
+        snapshotNonce: consultationDirectorySources.snapshotNonce,
+        snapshotKeyVersion: consultationDirectorySources.snapshotKeyVersion,
+      })
+      .from(consultationDirectorySources)
+      .where(eq(consultationDirectorySources.consultationId, consultationId))
+      .limit(1);
+    const directorySnapshot = directorySourceRow
+      ? (JSON.parse(
+          protection.decrypt(
+            {
+              ciphertext: directorySourceRow.snapshotCiphertext,
+              nonce: directorySourceRow.snapshotNonce,
+              keyVersion: directorySourceRow.snapshotKeyVersion,
+            },
+            `consultation_directory_sources/${consultationId}/snapshot`,
+          ),
+        ) as ConsultationDirectorySnapshot)
+      : null;
 
     const [assignment] = await db
       .select({
@@ -2959,6 +3001,18 @@ export function createConsultationService(options: {
             cancelledAt: naverBooking.cancelledAt?.toISOString() ?? null,
           }
         : null,
+      directorySource:
+        directorySourceRow && directorySnapshot
+          ? {
+              clientIdx: directorySourceRow.clientIdx,
+              caseIdx: directorySourceRow.caseIdx,
+              relationship:
+                directorySourceRow.relationship === "referrer"
+                  ? ("referrer" as const)
+                  : ("customer" as const),
+              ...directorySnapshot,
+            }
+          : null,
       assignment: assignment
         ? {
             id: assignment.id,

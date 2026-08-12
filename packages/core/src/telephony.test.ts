@@ -9,6 +9,7 @@ import {
   centrexMessageByteLength,
   centrexMessageKind,
   legalFriendsDirectoryClickToCallSchema,
+  legalFriendsDirectoryConsultationCreateSchema,
   legalFriendsDirectoryMessageSendSchema,
   messageTemplateCreateSchema,
   messageTemplateUpdateSchema,
@@ -49,6 +50,38 @@ test("고객찾기 발신은 양의 고객·사건 식별자만 받는다", () =
       idempotencyKey: "01980000-0000-7000-8000-000000000042",
       templateId: null,
       body: "고객 안내 문자",
+    }).success,
+    false,
+  );
+});
+
+test("고객찾기 신건상담은 수정된 고객정보와 소개 여부를 엄격히 검증한다", () => {
+  const input = {
+    clientIdx: 10,
+    caseIdx: 20,
+    idempotencyKey: "01980000-0000-7000-8000-000000000043",
+    customerName: " 새 고객 ",
+    phone: "010-1234-5678",
+    residenceRegion: "seoul",
+    caseType: 2,
+    isReferral: true,
+  } as const;
+  assert.deepEqual(legalFriendsDirectoryConsultationCreateSchema.parse(input), {
+    ...input,
+    customerName: "새 고객",
+    phone: "01012345678",
+  });
+  assert.equal(
+    legalFriendsDirectoryConsultationCreateSchema.safeParse({
+      ...input,
+      phone: "02-123-4567",
+    }).success,
+    false,
+  );
+  assert.equal(
+    legalFriendsDirectoryConsultationCreateSchema.safeParse({
+      ...input,
+      caseType: 4,
     }).success,
     false,
   );

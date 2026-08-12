@@ -553,11 +553,22 @@ test("클릭투콜 API는 인증된 현재 담당자와 상담 ID를 서비스�
   assert.equal(received?.actor.id, realtimeActor.id);
 });
 
-test("고객찾기 API는 검색어와 리걸프렌즈 고객 식별자만 서비스에 전달한다", async (context) => {
+test("고객찾기 API는 검색·연락·신건상담 입력을 인증된 서비스에 전달한다", async (context) => {
   let searchedQuery = "";
   let clickTarget: { clientIdx: number; caseIdx: number } | undefined;
   let messageTarget: { clientIdx: number; caseIdx: number } | undefined;
   let messageBody = "";
+  let consultationInput:
+    | {
+        clientIdx: number;
+        caseIdx: number;
+        customerName: string;
+        phone: string;
+        residenceRegion: string;
+        caseType: number;
+        isReferral: boolean;
+      }
+    | undefined;
   const telephonyService = {
     searchLegalFriendsClients: async (
       query: string,
@@ -628,6 +639,19 @@ test("고객찾기 API는 검색어와 리걸프렌즈 고객 식별자만 서�
         replayed: false,
       };
     },
+    createDirectoryConsultation: async (
+      input: NonNullable<typeof consultationInput>,
+      actor: StaffPrincipal,
+    ) => {
+      consultationInput = input;
+      assert.equal(actor.id, realtimeActor.id);
+      return {
+        consultationId: "019fa6a4-6834-7782-aa0b-4e71ffb8a2e5",
+        publicReceiptCode: "LW-20260812-TEST01",
+        acceptedAt: "2026-08-12T07:00:00.000Z",
+        replayed: false,
+      };
+    },
   } as unknown as TelephonyService;
   const authService = {
     authorize: async () => realtimeActor,
@@ -682,6 +706,35 @@ test("고객찾기 API는 검색어와 리걸프렌즈 고객 식별자만 서�
   assert.equal(messageResponse.status, 201);
   assert.deepEqual(messageTarget, { clientIdx: 123, caseIdx: 456 });
   assert.equal(messageBody, "고객 안내 문자");
+
+  const consultationResponse = await fetch(
+    `http://127.0.0.1:${address.port}/v1/client-directory/consultations`,
+    {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({
+        clientIdx: 123,
+        caseIdx: 456,
+        idempotencyKey: "019fa6a4-6834-7782-aa0b-4e71ffb8a2e5",
+        customerName: "소개받은 고객",
+        phone: "010-1234-5678",
+        residenceRegion: "seoul",
+        caseType: 1,
+        isReferral: true,
+      }),
+    },
+  );
+  assert.equal(consultationResponse.status, 201);
+  assert.deepEqual(consultationInput, {
+    clientIdx: 123,
+    caseIdx: 456,
+    idempotencyKey: "019fa6a4-6834-7782-aa0b-4e71ffb8a2e5",
+    customerName: "소개받은 고객",
+    phone: "01012345678",
+    residenceRegion: "seoul",
+    caseType: 1,
+    isReferral: true,
+  });
 });
 
 test("일반 직원은 자신의 문자 템플릿을 만들고 담당 상담에 문자를 요청한 뒤 삭제한다", async (context) => {

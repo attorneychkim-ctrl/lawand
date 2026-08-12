@@ -1699,6 +1699,60 @@ export const consultationRequests = pgTable(
   ],
 );
 
+export const consultationDirectorySources = pgTable(
+  "consultation_directory_sources",
+  {
+    consultationId: uuid("consultation_id")
+      .primaryKey()
+      .references(() => consultations.id, { onDelete: "restrict" }),
+    consultationRequestId: uuid("consultation_request_id")
+      .notNull(),
+    directoryClientIdx: integer("directory_client_idx").notNull(),
+    directoryCaseIdx: integer("directory_case_idx").notNull(),
+    relationship: varchar("relationship", { length: 20 }).notNull(),
+    snapshotCiphertext: bytea("snapshot_ciphertext").notNull(),
+    snapshotNonce: bytea("snapshot_nonce").notNull(),
+    snapshotKeyVersion: varchar("snapshot_key_version", { length: 50 })
+      .notNull(),
+    createdByUserId: uuid("created_by_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("consultation_directory_sources_request_uidx").on(
+      table.consultationRequestId,
+    ),
+    index("consultation_directory_sources_client_case_idx").on(
+      table.directoryClientIdx,
+      table.directoryCaseIdx,
+    ),
+    foreignKey({
+      columns: [table.consultationRequestId, table.consultationId],
+      foreignColumns: [
+        consultationRequests.id,
+        consultationRequests.consultationId,
+      ],
+      name: "consultation_directory_sources_request_consultation_fk",
+    }).onDelete("restrict"),
+    check(
+      "consultation_directory_sources_ids_positive",
+      sql`${table.directoryClientIdx} > 0 AND ${table.directoryCaseIdx} > 0`,
+    ),
+    check(
+      "consultation_directory_sources_relationship_allowed",
+      sql`${table.relationship} IN ('customer', 'referrer')`,
+    ),
+    check(
+      "consultation_directory_sources_crypto",
+      sql`octet_length(${table.snapshotNonce}) = 12
+        AND octet_length(${table.snapshotCiphertext}) >= 17`,
+    ),
+  ],
+);
+
 export const kakaoConsultationContacts = pgTable(
   "kakao_consultation_contacts",
   {

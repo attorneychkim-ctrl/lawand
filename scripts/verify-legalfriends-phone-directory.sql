@@ -47,6 +47,7 @@ WITH member_rows AS (
       "Case_idx",
       name,
       phone,
+      living_place,
       name_search,
       phone_search,
       to_char(create_dt, 'YYYY-MM-DD HH24:MI:SS'),

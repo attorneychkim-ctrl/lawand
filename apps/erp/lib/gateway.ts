@@ -1,5 +1,10 @@
 import "server-only";
 
+import type {
+  LegalFriendsDirectoryConsultationCreate,
+  ResidenceRegion,
+} from "@lawand/core";
+
 import { readStaffSessionToken } from "./session";
 
 const gatewayUrl =
@@ -452,6 +457,7 @@ export type LegalFriendsClientDirectoryItem = {
   clientName: string;
   phone: string | null;
   callable: boolean;
+  residenceRegion: ResidenceRegion | null;
   caseType: number;
   caseCategory: number;
   caseState: number;
@@ -469,6 +475,13 @@ export type LegalFriendsClientDirectoryItem = {
 export type LegalFriendsClientDirectorySearch = {
   queryType: "name" | "phone";
   items: LegalFriendsClientDirectoryItem[];
+};
+
+export type ClientDirectoryConsultationResult = {
+  consultationId: string;
+  publicReceiptCode: string;
+  acceptedAt: string;
+  replayed: boolean;
 };
 
 export type PhoneDeskStaffOption = {
@@ -530,6 +543,24 @@ export type ConsultationDetail = {
     sourceReceivedAt: string;
     detailsCapturedAt: string | null;
     cancelledAt: string | null;
+  } | null;
+  directorySource: {
+    clientIdx: number;
+    caseIdx: number;
+    relationship: "customer" | "referrer";
+    clientName: string | null;
+    phone: string | null;
+    residenceRegion: ResidenceRegion | null;
+    caseType: number;
+    caseState: number;
+    isClosed: boolean;
+    isRepealed: boolean;
+    courtName: string | null;
+    caseNumber: string | null;
+    caseName: string | null;
+    staffNames: string[];
+    caseCreatedOn: string;
+    caseUpdatedOn: string;
   } | null;
   assignment: {
     id: string;
@@ -624,7 +655,8 @@ export type ConsultationDetail = {
       | "kakao_channel"
       | "homepage_kakao"
       | "naver_booking_email"
-      | "erp_phone_desk";
+      | "erp_phone_desk"
+      | "erp_client_directory";
     contactChannel: "phone" | "kakao_channel" | "naver_booking";
     phone: string | null;
     name: string | null;
@@ -813,6 +845,17 @@ export async function searchLegalFriendsClientDirectory(
   const params = new URLSearchParams({ q: query, limit: "30" });
   return phoneDeskResponse<LegalFriendsClientDirectorySearch>(
     await gatewayFetch(`/v1/client-directory?${params.toString()}`),
+  );
+}
+
+export async function createClientDirectoryConsultation(
+  input: LegalFriendsDirectoryConsultationCreate,
+): Promise<ClientDirectoryConsultationResult> {
+  return phoneDeskResponse<ClientDirectoryConsultationResult>(
+    await gatewayFetch("/v1/client-directory/consultations", {
+      method: "POST",
+      body: input,
+    }),
   );
 }
 

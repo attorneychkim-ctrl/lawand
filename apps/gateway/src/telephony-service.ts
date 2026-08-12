@@ -26,6 +26,7 @@ import {
   createTelephonyCallId,
   createTelephonyMessageId,
   CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION,
+  type LegalFriendsDirectoryConsultationCreate,
   type MessageTemplateCreate,
   type MessageTemplateUpdate,
   type PhoneDeskAftercareSave,
@@ -33,9 +34,11 @@ import {
   type TelephonyCallDisposition,
   type CentrexBridgeCommandResult,
   type PlatformEvent,
+  type ResidenceRegion,
 } from "@lawand/core";
 import {
   consultationAssignments,
+  consultationDirectorySources,
   consultationRequests,
   consultationStatusHistory,
   consultations,
@@ -212,6 +215,7 @@ type LegalFriendsClientSearchRow = {
   client_name: string | null;
   phone: string | null;
   phone_search: string | null;
+  living_place: string | null;
   case_type: number;
   case_category: number;
   case_state: number;
@@ -233,12 +237,31 @@ type LegalFriendsDirectoryCallTargetRow = {
   phone: string;
 };
 
+type LegalFriendsDirectoryConsultationSourceRow = {
+  client_name: string;
+  phone: string | null;
+  living_place: string | null;
+  case_type: number;
+  case_state: number;
+  is_closed: number | null;
+  is_repealed: number | null;
+  court_name: string | null;
+  case_number: string | null;
+  case_name: string | null;
+  primary_staff_name: string | null;
+  secondary_staff_name: string | null;
+  tertiary_staff_name: string | null;
+  case_created_on: string;
+  case_updated_on: string;
+};
+
 export type LegalFriendsClientDirectoryItem = {
   clientIdx: number;
   caseIdx: number;
   clientName: string;
   phone: string | null;
   callable: boolean;
+  residenceRegion: ResidenceRegion | null;
   caseType: number;
   caseCategory: number;
   caseState: number;
@@ -253,6 +276,42 @@ export type LegalFriendsClientDirectoryItem = {
   caseUpdatedOn: string;
 };
 
+const legalFriendsResidencePrefixes: Array<
+  readonly [readonly string[], ResidenceRegion]
+> = [
+  [["서울특별시", "서울"], "seoul"],
+  [["부산광역시", "부산"], "busan"],
+  [["대구광역시", "대구"], "daegu"],
+  [["인천광역시", "인천"], "incheon"],
+  [["광주광역시", "광주"], "gwangju"],
+  [["대전광역시", "대전"], "daejeon"],
+  [["울산광역시", "울산"], "ulsan"],
+  [["세종특별자치시", "세종"], "sejong"],
+  [["경기도", "경기"], "gyeonggi"],
+  [["강원특별자치도", "강원도", "강원"], "gangwon"],
+  [["충청북도", "충북"], "chungbuk"],
+  [["충청남도", "충남"], "chungnam"],
+  [["전북특별자치도", "전라북도", "전북"], "jeonbuk"],
+  [["전라남도", "전남"], "jeonnam"],
+  [["경상북도", "경북"], "gyeongbuk"],
+  [["경상남도", "경남"], "gyeongnam"],
+  [["제주특별자치도", "제주도", "제주"], "jeju"],
+  [["해외", "국외"], "overseas_or_other"],
+];
+
+export function legalFriendsResidenceRegion(
+  value: string | null,
+): ResidenceRegion | null {
+  const normalized = value?.normalize("NFKC").trim().replace(/\s+/g, " ");
+  if (!normalized) return null;
+  for (const [prefixes, region] of legalFriendsResidencePrefixes) {
+    if (prefixes.some((prefix) => normalized.startsWith(prefix))) {
+      return region;
+    }
+  }
+  return null;
+}
+
 export class TelephonyCallError extends Error {
   constructor(
     readonly code:
@@ -264,6 +323,7 @@ export class TelephonyCallError extends Error {
       | "directory_query_invalid"
       | "directory_target_not_found"
       | "directory_phone_not_callable"
+      | "directory_consultation_idempotency_conflict"
       | "centrex_endpoint_not_linked"
       | "call_not_found"
       | "call_owned_by_other_staff"
@@ -566,6 +626,7 @@ export function createTelephonyService(options: {
       clientName: row.client_name ?? "이름 미확인",
       phone: row.phone,
       callable: /^[0-9]{9,15}$/.test(row.phone_search ?? ""),
+      residenceRegion: legalFriendsResidenceRegion(row.living_place),
       caseType: row.case_type,
       caseCategory: row.case_category,
       caseState: row.case_state,
@@ -603,6 +664,247 @@ export function createTelephonyService(options: {
       queryType: isPhoneQuery ? ("phone" as const) : ("name" as const),
       items,
     };
+  }
+
+  async function createDirectoryConsultation(
+    input: LegalFriendsDirectoryConsultationCreate,
+    actor: StaffPrincipal,
+  ) {
+    const acceptedAt = now();
+    const payloadFingerprint = protection.fingerprint({
+      source: "erp_client_directory",
+      clientIdx: input.clientIdx,
+      caseIdx: input.caseIdx,
+      customerName: input.customerName,
+      phone: input.phone,
+      residenceRegion: input.residenceRegion,
+      caseType: input.caseType,
+      isReferral: input.isReferral,
+    });
+    const idempotencyFingerprint = protection.fingerprint({
+      source: "erp_client_directory",
+      idempotencyKey: input.idempotencyKey,
+    });
+
+    return db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(cast(${protection.advisoryLockKey(idempotencyFingerprint)} as bigint))`,
+      );
+      const [existing] = await tx
+        .select({
+          consultationId: consultationRequests.consultationId,
+          publicReceiptCode: consultations.publicReceiptCode,
+          acceptedAt: consultationRequests.submittedAt,
+          payloadFingerprint: consultationRequests.payloadFingerprint,
+        })
+        .from(consultationRequests)
+        .innerJoin(
+          consultations,
+          eq(consultations.id, consultationRequests.consultationId),
+        )
+        .where(
+          and(
+            eq(consultationRequests.source, "erp_client_directory"),
+            eq(consultationRequests.idempotencyKey, input.idempotencyKey),
+          ),
+        )
+        .limit(1);
+      if (existing) {
+        if (!existing.payloadFingerprint.equals(payloadFingerprint)) {
+          throw new TelephonyCallError(
+            "directory_consultation_idempotency_conflict",
+            "같은 등록 요청 식별자로 다른 고객정보를 저장할 수 없습니다. 창을 닫고 다시 시도해 주세요.",
+          );
+        }
+        return {
+          consultationId: existing.consultationId,
+          publicReceiptCode: existing.publicReceiptCode,
+          acceptedAt: existing.acceptedAt.toISOString(),
+          replayed: true,
+        };
+      }
+
+      const sourceResult = await tx.execute(
+        sql<LegalFriendsDirectoryConsultationSourceRow>`SELECT * FROM public.resolve_legalfriends_directory_consultation_source(${input.clientIdx}, ${input.caseIdx})`,
+      );
+      const [source] =
+        sourceResult.rows as LegalFriendsDirectoryConsultationSourceRow[];
+      if (!source) {
+        throw new TelephonyCallError(
+          "directory_target_not_found",
+          "삭제되었거나 현재 조회할 수 없는 리걸프렌즈 고객입니다.",
+        );
+      }
+
+      const consultationId = createConsultationId();
+      const requestId = createConsultationRequestId();
+      const publicReceiptCode = createPublicReceiptCode(acceptedAt);
+      const nameEncrypted = protection.encrypt(
+        input.customerName,
+        `consultations.preferred_name:${consultationId}`,
+      );
+      const requestNameEncrypted = protection.encrypt(
+        input.customerName,
+        `consultation_requests.name:${requestId}`,
+      );
+      const phoneEncrypted = protection.encrypt(
+        input.phone,
+        `consultation_requests.phone:${requestId}`,
+      );
+      const phoneFingerprint = protection.fingerprint(input.phone);
+      const intake = {
+        residenceRegion: input.residenceRegion,
+        topic:
+          input.caseType === 2
+            ? "개인파산·면책"
+            : input.caseType === 3
+              ? "기타"
+              : "개인회생",
+      };
+      const intakeEncrypted = protection.encrypt(
+        JSON.stringify(intake),
+        `consultation_requests.intake:${requestId}`,
+      );
+      const sourceSnapshot = {
+        clientName: source.client_name,
+        phone: source.phone,
+        residenceRegion: legalFriendsResidenceRegion(source.living_place),
+        caseType: source.case_type,
+        caseState: source.case_state,
+        isClosed: source.is_closed === 1,
+        isRepealed: source.is_repealed === 1,
+        courtName: source.court_name,
+        caseNumber: source.case_number,
+        caseName: source.case_name,
+        staffNames: [
+          source.primary_staff_name,
+          source.secondary_staff_name,
+          source.tertiary_staff_name,
+        ].filter((name): name is string => Boolean(name)),
+        caseCreatedOn: source.case_created_on,
+        caseUpdatedOn: source.case_updated_on,
+      };
+      const sourceSnapshotEncrypted = protection.encrypt(
+        JSON.stringify(sourceSnapshot),
+        `consultation_directory_sources/${consultationId}/snapshot`,
+      );
+
+      await tx.insert(consultations).values({
+        id: consultationId,
+        publicReceiptCode,
+        state: "requested",
+        contactChannel: "phone",
+        phoneFingerprint,
+        anonymousLabel: `고객찾기_${publicReceiptCode.slice(-6)}`,
+        preferredNameCiphertext: nameEncrypted.ciphertext,
+        preferredNameNonce: nameEncrypted.nonce,
+        preferredNameKeyVersion: nameEncrypted.keyVersion,
+        firstRequestedAt: acceptedAt,
+        lastRequestedAt: acceptedAt,
+        createdAt: acceptedAt,
+        updatedAt: acceptedAt,
+      });
+      await tx.insert(consultationRequests).values({
+        id: requestId,
+        consultationId,
+        source: "erp_client_directory",
+        idempotencyKey: input.idempotencyKey,
+        mode: "quick",
+        contactChannel: "phone",
+        phoneFingerprint,
+        phoneCiphertext: phoneEncrypted.ciphertext,
+        phoneNonce: phoneEncrypted.nonce,
+        phoneKeyVersion: phoneEncrypted.keyVersion,
+        hasProvidedName: true,
+        nameCiphertext: requestNameEncrypted.ciphertext,
+        nameNonce: requestNameEncrypted.nonce,
+        nameKeyVersion: requestNameEncrypted.keyVersion,
+        intakeCiphertext: intakeEncrypted.ciphertext,
+        intakeNonce: intakeEncrypted.nonce,
+        intakeKeyVersion: intakeEncrypted.keyVersion,
+        payloadFingerprint,
+        contactPreference: "as_soon_as_possible",
+        contactWindowStart: null,
+        contactWindowEnd: null,
+        privacyNoticeVersion: CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION,
+        privacyBasis: "staff_recorded_phone_interaction",
+        consentAgreedAt: null,
+        journeySessionId: null,
+        dedupeOutcome: "new",
+        candidateConsultationId: null,
+        submittedAt: acceptedAt,
+        createdAt: acceptedAt,
+      });
+      await tx.insert(consultationDirectorySources).values({
+        consultationId,
+        consultationRequestId: requestId,
+        directoryClientIdx: input.clientIdx,
+        directoryCaseIdx: input.caseIdx,
+        relationship: input.isReferral ? "referrer" : "customer",
+        snapshotCiphertext: sourceSnapshotEncrypted.ciphertext,
+        snapshotNonce: sourceSnapshotEncrypted.nonce,
+        snapshotKeyVersion: sourceSnapshotEncrypted.keyVersion,
+        createdByUserId: actor.id,
+        createdAt: acceptedAt,
+      });
+      await tx.insert(consultationStatusHistory).values({
+        id: createEventId(),
+        consultationId,
+        fromState: null,
+        toState: "requested",
+        reason: input.isReferral
+          ? "client_directory_referral"
+          : "client_directory_conversion",
+        actorType: "staff",
+        actorId: actor.id,
+        changedAt: acceptedAt,
+        createdAt: acceptedAt,
+      });
+
+      const event: PlatformEvent = {
+        eventId: createEventId(),
+        eventType: "consultation.requested",
+        eventVersion: 1,
+        occurredAt: acceptedAt.toISOString(),
+        producer: "lawand.gateway",
+        correlationId: consultationId,
+        data: {
+          consultationId,
+          requestId,
+          intakeRef: `consultation_requests/${requestId}`,
+          mode: "quick",
+          privacyNoticeVersion: CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION,
+          privacyBasis: "staff_recorded_phone_interaction",
+          dedupeOutcome: "new",
+        },
+      };
+      assertPlatformEvent(event);
+      await tx
+        .insert(outboxEvents)
+        .values(eventRow(event, consultationId, "consultation"));
+      await tx.insert(staffAuditLogs).values({
+        id: createEventId(),
+        actorUserId: actor.id,
+        action: "legalfriends.client_directory.consultation_created",
+        targetType: "consultation",
+        targetId: consultationId,
+        metadata: {
+          requestId,
+          directoryClientIdx: input.clientIdx,
+          directoryCaseIdx: input.caseIdx,
+          relationship: input.isReferral ? "referrer" : "customer",
+        },
+        occurredAt: acceptedAt,
+        createdAt: acceptedAt,
+      });
+
+      return {
+        consultationId,
+        publicReceiptCode,
+        acceptedAt: acceptedAt.toISOString(),
+        replayed: false,
+      };
+    });
   }
 
   async function resolvePhoneCustomer(phone: string): Promise<PhoneCustomerMatch> {
@@ -4841,6 +5143,7 @@ export function createTelephonyService(options: {
     completePhoneDeskFollowUp,
     completeInboundAnswerCommand,
     confirmDisposition,
+    createDirectoryConsultation,
     createMessageTemplate,
     deleteMessageTemplate,
     getCall,
