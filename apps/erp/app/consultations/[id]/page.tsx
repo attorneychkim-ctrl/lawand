@@ -521,7 +521,7 @@ function nextAction(consultation: ConsultationDetail) {
   if (consultation.state === "requested") {
     return {
       title: "담당자를 배정해 주세요",
-      description: "상담하기를 누르면 본인에게 배정되고 전화 접수는 외부 등록과 담당 배정 알림이 시작됩니다.",
+      description: "상담하기를 누르면 본인에게 배정되고 전화·카카오 접수는 리걸프렌즈 신건 등록이 시작됩니다.",
     };
   }
   if (consultation.state === "assigned") {
@@ -681,7 +681,8 @@ export default async function ConsultationDetailPage({
         ? "failed"
         : "ready";
   const canInvalidateLegalFriendsCase =
-    Boolean(consultation.legalFriendsCase) &&
+    (Boolean(consultation.legalFriendsCase) ||
+      consultation.kakaoEntry?.status === "confirmed") &&
     (consultation.assignment?.assigneeUserId === staff.id ||
       staff.roles.includes("admin"));
 

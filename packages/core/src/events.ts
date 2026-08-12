@@ -89,6 +89,22 @@ const assignmentReferenceDataSchema = z
   })
   .strict();
 
+const invalidManagerRegistrationReferenceDataSchema = z
+  .object({
+    consultationId: z.uuid(),
+    requestId: z.uuid(),
+    intakeRef: z.string().regex(/^consultation_requests\/[0-9a-f-]{36}$/),
+    registrationTarget: z.literal("invalid_manager"),
+    requestedByUserId: z.uuid(),
+    targetManagerExternalAccountId: z.literal(
+      LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
+    ),
+    targetManagerMemberIdx: z.literal(
+      LEGALFRIENDS_INVALID_MANAGER_MEMBER_IDX,
+    ),
+  })
+  .strict();
+
 const legalFriendsInvalidationReferenceDataSchema = z
   .object({
     consultationId: z.uuid(),
@@ -269,7 +285,10 @@ export const legalfriendsRegistrationRequestedEventSchema =
       eventType: z.literal(
         "legalfriends.consultation.registration.requested",
       ),
-      data: assignmentReferenceDataSchema,
+      data: z.union([
+        assignmentReferenceDataSchema,
+        invalidManagerRegistrationReferenceDataSchema,
+      ]),
     })
     .strict();
 

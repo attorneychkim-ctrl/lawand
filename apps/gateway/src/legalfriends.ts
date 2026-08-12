@@ -7,6 +7,8 @@ export const LEGALFRIENDS_CREATE_CASE_URL =
   "https://www.legalfriends.co.kr/api/bankruptcy/case/createForLawnV2";
 export const LEGALFRIENDS_CHANGE_MANAGER_URL =
   "https://www.legalfriends.co.kr/api/bankruptcy/case/changeManager";
+export const KAKAO_LEGALFRIENDS_PLACEHOLDER_PHONE = "01000000000";
+export const KAKAO_LEGALFRIENDS_PLACEHOLDER_LIVING_PLACE = "미수집";
 
 const residenceNames: Record<
   Exclude<ResidenceRegion, "overseas_or_other">,
@@ -148,8 +150,12 @@ export function createLegalFriendsCasePayload(input: {
   name: string;
   phone: string;
   intake: ConsultationIntakeAnswers;
+  livingPlaceOverride?: string;
 }): LegalFriendsCasePayload {
-  if (input.intake.residenceRegion === "overseas_or_other") {
+  if (
+    !input.livingPlaceOverride &&
+    input.intake.residenceRegion === "overseas_or_other"
+  ) {
     throw new LegalFriendsPayloadError("unsupported_residence_region");
   }
   if (
@@ -164,7 +170,14 @@ export function createLegalFriendsCasePayload(input: {
     member_idx: input.memberIdx,
     name: input.name,
     phone: formatPhone(input.phone),
-    living_place: residenceNames[input.intake.residenceRegion],
+    living_place:
+      input.livingPlaceOverride ??
+      residenceNames[
+        input.intake.residenceRegion as Exclude<
+          ResidenceRegion,
+          "overseas_or_other"
+        >
+      ],
     memo: createMemo(input.mode, input.intake),
   };
 }

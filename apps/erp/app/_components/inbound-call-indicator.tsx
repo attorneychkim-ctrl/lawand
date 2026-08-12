@@ -12,6 +12,7 @@ import type {
   TelephonyInboundCallSnapshot,
 } from "../../lib/gateway";
 import { notificationPermissionChangedEvent } from "./browser-notification-toggle";
+import { subscribeConsultationRealtime } from "./consultation-realtime";
 import { PhoneAftercareDialog } from "./phone-aftercare-form";
 
 type ConnectionState = "connecting" | "connected" | "disconnected";
@@ -550,22 +551,11 @@ export function InboundCallIndicator({
   }, [activities, enqueueToast, notificationPermission, staffUserId]);
 
   useEffect(() => {
-    const stream = new EventSource("/api/consultations/stream");
-    const handleConsultationChange = (event: MessageEvent<string>) => {
-      let payload: {
-        eventId?: unknown;
-        eventType?: unknown;
-        consultationId?: unknown;
-      };
-      try {
-        payload = JSON.parse(event.data) as typeof payload;
-      } catch {
-        return;
-      }
+    const unsubscribe = subscribeConsultationRealtime((message) => {
+      if (message.kind !== "changed") return;
+      const payload = message.payload;
       if (
         payload.eventType !== "consultation.requested" ||
-        typeof payload.eventId !== "string" ||
-        typeof payload.consultationId !== "string" ||
         seenConsultationEventIds.current.has(payload.eventId)
       ) {
         return;
@@ -582,15 +572,24 @@ export function InboundCallIndicator({
       }
       if (
         notificationPermission !== "granted" ||
-        !notificationLeader.current
+        (document.visibilityState !== "visible" &&
+          !notificationLeader.current)
       ) {
         return;
       }
 
       const storageKey = `lawand:consultation-notified:${payload.eventId}`;
+      let alreadyNotified = false;
       try {
-        if (window.localStorage.getItem(storageKey)) return;
-        window.localStorage.setItem(storageKey, String(Date.now()));
+        alreadyNotified = Boolean(window.localStorage.getItem(storageKey));
+        if (!alreadyNotified) {
+          window.localStorage.setItem(storageKey, String(Date.now()));
+        }
+      } catch {
+        // 저장소가 막힌 브라우저에서도 Notification API는 별도로 시도한다.
+      }
+      if (alreadyNotified) return;
+      try {
         const notification = new Notification(title, {
           body,
           tag: notificationKey,
@@ -601,20 +600,10 @@ export function InboundCallIndicator({
           notification.close();
         };
       } catch {
-        // 저장소 또는 Notification API가 막힌 환경에서도 페이지 토스트는 유지한다.
+        // Notification API가 막힌 환경에서도 페이지 토스트는 유지한다.
       }
-    };
-    stream.addEventListener(
-      "consultation.changed",
-      handleConsultationChange as EventListener,
-    );
-    return () => {
-      stream.removeEventListener(
-        "consultation.changed",
-        handleConsultationChange as EventListener,
-      );
-      stream.close();
-    };
+    });
+    return unsubscribe;
   }, [enqueueToast, notificationPermission]);
 
   useEffect(() => {
