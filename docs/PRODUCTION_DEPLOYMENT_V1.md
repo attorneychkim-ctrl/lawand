@@ -4,17 +4,16 @@
 CloudFormation 스택: `lawand-prod`
 리전: 서울(`ap-northeast-2`)
 최초 배포 릴리스: `20260804T085006Z-84e8708`
-현재 홈페이지 릴리스: `20260810T064408Z-homepage-cutover-ready-v3`
-현재 ERP 릴리스: `20260812T061230Z-erp-consultation-alerts-v1`
-현재 gateway 릴리스: `20260812T015203Z-centrex-ringing-recovery-v1`
-현재 Windows bridge: `v0.8.2.0`
+현재 홈페이지 릴리스: `20260812T063358Z-integrated-worktrees-v1`
+현재 ERP 릴리스: `20260812T063358Z-integrated-worktrees-v1`
+현재 gateway 릴리스: `20260812T063358Z-integrated-worktrees-v1`
+현재 Windows bridge: `v0.8.3.0`
 
-bridge `v0.8.2.0` + migration `0048_centrex_v2_ringing_recovery.sql` + gateway·ERP를
-하나의 복구 릴리스로 운영 반영했다. v2 수신 관측의 `incomingLineNumber` 누락과 영구 거부
-이벤트 하나가 정상 후속 이벤트를 막는 FIFO 적체를 제거하고, 병행 v1 원장에서 빠진
-external root/leg를 멱등 복구했다. 동일 회선·고객 지문·시작/종료시각이 엄격히 일치한
-U+ 종료 이력/지연 bridge 중복 원장과 동일 후처리만 하나로 정리했다. 15초 넘게 늦게 온
-수신에는 이미 무효일 수 있는 `전화 받기` 버튼을 노출하지 않는다.
+bridge `v0.8.3.0` + migration `0049`·`0050` + 홈페이지·ERP·gateway를 통합 릴리스로
+운영 반영했다. 센트릭스 sentinel provider ID·ghost terminal state를 증거 기반으로 복구하고,
+고객찾기 신건·소개 상담과 전화 디렉터리 광역 거주지 동기화, 카카오 표시명 필수·기존고객
+배지를 함께 출시했다. 사용자의 명시적 승인으로 활성 통화를 배포 차단 조건으로 쓰지 않았지만,
+provider 종료 증거가 없는 connected root는 강제 종료하지 않았다.
 
 이 문서는 정식 도메인 전환 이후를 포함한 실제 AWS 구성, 접속점, 데이터 이관 범위와
 운영 체크리스트를 기록한다. 비밀번호·API 키·AWS 계정 ID·RDS 마스터 시크릿 ARN은
@@ -77,11 +76,8 @@ U+ 종료 이력/지연 bridge 중복 원장과 동일 후처리만 하나로 �
 - 배포 S3 버킷은 전체 public access 차단, 버전 관리, TLS 강제, `artifacts/` 30일
   만료 정책을 사용한다. 홈페이지 사용자 파일 저장소로 사용하지 않는다.
 - 기본 CloudWatch 경보는 세 EC2 상태, RDS CPU, RDS 여유 저장공간을 감시한다.
-  SNS·PagerDuty·텔레그램 같은 실제 통지 대상은 아직 연결하지 않았다. 2026-08-10
-  최종 확인에서 센트릭스 5종을 포함한 CloudWatch 경보는 모두 `OK`였다. 2026-08-12
-  도메인 전환 점검에서는 전환 전부터 시작된 v2 `call.ringing` 400 dead-letter 때문에
-  `lawand-centrex-dpapi-queue` 하나가 `ALARM`이다. queue는 0이고 암호문은 보존했으며 DNS
-  원인으로 보거나 임의 삭제하지 않는다.
+  SNS·PagerDuty·텔레그램 같은 실제 통지 대상은 아직 연결하지 않았다. 2026-08-12 통합
+  릴리스 최종 확인에서 센트릭스 분리 경보를 포함한 CloudWatch `ALARM`은 0건이다.
 
 ## RDS 기준선
 
@@ -100,7 +96,7 @@ U+ 종료 이력/지연 bridge 중복 원장과 동일 후처리만 하나로 �
 - migration `0022_consultation_sse_notifications.sql`은 상담 outbox INSERT가 커밋될 때
   개인정보 없이 이벤트 ID·유형·상담 ID·발생시각만 PostgreSQL 채널로 알린다. gateway의
   전용 연결만 이 채널을 `LISTEN`하며 RDS를 인터넷에 노출하지 않는다.
-- 2026-08-11 기준 migration `0047`까지 48개가 모두 적용됐고 최근 `0042..0047` 파일 해시는
+- 2026-08-12 기준 migration `0050`까지 51개가 모두 적용됐고 최근 `0042..0050` 파일 해시는
   현재 Git과 일치한다.
   역사적으로 운영에 적용된 `0028_inbound_phone_directory_resolver.sql` 한 개만 현재 파일과
   해시가 다르다. 후속 `0037_phone_desk_directory_context.sql`이 같은 함수 계약을 대체했고
@@ -121,8 +117,8 @@ Multi-AZ 전환, 수동 스냅샷, 실제 복원 훈련과 경보 통지 연결�
 | `CB.TblCBCase` | 9,598 | 공개 사례·자가진단 원천; 운영 앱 직접 조회 금지 |
 | `CB.TblCaseMemo` | 202,772 | 사건 메모 원천; 개인정보 가능 원문 포함 |
 | `CB.TblMoClientStatement` | 9,402 | 진술·주소·채무상담 원천; 개인정보 가능 원문 포함 |
-| `CB.TblCSClient` | 60,947 | 로앤 사무소 고객 이름·전화 검색 최소필드; 운영 앱 직접 조회 금지 |
-| `CB.TblCase` | 60,947 | 로앤 사무소 사건 유형·상태·주/부 담당자와 표시 필드 |
+| `CB.TblCSClient` | 61,188 | 로앤 사무소 고객 이름·전화·광역 거주지 검색 최소필드; 운영 앱 직접 조회 금지 |
+| `CB.TblCase` | 61,188 | 로앤 사무소 사건 유형·상태·주/부 담당자와 표시 필드 |
 | `CB.TblMember` | 69 | 로앤 사무소 담당자 식별자·이름·직책; 비밀번호·개인 연락처 제외 |
 | 상담·outbox·알림톡·리걸프렌즈 연결 원장 | 0 | 개발 테스트 데이터 미이관 |
 
@@ -145,6 +141,12 @@ AES256 암호화 상태다. 운영 복원은 단일 트랜잭션으로 끝났고
 전화 검색값은 0건이다. 원본에서 이미 삭제된 담당자 참조 1건은 다른 담당자로 추정하지
 않고 미해결 참조로 유지한다. 세 테이블은 `lawand_migrator` 소유,
 `lawand_viewer` SELECT 전용이며 `lawand_app`과 `PUBLIC`은 접근할 수 없다.
+
+2026-08-12 통합 릴리스에서는 고객 `living_place`를 전화 디렉터리의 검증 digest와 원자 교체
+대상에 추가하고 dry-run 뒤 실제 재동기화했다. 사건·고객 각 61,188건, 담당자 69건과 지역
+null 0건, 사건-고객 누락·타 사무소·전화 정규화 위반 0건을 확인했다. 삭제 담당자 미해결
+참조 1건은 보존했고, `lawand_app` 직접 SELECT 차단·viewer 읽기 전용·gateway 함수 실행
+경계를 다시 통과했다.
 
 `public_case_studies` 중 51건은 개인정보·법률 승인 시각과 감사 조건을 갖춰 발행됐고,
 나머지 세 건은 `preview/pending` 상태라 목록·상세·sitemap에서 제외한다. 자가진단은 임시
@@ -181,6 +183,41 @@ systemd 앱 단위와 Caddy edge 단위는 부팅 시 자동 시작한다. 최�
 재기동 후 약 1초, gateway는 약 2초 안에 health를 회복했고 실패한 systemd unit과
 최근 error priority journal은 없었다.
 
+## 나머지 워크트리 통합·센트릭스/상담 전체 배포
+
+2026-08-12 미반영이던 `brave-cloud-9c88`, `rapid-meadow-adae`, `clear-river-b502`를
+main에 병합한 뒤 릴리스 `20260812T063358Z-integrated-worktrees-v1`로 홈페이지·ERP·
+gateway·Windows bridge·migration·전화 디렉터리를 함께 운영 반영했다.
+
+- 배포 소스는 merge commit `ae46b5b`다. HERDR worktree 여섯 개와 원격
+  `origin/worktree/*` 19개를 대조해 모두 clean/ancestor임을 확인했다. 전체 5패키지
+  typecheck·lint·test·build, core 66개·gateway 115개 테스트, DB schema/migration 검사,
+  홈페이지 smoke와 Windows x86 self-test 20개를 통과했다.
+- private S3 AES256 앱 아티팩트 SHA-256은
+  `89c6ae1a3b7990cdecd68542bdc056deef4895f81d1669a86502b8fe9f09a0d8`, bridge ZIP은
+  `067c3c6e352786e990f9da0501fb83c4da4e83cc0d2a304bb91371f38c94e814`, bridge source는
+  `b16ed3aa5fffb4307916cc32ec6ca147b6f528ae44ae14f10f7556f061e43e97`다. 변경 전 암호화
+  RDS 스냅샷 `lawand-prod-pre-integrated-worktrees-20260812t063358z`은 available이다.
+- migration `0049` 해시는
+  `b93be64017ca65fd3ada73b13305b54d10594a4d1effa76882761f279bb42048`, `0050`은
+  `b6517be1d7db367d8ca2a52f846f25adcdbf341d19669d21648385867429f151`이며 운영 원장은
+  총 51개다. sentinel 관측·식별자와 후처리 source 위반은 0이고 새 상담 출처 테이블과
+  고객 광역 거주지 원천을 확인했다.
+- 이미지 ID는 gateway
+  `sha256:f07039e09c415d682d302f98aba2d00f3d16e9af615e65562e2258c95774ea2c`, ERP
+  `sha256:d8bc3cdb7411a8c2337e587c91445678d3f176d3cf2ac2296b30307030f4d071`, 홈페이지
+  `sha256:3ae64d91507583adf074ed1fd3da71da3d3f1e07e8165a112eb3beac5b81b04b`다. 세 앱·Caddy는
+  active/running, systemd와 Docker restart 0이며 정식 DNS·EIP 고정·`sslip.io` smoke가
+  정상이다. gateway 실시간 source 3개와 worker 6개가 모두 시작됐고 CloudWatch ALARM은 0이다.
+- bridge v0.8.3.0 SHA-256은
+  `69116FD2D12BB50829130F9C56FA5CF9E05E8EA47330042F27E0466145D8BCAA`다. v0.8.2.0은
+  rollback 파일로 보존했다. 최종 설치 51·배정 19·실행 24·warm 5, offline·로그인 실패·
+  queue·dead-letter 0, supervisor 정상이다. 조직용 Authenticode 서명은 아직 없다.
+- 배포 시작 시 active root/leg 11건과 수신 1건이 있었으나 사용자가 통화 중 배포를 명시
+  승인했다. migration은 provider 증거가 있는 ghost만 종결했고 최종 smoke의 connected
+  root/leg 4건은 추정 종료하지 않았다. 실제 상담·카카오 채팅·외부 사건·고객 알림 canary는
+  만들지 않았다.
+
 ## ERP 상담 알림 UX 긴급 단독 배포
 
 2026-08-12 사용자가 지정한 `worktree/calm-valley-fbf9`만 `main`에 병합한 뒤 릴리스
@@ -200,7 +237,8 @@ systemd 앱 단위와 Caddy edge 단위는 부팅 시 자동 시작한다. 최�
   error priority journal과 CloudWatch ALARM은 0이다. 실제 상담·알림·통화 canary와 임시
   직원 세션은 만들지 않았다.
 - 이번 긴급 범위에서는 운영 DB migration, gateway, Windows bridge를 변경하지 않았다.
-  main에 먼저 병합된 v0.8.3·migration `0049`는 별도 통합 릴리스 안전 게이트에 남아 있다.
+  main에 먼저 병합된 v0.8.3·migration `0049`는 당시 별도 통합 릴리스 안전 게이트에 남겼고,
+  이후 `20260812T063358Z-integrated-worktrees-v1`에서 운영 반영했다.
   gateway는 직전 릴리스 `20260812T015203Z-centrex-ringing-recovery-v1`와 이미지
   `sha256:e0ca5390fea42144569080a8d3950c7d13ea09c27244074ae53966c7e1d90a9e`로 active·restart 0,
   health 정상이다. ERP rollback은 직전 태그

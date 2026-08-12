@@ -71,6 +71,46 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-12 — 나머지 워크트리 main 통합·0049/0050·v0.8.3 전체 운영 배포
+- `HERDR_ENV=1`에서 main과 HERDR worktree 5개, 원격 `origin/worktree/*` 19개를 전수
+  대조했다. 미반영이던 `brave-cloud-9c88`의 Cafe24 구 DNS 안전 문서는 merge commit
+  `60eab28`, `rapid-meadow-adae`의 카카오 이름 필수·기존고객 배지 UX는 `7f5db3b`,
+  `clear-river-b502`의 고객찾기 신건·소개 상담과 migration `0050`은 `ae46b5b`로 main에
+  병합·push했다. 배포 직전 여섯 작업 트리가 모두 깨끗하고 원격 worktree 19개 HEAD가 전부
+  main ancestor임을 확인했으며 단일 배포 소스는 `ae46b5b`다.
+- 전체 5패키지 typecheck·lint·production build, core 66개·gateway 115개 테스트, DB schema
+  check, 운영형 migration `0042..0050`, 홈페이지 production smoke, Windows .NET Framework
+  x86 build·self-test 20개와 `git diff --check`를 통과했다. 통합 릴리스
+  `20260812T063358Z-integrated-worktrees-v1`의 private S3 AES256 앱 아티팩트 SHA-256은
+  `89c6ae1a3b7990cdecd68542bdc056deef4895f81d1669a86502b8fe9f09a0d8`, bridge ZIP은
+  `067c3c6e352786e990f9da0501fb83c4da4e83cc0d2a304bb91371f38c94e814`, bridge source는
+  `b16ed3aa5fffb4307916cc32ec6ca147b6f528ae44ae14f10f7556f061e43e97`다.
+- 변경 전 암호화 RDS 스냅샷 `lawand-prod-pre-integrated-worktrees-20260812t063358z`을
+  available로 확보하고 migration `0049`·`0050`을 적용했다. 운영 migration 원장은 51개이며
+  두 최신 Git 해시는 각각 `b93be64017ca65fd3ada73b13305b54d10594a4d1effa76882761f279bb42048`,
+  `b6517be1d7db367d8ca2a52f846f25adcdbf341d19669d21648385867429f151`로 일치한다.
+  sentinel 관측·식별자는 0이고 `consultation_directory_sources`와 전화 디렉터리
+  `living_place`가 존재한다. 배포 전 활성 root/leg 11건과 수신 1건이 있었지만 사용자가
+  통화 중 배포를 명시 승인해 차단 게이트로 쓰지 않았다. `0049`는 증거 있는 ghost만 정리했고,
+  최종 smoke의 connected root/leg 4건은 provider 종료 증거 없이 강제 종료하지 않았다.
+- 홈페이지·ERP·gateway를 같은 릴리스로 전환했다. 이미지 ID는 gateway
+  `sha256:f07039e09c415d682d302f98aba2d00f3d16e9af615e65562e2258c95774ea2c`, ERP
+  `sha256:d8bc3cdb7411a8c2337e587c91445678d3f176d3cf2ac2296b30307030f4d071`, 홈페이지
+  `sha256:3ae64d91507583adf074ed1fd3da71da3d3f1e07e8165a112eb3beac5b81b04b`다. 세 앱과
+  Caddy는 active·running, systemd/Docker restart 0이며 정식 DNS·EIP 고정·`sslip.io` HTTPS
+  smoke가 모두 정상이다. gateway 실시간 source 3개와 리걸프렌즈·알림톡·네이버·클릭투콜·
+  문자·수신 관측 worker 6개가 모두 시작됐고 최근 error journal과 CloudWatch ALARM은 0이다.
+- Windows bridge는 v0.8.3.0, SHA-256
+  `69116FD2D12BB50829130F9C56FA5CF9E05E8EA47330042F27E0466145D8BCAA`로 교체했다. 직전
+  v0.8.2.0 파일은 릴리스 ID가 붙은 rollback 파일로 보존했다. 최종 설치 51·배정 19·실행 24·
+  warm 5, assigned offline·로그인 실패·queue·dead-letter 0, supervisor 정상이다. 후보는
+  조직용 인증서가 없어 여전히 unsigned다.
+- 별도 `ai-agents` 저장소의 전화 디렉터리 잡에 `living_place` 원천·검증 digest를 추가해
+  커밋 `962c03f`로 push하고 운영 exact 두 파일만 백업·교체했다. dry-run 뒤 실제 동기화와
+  verify/access canary를 통과해 사건 61,188·고객 61,188·담당자 69, 지역 null 0, 관계 누락·
+  타 사무소·전화 정규화 위반 0이며 timer는 enabled·active다. 실제 상담·카카오 채팅·외부 사건·
+  고객 알림 canary는 만들지 않았다. `PROJECT_PLAN.md`는 v1.20이다.
+
 ### 2026-08-12 — calm-valley ERP 상담 알림 UX 긴급 단독 운영 배포
 - `HERDR_ENV=1`에서 main과 HERDR worktree 5개, 원격 `origin/worktree/*` 18개를 전수
   대조했다. `worktree/calm-valley-fbf9`의 `b69c037`·`6550ebc`만 merge commit
