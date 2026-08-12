@@ -892,6 +892,205 @@ summary:focus-visible {
   cursor: pointer;
 }
 
+.kakao-entry-modal-backdrop {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: grid;
+  overflow-y: auto;
+  align-items: center;
+  justify-items: center;
+  padding: 24px;
+  background: rgba(9, 17, 14, 0.58);
+  backdrop-filter: blur(8px);
+}
+
+.kakao-entry-modal {
+  position: relative;
+  width: min(100%, 520px);
+  padding: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.48);
+  border-radius: 24px;
+  background: var(--ivory-050);
+  box-shadow: 0 28px 90px rgba(6, 21, 16, 0.28);
+}
+
+.kakao-entry-modal-close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--slate-700);
+  cursor: pointer;
+}
+
+.kakao-entry-modal-close svg {
+  width: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-width: 1.8;
+}
+
+.kakao-entry-modal-heading {
+  padding-right: 42px;
+}
+
+.kakao-entry-modal-heading > span {
+  display: inline-flex;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #fee500;
+  color: #2b2512;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.kakao-entry-modal-heading h2 {
+  margin: 18px 0 9px;
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(27px, 5vw, 34px);
+  letter-spacing: -0.045em;
+  line-height: 1.22;
+}
+
+.kakao-entry-modal-heading p {
+  margin: 0;
+  color: var(--slate-600);
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.kakao-entry-modal-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 25px;
+}
+
+.kakao-entry-modal-form label {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.kakao-entry-modal-form label span {
+  margin-left: 4px;
+  color: var(--action-700);
+  font-size: 11px;
+}
+
+.kakao-entry-modal-form input {
+  width: 100%;
+  min-height: 54px;
+  padding: 13px 15px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  outline: none;
+  background: white;
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+}
+
+.kakao-entry-modal-form input:focus {
+  border-color: var(--action-600);
+  box-shadow: 0 0 0 4px rgba(39, 106, 87, 0.12);
+}
+
+.kakao-entry-modal-help,
+.kakao-entry-modal-privacy {
+  margin: 0;
+  color: var(--slate-600);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.kakao-entry-modal-privacy {
+  padding: 11px 12px;
+  border-radius: 10px;
+  background: var(--mint-050);
+}
+
+.kakao-entry-modal-privacy a {
+  color: var(--action-700);
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.kakao-entry-modal-actions {
+  display: grid;
+  margin-top: 8px;
+  grid-template-columns: .72fr 1.28fr;
+  gap: 10px;
+}
+
+.kakao-entry-modal-actions button {
+  min-height: 52px;
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.kakao-entry-modal-cancel {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--slate-700);
+}
+
+.kakao-entry-modal-submit {
+  border: 1px solid var(--action-600);
+  background: var(--action-600);
+  color: white;
+}
+
+.kakao-entry-modal-submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+@media (max-width: 640px) {
+  .kakao-entry-modal-backdrop {
+    align-items: end;
+    padding: 0;
+  }
+
+  .kakao-entry-modal {
+    width: 100%;
+    padding: 27px 20px calc(20px + env(safe-area-inset-bottom));
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 24px 24px 0 0;
+  }
+
+  .kakao-entry-modal-heading {
+    padding-right: 38px;
+  }
+
+  .kakao-entry-modal-heading h2 {
+    margin-top: 15px;
+    font-size: 28px;
+  }
+
+  .kakao-entry-modal-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .kakao-entry-modal-submit {
+    grid-row: 1;
+  }
+}
+
 svg {
   display: block;
 }

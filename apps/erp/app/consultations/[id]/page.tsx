@@ -21,6 +21,7 @@ import { requireStaff } from "../../../lib/session";
 import { ClaimConsultationButton } from "../../_components/claim-consultation-button";
 import { ClickToCallButton } from "../../_components/click-to-call-button";
 import { CopyButton } from "../../_components/copy-button";
+import { KakaoEntryInvalidationButton } from "../../_components/kakao-entry-invalidation-button";
 import { KakaoEntryPanel } from "../../_components/kakao-entry-panel";
 import { LegalFriendsInvalidationButton } from "../../_components/legalfriends-invalidation-button";
 import { MessageComposeButton } from "../../_components/message-compose-button";
@@ -465,6 +466,13 @@ function nextAction(consultation: ConsultationDetail) {
     };
   }
   if (consultation.kakaoEntry?.status === "pending") {
+    if (consultation.kakaoEntry.nameProvided) {
+      return {
+        title: "입력한 이름으로 카카오 채팅을 확인해 주세요",
+        description:
+          "채팅방의 이름이 맞으면 상담하기를 누르세요. 채팅 확인과 본인 담당 배정이 함께 처리됩니다.",
+      };
+    }
     return {
       title: "카카오 채팅을 확인해 주세요",
       description: "채널 관리자에서 실제 메시지를 찾은 뒤 표시명을 반영해야 담당 배정할 수 있습니다.",
@@ -614,7 +622,8 @@ export default async function ConsultationDetailPage({
   const action = nextAction(consultation);
   const canClaim =
     consultation.state === "requested" &&
-    consultation.kakaoEntry?.status !== "pending";
+    (consultation.kakaoEntry?.status !== "pending" ||
+      consultation.kakaoEntry.nameProvided);
   const canClickToCall =
     Boolean(latestPhone) &&
     consultation.assignment?.assigneeUserId === staff.id;
@@ -658,6 +667,9 @@ export default async function ConsultationDetailPage({
               <span className={`state-badge is-${consultation.state}`}>
                 {stateLabels[consultation.state] ?? consultation.state}
               </span>
+              {consultation.existingCustomer ? (
+                <span className="flag-badge is-existing">기존고객</span>
+              ) : null}
               {legalFriendsInvalidated ? (
                 <span className="flag-badge is-neutral">리걸프렌즈 무효</span>
               ) : null}
@@ -686,6 +698,11 @@ export default async function ConsultationDetailPage({
               <LegalFriendsInvalidationButton
                 consultationId={consultation.id}
                 status={invalidationStatus}
+              />
+            ) : null}
+            {consultation.kakaoEntry?.status === "pending" ? (
+              <KakaoEntryInvalidationButton
+                consultationId={consultation.id}
               />
             ) : null}
             {canClaim ? (
@@ -849,7 +866,12 @@ export default async function ConsultationDetailPage({
         {consultation.kakaoEntry ? (
           <KakaoEntryPanel
             consultationId={consultation.id}
+            displayName={consultation.displayName.replace(
+              /_[23456789A-HJ-NP-Z]{8}_플친$/u,
+              "",
+            )}
             entry={consultation.kakaoEntry}
+            nameProvided={consultation.kakaoEntry.nameProvided}
           />
         ) : null}
 

@@ -1385,6 +1385,11 @@ a.inbound-customer:hover { text-decoration: underline; }
   color: var(--brand-strong);
 }
 
+.flag-badge.is-existing {
+  background: var(--info-soft);
+  color: var(--info);
+}
+
 .flag-badge.is-neutral {
   background: var(--surface-muted);
   color: var(--muted);
@@ -1614,7 +1619,7 @@ a.inbound-customer:hover { text-decoration: underline; }
 }
 
 .detail-actions .call-button,
-.detail-actions .legalfriends-invalidation-button {
+.detail-actions .consultation-invalidation-button {
   min-height: 46px;
 }
 
@@ -2217,7 +2222,6 @@ a.inbound-customer:hover { text-decoration: underline; }
 }
 
 .kakao-confirm-form button,
-.kakao-invalidate-form button,
 .secondary-button {
   min-height: 44px;
   padding: 0 14px;
@@ -2239,28 +2243,9 @@ a.inbound-customer:hover { text-decoration: underline; }
 }
 
 .kakao-confirm-form button:disabled,
-.kakao-invalidate-form button:disabled,
 .secondary-button:disabled {
   cursor: wait;
   opacity: .62;
-}
-
-.kakao-invalidate-form {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 9px;
-}
-
-.kakao-invalidate-form button {
-  border: 1px solid color-mix(in srgb, var(--danger) 26%, var(--line));
-  background: var(--danger-soft);
-  color: var(--danger);
-}
-
-.kakao-invalidate-form .form-error {
-  flex-basis: 100%;
-  margin: 0;
 }
 
 .detail-section {
@@ -4864,8 +4849,8 @@ a.inbound-customer:hover { text-decoration: underline; }
 .message-template-modal > header p:last-child { margin: 0; color: var(--muted); font-size: .68rem; }
 .message-template-modal > header > button { border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 1.75rem; line-height: 1; }
 
-.legalfriends-invalidation-form { display: grid; gap: 5px; }
-.legalfriends-invalidation-button {
+.consultation-invalidation-form { display: grid; gap: 5px; }
+.consultation-invalidation-button {
   display: inline-flex;
   min-height: 42px;
   align-items: center;
@@ -4880,9 +4865,9 @@ a.inbound-customer:hover { text-decoration: underline; }
   font-size: .75rem;
   font-weight: 820;
 }
-.legalfriends-invalidation-button:hover:not(:disabled) { background: var(--danger-soft); }
-.legalfriends-invalidation-button:disabled { cursor: default; opacity: .58; }
-.legalfriends-invalidation-error { max-width: 240px; margin: 0; color: var(--danger); font-size: .64rem; line-height: 1.4; text-align: right; }
+.consultation-invalidation-button:hover:not(:disabled) { background: var(--danger-soft); }
+.consultation-invalidation-button:disabled { cursor: default; opacity: .58; }
+.consultation-invalidation-error { max-width: 240px; margin: 0; color: var(--danger); font-size: .64rem; line-height: 1.4; text-align: right; }
 
 @media (max-width: 1040px) {
   .staff-bar-leading { gap: 20px; }
@@ -5183,8 +5168,8 @@ a.inbound-customer:hover { text-decoration: underline; }
   .detail-actions > * { flex: 1; }
   .detail-actions .claim-button,
   .detail-actions .secondary-action-link,
-  .detail-actions .legalfriends-invalidation-button { width: 100%; }
-  .legalfriends-invalidation-error { max-width: none; text-align: left; }
+  .detail-actions .consultation-invalidation-button { width: 100%; }
+  .consultation-invalidation-error { max-width: none; text-align: left; }
   .detail-shell.has-mobile-action { padding-bottom: 118px; }
   .detail-shell.has-mobile-action .detail-actions .claim-form {
     position: fixed;

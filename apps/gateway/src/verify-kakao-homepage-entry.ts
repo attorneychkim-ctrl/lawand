@@ -25,10 +25,7 @@ import {
 import type { StaffPrincipal } from "./auth.js";
 import { readGatewayConfig } from "./config.js";
 import { createDataProtection } from "./crypto.js";
-import {
-  ConsultationAssignmentError,
-  createConsultationService,
-} from "./service.js";
+import { createConsultationService } from "./service.js";
 
 const localEnvPath = resolve(process.cwd(), ".env.local");
 if (existsSync(localEnvPath)) {
@@ -164,6 +161,7 @@ try {
   const first = await service.submitKakaoHomepageEntry({
     source: "homepage_kakao",
     idempotencyKey,
+    displayName: "김민수",
   });
   assert.equal(first.status, "pending");
   assert.equal(first.replayed, false);
@@ -171,6 +169,7 @@ try {
   const replay = await service.submitKakaoHomepageEntry({
     source: "homepage_kakao",
     idempotencyKey,
+    displayName: "김민수",
   });
   assert.equal(replay.publicReceiptCode, first.publicReceiptCode);
   assert.equal(replay.status, "pending");
@@ -192,6 +191,9 @@ try {
   assert.equal(request.source, "homepage_kakao");
   assert.equal(request.contactChannel, "kakao_channel");
   assert.equal(request.phoneCiphertext, null);
+  assert.equal(request.hasProvidedName, true);
+  assert.ok(request.nameCiphertext);
+  assert.ok(request.nameNonce);
   assert.equal(request.privacyBasis, "customer_initiated_channel_entry");
   assert.equal(request.consentAgreedAt, null);
 
@@ -203,30 +205,15 @@ try {
   assert.equal(pendingEntry.status, "pending");
   assert.equal(pendingEntry.clickCount, 2);
 
-  await assert.rejects(
-    service.assignToSelf(consultation.id, actor),
-    (error: unknown) =>
-      error instanceof ConsultationAssignmentError &&
-      error.code === "consultation_not_assignable",
-  );
-
-  const confirmation = await service.confirmKakaoHomepageEntry(
-    consultation.id,
-    { displayName: "김민수" },
-    actor,
-  );
-  assert.equal(confirmation.status, "confirmed");
-  assert.equal(confirmation.replayed, false);
+  const pendingDetail = await service.detail(consultation.id);
+  assert.ok(pendingDetail);
+  assert.equal(pendingDetail.kakaoEntry?.status, "pending");
   assert.match(
-    confirmation.displayName,
+    pendingDetail.displayName,
     /^김민수_[23456789A-HJ-NP-Z]{8}_플친$/,
   );
-
-  const detail = await service.detail(consultation.id);
-  assert.ok(detail);
-  assert.equal(detail.kakaoEntry?.status, "confirmed");
-  assert.equal(detail.displayName, confirmation.displayName);
-  assert.equal(detail.requests[0]?.phone, null);
+  assert.equal(pendingDetail.requests[0]?.name, "김민수");
+  assert.equal(pendingDetail.requests[0]?.phone, null);
 
   const [encryptedConsultation] = await database.db
     .select({
@@ -243,7 +230,14 @@ try {
   );
 
   const assignment = await service.assignToSelf(consultation.id, actor);
-  assert.deepEqual(assignment.queuedEventTypes, ["consultation.assigned"]);
+  assert.deepEqual(assignment.queuedEventTypes, [
+    "consultation.kakao_chat.confirmed",
+    "consultation.assigned",
+  ]);
+
+  const assignedDetail = await service.detail(consultation.id);
+  assert.ok(assignedDetail);
+  assert.equal(assignedDetail.kakaoEntry?.status, "confirmed");
 
   const confirmedEvents = await database.db
     .select({ eventType: outboxEvents.eventType })
@@ -271,6 +265,7 @@ try {
   const invalidReceipt = await service.submitKakaoHomepageEntry({
     source: "homepage_kakao",
     idempotencyKey: randomUUID(),
+    displayName: "이탈고객",
   });
   const invalidConsultation = await consultationByReceipt(
     invalidReceipt.publicReceiptCode,
@@ -287,7 +282,7 @@ try {
   assert.equal(invalidDetail.assignment, null);
 
   console.log(
-    "홈페이지 카카오 진입 검증 완료: 중복 클릭 1건 유지·표시명 확정·대기 중 배정 차단·무효 종결·알림톡/리걸프렌즈 차단",
+    "홈페이지 카카오 진입 검증 완료: 고객 입력 이름 암호화·중복 클릭 1건 유지·상담하기 시 채팅 확인/배정·무효 종결·알림톡/리걸프렌즈 차단",
   );
 } finally {
   await cleanup();

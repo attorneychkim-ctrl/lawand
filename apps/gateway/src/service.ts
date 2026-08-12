@@ -14,6 +14,7 @@ import {
 
 import {
   assertPlatformEvent,
+  kakaoHomepageEntryAssignmentPolicy,
   classifyConsultationSubmission,
   consultationSubmissionSchema,
   createConsultationId,
@@ -184,7 +185,11 @@ function kakaoDisplayName(displayName: string, publicReceiptCode: string) {
   if (!suffix) {
     throw new Error("카카오 상담 접수번호 형식이 올바르지 않습니다.");
   }
-  return `${displayName.trim().replace(/\s+/gu, " ")}_${suffix}_플친`;
+  return `${normalizeKakaoDisplayName(displayName)}_${suffix}_플친`;
+}
+
+function normalizeKakaoDisplayName(displayName: string) {
+  return displayName.trim().replace(/\s+/gu, " ");
 }
 
 function eventRow(event: PlatformEvent) {
@@ -206,6 +211,42 @@ export function createConsultationService(options: {
   protection: DataProtection;
 }) {
   const { db, protection } = options;
+
+  async function existingLegalFriendsCustomerPhones(phones: string[]) {
+    const normalizedPhones = [
+      ...new Set(
+        phones
+          .map((phone) => phone.replace(/[^0-9]/g, ""))
+          .filter((phone) => phone.length >= 9 && phone.length <= 15),
+      ),
+    ];
+    if (normalizedPhones.length === 0) return new Set<string>();
+
+    try {
+      const result = await db.execute(
+        sql<{ phone: string }>`
+          select candidate.phone
+          from unnest(${normalizedPhones}::text[]) as candidate(phone)
+          where exists (
+            select 1
+            from public.resolve_inbound_phone_directory(candidate.phone)
+          )
+        `,
+      );
+      return new Set(
+        (result.rows as Array<{ phone: string }>).map((row) => row.phone),
+      );
+    } catch {
+      console.error(
+        JSON.stringify({
+          event: "consultation_existing_customer_lookup_failed",
+          phoneCount: normalizedPhones.length,
+          occurredAt: new Date().toISOString(),
+        }),
+      );
+      return new Set<string>();
+    }
+  }
 
   async function submitSelfDiagnosis(
     rawSubmission: SelfDiagnosisSubmission,
@@ -1045,18 +1086,34 @@ export function createConsultationService(options: {
         throw new Error("카카오 홈페이지 진입 별칭을 만들지 못했습니다.");
       }
       const internalAlias = `카카오_${receiptSuffix}_플친`;
+      const submittedDisplayName = normalizeKakaoDisplayName(
+        input.displayName,
+      );
+      const preferredDisplayName = kakaoDisplayName(
+        submittedDisplayName,
+        publicReceiptCode,
+      );
+      const preferredNameEncrypted = protection.encrypt(
+        preferredDisplayName,
+        `consultations.preferred_name:${consultationId}`,
+      );
+      const requestNameEncrypted = protection.encrypt(
+        submittedDisplayName,
+        `consultation_requests.name:${requestId}`,
+      );
       const intakeEncrypted = protection.encrypt(
         JSON.stringify({
           channel: "kakao_channel",
           entrySource: "homepage_button",
           messageStorage: "not_stored",
-          note: "카카오 채팅 메시지 확인 대기",
+          note: "고객 입력 이름으로 카카오 채팅 메시지 확인 대기",
         }),
         `consultation_requests.intake:${requestId}`,
       );
       const payloadFingerprint = protection.fingerprint({
         source: input.source,
         idempotencyKey: input.idempotencyKey,
+        displayName: submittedDisplayName,
       });
 
       let journeySessionId: string | null = null;
@@ -1184,6 +1241,9 @@ export function createConsultationService(options: {
         contactChannel: "kakao_channel",
         phoneFingerprint: null,
         anonymousLabel: internalAlias,
+        preferredNameCiphertext: preferredNameEncrypted.ciphertext,
+        preferredNameNonce: preferredNameEncrypted.nonce,
+        preferredNameKeyVersion: preferredNameEncrypted.keyVersion,
         firstRequestedAt: receivedAt,
         lastRequestedAt: receivedAt,
         createdAt: receivedAt,
@@ -1200,10 +1260,10 @@ export function createConsultationService(options: {
         phoneCiphertext: null,
         phoneNonce: null,
         phoneKeyVersion: null,
-        hasProvidedName: false,
-        nameCiphertext: null,
-        nameNonce: null,
-        nameKeyVersion: null,
+        hasProvidedName: true,
+        nameCiphertext: requestNameEncrypted.ciphertext,
+        nameNonce: requestNameEncrypted.nonce,
+        nameKeyVersion: requestNameEncrypted.keyVersion,
         intakeCiphertext: intakeEncrypted.ciphertext,
         intakeNonce: intakeEncrypted.nonce,
         intakeKeyVersion: intakeEncrypted.keyVersion,
@@ -1818,16 +1878,19 @@ export function createConsultationService(options: {
       }
 
       const [homepageKakaoEntry] = await tx
-        .select({ status: kakaoHomepageEntries.status })
+        .select({
+          id: kakaoHomepageEntries.id,
+          firstRequestId: kakaoHomepageEntries.firstRequestId,
+          nameProvided: consultationRequests.hasProvidedName,
+          status: kakaoHomepageEntries.status,
+        })
         .from(kakaoHomepageEntries)
+        .innerJoin(
+          consultationRequests,
+          eq(kakaoHomepageEntries.firstRequestId, consultationRequests.id),
+        )
         .where(eq(kakaoHomepageEntries.consultationId, consultationId))
         .limit(1);
-      if (homepageKakaoEntry?.status === "pending") {
-        throw new ConsultationAssignmentError(
-          "consultation_not_assignable",
-          "카카오 채팅방의 고객명을 확인한 뒤 담당자를 지정해 주세요.",
-        );
-      }
 
       const [latestRequest] = await tx
         .select({
@@ -1843,6 +1906,44 @@ export function createConsultationService(options: {
           "consultation_not_assignable",
           "상담 요청 원장을 찾을 수 없어 담당자를 지정하지 못했습니다.",
         );
+      }
+      const kakaoAssignmentPolicy = homepageKakaoEntry
+        ? kakaoHomepageEntryAssignmentPolicy(homepageKakaoEntry)
+        : "assign";
+      if (kakaoAssignmentPolicy === "blocked") {
+        throw new ConsultationAssignmentError(
+          "consultation_not_assignable",
+          "카카오 채팅방의 고객명을 확인한 뒤 담당자를 지정해 주세요.",
+        );
+      }
+
+      const kakaoEntryToConfirm =
+        kakaoAssignmentPolicy === "confirm_and_assign" && homepageKakaoEntry
+          ? homepageKakaoEntry
+          : null;
+      if (kakaoEntryToConfirm) {
+        await tx
+          .update(kakaoHomepageEntries)
+          .set({
+            status: "confirmed",
+            confirmedAt: now,
+            confirmedByUserId: actor.id,
+            updatedAt: now,
+          })
+          .where(eq(kakaoHomepageEntries.id, kakaoEntryToConfirm.id));
+        await tx.insert(staffAuditLogs).values({
+          id: createEventId(),
+          actorUserId: actor.id,
+          action: "consultation.kakao_chat_confirmed_from_assignment",
+          targetType: "consultation",
+          targetId: consultationId,
+          metadata: {
+            entryId: kakaoEntryToConfirm.id,
+            requestId: kakaoEntryToConfirm.firstRequestId,
+          },
+          occurredAt: now,
+          createdAt: now,
+        });
       }
 
       const assignmentId = createEventId();
@@ -1895,22 +1996,39 @@ export function createConsultationService(options: {
         intakeRef: `consultation_requests/${latestRequest.id}` as const,
       };
       const occurredAt = now.toISOString();
-      const events: PlatformEvent[] = [
-        {
-          eventId: assignedEventId,
-          eventType: "consultation.assigned",
+      const events: PlatformEvent[] = [];
+      if (kakaoEntryToConfirm) {
+        events.push({
+          eventId: createEventId(),
+          eventType: "consultation.kakao_chat.confirmed",
           eventVersion: 1,
           occurredAt,
           producer: "lawand.gateway",
           correlationId: consultationId,
           data: {
-            ...referenceData,
-            assigneeUserId: actor.id,
-            assigneeMembershipId: actor.primaryMembership.id,
-            assignmentMethod: "self_claim",
+            consultationId,
+            requestId: kakaoEntryToConfirm.firstRequestId,
+            intakeRef:
+              `consultation_requests/${kakaoEntryToConfirm.firstRequestId}`,
+            entryId: kakaoEntryToConfirm.id,
+            actorUserId: actor.id,
           },
+        });
+      }
+      events.push({
+        eventId: assignedEventId,
+        eventType: "consultation.assigned",
+        eventVersion: 1,
+        occurredAt,
+        producer: "lawand.gateway",
+        correlationId: consultationId,
+        data: {
+          ...referenceData,
+          assigneeUserId: actor.id,
+          assigneeMembershipId: actor.primaryMembership.id,
+          assignmentMethod: "self_claim",
         },
-      ];
+      });
       if (latestRequest.contactChannel === "phone") {
         events.push({
           eventId: createEventId(),
@@ -2289,10 +2407,15 @@ export function createConsultationService(options: {
       .select({
         consultationId: kakaoHomepageEntries.consultationId,
         status: kakaoHomepageEntries.status,
+        nameProvided: consultationRequests.hasProvidedName,
         clickCount: kakaoHomepageEntries.clickCount,
         lastClickedAt: kakaoHomepageEntries.lastClickedAt,
       })
       .from(kakaoHomepageEntries)
+      .innerJoin(
+        consultationRequests,
+        eq(kakaoHomepageEntries.firstRequestId, consultationRequests.id),
+      )
       .where(inArray(kakaoHomepageEntries.consultationId, ids));
     const homepageEntryByConsultation = new Map(
       homepageEntryRows.map((row) => [row.consultationId, row]),
@@ -2369,8 +2492,7 @@ export function createConsultationService(options: {
       }
     }
 
-    return {
-      items: consultationRows.map((consultation) => {
+    const items = consultationRows.map((consultation) => {
         const request = latestByConsultation.get(consultation.id);
         const preferredName =
           consultation.preferredNameCiphertext &&
@@ -2439,6 +2561,7 @@ export function createConsultationService(options: {
           kakaoEntry: kakaoEntry
             ? {
                 status: kakaoEntry.status,
+                nameProvided: kakaoEntry.nameProvided,
                 clickCount: kakaoEntry.clickCount,
                 lastClickedAt: kakaoEntry.lastClickedAt.toISOString(),
               }
@@ -2460,7 +2583,18 @@ export function createConsultationService(options: {
           firstRequestedAt: consultation.firstRequestedAt.toISOString(),
           lastRequestedAt: consultation.lastRequestedAt.toISOString(),
         };
-      }),
+      });
+    const existingCustomerPhones = await existingLegalFriendsCustomerPhones(
+      items.flatMap((item) => (item.phone ? [item.phone] : [])),
+    );
+
+    return {
+      items: items.map((item) => ({
+        ...item,
+        existingCustomer:
+          item.phone !== null &&
+          existingCustomerPhones.has(item.phone.replace(/[^0-9]/g, "")),
+      })),
       total,
       page,
       pageSize: query.pageSize,
@@ -2480,6 +2614,7 @@ export function createConsultationService(options: {
     const [kakaoEntry] = await db
       .select({
         id: kakaoHomepageEntries.id,
+        firstRequestId: kakaoHomepageEntries.firstRequestId,
         status: kakaoHomepageEntries.status,
         clickCount: kakaoHomepageEntries.clickCount,
         firstClickedAt: kakaoHomepageEntries.firstClickedAt,
@@ -2760,6 +2895,29 @@ export function createConsultationService(options: {
             `consultations.preferred_name:${consultation.id}`,
           )
         : null;
+    const phoneByRequest = new Map(
+      requestRows.map((request) => [
+        request.id,
+        request.phoneCiphertext &&
+        request.phoneNonce &&
+        request.phoneKeyVersion
+          ? protection.decrypt(
+              {
+                ciphertext: request.phoneCiphertext,
+                nonce: request.phoneNonce,
+                keyVersion: request.phoneKeyVersion,
+              },
+              `consultation_requests.phone:${request.id}`,
+            )
+          : null,
+      ]),
+    );
+    const latestPhone = requestRows[0]
+      ? phoneByRequest.get(requestRows[0].id) ?? null
+      : null;
+    const existingCustomerPhones = await existingLegalFriendsCustomerPhones(
+      latestPhone ? [latestPhone] : [],
+    );
 
     return {
       id: consultation.id,
@@ -2767,10 +2925,18 @@ export function createConsultationService(options: {
       state: consultation.state,
       displayName: preferredName ?? consultation.anonymousLabel,
       contactChannel: consultation.contactChannel,
+      existingCustomer:
+        latestPhone !== null &&
+        existingCustomerPhones.has(latestPhone.replace(/[^0-9]/g, "")),
       kakaoEntry: kakaoEntry
         ? {
             id: kakaoEntry.id,
             status: kakaoEntry.status,
+            nameProvided: Boolean(
+              requestRows.find(
+                (request) => request.id === kakaoEntry.firstRequestId,
+              )?.hasProvidedName,
+            ),
             clickCount: kakaoEntry.clickCount,
             firstClickedAt: kakaoEntry.firstClickedAt.toISOString(),
             lastClickedAt: kakaoEntry.lastClickedAt.toISOString(),
@@ -2940,19 +3106,7 @@ export function createConsultationService(options: {
           mode: request.mode,
           source: request.source,
           contactChannel: request.contactChannel,
-          phone:
-            request.phoneCiphertext &&
-            request.phoneNonce &&
-            request.phoneKeyVersion
-              ? protection.decrypt(
-                  {
-                    ciphertext: request.phoneCiphertext,
-                    nonce: request.phoneNonce,
-                    keyVersion: request.phoneKeyVersion,
-                  },
-                  `consultation_requests.phone:${request.id}`,
-                )
-              : null,
+          phone: phoneByRequest.get(request.id) ?? null,
           name:
             request.nameCiphertext &&
             request.nameNonce &&

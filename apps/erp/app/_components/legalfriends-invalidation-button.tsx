@@ -48,7 +48,7 @@ export function LegalFriendsInvalidationButton({
   return (
     <form
       action={action}
-      className="legalfriends-invalidation-form"
+      className="consultation-invalidation-form"
       onSubmit={(event) => {
         if (
           !window.confirm(
@@ -60,14 +60,14 @@ export function LegalFriendsInvalidationButton({
       }}
     >
       <button
-        className="legalfriends-invalidation-button"
+        className="consultation-invalidation-button"
         disabled={disabled}
         type="submit"
       >
         {label}
       </button>
       {state.error ? (
-        <p className="legalfriends-invalidation-error" role="alert">
+        <p className="consultation-invalidation-error" role="alert">
           {state.error}
         </p>
       ) : null}

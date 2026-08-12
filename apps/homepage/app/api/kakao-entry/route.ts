@@ -48,12 +48,15 @@ export async function POST(request: Request) {
 
     const formData = await request.formData();
     const idempotencyValue = formData.get("idempotencyKey");
+    const displayNameValue = formData.get("displayName");
     const parsed = kakaoHomepageEntrySubmissionSchema.safeParse({
       source: "homepage_kakao",
       idempotencyKey:
         typeof idempotencyValue === "string" && idempotencyValue
           ? idempotencyValue
           : randomUUID(),
+      displayName:
+        typeof displayNameValue === "string" ? displayNameValue : "",
       attribution: parseAttribution(formData.get("attribution")),
     });
     if (!parsed.success) {
@@ -64,7 +67,13 @@ export async function POST(request: Request) {
           occurredAt: new Date().toISOString(),
         }),
       );
-      return redirect();
+      return NextResponse.json(
+        {
+          error: "invalid_kakao_entry",
+          message: "이름 또는 카카오톡 표시명을 입력해 주세요.",
+        },
+        { status: 400 },
+      );
     }
 
     const headers: Record<string, string> = {

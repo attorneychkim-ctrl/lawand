@@ -2,16 +2,49 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  kakaoHomepageEntryAssignmentPolicy,
   kakaoHomepageEntryConfirmationSchema,
   kakaoHomepageEntryReceiptSchema,
   kakaoHomepageEntrySubmissionSchema,
 } from "./kakao-homepage.js";
 
-test("홈페이지 카카오 진입은 UUID 멱등키와 선택적 유입정보만 받는다", () => {
+test("고객 입력 이름이 있는 대기 접수만 상담하기에서 확인·배정을 함께 허용한다", () => {
+  assert.equal(
+    kakaoHomepageEntryAssignmentPolicy({
+      status: "pending",
+      nameProvided: true,
+    }),
+    "confirm_and_assign",
+  );
+  assert.equal(
+    kakaoHomepageEntryAssignmentPolicy({
+      status: "pending",
+      nameProvided: false,
+    }),
+    "blocked",
+  );
+  assert.equal(
+    kakaoHomepageEntryAssignmentPolicy({
+      status: "confirmed",
+      nameProvided: false,
+    }),
+    "assign",
+  );
+  assert.equal(
+    kakaoHomepageEntryAssignmentPolicy({
+      status: "invalid",
+      nameProvided: true,
+    }),
+    "blocked",
+  );
+});
+
+test("홈페이지 카카오 진입은 표시명과 UUID 멱등키를 받는다", () => {
   assert.equal(
     kakaoHomepageEntrySubmissionSchema.safeParse({
       source: "homepage_kakao",
       idempotencyKey: "01984c7d-8500-7000-8000-000000000001",
+      displayName: "김민수",
     }).success,
     true,
   );
@@ -19,6 +52,15 @@ test("홈페이지 카카오 진입은 UUID 멱등키와 선택적 유입정보�
     kakaoHomepageEntrySubmissionSchema.safeParse({
       source: "homepage_kakao",
       idempotencyKey: "not-a-uuid",
+      displayName: "김민수",
+    }).success,
+    false,
+  );
+  assert.equal(
+    kakaoHomepageEntrySubmissionSchema.safeParse({
+      source: "homepage_kakao",
+      idempotencyKey: "01984c7d-8500-7000-8000-000000000001",
+      displayName: " ",
     }).success,
     false,
   );

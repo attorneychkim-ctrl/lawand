@@ -20,6 +20,7 @@ export type ConsultationListItem = {
   displayName: string;
   contactChannel: "phone" | "kakao_channel" | "naver_booking";
   phone: string | null;
+  existingCustomer: boolean;
   residenceRegion: string | null;
   mode: "quick" | "detailed" | "self_diagnosis";
   dedupeOutcome:
@@ -32,6 +33,7 @@ export type ConsultationListItem = {
   assigneeDisplayName: string | null;
   kakaoEntry: {
     status: "pending" | "confirmed" | "invalid";
+    nameProvided: boolean;
     clickCount: number;
     lastClickedAt: string;
   } | null;
@@ -507,9 +509,11 @@ export type ConsultationDetail = {
   state: string;
   displayName: string;
   contactChannel: "phone" | "kakao_channel" | "naver_booking";
+  existingCustomer: boolean;
   kakaoEntry: {
     id: string;
     status: "pending" | "confirmed" | "invalid";
+    nameProvided: boolean;
     clickCount: number;
     firstClickedAt: string;
     lastClickedAt: string;
