@@ -43,7 +43,10 @@ export function StaffBar({ staff }: { staff: StaffPrincipal }) {
           </form>
         </div>
       </div>
-      <InboundCallIndicator staffUserId={staff.id} />
+      <InboundCallIndicator
+        staffDisplayName={staff.displayName}
+        staffUserId={staff.id}
+      />
     </header>
   );
 }

@@ -54,6 +54,8 @@ function statusMessage(call: CallState | null, aftercareSaved: boolean) {
 
 type ClickToCallButtonProps = {
   initialCall?: CallState | null;
+  idleLabel?: string;
+  staffName: string;
 } & (
   | {
       consultationId: string;
@@ -73,6 +75,8 @@ export function ClickToCallButton({
   consultationId,
   directoryTarget,
   initialCall = null,
+  idleLabel = "센트릭스로 전화",
+  staffName,
 }: ClickToCallButtonProps) {
   const router = useRouter();
   const [call, setCall] = useState<CallState | null>(initialCall);
@@ -219,7 +223,7 @@ export function ClickToCallButton({
           : "전화기 연결 중…"
       : needsAftercare
         ? "통화 후처리 입력"
-        : "센트릭스로 전화";
+        : idleLabel;
   const message = error || statusMessage(call, aftercareSaved);
 
   return (
@@ -245,6 +249,7 @@ export function ClickToCallButton({
       ) : null}
       <PhoneAftercareDialog
         callId={call?.id ?? null}
+        staffName={staffName}
         onClose={() => setAftercareOpen(false)}
         onSaved={() => {
           if (call) {

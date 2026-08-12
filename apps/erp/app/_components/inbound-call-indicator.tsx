@@ -197,8 +197,10 @@ function notificationCopy(activity: TelephonyCallActivity) {
 }
 
 export function InboundCallIndicator({
+  staffDisplayName,
   staffUserId,
 }: {
+  staffDisplayName: string;
   staffUserId: string;
 }) {
   const [calls, setCalls] = useState<TelephonyInboundCall[]>([]);
@@ -1036,6 +1038,7 @@ export function InboundCallIndicator({
       ) : null}
       <PhoneAftercareDialog
         callId={aftercareCallId}
+        staffName={staffDisplayName}
         onClose={() => setAftercareCallId(null)}
         onSaved={() => {
           if (aftercareCallId) {

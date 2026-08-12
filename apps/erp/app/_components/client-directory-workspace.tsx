@@ -184,6 +184,7 @@ export function ClientDirectoryWorkspace({ staffName }: { staffName: string }) {
                             caseIdx: item.caseIdx,
                             clientName: item.clientName,
                           }}
+                          staffName={staffName}
                         />
                       </>
                     ) : (

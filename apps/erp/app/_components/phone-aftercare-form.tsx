@@ -10,6 +10,7 @@ import type {
   PhoneDeskCallDetail,
   PhoneDeskCallResult,
 } from "../../lib/gateway";
+import { MessageComposeButton } from "./message-compose-button";
 
 const resultOptions = [
   { value: "consultation_completed", label: "상담완료" },
@@ -268,12 +269,51 @@ function suggestedConsultation(
   return resolved;
 }
 
+function messageTarget(detail: PhoneDeskCallDetail) {
+  const consultation = detail.call.clickToCall?.consultation ??
+    (detail.call.customerMatch?.source === "consultation"
+      ? detail.call.customerMatch.consultation
+      : null);
+  if (consultation) {
+    return {
+      source: "consultation" as const,
+      consultationId: consultation.id,
+      customerName: consultation.displayName,
+      receiptCode: consultation.publicReceiptCode,
+    };
+  }
+  const clickedDirectory = detail.call.clickToCall?.directoryClient;
+  if (clickedDirectory) {
+    return {
+      source: "legal_friends_directory" as const,
+      clientIdx: clickedDirectory.clientIdx,
+      caseIdx: clickedDirectory.caseIdx,
+      customerName: clickedDirectory.displayName,
+      receiptCode: "리걸프렌즈",
+    };
+  }
+  const legalFriends = detail.legalFriendsMatch;
+  const latestCase = legalFriends?.cases[0];
+  if (legalFriends && latestCase) {
+    return {
+      source: "legal_friends_directory" as const,
+      clientIdx: latestCase.clientIdx,
+      caseIdx: latestCase.caseIdx,
+      customerName: legalFriends.clientName,
+      receiptCode: latestCase.caseNumber ?? "리걸프렌즈",
+    };
+  }
+  return null;
+}
+
 export function PhoneAftercareForm({
   detail,
+  staffName,
   onSaved,
   returnTo,
 }: {
   detail: PhoneDeskCallDetail;
+  staffName: string;
   onSaved?: (next: PhoneDeskCallDetail) => void;
   returnTo?: string;
 }) {
@@ -282,7 +322,7 @@ export function PhoneAftercareForm({
   const suggested = suggestedConsultation(detail);
   const recommendedAssignee = detail.recommendedAssigneeUserIds[0] ?? "";
   const [result, setResult] = useState<PhoneDeskCallResult | "">(
-    existing?.result ?? "",
+    existing?.result ?? "consultation_completed",
   );
   const [otherText, setOtherText] = useState(existing?.otherText ?? "");
   const [memo, setMemo] = useState(existing?.memo ?? "");
@@ -351,6 +391,7 @@ export function PhoneAftercareForm({
   const followUpDueValid = Boolean(
     followUpDueAt && minimumDueAt && followUpDueAt >= minimumDueAt,
   );
+  const safeMessageTarget = messageTarget(detail);
   const canSave = Boolean(
     result &&
       (result !== "other" || otherText.trim()) &&
@@ -456,6 +497,36 @@ export function PhoneAftercareForm({
           </label>
         ) : null}
       </fieldset>
+
+      <section className="phone-aftercare-message-action">
+        <div>
+          <strong>고객에게 문자 남기기</strong>
+          <span>통화 결과와 관계없이 안내나 부재 메시지를 바로 보낼 수 있습니다.</span>
+        </div>
+        {safeMessageTarget?.source === "consultation" ? (
+          <MessageComposeButton
+            consultationId={safeMessageTarget.consultationId}
+            customerName={safeMessageTarget.customerName}
+            receiptCode={safeMessageTarget.receiptCode}
+            staffName={staffName}
+          />
+        ) : safeMessageTarget?.source === "legal_friends_directory" ? (
+          <MessageComposeButton
+            customerName={safeMessageTarget.customerName}
+            directoryTarget={{
+              clientIdx: safeMessageTarget.clientIdx,
+              caseIdx: safeMessageTarget.caseIdx,
+            }}
+            receiptCode={safeMessageTarget.receiptCode}
+            staffName={staffName}
+          />
+        ) : (
+          <div className="phone-aftercare-message-unavailable">
+            <button className="message-button" disabled type="button">문자 보내기</button>
+            <small>상담 또는 리걸프렌즈 고객 연결 후 사용할 수 있습니다.</small>
+          </div>
+        )}
+      </section>
 
       <fieldset className="phone-aftercare-section">
         <legend>상담데스크 연결</legend>
@@ -731,11 +802,13 @@ export function PhoneAftercareForm({
 
 export function PhoneAftercareDialog({
   callId,
+  staffName,
   open,
   onClose,
   onSaved,
 }: {
   callId: string | null;
+  staffName: string;
   open: boolean;
   onClose: () => void;
   onSaved?: (next: PhoneDeskCallDetail) => void;
@@ -839,6 +912,7 @@ export function PhoneAftercareDialog({
         {detail ? (
           <PhoneAftercareForm
             detail={detail}
+            staffName={staffName}
             onSaved={(next) => {
               setDetail(next);
               onSaved?.(next);

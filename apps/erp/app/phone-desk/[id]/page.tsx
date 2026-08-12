@@ -111,7 +111,11 @@ export default async function PhoneDeskDetailPage({
                 <span className="count-badge attention">입력 필요</span>
               )}
             </div>
-            <PhoneAftercareForm detail={detail} returnTo="/phone-desk" />
+            <PhoneAftercareForm
+              detail={detail}
+              returnTo="/phone-desk"
+              staffName={staff.displayName}
+            />
           </section>
         ) : (
           <p className="info-banner">통화가 종료되면 후처리 입력이 열립니다.</p>
