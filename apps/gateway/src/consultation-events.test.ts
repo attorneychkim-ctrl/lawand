@@ -18,6 +18,28 @@ test("상담 outbox 알림 payload에서 실시간 이벤트를 복원한다", (
       eventType: "consultation.requested",
       consultationId: "019fa6a4-6834-7782-aa0b-4e71ffb8a2a2",
       occurredAt: "2026-08-05T09:00:00+00:00",
+      notificationKind: null,
+    },
+  );
+});
+
+test("상담 재요청 알림은 개인정보 없이 배정 전후 구분만 전달한다", () => {
+  assert.deepEqual(
+    parseConsultationEventNotification(
+      JSON.stringify({
+        eventId: "019fa6a4-6834-7782-aa0b-4e71ffb8a2a1",
+        eventType: "consultation.request.updated",
+        consultationId: "019fa6a4-6834-7782-aa0b-4e71ffb8a2a2",
+        occurredAt: "2026-08-05T09:00:00+00:00",
+        notificationKind: "repeat_assigned",
+      }),
+    ),
+    {
+      eventId: "019fa6a4-6834-7782-aa0b-4e71ffb8a2a1",
+      eventType: "consultation.request.updated",
+      consultationId: "019fa6a4-6834-7782-aa0b-4e71ffb8a2a2",
+      occurredAt: "2026-08-05T09:00:00+00:00",
+      notificationKind: "repeat_assigned",
     },
   );
 });

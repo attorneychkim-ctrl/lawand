@@ -53,19 +53,33 @@ const requestedDataSchema = z
     }
   });
 
-const updatedDataSchema = z
-  .object({
-    consultationId: z.uuid(),
-    requestId: z.uuid(),
-    intakeRef: z.string().regex(/^consultation_requests\/[0-9a-f-]{36}$/),
-    attributionRef: z
-      .string()
-      .regex(/^consultation_attributions\/[0-9a-f-]{36}$/)
-      .optional(),
-    updateReason: z.literal("identity_enriched"),
-    dedupeOutcome: z.literal("identity_enrichment"),
-  })
-  .strict();
+const updatedReferenceFields = {
+  consultationId: z.uuid(),
+  requestId: z.uuid(),
+  intakeRef: z.string().regex(/^consultation_requests\/[0-9a-f-]{36}$/),
+  attributionRef: z
+    .string()
+    .regex(/^consultation_attributions\/[0-9a-f-]{36}$/)
+    .optional(),
+};
+
+const updatedDataSchema = z.discriminatedUnion("updateReason", [
+  z
+    .object({
+      ...updatedReferenceFields,
+      updateReason: z.literal("identity_enriched"),
+      dedupeOutcome: z.literal("identity_enrichment"),
+    })
+    .strict(),
+  z
+    .object({
+      ...updatedReferenceFields,
+      updateReason: z.literal("repeat_request"),
+      repeatStage: z.enum(["before_assignment", "after_assignment"]),
+      dedupeOutcome: z.enum(["repeat_unassigned", "repeat_assigned"]),
+    })
+    .strict(),
+]);
 
 const duplicateSuspectedDataSchema = z
   .object({

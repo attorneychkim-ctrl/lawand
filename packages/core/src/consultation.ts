@@ -18,6 +18,8 @@ export const dedupeOutcomeSchema = z.enum([
   "new",
   "exact_duplicate",
   "identity_enrichment",
+  "repeat_unassigned",
+  "repeat_assigned",
   "suspected_duplicate",
 ]);
 
@@ -38,6 +40,7 @@ export type ExistingConsultationCandidate = {
   latestPayloadFingerprint: string;
   latestJourneySessionId: string | null;
   hasProvidedName: boolean;
+  nameFingerprint: string | null;
   latestRequestAt: Date;
 };
 
@@ -50,6 +53,7 @@ export type DedupeSubmission = {
   payloadFingerprint: string;
   journeySessionId: string | null;
   hasProvidedName: boolean;
+  nameFingerprint: string | null;
   submittedAt: Date;
 };
 
@@ -72,6 +76,15 @@ export type DedupeDecision =
     }
   | {
       action: "attach_identity_enrichment";
+      consultationId: string;
+      matchedRequestId: string;
+      createConsultation: false;
+      createRequest: true;
+      eventTypes: ["consultation.request.updated"];
+    }
+  | {
+      action: "attach_repeat_request";
+      stage: "before_assignment" | "after_assignment";
       consultationId: string;
       matchedRequestId: string;
       createConsultation: false;
@@ -169,6 +182,30 @@ export function classifyConsultationSubmission(
     };
   }
 
+  const repeatRequest = activePhoneMatches.find(
+    (candidate) =>
+      submission.nameFingerprint !== null &&
+      candidate.nameFingerprint !== null &&
+      candidate.nameFingerprint === submission.nameFingerprint &&
+      elapsedMs(submission.submittedAt, candidate.latestRequestAt) <=
+        DEDUPE_WINDOWS.suspectedDuplicateMs,
+  );
+
+  if (repeatRequest) {
+    return {
+      action: "attach_repeat_request",
+      stage:
+        repeatRequest.state === "requested"
+          ? "before_assignment"
+          : "after_assignment",
+      consultationId: repeatRequest.consultationId,
+      matchedRequestId: repeatRequest.latestRequestId,
+      createConsultation: false,
+      createRequest: true,
+      eventTypes: ["consultation.request.updated"],
+    };
+  }
+
   const suspectedDuplicate = activePhoneMatches.find(
     (candidate) =>
       elapsedMs(submission.submittedAt, candidate.latestRequestAt) <=
@@ -195,3 +232,28 @@ export function classifyConsultationSubmission(
     eventTypes: ["consultation.requested"],
   };
 }
+
+export const legalFriendsConsultationHandlingSchema = z.discriminatedUnion(
+  "mode",
+  [
+    z
+      .object({
+        mode: z.literal("existing_case"),
+        clientIdx: z.number().int().positive(),
+        caseIdx: z.number().int().positive(),
+      })
+      .strict(),
+    z.object({ mode: z.literal("new_matter") }).strict(),
+    z.object({ mode: z.literal("shared_contact") }).strict(),
+  ],
+);
+
+export const consultationAssignmentInputSchema = z
+  .object({
+    legalFriendsHandling: legalFriendsConsultationHandlingSchema.optional(),
+  })
+  .strict();
+
+export type LegalFriendsConsultationHandling = z.infer<
+  typeof legalFriendsConsultationHandlingSchema
+>;

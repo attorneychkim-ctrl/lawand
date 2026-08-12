@@ -4,16 +4,38 @@ import {
   assignConsultationToMe,
   ConsultationGatewayError,
 } from "../../../../../lib/gateway";
+import { legalFriendsConsultationHandlingSchema } from "@lawand/core";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
   const { id } = await context.params;
   try {
-    const assignment = await assignConsultationToMe(id);
+    const body = (await request.json().catch(() => ({}))) as Record<
+      string,
+      unknown
+    >;
+    const handling = body.legalFriendsHandling
+      ? legalFriendsConsultationHandlingSchema.safeParse(
+          body.legalFriendsHandling,
+        )
+      : null;
+    if (handling && !handling.success) {
+      return NextResponse.json(
+        {
+          error: "legalfriends_handling_invalid",
+          message: "리걸프렌즈 처리 구분을 다시 선택해 주세요.",
+        },
+        { status: 400 },
+      );
+    }
+    const assignment = await assignConsultationToMe(
+      id,
+      handling?.success ? handling.data : undefined,
+    );
     return NextResponse.json(assignment, {
       status: assignment.replayed ? 200 : 201,
     });

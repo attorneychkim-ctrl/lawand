@@ -6,6 +6,7 @@ import {
   alimtalkAssignmentNotificationRequestedEventSchema,
   alimtalkRequestNotificationRequestedEventSchema,
   consultationAssignedEventSchema,
+  consultationRequestUpdatedEventSchema,
   consultationRequestedEventSchema,
   LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
   LEGALFRIENDS_INVALID_MANAGER_MEMBER_IDX,
@@ -51,6 +52,32 @@ test("consultation.requested에 전화번호 같은 계약 외 필드를 넣으�
   };
 
   assert.equal(consultationRequestedEventSchema.safeParse(unsafeEvent).success, false);
+});
+
+test("상담 재요청은 배정 전후 구분과 요청 참조만 남긴다", () => {
+  const event = {
+    ...requestedEvent,
+    eventId: "01984c7d-8500-7000-8000-000000000019",
+    eventType: "consultation.request.updated",
+    data: {
+      consultationId: requestedEvent.data.consultationId,
+      requestId: requestedEvent.data.requestId,
+      intakeRef: requestedEvent.data.intakeRef,
+      attributionRef: requestedEvent.data.attributionRef,
+      updateReason: "repeat_request",
+      repeatStage: "after_assignment",
+      dedupeOutcome: "repeat_assigned",
+    },
+  } as const;
+
+  assert.deepEqual(consultationRequestUpdatedEventSchema.parse(event), event);
+  assert.equal(
+    consultationRequestUpdatedEventSchema.safeParse({
+      ...event,
+      data: { ...event.data, phone: "01012345678" },
+    }).success,
+    false,
+  );
 });
 
 test("카카오 최초 메시지는 동의 시각을 꾸미지 않고 채널 시작 근거를 남긴다", () => {

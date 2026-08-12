@@ -35,6 +35,8 @@ const dedupeLabels: Record<ConsultationListItem["dedupeOutcome"], string> = {
   new: "신규",
   exact_duplicate: "동일 내용 재접수",
   identity_enrichment: "고객정보 보강",
+  repeat_unassigned: "배정 전 재요청",
+  repeat_assigned: "담당 상담 재요청",
   suspected_duplicate: "7일 내 중복 의심",
 };
 
@@ -192,6 +194,9 @@ function StatusBadges({ item }: { item: ConsultationListItem }) {
       {item.existingCustomer ? (
         <span className="flag-badge is-existing">기존고객</span>
       ) : null}
+      {item.requiresLegalFriendsReview ? (
+        <span className="flag-badge is-attention">기존 사건 확인</span>
+      ) : null}
       {item.latestTelephony?.disposition === "no_answer" ? (
         <span className="flag-badge is-attention">부재</span>
       ) : null}
@@ -236,7 +241,8 @@ function StatusBadges({ item }: { item: ConsultationListItem }) {
       {item.dedupeOutcome !== "new" ? (
         <span
           className={`flag-badge ${
-            item.dedupeOutcome === "suspected_duplicate"
+            item.dedupeOutcome === "suspected_duplicate" ||
+            item.dedupeOutcome === "repeat_assigned"
               ? "is-danger"
               : "is-neutral"
           }`}
@@ -550,6 +556,7 @@ export function ConsultationWorkspace({
                     </svg>
                   </Link>
                   {consultation.state === "requested" &&
+                  !consultation.requiresLegalFriendsReview &&
                   (consultation.kakaoEntry?.status !== "pending" ||
                     consultation.kakaoEntry.nameProvided) ? (
                     <ClaimConsultationButton

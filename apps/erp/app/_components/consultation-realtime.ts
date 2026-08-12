@@ -5,6 +5,7 @@ export type ConsultationRealtimeChangedPayload = {
   eventType: string;
   consultationId: string;
   occurredAt: string;
+  notificationKind: "repeat_unassigned" | "repeat_assigned" | null;
 };
 
 export type ConsultationRealtimeMessage =
@@ -34,12 +35,21 @@ function parseChangedPayload(
     return typeof payload.eventId === "string" &&
         typeof payload.eventType === "string" &&
         typeof payload.consultationId === "string" &&
-        typeof payload.occurredAt === "string"
+        typeof payload.occurredAt === "string" &&
+        (payload.notificationKind === undefined ||
+          payload.notificationKind === null ||
+          payload.notificationKind === "repeat_unassigned" ||
+          payload.notificationKind === "repeat_assigned")
       ? {
           eventId: payload.eventId,
           eventType: payload.eventType,
           consultationId: payload.consultationId,
           occurredAt: payload.occurredAt,
+          notificationKind:
+            payload.notificationKind === "repeat_unassigned" ||
+            payload.notificationKind === "repeat_assigned"
+              ? payload.notificationKind
+              : null,
         }
       : null;
   } catch {
