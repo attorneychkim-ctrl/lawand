@@ -5,17 +5,16 @@ CloudFormation 스택: `lawand-prod`
 리전: 서울(`ap-northeast-2`)
 최초 배포 릴리스: `20260804T085006Z-84e8708`
 현재 홈페이지 릴리스: `20260810T064408Z-homepage-cutover-ready-v3`
-현재 ERP 릴리스: `20260811T104143Z-integrated-call-messaging-v2`
-현재 gateway 릴리스: `20260811T104143Z-integrated-call-messaging-v2`
-현재 Windows bridge: `v0.8.0.0`
+현재 ERP 릴리스: `20260812T015203Z-centrex-ringing-recovery-v1`
+현재 gateway 릴리스: `20260812T015203Z-centrex-ringing-recovery-v1`
+현재 Windows bridge: `v0.8.2.0`
 
-배포 대기: bridge `v0.8.2.0` + migration `0048_centrex_v2_ringing_recovery.sql` +
-gateway·ERP. 이 후보는 v2 수신 관측의 `incomingLineNumber` 누락을 고치고, 영구 거부
-이벤트 하나가 정상 후속 이벤트를 막는 FIFO 적체를 제거한다. 병행 v1 원장에서 빠진
-external root/leg를 멱등 복구하며, 동일 회선·고객 지문·시작/종료시각이 엄격히 일치하는
-U+ 종료 이력/지연 bridge 중복 원장과 동일 후처리만 하나로 정리한다. 15초 넘게 늦게 온
-수신에는 이미 무효일 수 있는 `전화 받기` 버튼을 노출하지 않는다. main 반영만으로 운영
-반영으로 간주하지 않는다.
+bridge `v0.8.2.0` + migration `0048_centrex_v2_ringing_recovery.sql` + gateway·ERP를
+하나의 복구 릴리스로 운영 반영했다. v2 수신 관측의 `incomingLineNumber` 누락과 영구 거부
+이벤트 하나가 정상 후속 이벤트를 막는 FIFO 적체를 제거하고, 병행 v1 원장에서 빠진
+external root/leg를 멱등 복구했다. 동일 회선·고객 지문·시작/종료시각이 엄격히 일치한
+U+ 종료 이력/지연 bridge 중복 원장과 동일 후처리만 하나로 정리했다. 15초 넘게 늦게 온
+수신에는 이미 무효일 수 있는 `전화 받기` 버튼을 노출하지 않는다.
 
 이 문서는 정식 도메인 전환 이후를 포함한 실제 AWS 구성, 접속점, 데이터 이관 범위와
 운영 체크리스트를 기록한다. 비밀번호·API 키·AWS 계정 ID·RDS 마스터 시크릿 ARN은
@@ -174,6 +173,63 @@ EC2에서 ARM64 네이티브 빌드한다. 서버 배포는
 systemd 앱 단위와 Caddy edge 단위는 부팅 시 자동 시작한다. 최종 검증에서 홈페이지·ERP는
 재기동 후 약 1초, gateway는 약 2초 안에 health를 회복했고 실패한 systemd unit과
 최근 error priority journal은 없었다.
+
+## 센트릭스 지연 수신·중복 원장 복구 통합 배포
+
+2026-08-12 `HERDR_ENV=1`에서 main·HERDR worktree 2개와 원격
+`origin/worktree/*` 14개를 전수 대조했다. 모든 원격 worktree HEAD가 main ancestor이고
+세 작업 트리가 깨끗해 추가 병합 없이 `main`/`origin/main` `66847b7`을 단일 배포 소스로
+사용했다. 전체 5개 패키지 typecheck·lint, core 65개·gateway 112개 테스트, DB schema
+check, 패키지별 production build와 Windows .NET Framework x86 self-test 19개를 통과했다.
+Turbo 일괄 build는 실행기 spawn 오류로 시작되지 않아 같은 5개 패키지의 직접 build로
+대체 검증했다.
+
+- 릴리스 ID는 `20260812T015203Z-centrex-ringing-recovery-v1`이다. private S3 AES256 앱
+  아티팩트 SHA-256은
+  `0ccf54921dd00e809096baf4fd76c07d0bec8060e850854d420cbf09f671a95d`,
+  bridge ZIP은
+  `1c00ec8e08d903e253b7d8246c37936ec1eba607dd552e938ba556bb2c4db16e`,
+  bridge source는
+  `c8e1c1e191a78e150d7cbd40c69adcbf2a959ca6db06c63161edc5aa9fc74d7f`다.
+  gateway 이미지 ID는
+  `sha256:e0ca5390fea42144569080a8d3950c7d13ea09c27244074ae53966c7e1d90a9e`,
+  ERP는
+  `sha256:59cbac811381880c5706d057400d3aa8208c0be0568516372ad34b03619fdbf7`다.
+  홈페이지 코드는 영향이 없어 기존 릴리스를 유지했다.
+- 변경 전 암호화 RDS 스냅샷
+  `lawand-prod-pre-centrex-ringing-recovery-20260812t015203z`을 `available`로 확보했다.
+  migration `0048` 해시는
+  `bd6681300b1fc6500c58af9983cecb2ff147d5cd4fd45c9d595500e6151ce6b8`이고 운영 원장은
+  49개로 Git과 일치한다. 적용 직후 미연결 v1 통화 17건은 0건이 됐고 root/leg는
+  346쌍에서 363쌍, provider 식별자는 513건에서 536건으로 복구됐다. 엄격히 일치한
+  중복 통화 1쌍과 중복 후처리 1건만 정리해 후처리는 42건에서 41건이 됐으며 재통화 11건,
+  source 제약 위반 0을 보존했다. 배포 후 업무 통화가 자연 유입된 최종 smoke 시점에도
+  미연결 통화와 source 위반은 0이다.
+- Windows bridge는 v0.8.2.0, SHA-256
+  `EF0891CDFF9344CB5CFA07D309DD795A4C10B6111D1B31B8C27DD6C957A9B8F8`로 전환했다.
+  조직용 Authenticode 인증서가 없어 이번 후보도 unsigned이며, 이전 v0.8.0.0
+  `312764133521E634EDAAF0820F4F44F953E41EEE34CD50BBF96B94F3BF0CA46B`를 검증된
+  rollback 파일로 보존했다. 최종 pool은 설치 51·배정 19·실행 24·warm 5,
+  오프라인·로그인 실패·재시도 queue 0, supervisor 정상이다.
+- v0.8.0이 만든 암호화 dead-letter 32건은 복호화·재처리·삭제하지 않았다. 15개 bridge의
+  `gateway-dead-letter-archive/20260812T015203Z-centrex-ringing-recovery-v1`로 옮겨
+  파일별 SHA-256 manifest와 함께 보존했고, manifest 15개·원장 항목 32개·보존 파일 32개를
+  다시 대조했다. 활성 dead-letter와 `DpapiQueueDepth`는 0이다. 새 CloudWatch 경보
+  `lawand-centrex-queue-depth`, `lawand-centrex-dead-letter-depth`를 추가하고 기존 합계
+  경보를 유지했으며 센트릭스 7개 경보는 모두 `OK`다.
+- gateway 첫 전환 시 개별 `canary-4591` secret과 이미 그 bridge를 포함한 `registry-v1`을
+  함께 넣어 중복 bridge ID 보호가 재시작 전에 배포를 중단했다. 현재 컨테이너는 유지됐고,
+  `registry-v1` 단일 소스로 재실행해 51개 key를 적용했다. 향후 풀 gateway 배포에서도
+  두 secret을 함께 넘기지 않는다.
+- gateway·ERP 컨테이너는 모두 예상 이미지, running, restart count 0이고 각
+  `lawand-caddy`와 정식 호스트 EIP 고정 HTTPS smoke가 정상이다. gateway 실시간 source·worker 9종 시작,
+  최근 error journal 0을 확인했다. 5분 임시 직원 세션으로 인증·통화 snapshot·전화데스크
+  첫 페이지 20건/총 366건·ERP `/phone-desk` 렌더를 200으로 확인하고 임시 세션을 삭제했다.
+  실제 통화·문자·외부 사건은 새로 만들지 않았다.
+- 배포 게이트는 활성 관측·받기/발신/문자 명령·telephony outbox가 3회 연속 0일 때만
+  전환했다. 08:19 KST부터 남은 내부 connected root 1건은 실제 활성 관측이나 실행 명령이
+  없는 기존 orphan으로 확인했으나 provider 종료 증거 없이 추정 종료하지 않았다. 별도
+  읽기 대조 후 안전한 종결 또는 명시적 orphan 상태 모델을 결정한다.
 
 ## 통화 활동 v2·서버 페이지네이션·문자 후속 UX 통합 배포
 
@@ -792,7 +848,7 @@ x86 OCX 프로세스 하나를 격리해 실행하고, 배정된 회선과 제�
 
 ## 아직 연결하지 않은 범위
 
-- DNS 전파 완료 뒤 gateway·ERP 정식 URL 환경값 재시작과 인증 로그인·모바일 smoke
+- DNS 전파 완료 뒤 resolver별 정식 URL 안정화와 모바일 실기기 smoke
 - ElastiCache Redis: 현재 DB outbox만으로 충분해 실제 큐·실시간 부하가 생길 때 추가
 - 사무실 NAS VPN, 녹취 전송, S3 Glacier 재해 복구 사본
 - 센트릭스 실시간 STT·요약·대응 멘트

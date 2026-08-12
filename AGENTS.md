@@ -71,6 +71,50 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-12 — 센트릭스 지연 수신 복구 v0.8.2·0048·gateway/ERP 운영 통합 배포
+- `HERDR_ENV=1`에서 main과 HERDR worktree 2개, 원격 `origin/worktree/*` 14개를 전수
+  대조했다. 모든 원격 HEAD가 main ancestor이고 세 작업 트리가 깨끗해 추가 병합 없이
+  `main`/`origin/main` `66847b7`을 배포 소스로 사용했다. `git pull --ff-only`와 main push는
+  이미 최신이었다. 전체 5개 패키지 typecheck·lint, core 65개·gateway 112개 테스트, DB
+  schema check, 패키지별 production build, Windows x86 self-test 19개와 `git diff --check`를
+  통과했다. Turbo 일괄 build는 코드 실행 전 spawn 오류가 나 같은 5개 패키지 직접 build로
+  대체 검증했다.
+- 통합 릴리스 `20260812T015203Z-centrex-ringing-recovery-v1`을 운영 반영했다. 배포 전 암호화
+  RDS 스냅샷 `lawand-prod-pre-centrex-ringing-recovery-20260812t015203z`은 available이다.
+  private S3 AES256 앱 아티팩트 SHA-256은
+  `0ccf54921dd00e809096baf4fd76c07d0bec8060e850854d420cbf09f671a95d`, bridge ZIP은
+  `1c00ec8e08d903e253b7d8246c37936ec1eba607dd552e938ba556bb2c4db16e`, bridge source는
+  `c8e1c1e191a78e150d7cbd40c69adcbf2a959ca6db06c63161edc5aa9fc74d7f`다. gateway 이미지
+  ID는 `sha256:e0ca5390fea42144569080a8d3950c7d13ea09c27244074ae53966c7e1d90a9e`, ERP는
+  `sha256:59cbac811381880c5706d057400d3aa8208c0be0568516372ad34b03619fdbf7`다. 홈페이지는
+  코드 영향이 없어 기존 릴리스를 유지했다.
+- migration `0048_centrex_v2_ringing_recovery.sql`을 적용해 운영 migration 49개와 최신
+  Git 해시 `bd6681300b1fc6500c58af9983cecb2ff147d5cd4fd45c9d595500e6151ce6b8`을 확인했다.
+  미연결 v1 통화 17건은 0건, root/leg는 346쌍→363쌍, provider 식별자는 513→536건으로
+  복구됐다. 엄격히 일치한 중복 통화 1쌍과 동일 후처리 1건만 합쳐 후처리 42→41건이 됐고,
+  재통화 11건·source 위반 0을 보존했다. 업무 통화가 배포 중 자연 유입·종료돼 최종 smoke
+  시점의 통화 수는 늘었지만 미연결과 source 위반은 계속 0이다.
+- Windows bridge를 v0.8.2.0, SHA-256
+  `EF0891CDFF9344CB5CFA07D309DD795A4C10B6111D1B31B8C27DD6C957A9B8F8`로 전환했다.
+  이전 v0.8.0.0 `312764133521E634EDAAF0820F4F44F953E41EEE34CD50BBF96B94F3BF0CA46B`는
+  rollback 파일로 보존했다. 최종 설치 51·배정 19·실행 24·warm 5, 오프라인·로그인 실패·
+  queue 0, supervisor 정상이다. v0.8.0 암호화 dead-letter 32건은 복호화·재처리·삭제 없이
+  15개 bridge별 `gateway-dead-letter-archive/20260812T015203Z-centrex-ringing-recovery-v1`로
+  옮기고 파일 SHA-256 manifest 15개·항목 32개·보존 파일 32개를 재검증했다. 활성
+  dead-letter·합계는 0이다. `QueueDepth`·`DeadLetterDepth` 분리 경보를 추가했고 기존 합계
+  경보를 포함한 센트릭스 7개가 모두 OK다. 후보 exe는 조직용 인증서가 없어 여전히 unsigned다.
+- gateway 첫 전환은 개별 `canary-4591` secret과 이미 이를 포함한 `registry-v1`의 중복을
+  재시작 전에 감지해 중단됐다. 실행 컨테이너는 유지됐고 `registry-v1`만 단일 소스로 넘겨
+  51개 bridge key와 정식 ERP URL을 정상 적용했다. 향후 풀 배포에서도 두 secret을 함께
+  넘기지 않는다. gateway·ERP 예상 이미지/running/restart 0, `lawand-caddy`, 정식 호스트
+  EIP 고정 HTTPS, gateway 실시간 source·worker 9종, 최근 error journal 0을 확인했다. 임시 5분 세션으로
+  인증·통화 snapshot·전화데스크 첫 페이지 20건/총 366건·ERP 전화데스크 200을 검증하고
+  세션을 0건으로 삭제했다. 실제 통화·문자·외부 사건 canary는 만들지 않았다.
+- 전환 게이트는 활성 관측과 받기/발신/문자 명령·telephony outbox가 3회 연속 0일 때만
+  열었다. 08:19 KST부터 남은 내부 connected root 1건은 실제 활성 관측이 없는 기존 orphan이라
+  provider 종료 증거 없이 추정 종료하지 않았다. 별도 읽기 대조 뒤 안전한 종결 또는 명시적
+  orphan 상태 모델을 정한다. `PROJECT_PLAN.md`는 v1.17이다.
+
 ### 2026-08-12 — 4591 지연 수신·종료 선행·중복 13초 원장 근본 수정 후보
 - 운영 Windows 비식별 로그와 DB 시각을 읽기 전용으로 대조했다. 4591은 10:12:06 KST에
   실제 ring을 즉시 관측·큐잉했지만 v0.8.0의 필수 `incomingLineNumber` 누락 v2 이벤트가

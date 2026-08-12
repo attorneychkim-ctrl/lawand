@@ -1,4 +1,4 @@
-# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.16)
+# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.17)
 
 > 이 문서는 새 로앤 홈페이지 + 새 ERP + 리걸플로/리걸프렌즈 연동을 하나의 플랫폼으로
 > 묶기 위한 **저장소 구조·아키텍처 설계 초안**이다. 코덱스/클로드코드 세션이 번갈아
@@ -574,7 +574,7 @@
 > bridge ring은 약 68초 뒤 도착해 기존 구현이 이미 종료된 U+ 이력을 찾지 못한 채 별도
 > 13초 원장과 후처리를 만들었다. 즉 브라우저 렌더 지연이 아니라 이벤트 단위 영구 오류의
 > head-of-line blocking과 지연 ring 상관 범위 부족이 결합한 장애였다.
-> v0.8.2 출시 후보는 수신 회선을 독립 직렬화하고 C#·core 양쪽에 inbound v2 계약 회귀
+> v0.8.2는 수신 회선을 독립 직렬화하고 C#·core 양쪽에 inbound v2 계약 회귀
 > 테스트를 둔다. 이벤트 단위 400/404/409/422는 재시도 중에도 후속 큐 파일을 계속 보내고,
 > 인증·rate limit·gateway 장애인 401/429/5xx와 네트워크 실패만 현재 배치를 중단한다.
 > gateway는 동일 endpoint·고객 지문·시작시각 5초 안의 유일한 U+ callback/history 원장을
@@ -590,8 +590,17 @@
 > 생성하지 않고 연결하며 후처리 원천도 root로 원자적으로 승격한다. 필수 필드가 이미 빠진
 > 과거 암호화 dead-letter는 재처리로 복구하지 않고 migration 대조 뒤 hash를 보존한 archive로
 > 이동한다. 로컬 운영형 fixture에서 중복 통화·이벤트 4건·동일 후처리·두 provider 식별자의
-> 보존과 migration 2회 멱등성을 검증했다. 이 후보는 아직 운영 bridge 교체, 운영 migration,
-> gateway·ERP 배포, dead-letter 이동과 CloudWatch 경보 재구성을 수행하지 않았다.
+> 보존과 migration 2회 멱등성을 검증했다. 2026-08-12 통합 복구 릴리스
+> `20260812T015203Z-centrex-ringing-recovery-v1`로 migration `0048`, gateway·ERP와
+> Windows bridge v0.8.2.0을 함께 운영 반영했다. migration은 미연결 v1 17건을 root/leg에
+> 연결하고 엄격히 일치한 중복 통화 1쌍과 중복 후처리 1건만 정리했으며 source 제약 위반과
+> 미연결 원장은 0이다. v0.8.0이 남긴 암호화 dead-letter 32건은 복호화·재처리하지 않고
+> 15개 bridge별 SHA-256 manifest와 함께 archive로 이동했다. 새 `QueueDepth`·
+> `DeadLetterDepth` 경보와 기존 합계 경보는 모두 `OK`이고, pool은 설치 51·배정 19·실행 24·
+> warm 5, 오프라인·로그인 실패·활성 queue/dead-letter 0이다. gateway·ERP 인증 smoke와
+> 전화데스크 첫 페이지 계약을 통과했고 임시 세션은 0건으로 정리했다. 별도 과제로 남은
+> 08:19 KST의 내부 통화 root 1건은 실제 활성 관측이 없는 기존 orphan이라 이번 migration이나
+> 배포에서 추정 종료하지 않았다.
 > `Office_idx=56` 사건만 이름·전화·사건번호·원본 사건 ID 없이 추출한 자가진단
 > 런타임 읽기 모델을 만들었다. 현재 1,759건(회생 1,342·파산면책 417)이며 gateway만
 > 이 모델을 읽는다. `/bank/self-diagnosis`는 고객 상황과 유사한 다섯 건의 월 변제금·
@@ -1681,8 +1690,9 @@ Manager와 별도 역할·보안그룹·TLS 기준을 적용한다.
 - [x] 통합 통화 활동 구현: root/leg 원장·외부 수발신 공용 snapshot/card·정확한 알림 대상·
   토스트/Notification API·최종 고객 통화자 1회 후처리
 - [x] 통합 통화 활동 migration `0045`·gateway·ERP·bridge v0.8.0 운영 통합 배포
-- [x] v0.8.2 출시 후보: v2 수신 필수 회선 직렬화·이벤트별 영구 오류 큐 비차단·종료된
-  U+ 이력과 지연 bridge ring 엄격 상관·늦은 `전화 받기` 차단·0048 중복 원장 복구
+- [x] v0.8.2 운영 통합 배포: v2 수신 필수 회선 직렬화·이벤트별 영구 오류 큐 비차단·
+  종료된 U+ 이력과 지연 bridge ring 엄격 상관·늦은 `전화 받기` 차단·0048 중복 원장 복구,
+  암호화 dead-letter 32건 SHA archive와 queue/dead-letter 분리 경보
 - [ ] v0.8.0 일반 내선·무조건/통화 후 호전환·실패 복귀 운영 acceptance 재수행
 - [x] 실제 업무 통화를 포함한 10→25→50 프로세스 CPU·메모리 canary와 warm 5개 원복
 - [ ] bridge 조직용 Authenticode 인증서 발급·서명 배포
@@ -1738,15 +1748,15 @@ Manager와 별도 역할·보안그룹·TLS 기준을 적용한다.
 11. 실제 수신·ERP 발신·직접 발신 한 건씩 통화 종료 후 공용 후처리 자동 열림과 담당자 기본값 UX 확인
 12. 센트릭스 조직용 코드 서명 인증서 배포; 실제 배정이 50개에 가까워지기 전
     t3.medium의 메모리 여유를 재확인하고 t3.large 상향 검토
-13. bridge v0.8.2·gateway·ERP·migration 0048을 하나의 복구 릴리스로 배포해 큐·dead-letter
-    분리 경보, 지연 수신 비차단, 중복 원장 정리를 먼저 검증한다. 이어 일반 내선·무조건/통화
-    후 호전환·실패 복귀를 다시 canary한다. 통화 후 호전환의
+13. 배포된 bridge v0.8.2에서 외부 수신 순서를 통제 관측해 지연 수신 비차단과 새
+    queue/dead-letter 분리 경보를 재확인한다. 이어 일반 내선·무조건/통화 후 호전환·실패
+    복귀를 다시 canary한다. 통화 후 호전환의
     B/customer final leg는 추가 provider 증거가 없으면 계속 `호전환 확인 필요`로 남기고,
     공용 카드·담당자 알림·최종 통화자 후처리와 녹취 매핑용 provider 식별자를 대조한다.
 14. 비즈콜 앱 직접 발신 1건이 종료 후 전화데스크에 들어오는지만 운영 acceptance로 확인;
     실시간 모바일 ring·ERP 받기·원격 발신은 현재 범위에서 제외
 15. 전화 담당자의 실시간 근무현황과 회선 통화 중 여부를 전화데스크·수신 카드에 결합
-16. `lawandfirm.com` DNS 전파 관찰, 무통화 시 gateway·ERP 정식 URL 재시작·인증 smoke,
-    Solapi IP 제한·승인된 운영 canary·경보 통지 연결
-17. v2 `call.ringing` 400 dead-letter 원인 수정·회귀 검증 뒤 보존 암호문의 통제 재처리 여부 결정
+16. `lawandfirm.com` DNS 전파 관찰, Solapi IP 제한·승인된 운영 canary·경보 통지 연결
+17. 실제 관측이 없는 08:19 KST 내부 active root 1건의 provider 종료 증거를 대조하고,
+    추정 없이 안전한 종결 또는 별도 orphan 상태 모델을 결정
 18. 기준점 이후 신규 네이버 예약 확정 메일 → IMAP 전용 ERP 접수 실제 canary
