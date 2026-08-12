@@ -48,12 +48,15 @@ export async function POST(request: Request) {
 
     const formData = await request.formData();
     const idempotencyValue = formData.get("idempotencyKey");
+    const displayNameValue = formData.get("displayName");
     const parsed = kakaoHomepageEntrySubmissionSchema.safeParse({
       source: "homepage_kakao",
       idempotencyKey:
         typeof idempotencyValue === "string" && idempotencyValue
           ? idempotencyValue
           : randomUUID(),
+      displayName:
+        typeof displayNameValue === "string" ? displayNameValue : "",
       attribution: parseAttribution(formData.get("attribution")),
     });
     if (!parsed.success) {

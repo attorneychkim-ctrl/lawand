@@ -71,6 +71,25 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-12 — 홈페이지 카카오 표시명 선입력·ERP 즉시 상담하기 출시 후보
+- 홈페이지의 모든 카카오 상담 CTA를 직접 외부 이동하는 방식에서 client-only 모달로
+  바꿨다. 고객이 `이름 또는 카카오톡 표시명`을 필수로 입력하고 확인할 때만 same-origin
+  POST가 접수를 만든 뒤 기존 카카오 1:1 채팅 URL을 새 탭으로 연다. 입력값은 공백 정규화,
+  1~40자·제어문자 거부를 적용했고 요청 원문과 `<표시명>_<접수번호 8자리>_플친` 이름을
+  각각 AES-256-GCM으로 저장한다. 전화번호·카카오 사용자 ID·메시지 원문은 계속 수집하지
+  않으며 개인정보처리방침과 이용약관도 새 흐름에 맞춰 갱신했다.
+- 새 접수는 카카오 링크만으로 실제 메시지 도착을 증명할 수 없어 `pending`을 유지하지만,
+  ERP 목록에 복호화한 입력 이름과 `카톡 이름 입력` 배지를 즉시 표시한다. 상담원이 같은
+  이름의 채팅을 확인하고 `상담하기`를 누르면 gateway가 채팅 확인과 본인 담당 배정을 같은
+  트랜잭션으로 처리하고 `consultation.kakao_chat.confirmed`·`consultation.assigned`를 함께
+  남긴다. 배포 전의 이름 없는 pending은 기존처럼 표시명 확인 전 배정을 차단하며, 오탈자
+  수정·미진입 무효 처리, 전화번호 NULL, 알림톡·리걸프렌즈 외부 실행 차단 계약은 보존했다.
+- DB migration 없이 기존 암호화 이름·요청·카카오 entry 필드를 재사용했다. core 66개와
+  gateway 112개 전체 테스트, gateway HTTP 37개 테스트, core·db·gateway·homepage·ERP의
+  대상 typecheck/lint/build를 통과했다. 최종 홈페이지 정적 HTML에는 모달의 이름 input·
+  제출 button이 0개임을 확인해 SSR 첫 렌더의 hydration 결정성을 지켰다. `PROJECT_PLAN.md`는
+  v1.18이다. 이 워크트리에서는 main 병합·운영 배포·운영 데이터 변경을 수행하지 않았다.
+
 ### 2026-08-12 — 센트릭스 지연 수신 복구 v0.8.2·0048·gateway/ERP 운영 통합 배포
 - `HERDR_ENV=1`에서 main과 HERDR worktree 2개, 원격 `origin/worktree/*` 14개를 전수
   대조했다. 모든 원격 HEAD가 main ancestor이고 세 작업 트리가 깨끗해 추가 병합 없이

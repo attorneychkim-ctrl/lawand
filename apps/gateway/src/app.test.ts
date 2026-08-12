@@ -1639,6 +1639,7 @@ test("홈페이지 카카오 진입은 접수 전용 키와 별도 익명 한도
     | {
         source: "homepage_kakao";
         idempotencyKey: string;
+        displayName: string;
       }
     | undefined;
   let protectionChecked = false;
@@ -1646,6 +1647,7 @@ test("홈페이지 카카오 진입은 접수 전용 키와 별도 익명 한도
     submitKakaoHomepageEntry: async (input: {
       source: "homepage_kakao";
       idempotencyKey: string;
+      displayName: string;
     }) => {
       received = input;
       return {
@@ -1678,6 +1680,7 @@ test("홈페이지 카카오 진입은 접수 전용 키와 별도 익명 한도
   const body = JSON.stringify({
     source: "homepage_kakao",
     idempotencyKey: "01984c7d-8500-7000-8000-000000000001",
+    displayName: "김민수",
   });
 
   const denied = await fetch(endpoint, {
@@ -1686,6 +1689,19 @@ test("홈페이지 카카오 진입은 접수 전용 키와 별도 익명 한도
     body,
   });
   assert.equal(denied.status, 401);
+
+  const missingDisplayName = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-lawand-public-intake-key": "test-public-intake-key",
+    },
+    body: JSON.stringify({
+      source: "homepage_kakao",
+      idempotencyKey: "01984c7d-8500-7000-8000-000000000002",
+    }),
+  });
+  assert.equal(missingDisplayName.status, 400);
 
   const accepted = await fetch(endpoint, {
     method: "POST",
@@ -1701,6 +1717,7 @@ test("홈페이지 카카오 진입은 접수 전용 키와 별도 익명 한도
     received?.idempotencyKey,
     "01984c7d-8500-7000-8000-000000000001",
   );
+  assert.equal(received?.displayName, "김민수");
   assert.equal(
     ((await accepted.json()) as { status: string }).status,
     "pending",

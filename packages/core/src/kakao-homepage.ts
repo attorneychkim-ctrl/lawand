@@ -3,7 +3,21 @@ import { z } from "zod";
 import { consultationAttributionInputSchema } from "./attribution.js";
 
 export const CURRENT_KAKAO_HOMEPAGE_ENTRY_NOTICE_VERSION =
-  "2026-07-30.kakao-homepage-entry.1";
+  "2026-08-12.kakao-homepage-entry.2";
+
+const kakaoHomepageDisplayNameSchema = z
+  .string()
+  .trim()
+  .min(1, "이름 또는 카카오톡 표시명을 입력해 주세요.")
+  .max(40, "이름 또는 카카오톡 표시명은 40자 이하로 입력해 주세요.")
+  .refine(
+    (value) =>
+      [...value].every((character) => {
+        const codePoint = character.codePointAt(0);
+        return codePoint !== undefined && codePoint > 31 && codePoint !== 127;
+      }),
+    "이름 또는 카카오톡 표시명에는 제어 문자를 사용할 수 없습니다.",
+  );
 
 export const kakaoHomepageEntryStatusSchema = z.enum([
   "pending",
@@ -15,6 +29,7 @@ export const kakaoHomepageEntrySubmissionSchema = z
   .object({
     source: z.literal("homepage_kakao"),
     idempotencyKey: z.uuid(),
+    displayName: kakaoHomepageDisplayNameSchema,
     attribution: consultationAttributionInputSchema.optional(),
   })
   .strict();
@@ -30,19 +45,7 @@ export const kakaoHomepageEntryReceiptSchema = z
 
 export const kakaoHomepageEntryConfirmationSchema = z
   .object({
-    displayName: z
-      .string()
-      .trim()
-      .min(1, "카카오 채팅방에 표시된 고객명을 입력해 주세요.")
-      .max(40, "고객명은 40자 이하로 입력해 주세요.")
-      .refine(
-        (value) =>
-          [...value].every((character) => {
-            const codePoint = character.codePointAt(0);
-            return codePoint !== undefined && codePoint > 31 && codePoint !== 127;
-          }),
-        "고객명에는 제어 문자를 사용할 수 없습니다.",
-      ),
+    displayName: kakaoHomepageDisplayNameSchema,
   })
   .strict();
 
@@ -58,3 +61,14 @@ export type KakaoHomepageEntryReceipt = z.infer<
 export type KakaoHomepageEntryConfirmation = z.infer<
   typeof kakaoHomepageEntryConfirmationSchema
 >;
+
+export function kakaoHomepageEntryAssignmentPolicy(input: {
+  status: KakaoHomepageEntryStatus;
+  nameProvided: boolean;
+}) {
+  if (input.status === "confirmed") return "assign" as const;
+  if (input.status === "pending" && input.nameProvided) {
+    return "confirm_and_assign" as const;
+  }
+  return "blocked" as const;
+}

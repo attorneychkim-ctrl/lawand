@@ -32,6 +32,7 @@ export type ConsultationListItem = {
   assigneeDisplayName: string | null;
   kakaoEntry: {
     status: "pending" | "confirmed" | "invalid";
+    nameProvided: boolean;
     clickCount: number;
     lastClickedAt: string;
   } | null;
@@ -510,6 +511,7 @@ export type ConsultationDetail = {
   kakaoEntry: {
     id: string;
     status: "pending" | "confirmed" | "invalid";
+    nameProvided: boolean;
     clickCount: number;
     firstClickedAt: string;
     lastClickedAt: string;

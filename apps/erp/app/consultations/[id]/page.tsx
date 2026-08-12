@@ -465,6 +465,13 @@ function nextAction(consultation: ConsultationDetail) {
     };
   }
   if (consultation.kakaoEntry?.status === "pending") {
+    if (consultation.kakaoEntry.nameProvided) {
+      return {
+        title: "입력한 이름으로 카카오 채팅을 확인해 주세요",
+        description:
+          "채팅방의 이름이 맞으면 상담하기를 누르세요. 채팅 확인과 본인 담당 배정이 함께 처리됩니다.",
+      };
+    }
     return {
       title: "카카오 채팅을 확인해 주세요",
       description: "채널 관리자에서 실제 메시지를 찾은 뒤 표시명을 반영해야 담당 배정할 수 있습니다.",
@@ -614,7 +621,8 @@ export default async function ConsultationDetailPage({
   const action = nextAction(consultation);
   const canClaim =
     consultation.state === "requested" &&
-    consultation.kakaoEntry?.status !== "pending";
+    (consultation.kakaoEntry?.status !== "pending" ||
+      consultation.kakaoEntry.nameProvided);
   const canClickToCall =
     Boolean(latestPhone) &&
     consultation.assignment?.assigneeUserId === staff.id;
@@ -849,7 +857,12 @@ export default async function ConsultationDetailPage({
         {consultation.kakaoEntry ? (
           <KakaoEntryPanel
             consultationId={consultation.id}
+            displayName={consultation.displayName.replace(
+              /_[23456789A-HJ-NP-Z]{8}_플친$/u,
+              "",
+            )}
             entry={consultation.kakaoEntry}
+            nameProvided={consultation.kakaoEntry.nameProvided}
           />
         ) : null}
 

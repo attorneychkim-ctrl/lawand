@@ -208,7 +208,15 @@ function StatusBadges({ item }: { item: ConsultationListItem }) {
         <span className="flag-badge is-attention">거절</span>
       ) : null}
       {item.kakaoEntry?.status === "pending" ? (
-        <span className="flag-badge is-attention">채팅 확인 필요</span>
+        <span
+          className={`flag-badge ${
+            item.kakaoEntry.nameProvided ? "is-positive" : "is-attention"
+          }`}
+        >
+          {item.kakaoEntry.nameProvided
+            ? "카톡 이름 입력"
+            : "채팅 확인 필요"}
+        </span>
       ) : null}
       {item.kakaoEntry?.status === "confirmed" ? (
         <span className="flag-badge is-positive">채팅 확인</span>
@@ -526,7 +534,8 @@ export function ConsultationWorkspace({
                     </svg>
                   </Link>
                   {consultation.state === "requested" &&
-                  consultation.kakaoEntry?.status !== "pending" ? (
+                  (consultation.kakaoEntry?.status !== "pending" ||
+                    consultation.kakaoEntry.nameProvided) ? (
                     <ClaimConsultationButton
                       compact
                       consultationId={consultation.id}
