@@ -7,10 +7,13 @@ import {
   SELF_DIAGNOSIS_INCOME_TYPES,
   SELF_DIAGNOSIS_LIVING_COST_TYPES,
   SELF_DIAGNOSIS_MARRIAGE_STATES,
+  SELF_DIAGNOSIS_MONEY_UNIT_FIELDS,
   SELF_DIAGNOSIS_RESIDENCE_REGIONS,
   SELF_DIAGNOSIS_RESIDENCE_TYPES,
   getSelfDiagnosisCourtOptions,
+  needsSelfDiagnosisMoneyUnitConfirmation,
   type SelfDiagnosisResidenceRegion,
+  type SelfDiagnosisMoneyUnitField,
   type SelfDiagnosisSubmissionResponse,
 } from "@lawand/core";
 
@@ -52,6 +55,44 @@ const initialData: FormData = {
   phone: "",
   consent: false,
 };
+
+type ConfirmedMoneyValues = Partial<
+  Record<SelfDiagnosisMoneyUnitField, string>
+>;
+
+type MoneyCheckAction = "next" | "submit";
+
+const moneyFieldDetails: Record<
+  SelfDiagnosisMoneyUnitField,
+  { inputId: string; label: string; maximum: number; step: number }
+> = {
+  monthlyIncome: {
+    inputId: "diagnosis-monthly-income",
+    label: "월평균 소득",
+    maximum: 100_000_000,
+    step: 0,
+  },
+  unsecuredDebt: {
+    inputId: "diagnosis-unsecured-debt",
+    label: "담보 없는 채무",
+    maximum: 100_000_000_000,
+    step: 1,
+  },
+  securedDebt: {
+    inputId: "diagnosis-secured-debt",
+    label: "담보부 채무",
+    maximum: 100_000_000_000,
+    step: 1,
+  },
+  liquidationValue: {
+    inputId: "diagnosis-liquidation-value",
+    label: "예상 청산가치",
+    maximum: 100_000_000_000,
+    step: 1,
+  },
+};
+
+const moneyUnitMultiplier = 10_000;
 
 const steps = ["지역·소득", "채무·재산", "가족·거주", "결과 받기"];
 
@@ -101,6 +142,23 @@ function formatWon(value: number) {
   }
   if (value >= 10_000) return `${Math.round(value / 10_000).toLocaleString("ko-KR")}만원`;
   return `${value.toLocaleString("ko-KR")}원`;
+}
+
+function formatMoneyInputSummary(value: string) {
+  if (value === "") return "";
+  return `현재 입력 금액: ${formatWon(numberValue(value))}`;
+}
+
+function getMoneyUnitConversion(
+  field: SelfDiagnosisMoneyUnitField,
+  value: string,
+) {
+  const converted = numberValue(value) * moneyUnitMultiplier;
+  return converted <= moneyFieldDetails[field].maximum ? converted : null;
+}
+
+function isMoneyField(key: keyof FormData): key is SelfDiagnosisMoneyUnitField {
+  return SELF_DIAGNOSIS_MONEY_UNIT_FIELDS.some((field) => field === key);
 }
 
 function formatPhone(value: string) {
@@ -240,10 +298,17 @@ function FinancialPlan({ match }: { match: DiagnosisMatch }) {
 
 export function SelfDiagnosisForm() {
   const formCardRef = useRef<HTMLDivElement>(null);
+  const moneyUnitWarningRef = useRef<HTMLDivElement>(null);
   const resultsRef = useRef<HTMLElement>(null);
   const attentionRequestedRef = useRef(false);
   const [step, setStep] = useState(0);
   const [data, setData] = useState<FormData>(initialData);
+  const [confirmedMoneyValues, setConfirmedMoneyValues] =
+    useState<ConfirmedMoneyValues>({});
+  const [moneyUnitWarning, setMoneyUnitWarning] =
+    useState<SelfDiagnosisMoneyUnitField | null>(null);
+  const [moneyCheckAction, setMoneyCheckAction] =
+    useState<MoneyCheckAction | null>(null);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<SelfDiagnosisSubmissionResponse | null>(
@@ -281,8 +346,28 @@ export function SelfDiagnosisForm() {
     return () => window.cancelAnimationFrame(frame);
   }, [result, step]);
 
+  useEffect(() => {
+    if (!moneyUnitWarning) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      moneyUnitWarningRef.current?.focus();
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [moneyUnitWarning]);
+
   const setField = <Key extends keyof FormData>(key: Key, value: FormData[Key]) => {
     setData((current) => ({ ...current, [key]: value }));
+    if (isMoneyField(key)) {
+      setConfirmedMoneyValues((current) => {
+        if (current[key] === undefined) return current;
+        const nextValues = { ...current };
+        delete nextValues[key];
+        return nextValues;
+      });
+      setMoneyUnitWarning(null);
+      setMoneyCheckAction(null);
+    }
     setError("");
   };
 
@@ -299,89 +384,111 @@ export function SelfDiagnosisForm() {
     setError("");
   };
 
-  const validateStep = () => {
+  const validateStep = (
+    candidateStep = step,
+    candidateData = data,
+  ) => {
+    const candidateTotalDebt =
+      numberValue(candidateData.unsecuredDebt) +
+      numberValue(candidateData.securedDebt);
     if (
-      step === 0 &&
-      (!data.residenceRegion ||
-        !data.courtIdx ||
-        !data.incomeType ||
-        numberValue(data.monthlyIncome) <= 0)
+      candidateStep === 0 &&
+      (!candidateData.residenceRegion ||
+        !candidateData.courtIdx ||
+        !candidateData.incomeType ||
+        numberValue(candidateData.monthlyIncome) <= 0)
     ) {
       return "현재 거주지역, 관할법원, 소득형태와 월평균 소득을 모두 입력해 주세요.";
     }
     if (
-      step === 1 &&
-      (totalDebt <= 0 || data.priorityDebt === "")
+      candidateStep === 1 &&
+      (candidateTotalDebt <= 0 || candidateData.priorityDebt === "")
     ) {
       return "채무액과 조세·우선권채권 여부를 확인해 주세요.";
     }
     if (
-      step === 2 &&
-      (!data.marriageState ||
-        !data.residenceType)
+      candidateStep === 2 &&
+      (!candidateData.marriageState ||
+        !candidateData.residenceType)
     ) {
       return "혼인상태와 거주형태를 선택해 주세요.";
     }
-    if (step === 3) {
-      if (!data.name.trim()) return "이름을 입력해 주세요.";
-      if (!/^010\d{8}$/u.test(digits(data.phone))) {
+    if (candidateStep === 3) {
+      if (!candidateData.name.trim()) return "이름을 입력해 주세요.";
+      if (!/^010\d{8}$/u.test(digits(candidateData.phone))) {
         return "010으로 시작하는 휴대전화 번호를 입력해 주세요.";
       }
-      if (!data.consent) return "개인정보 수집·이용에 동의해 주세요.";
+      if (!candidateData.consent) {
+        return "개인정보 수집·이용에 동의해 주세요.";
+      }
     }
     return "";
   };
 
-  const next = () => {
-    const message = validateStep();
-    if (message) {
-      setError(message);
-      return;
-    }
-    setError("");
-    attentionRequestedRef.current = true;
-    setStep((current) => Math.min(steps.length - 1, current + 1));
-  };
+  const confirmedMoneyUnitFields = (
+    candidateData: FormData,
+    candidateConfirmedValues: ConfirmedMoneyValues,
+  ) =>
+    SELF_DIAGNOSIS_MONEY_UNIT_FIELDS.filter(
+      (field) =>
+        needsSelfDiagnosisMoneyUnitConfirmation(
+          numberValue(candidateData[field]),
+        ) && candidateConfirmedValues[field] === candidateData[field],
+    );
 
-  const previous = () => {
-    setError("");
-    attentionRequestedRef.current = true;
-    setStep((current) => Math.max(0, current - 1));
-  };
+  const findPendingMoneyUnitField = (
+    candidateData: FormData,
+    candidateConfirmedValues: ConfirmedMoneyValues,
+    checkedStep?: number,
+  ) =>
+    SELF_DIAGNOSIS_MONEY_UNIT_FIELDS.find(
+      (field) =>
+        (checkedStep === undefined ||
+          moneyFieldDetails[field].step === checkedStep) &&
+        needsSelfDiagnosisMoneyUnitConfirmation(
+          numberValue(candidateData[field]),
+        ) &&
+        candidateConfirmedValues[field] !== candidateData[field],
+    ) ?? null;
 
-  const submit = async () => {
-    const message = validateStep();
-    if (message) {
-      setError(message);
-      return;
-    }
+  const submitRequest = async (
+    candidateData: FormData,
+    candidateConfirmedValues: ConfirmedMoneyValues,
+  ) => {
     setSubmitting(true);
     setError("");
     try {
+      const unitConfirmedFields = confirmedMoneyUnitFields(
+        candidateData,
+        candidateConfirmedValues,
+      );
       const response = await fetch("/api/self-diagnoses", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           source: "homepage",
           idempotencyKey: window.crypto.randomUUID(),
-          phone: data.phone,
-          name: data.name.trim(),
+          phone: candidateData.phone,
+          name: candidateData.name.trim(),
           privacyNoticeVersion: CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION,
           consentAgreedAt: new Date().toISOString(),
           attribution: getConsultationAttribution(),
           answers: {
-            residenceRegion: data.residenceRegion,
-            courtIdx: numberValue(data.courtIdx),
-            monthlyIncome: numberValue(data.monthlyIncome),
-            incomeType: numberValue(data.incomeType),
-            residenceType: numberValue(data.residenceType),
-            marriageState: numberValue(data.marriageState),
-            minorChildCount: numberValue(data.minorChildCount),
-            unsecuredDebt: numberValue(data.unsecuredDebt),
-            securedDebt: numberValue(data.securedDebt),
-            liquidationValue: numberValue(data.liquidationValue),
-            priorityDebt: data.priorityDebt === "yes",
+            residenceRegion: candidateData.residenceRegion,
+            courtIdx: numberValue(candidateData.courtIdx),
+            monthlyIncome: numberValue(candidateData.monthlyIncome),
+            incomeType: numberValue(candidateData.incomeType),
+            residenceType: numberValue(candidateData.residenceType),
+            marriageState: numberValue(candidateData.marriageState),
+            minorChildCount: numberValue(candidateData.minorChildCount),
+            unsecuredDebt: numberValue(candidateData.unsecuredDebt),
+            securedDebt: numberValue(candidateData.securedDebt),
+            liquidationValue: numberValue(candidateData.liquidationValue),
+            priorityDebt: candidateData.priorityDebt === "yes",
           },
+          ...(unitConfirmedFields.length > 0
+            ? { confirmedMoneyUnitFields: unitConfirmedFields }
+            : {}),
         }),
       });
       const body = (await response.json()) as SelfDiagnosisSubmissionResponse & {
@@ -401,6 +508,97 @@ export function SelfDiagnosisForm() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const continueAfterMoneyCheck = (
+    action: MoneyCheckAction,
+    candidateData = data,
+    candidateConfirmedValues = confirmedMoneyValues,
+  ) => {
+    const pendingField = findPendingMoneyUnitField(
+      candidateData,
+      candidateConfirmedValues,
+      action === "next" ? step : undefined,
+    );
+    if (pendingField) {
+      setMoneyUnitWarning(pendingField);
+      setMoneyCheckAction(action);
+      setError("");
+      setStep(moneyFieldDetails[pendingField].step);
+      return;
+    }
+
+    setMoneyUnitWarning(null);
+    setMoneyCheckAction(null);
+    if (action === "next") {
+      attentionRequestedRef.current = true;
+      setStep((current) => Math.min(steps.length - 1, current + 1));
+      return;
+    }
+
+    setStep(steps.length - 1);
+    void submitRequest(candidateData, candidateConfirmedValues);
+  };
+
+  const next = () => {
+    const message = validateStep();
+    if (message) {
+      setError(message);
+      return;
+    }
+    continueAfterMoneyCheck("next");
+  };
+
+  const previous = () => {
+    setError("");
+    setMoneyUnitWarning(null);
+    setMoneyCheckAction(null);
+    attentionRequestedRef.current = true;
+    setStep((current) => Math.max(0, current - 1));
+  };
+
+  const confirmMoneyUnit = (convertFromManwon: boolean) => {
+    if (!moneyUnitWarning || !moneyCheckAction) return;
+
+    const nextValue = convertFromManwon
+      ? getMoneyUnitConversion(moneyUnitWarning, data[moneyUnitWarning])
+      : numberValue(data[moneyUnitWarning]);
+    if (nextValue === null) return;
+
+    const nextData = {
+      ...data,
+      [moneyUnitWarning]: String(nextValue),
+    };
+    const nextConfirmedValues = {
+      ...confirmedMoneyValues,
+      [moneyUnitWarning]: String(nextValue),
+    };
+    setData(nextData);
+    setConfirmedMoneyValues(nextConfirmedValues);
+    continueAfterMoneyCheck(
+      moneyCheckAction,
+      nextData,
+      nextConfirmedValues,
+    );
+  };
+
+  const editMoneyUnit = () => {
+    if (!moneyUnitWarning) return;
+    const inputId = moneyFieldDetails[moneyUnitWarning].inputId;
+    setMoneyUnitWarning(null);
+    setMoneyCheckAction(null);
+    window.requestAnimationFrame(() => {
+      document.getElementById(inputId)?.focus();
+    });
+  };
+
+  const submit = () => {
+    const message = validateStep();
+    if (message) {
+      setError(message);
+      return;
+    }
+    continueAfterMoneyCheck("submit");
   };
 
   if (result) {
@@ -539,6 +737,9 @@ export function SelfDiagnosisForm() {
               onClick={() => {
                 attentionRequestedRef.current = true;
                 setData(initialData);
+                setConfirmedMoneyValues({});
+                setMoneyUnitWarning(null);
+                setMoneyCheckAction(null);
                 setResult(null);
                 setStep(0);
                 setError("");
@@ -621,9 +822,24 @@ export function SelfDiagnosisForm() {
               <label>
                 <span>월평균 소득</span>
                 <div className="diagnosis-money-input">
-                  <input inputMode="numeric" value={formatInputMoney(data.monthlyIncome)} onChange={(event) => setField("monthlyIncome", digits(event.target.value))} placeholder="예: 2,800,000" />
+                  <input
+                    aria-describedby="diagnosis-monthly-income-summary"
+                    id={moneyFieldDetails.monthlyIncome.inputId}
+                    inputMode="numeric"
+                    value={formatInputMoney(data.monthlyIncome)}
+                    onChange={(event) =>
+                      setField("monthlyIncome", digits(event.target.value))
+                    }
+                    placeholder="예: 2,800,000"
+                  />
                   <em>원</em>
                 </div>
+                <small
+                  className="diagnosis-money-summary"
+                  id="diagnosis-monthly-income-summary"
+                >
+                  {formatMoneyInputSummary(data.monthlyIncome)}
+                </small>
               </label>
               <label>
                 <span>소득형태</span>
@@ -655,9 +871,24 @@ export function SelfDiagnosisForm() {
                 <label key={key}>
                   <span>{label}</span>
                   <div className="diagnosis-money-input">
-                    <input inputMode="numeric" value={formatInputMoney(data[key])} onChange={(event) => setField(key, digits(event.target.value))} placeholder="0" />
+                    <input
+                      aria-describedby={`${moneyFieldDetails[key].inputId}-summary`}
+                      id={moneyFieldDetails[key].inputId}
+                      inputMode="numeric"
+                      value={formatInputMoney(data[key])}
+                      onChange={(event) =>
+                        setField(key, digits(event.target.value))
+                      }
+                      placeholder="0"
+                    />
                     <em>원</em>
                   </div>
+                  <small
+                    className="diagnosis-money-summary"
+                    id={`${moneyFieldDetails[key].inputId}-summary`}
+                  >
+                    {formatMoneyInputSummary(data[key])}
+                  </small>
                 </label>
               ))}
             </div>
@@ -749,20 +980,86 @@ export function SelfDiagnosisForm() {
         ) : null}
 
         {error ? <p className="diagnosis-error" role="alert">{error}</p> : null}
-        <div className="diagnosis-actions">
-          {step > 0 ? <button className="button button-outline" type="button" onClick={previous}>이전</button> : <span />}
-          {step < steps.length - 1 ? (
-            <button className="button button-primary" type="button" onClick={next}>
-              다음 조건
-              <ArrowIcon />
-            </button>
-          ) : (
-            <button className="button button-primary" type="button" disabled={submitting} onClick={submit}>
-              {submitting ? "로앤 사건 비교 중…" : "유사사건 5건 보기"}
-              {!submitting ? <ArrowIcon /> : null}
-            </button>
-          )}
-        </div>
+        {moneyUnitWarning ? (
+          <div
+            aria-describedby="diagnosis-money-warning-description"
+            aria-labelledby="diagnosis-money-warning-title"
+            className="diagnosis-money-warning"
+            ref={moneyUnitWarningRef}
+            role="alertdialog"
+            tabIndex={-1}
+          >
+            <span>금액 단위를 확인해 주세요</span>
+            <strong id="diagnosis-money-warning-title">
+              {moneyFieldDetails[moneyUnitWarning].label} 항목에{" "}
+              {numberValue(data[moneyUnitWarning]).toLocaleString("ko-KR")}원으로
+              입력하셨어요.
+            </strong>
+            {getMoneyUnitConversion(
+              moneyUnitWarning,
+              data[moneyUnitWarning],
+            ) !== null ? (
+              <p id="diagnosis-money-warning-description">
+                혹시{" "}
+                {numberValue(data[moneyUnitWarning]).toLocaleString("ko-KR")}
+                만원(
+                {getMoneyUnitConversion(
+                  moneyUnitWarning,
+                  data[moneyUnitWarning],
+                )?.toLocaleString("ko-KR")}
+                원)을 뜻하셨나요?
+              </p>
+            ) : (
+              <p id="diagnosis-money-warning-description">
+                입력한 금액과 원 단위가 맞는지 한 번 더 확인해 주세요.
+              </p>
+            )}
+            <div className="diagnosis-money-warning-actions">
+              {getMoneyUnitConversion(
+                moneyUnitWarning,
+                data[moneyUnitWarning],
+              ) !== null ? (
+                <button
+                  className="button button-primary"
+                  type="button"
+                  onClick={() => confirmMoneyUnit(true)}
+                >
+                  {numberValue(data[moneyUnitWarning]).toLocaleString("ko-KR")}
+                  만원으로 수정
+                </button>
+              ) : null}
+              <button
+                className="button button-outline"
+                type="button"
+                onClick={() => confirmMoneyUnit(false)}
+              >
+                원 단위 그대로 입력
+              </button>
+              <button
+                className="button button-quiet"
+                type="button"
+                onClick={editMoneyUnit}
+              >
+                다시 입력
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="diagnosis-actions">
+            {step > 0 ? <button className="button button-outline" type="button" onClick={previous}>이전</button> : <span />}
+            {step < steps.length - 1 ? (
+              <button className="button button-primary" type="button" onClick={next}>
+                다음 조건
+                <ArrowIcon />
+              </button>
+            ) : (
+              <button className="button button-primary" type="button" disabled={submitting} onClick={submit}>
+                {submitting ? "로앤 사건 비교 중…" : "유사사건 5건 보기"}
+                {!submitting ? <ArrowIcon /> : null}
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </section>
   );

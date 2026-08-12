@@ -4,8 +4,10 @@ import test from "node:test";
 import {
   assessSelfDiagnosis,
   getSelfDiagnosisCourtOptions,
+  needsSelfDiagnosisMoneyUnitConfirmation,
   selfDiagnosisAnswersSchema,
   selfDiagnosisRecordSchema,
+  selfDiagnosisSubmissionSchema,
   type SelfDiagnosisAnswers,
   type SelfDiagnosisCaseProfile,
 } from "./self-diagnosis.js";
@@ -23,6 +25,54 @@ const answers: SelfDiagnosisAnswers = {
   liquidationValue: 5_000_000,
   priorityDebt: false,
 };
+
+const submission = {
+  source: "homepage" as const,
+  idempotencyKey: "01984c7d-8500-7000-8000-000000000001",
+  phone: "010-1234-5678",
+  name: "로앤 고객",
+  privacyNoticeVersion: "2026-08-03.1" as const,
+  consentAgreedAt: "2026-08-03T15:40:00+09:00",
+  attribution: {
+    journeySessionId: "01984c7d-8500-7000-8000-000000000002",
+    startedAt: "2026-08-03T15:35:00+09:00",
+    firstLandingPath: "/bank",
+    source: {},
+    journey: [],
+    submittedFromPath: "/bank/self-diagnosis",
+  },
+  answers,
+};
+
+test("10만원 미만의 양수 금액은 원·만원 단위를 명시적으로 확인한다", () => {
+  assert.equal(needsSelfDiagnosisMoneyUnitConfirmation(0), false);
+  assert.equal(needsSelfDiagnosisMoneyUnitConfirmation(99_999), true);
+  assert.equal(needsSelfDiagnosisMoneyUnitConfirmation(100_000), false);
+
+  assert.equal(
+    selfDiagnosisSubmissionSchema.safeParse({
+      ...submission,
+      answers: {
+        ...answers,
+        monthlyIncome: 210,
+        unsecuredDebt: 4_500,
+      },
+    }).success,
+    false,
+  );
+  assert.equal(
+    selfDiagnosisSubmissionSchema.safeParse({
+      ...submission,
+      answers: {
+        ...answers,
+        monthlyIncome: 210,
+        unsecuredDebt: 4_500,
+      },
+      confirmedMoneyUnitFields: ["monthlyIncome", "unsecuredDebt"],
+    }).success,
+    true,
+  );
+});
 
 test("거주지역별 단일·복수 관할법원을 반환하고 다른 지역 법원은 거부한다", () => {
   assert.deepEqual(
