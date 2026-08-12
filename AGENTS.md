@@ -12,7 +12,7 @@
 고객 전 생애주기를 **최대한 사람 손이 안 타는 자동화**로 흐르게 한다. (상세: `PROJECT_PLAN.md`)
 
 ## 현재 상태
-- **홈페이지·ERP·gateway AWS 운영 배포 완료, 정식 도메인 전환 전.**
+- **홈페이지·ERP·gateway AWS 운영 배포와 Route 53 정식 도메인 전환 완료, DNS 전파·안정화 중.**
 - 스택 전제: Next.js 16(App Router) · React 19 · TypeScript · Tailwind 4 · shadcn/ui ·
   TanStack Query, **모노레포(pnpm workspaces + Turborepo)**.
 - 이 WSL 환경: node **v22.22.2**, pnpm **11.17.0**(Corepack + 로컬 shim).
@@ -70,6 +70,47 @@
 ---
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
+
+### 2026-08-12 — lawandfirm.com Route 53 무중단 전환·정식 HTTPS 발급
+- `HERDR_ENV=1`에서 main·HERDR worktree·로컬/원격 `worktree/*`를 전수 대조해 당시 모든
+  원격 worktree HEAD가 main ancestor이고 작업 트리가 깨끗함을 확인했다. 정식 ERP/API
+  Caddy 호스트와 ERP 공개 URL을 코드에 반영한 `645e8f0`을 worktree 브랜치에 push하고,
+  main에는 merge commit `77f2402`로 병합·push했다. 전체 5패키지 lint, 대상 스크립트
+  syntax/ESLint와 `git diff --check`를 통과했다.
+- Cafe24 DNS에는 apex A `222.239.248.41`, `revivetouch` A, `*` CNAME→apex, Daum MX 2개와
+  SPF만 있고 TXT·SRV는 비어 있음을 UI와 공개 resolver로 대조했다. apex는 구 호스팅의
+  대표 도메인이라 연결 삭제 전에는 수정할 수 없고 삭제하면 구 SSL도 제거되는 계약을
+  확인했다. 캐시 이용자의 인증서 오류를 피하기 위해 계획된 Route 53으로 전환했다.
+  public hosted zone `Z04111031FDIY4A1O715I`에 기존 레코드를 모두 보존하고 apex·www는
+  homepage `15.165.23.84`, ERP `3.34.72.9`, API `3.36.255.226`을 추가했다. Cafe24 본인
+  인증 뒤 AWS 네임서버 4개 변경 신청이 정상 접수됐고, Google·Cloudflare에서 새 NS와
+  Google의 새 A 응답을 확인했다. Cloudflare의 구 A 캐시는 예상대로 남아 전파 중 구
+  홈페이지를 정상 제공한다.
+- 세 EC2의 기존 Caddyfile을
+  `Caddyfile.pre-domain-cutover-20260812T004900Z`로 보존하고, 검증된 정식 호스트 설정을
+  연결 중단 없는 `caddy reload`로 적용했다. 앱·Caddy restart count는 0이며 임시
+  `sslip.io` 접속점도 계속 200이다. Let's Encrypt 인증서는 apex·www·ERP·API 각각 정상
+  발급됐다. 새 EIP 고정 smoke에서 apex→`/bank` 최종 200, www→apex, ERP `/login`, API
+  `/health`, robots·sitemap·신규 페이지와 구 `/divorce`·`/insurance`·`/realty` HTTPS
+  fallback이 모두 200이고, 구 EIP 고정 apex·www도 200이라 전파 구간의 양쪽이 살아 있다.
+- Secrets Manager의 gateway·ERP `LAWAND_ERP_BASE_URL`만
+  `https://erp.lawandfirm.com`으로 바꿨고 그 외 JSON 해시는 직전 버전과 일치한다. 당시
+  업무 통화가 계속 1~4건이라 gateway·ERP 앱 재시작은 하지 않았다. 정식 ERP 로그인
+  페이지 자체는 200이며, 다음 안전 작업은 활성 root/leg·수신 통화·수발신 실행 명령이
+  연속 0일 때 두 앱만 재시작하고 새 환경값·인증 로그인·재시작 0/health를 대조하는 것이다.
+- 도메인 작업과 별개로 `lawand-centrex-dpapi-queue`가 이미 08:20 KST부터 ALARM이었음을
+  발견했다. queue는 계속 0이나 dead-letter는 10:05 KST 12건에서 10:14 KST 16건으로
+  증가했으며 여러 slot의 v2
+  `call.ringing`만 gateway 400 뒤 격리됐고 뒤따른 기존 수신 이벤트는 201로 전달됐다.
+  최초 격리는 도메인 Caddy 전환 전인 08:19 KST라 DNS 원인이 아니다. Windows pool은
+  배정 19+warm 5, 실행 24, offline·login failure 0, supervisor 정상이다. 암호문은 삭제·
+  재처리하지 않고 보존했다. 별도 결함으로 400 원인을 수정·검증한 뒤 통제된 재처리 여부를
+  결정해야 하며, 이 ALARM을 도메인 안정화 성공으로 오인해 임의로 지우지 않는다.
+- 1차 rollback은 NS를 다시 흔드는 대신 Route 53 apex A를 구 `222.239.248.41`로 바꾸고
+  www CNAME을 유지하는 것이다. ERP/API도 필요하면 명시 A를 제거해 보존된 wildcard→apex로
+  돌린다. Cafe24 호스팅·DNS·SSL은 삭제하지 않았고 세 Caddy 원본과 Secrets Manager 직전
+  버전도 보존했다. 다음은 DNS 전파 관찰, 무통화 앱 재시작, 정식 ERP 인증 smoke다. 실제
+  상담/알림톡 canary와 Solapi IP 제한은 별도 승인·운영 게이트로 남긴다.
 
 ### 2026-08-11 — main 누적 브랜치 통합·통화 활동 v2/페이지네이션/문자 UX 운영 배포
 - `HERDR_ENV=1`에서 main과 HERDR worktree 4개, 로컬 worktree, 원격

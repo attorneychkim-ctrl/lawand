@@ -1,6 +1,6 @@
-# AWS 운영 배포 기준선 v1
+# AWS 운영 배포 기준선 v2
 
-기준 시각: 2026-08-11 KST
+기준 시각: 2026-08-12 KST
 CloudFormation 스택: `lawand-prod`
 리전: 서울(`ap-northeast-2`)
 최초 배포 릴리스: `20260804T085006Z-84e8708`
@@ -9,28 +9,30 @@ CloudFormation 스택: `lawand-prod`
 현재 gateway 릴리스: `20260811T104143Z-integrated-call-messaging-v2`
 현재 Windows bridge: `v0.8.0.0`
 
-이 문서는 정식 도메인 전환 전까지의 실제 AWS 구성, 접속점, 데이터 이관 범위와
+이 문서는 정식 도메인 전환 이후를 포함한 실제 AWS 구성, 접속점, 데이터 이관 범위와
 운영 체크리스트를 기록한다. 비밀번호·API 키·AWS 계정 ID·RDS 마스터 시크릿 ARN은
 기록하지 않는다.
 
 ## 현재 접속점
 
-| 앱 | EIP HTTP(HTTPS로 전환) | 임시 HTTPS | 인스턴스 |
+| 앱 | 정식 HTTPS | 임시 HTTPS / 관리 접속점 | 인스턴스 |
 |---|---|---|---|
-| 홈페이지 | `http://15.165.23.84/bank` | `https://15-165-23-84.sslip.io/bank` | `t4g.small`, 30GB gp3 |
-| ERP | `http://3.34.72.9/login` | `https://3-34-72-9.sslip.io/login` | `t4g.small`, 100GB gp3 |
-| gateway | `http://3.36.255.226/health` | `https://3-36-255-226.sslip.io/health` | `t4g.medium`, 100GB gp3 |
-| Centrex bridge canary | `15.165.2.138` | 해당 없음(SSM·제한된 RDP 전용) | Windows Server 2022 x64, `t3.medium`, 100GB gp3 |
+| 홈페이지 | `https://lawandfirm.com` | `https://15-165-23-84.sslip.io/bank` | `t4g.small`, 30GB gp3 |
+| ERP | `https://erp.lawandfirm.com/login` | `https://3-34-72-9.sslip.io/login` | `t4g.small`, 100GB gp3 |
+| gateway | `https://api.lawandfirm.com/health` | `https://3-36-255-226.sslip.io/health` | `t4g.medium`, 100GB gp3 |
+| Centrex bridge canary | 해당 없음 | `15.165.2.138`(SSM·제한된 RDP 전용) | Windows Server 2022 x64, `t3.medium`, 100GB gp3 |
 
-EIP의 HTTP 주소는 같은 경로의 임시 HTTPS 주소로 `301 Moved Permanently` 전환한다.
-`sslip.io` 주소는 도메인 전환 전 인증서·화면·모바일 동작을 검증하기 위한 임시
-접속점이다. 검색 노출, 광고, canonical 주소로 사용하지 않는다. ERP의 운영 세션 쿠키는
-`Secure`이므로 실제 로그인 검증과 사용은 반드시 HTTPS 주소로 한다.
+정식 HTTPS를 운영 접속점으로 사용한다. 기존 EIP·`sslip.io` 주소는 rollback과 운영
+진단을 위해 당분간 유지하되 검색 노출, 광고, canonical 주소로 사용하지 않는다. ERP의
+운영 세션 쿠키는 `Secure`이므로 실제 로그인 검증과 사용은 반드시 HTTPS 주소로 한다.
 
-2026-08-10 확인 시 apex A는 기존 `222.239.248.41`, `www`는 apex CNAME이며 권한
-네임서버는 Cafe24 네 대다. 레코드 TTL은 1,800초이고 apex AAAA는 없으며 Daum MX는
-그대로다. 이번 배포에서도 DNS 레코드는 변경하지 않았다. cutover와 rollback에서는
-A와 `www` CNAME만 다루고 NS·MX는 변경하지 않는다.
+2026-08-12 Cafe24 대표 도메인 연결 삭제 없이 Route 53 public hosted zone
+`Z04111031FDIY4A1O715I`으로 권한 네임서버 변경을 접수했다. 새 zone은 apex A
+`15.165.23.84`, `www` CNAME→apex, ERP A `3.34.72.9`, API A `3.36.255.226`과 기존
+`revivetouch` A, wildcard CNAME, Daum MX 2개, SPF TXT를 보존한다. apex·www·ERP·API의
+레코드 TTL은 300초이고 메일·legacy TTL은 1,800초다. Cafe24 구 zone과 호스팅·SSL은
+삭제하지 않았다. 공개 resolver에 따라 잠시 구 A 또는 새 A가 보이지만 양쪽 HTTPS가
+모두 정상이다.
 
 ## 실제 AWS 구성
 
@@ -62,7 +64,10 @@ A와 `www` CNAME만 다루고 NS·MX는 변경하지 않는다.
   만료 정책을 사용한다. 홈페이지 사용자 파일 저장소로 사용하지 않는다.
 - 기본 CloudWatch 경보는 세 EC2 상태, RDS CPU, RDS 여유 저장공간을 감시한다.
   SNS·PagerDuty·텔레그램 같은 실제 통지 대상은 아직 연결하지 않았다. 2026-08-10
-  최종 확인에서 센트릭스 5종을 포함한 CloudWatch 경보는 모두 `OK`다.
+  최종 확인에서 센트릭스 5종을 포함한 CloudWatch 경보는 모두 `OK`였다. 2026-08-12
+  도메인 전환 점검에서는 전환 전부터 시작된 v2 `call.ringing` 400 dead-letter 때문에
+  `lawand-centrex-dpapi-queue` 하나가 `ALARM`이다. queue는 0이고 암호문은 보존했으며 DNS
+  원인으로 보거나 임의 삭제하지 않는다.
 
 ## RDS 기준선
 
@@ -743,38 +748,43 @@ x86 OCX 프로세스 하나를 격리해 실행하고, 배정된 회선과 제�
   보내고 아직 이관하지 않은 `/divorce`, `/insurance`, `/realty`와 기타 legacy 경로는
   기존 `222.239.248.41` HTTPS origin으로 전달한다. 실제 운영 Caddy 버전의 config
   validation을 통과했다. 기존 서버 종료 전까지 이 fallback을 유지한다.
-- rollback은 Caddy의 현재 임시-host 설정과 직전 홈페이지 이미지들을 보존한 상태에서,
-  Cafe24 apex A를 `222.239.248.41`로 되돌리는 것을 1차 기준으로 한다. 정식 DNS와 인증서는
-  아직 변경하지 않았다.
+- rollback은 NS를 다시 바꾸지 않고 Route 53 apex A를 `222.239.248.41`로 되돌리는 것을
+  1차 기준으로 한다. `www` CNAME은 그대로 두며 ERP/API도 필요하면 명시 A를 제거해
+  wildcard→apex로 돌린다. 세 서버의 전환 전 Caddyfile은
+  `Caddyfile.pre-domain-cutover-20260812T004900Z`에 있고 Cafe24 구 zone·호스팅·SSL과
+  직전 홈페이지 이미지도 보존했다.
 
 ## 도메인 전환 체크리스트
 
-도메인 이름은 아래 구성을 제안하되 ERP·API 서브도메인은 전환 전에 최종 확정한다.
+도메인 이름과 대상은 아래 값으로 확정·적용했다.
 
-| 제안 레코드 | 대상 |
+| 레코드 | 대상 |
 |---|---|
 | `lawandfirm.com`, `www.lawandfirm.com` | 홈페이지 EIP `15.165.23.84` |
 | `erp.lawandfirm.com` | ERP EIP `3.34.72.9` |
 | `api.lawandfirm.com` | gateway EIP `3.36.255.226` |
 
-1. 기존 핵심 URL·광고 랜딩·전환 스크립트·robots·sitemap의 cutover 목록을 확정한다.
-2. 현재 DNS TTL을 충분히 낮추고 기존 레코드 값을 rollback용으로 기록한다.
-3. Caddy 호스트를 정식 도메인으로 바꾸고 ERP base URL·허용 origin·공개 webhook URL을
-   Secrets Manager에서 함께 갱신한다.
+1. 기존 핵심 URL·robots·sitemap과 legacy fallback 목록을 확정했다.
+2. 기존 레코드를 기록하고 새 Route 53 레코드 TTL을 300초로 설정했다.
+3. Caddy 정식 호스트를 무중단 reload하고 Secrets Manager의 ERP 공개 URL만 갱신했다.
+   업무 통화가 연속 0일 때 gateway·ERP 프로세스를 재시작해 새 환경값을 읽힌다.
 4. Solapi API 키의 IP 허용 범위를 `0.0.0.0/0`에서 gateway EIP
    `3.36.255.226` 하나로 제한한다.
-5. 정식 A/CNAME 레코드를 변경하고 Let’s Encrypt 인증서 발급을 확인한다.
-6. 홈페이지 주요 URL, 후기 3,359건, 자가진단 1,759건, ERP HTTPS 로그인, gateway health를
-   데스크톱·모바일에서 확인한다.
+5. Route 53 레코드·Cafe24 NS 변경을 적용하고 apex·www·ERP·API의 Let’s Encrypt 인증서
+   발급을 확인했다.
+6. 홈페이지 주요 URL·legacy fallback, ERP HTTPS 로그인 페이지와 gateway health를
+   직접 EIP 고정·공개 DNS 양쪽에서 확인했다. 인증 로그인·모바일 실기기 확인은 안정화
+   단계에서 이어간다.
 7. 실제 운영자가 보는 상태에서 상담 한 건만 canary로 접수해 ERP 등록과 접수 알림톡을
    확인한다. 담당 배정 canary는 리걸프렌즈 실제 사건 생성과 담당 배정 알림톡을 함께
    실행한다는 점을 알고 승인 후 진행한다.
-8. 광고 랜딩·분석·Search Console을 확인하고 이상 시 TTL 기간 안에 기존 DNS로 되돌린다.
+8. 광고 랜딩·분석·Search Console과 resolver별 전파를 확인하고 이상 시 Route 53 apex A를
+   기존 IP로 되돌린다.
 9. 안정화 뒤에도 EIP HTTP의 HTTPS 전환을 유지하고 ERP 인터넷 공개 범위를 재검토한다.
 
 ## 아직 연결하지 않은 범위
 
-- `lawandfirm.com` DNS와 정식 도메인 인증서
+- DNS 전파 완료 뒤 gateway·ERP 정식 URL 환경값 재시작과 인증 로그인·모바일 smoke
 - ElastiCache Redis: 현재 DB outbox만으로 충분해 실제 큐·실시간 부하가 생길 때 추가
 - 사무실 NAS VPN, 녹취 전송, S3 Glacier 재해 복구 사본
 - 센트릭스 실시간 STT·요약·대응 멘트

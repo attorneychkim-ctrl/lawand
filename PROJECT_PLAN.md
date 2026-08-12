@@ -1,4 +1,4 @@
-# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.14)
+# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.15)
 
 > 이 문서는 새 로앤 홈페이지 + 새 ERP + 리걸플로/리걸프렌즈 연동을 하나의 플랫폼으로
 > 묶기 위한 **저장소 구조·아키텍처 설계 초안**이다. 코덱스/클로드코드 세션이 번갈아
@@ -616,17 +616,30 @@
 > `CB` 세 테이블도 운영 RDS에 추가 이관했다.
 > 상담·outbox·외부 실행 테스트 원장은 0건으로 시작한다. 세 worker와 EIP HTTP의 임시
 > `sslip.io` HTTPS 301 전환·HTTPS 200, 실제 브라우저·재기동·CloudWatch 경보를
-> 검증했다. 정식
-> `lawandfirm.com` DNS는 기존 `222.239.248.41`을 그대로 유지하며 변경하지 않았다.
-> 실제 EIP·접속점·도메인 전환·rollback 기준은
-> `docs/PRODUCTION_DEPLOYMENT_V1.md`가 운영 단일 진실원천이다.
+> 검증했다. 2026-08-12에는 Cafe24 대표 도메인 연결을 삭제하면 구 SSL까지 제거되는
+> 계약을 확인해, 기존 DNS·호스팅을 그대로 살려 둔 채 계획된 Route 53 public hosted
+> zone으로 네임서버를 전환했다. 기존 apex A·`revivetouch` A·wildcard CNAME·Daum
+> MX·SPF를 모두 복제하고 홈페이지·ERP·API의 개별 EIP를 추가했다. 세 Caddy는 연결 중단
+> 없는 reload로 정식 호스트를 활성화했고 apex·www·ERP·API의 Let's Encrypt 인증서를
+> 발급했다. 새 EIP 고정 smoke에서 홈페이지 루트→`/bank`, ERP 로그인, gateway health와
+> legacy fallback이 모두 200이며 구 EIP 고정 홈페이지도 200이라 DNS 전파 중 양쪽이
+> 정상이다. rollback은 NS 재변경이 아니라 Route 53 apex A를 구 `222.239.248.41`로
+> 되돌리는 것을 1차로 한다. Secrets Manager의 ERP 공개 URL만 정식 주소로 갱신했으나
+> 업무 통화가 이어져 gateway·ERP 프로세스 재시작은 무통화 시점으로 미뤘다. 실제
+> EIP·접속점·도메인 전환·rollback 기준은 `docs/PRODUCTION_DEPLOYMENT_V1.md`가 운영 단일
+> 진실원천이다.
+> 같은 점검에서 도메인 전환 전부터 일부 v2 `call.ringing`이 gateway 400 뒤 Windows
+> DPAPI dead-letter에 격리되는 별도 결함을 발견했다. queue는 0이나 dead-letter는
+> 2026-08-12 10:05 KST 12건에서 10:14 KST 16건으로 증가했고 기존 수신 이벤트는 201로
+> 계속 전달된다. 암호문을 삭제·재처리하지
+> 않고 보존하며, 400 원인을 수정·검증한 뒤 통제된 재처리 여부를 결정한다.
 > 2026-08-10에는 main 정리·자가진단 어텐션 UX·전체 검증을 마치고 홈페이지 출시 후보
 > `20260810T064408Z-homepage-cutover-ready-v3`를 임시 EIP HTTPS에 배포했다. `/bank`의
 > 공개 사례·후기는 이미지 빌드에 DB 비밀값을 넣지 않고 요청 시점에 읽으며, 첫 화면의
 > 승인 사례 2건·후기 3건과 주요 상담·자가진단·목록 URL 200을 확인했다. 기존 WordPress
 > 핵심 회생·파산 URL은 새 canonical로 한 번만 영구 이동하고, 아직 이관하지 않은 이혼·
 > 보험·부동산 등은 정식 Caddy에서 기존 HTTPS origin으로 임시 전달하도록 검증했다.
-> `lawandfirm.com` DNS는 여전히 `222.239.248.41`이며 책임 변호사의 자가진단 최종 출시 승인과
+> 당시 `lawandfirm.com` DNS는 `222.239.248.41`이었으며 책임 변호사의 자가진단 최종 출시 승인과
 > Cafe24 DNS 접속 뒤에만 전환한다.
 > 2026-08-05에는 `ai-agent-prod-01`의 공개 사례 생성 크론이 비공개 운영 RDS에
 > 접근할 수 있도록 기본 VPC와 `lawand-prod` VPC를 peering하고 양방향 route를
@@ -1527,7 +1540,7 @@ Manager와 별도 역할·보안그룹·TLS 기준을 적용한다.
 - [x] GitHub origin 연결: `https://github.com/attorneychkim-ctrl/lawand.git`
 - [x] 개인회생·파산 홈페이지 제품·UX·통합 설계 v1 작성
 - [x] VPC/2AZ 서브넷·보안 그룹·EC2 3대·EIP 3개·비공개 RDS·배포 S3·임시 HTTPS 준비
-- [ ] `lawandfirm.com`·ERP/API 서브도메인 DNS 전환과 정식 HTTPS·rollback 실행
+- [x] `lawandfirm.com`·ERP/API Route 53 전환, 정식 HTTPS 발급과 DNS record rollback 준비
 - [ ] 사무실 NAS ↔ AWS Site-to-Site VPN(WireGuard)·암호화·백업·보존 정책 설계
 - [x] 정식 홈페이지 도메인: `lawandfirm.com` 유지
 - [ ] 출시 전 기존 핵심 검색 유입·백링크 URL의 유지/단일 301 보호 목록
@@ -1702,5 +1715,7 @@ Manager와 별도 역할·보안그룹·TLS 기준을 적용한다.
 14. 비즈콜 앱 직접 발신 1건이 종료 후 전화데스크에 들어오는지만 운영 acceptance로 확인;
     실시간 모바일 ring·ERP 받기·원격 발신은 현재 범위에서 제외
 15. 전화 담당자의 실시간 근무현황과 회선 통화 중 여부를 전화데스크·수신 카드에 결합
-16. `lawandfirm.com` 도메인 cutover·Solapi IP 제한·운영 canary·경보 통지 연결
-17. 기준점 이후 신규 네이버 예약 확정 메일 → IMAP 전용 ERP 접수 실제 canary
+16. `lawandfirm.com` DNS 전파 관찰, 무통화 시 gateway·ERP 정식 URL 재시작·인증 smoke,
+    Solapi IP 제한·승인된 운영 canary·경보 통지 연결
+17. v2 `call.ringing` 400 dead-letter 원인 수정·회귀 검증 뒤 보존 암호문의 통제 재처리 여부 결정
+18. 기준점 이후 신규 네이버 예약 확정 메일 → IMAP 전용 ERP 접수 실제 canary
