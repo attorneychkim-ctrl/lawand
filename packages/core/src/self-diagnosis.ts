@@ -423,6 +423,8 @@ export type SelfDiagnosisSubmissionResponse = {
     | "new"
     | "exact_duplicate"
     | "identity_enrichment"
+    | "repeat_unassigned"
+    | "repeat_assigned"
     | "suspected_duplicate";
   replayed: boolean;
   assessment: SelfDiagnosisAssessment;

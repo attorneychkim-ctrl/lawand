@@ -24,6 +24,7 @@ type ConsultationNotificationSummary = {
   contactChannel: "phone" | "kakao_channel" | "naver_booking";
   phone: string | null;
   residenceRegion: string | null;
+  assigneeUserId: string | null;
   canClaim: boolean;
 };
 
@@ -146,6 +147,8 @@ function isConsultationNotificationSummary(
     (typeof record.phone === "string" || record.phone === null) &&
     (typeof record.residenceRegion === "string" ||
       record.residenceRegion === null) &&
+    (typeof record.assigneeUserId === "string" ||
+      record.assigneeUserId === null) &&
     typeof record.canClaim === "boolean"
   );
 }
@@ -714,8 +717,9 @@ export function InboundCallIndicator({
     const unsubscribe = subscribeConsultationRealtime((message) => {
       if (message.kind !== "changed") return;
       const payload = message.payload;
+      const isRequestedEvent = payload.eventType === "consultation.requested";
       if (
-        payload.eventType !== "consultation.requested" ||
+        (!isRequestedEvent && payload.notificationKind === null) ||
         seenConsultationEventIds.current.has(payload.eventId)
       ) {
         return;
@@ -753,8 +757,20 @@ export function InboundCallIndicator({
         }
         if (!active) return;
 
+        if (!isRequestedEvent && !consultation) return;
+        if (
+          payload.notificationKind === "repeat_assigned" &&
+          consultation?.assigneeUserId !== staffUserId
+        ) {
+          return;
+        }
+
         const title = consultation
-          ? `새 상담 · ${consultation.displayName}`
+          ? payload.notificationKind === "repeat_assigned"
+            ? `담당 상담 재요청 · ${consultation.displayName}`
+            : payload.notificationKind === "repeat_unassigned"
+              ? `상담 재요청 · ${consultation.displayName}`
+              : `새 상담 · ${consultation.displayName}`
           : "새 상담이 등록됐습니다";
         const body = consultation
           ? [
@@ -811,7 +827,7 @@ export function InboundCallIndicator({
       active = false;
       unsubscribe();
     };
-  }, [enqueueToast, notificationPermission]);
+  }, [enqueueToast, notificationPermission, staffUserId]);
 
   useEffect(() => {
     if (!calls.some((call) => call.state === "ended")) return;

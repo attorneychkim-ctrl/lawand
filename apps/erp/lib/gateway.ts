@@ -1,6 +1,7 @@
 import "server-only";
 
 import type {
+  LegalFriendsConsultationHandling,
   LegalFriendsDirectoryConsultationCreate,
   ResidenceRegion,
   StaffConsultationCreate,
@@ -27,12 +28,15 @@ export type ConsultationListItem = {
   contactChannel: "phone" | "kakao_channel" | "naver_booking";
   phone: string | null;
   existingCustomer: boolean;
+  requiresLegalFriendsReview: boolean;
   residenceRegion: string | null;
   mode: "quick" | "detailed" | "self_diagnosis";
   dedupeOutcome:
     | "new"
     | "exact_duplicate"
     | "identity_enrichment"
+    | "repeat_unassigned"
+    | "repeat_assigned"
     | "suspected_duplicate";
   requestCount: number;
   assigneeUserId: string | null;
@@ -563,6 +567,29 @@ export type ConsultationDetail = {
   displayName: string;
   contactChannel: "phone" | "kakao_channel" | "naver_booking";
   existingCustomer: boolean;
+  requiresLegalFriendsReview: boolean;
+  legalFriendsMatches: Array<{
+    clientIdx: number;
+    clientName: string;
+    caseIdx: number;
+    caseNumber: string | null;
+    caseName: string | null;
+    caseType: number;
+    caseState: number;
+    isClosed: boolean;
+    isRepealed: boolean;
+    courtName: string | null;
+    staffNames: string[];
+    caseCreatedOn: string;
+    caseUpdatedOn: string;
+  }>;
+  legalFriendsHandling: {
+    mode: LegalFriendsConsultationHandling["mode"];
+    directoryClientIdx: number | null;
+    directoryCaseIdx: number | null;
+    decidedByUserId: string;
+    decidedAt: string;
+  } | null;
   kakaoEntry: {
     id: string;
     status: "pending" | "confirmed" | "invalid";
@@ -991,7 +1018,10 @@ export async function getConsultation(
   return (await response.json()) as ConsultationDetail;
 }
 
-export async function assignConsultationToMe(id: string): Promise<{
+export async function assignConsultationToMe(
+  id: string,
+  legalFriendsHandling?: LegalFriendsConsultationHandling,
+): Promise<{
   assignmentId: string;
   consultationId: string;
   state: "assigned";
@@ -1001,7 +1031,12 @@ export async function assignConsultationToMe(id: string): Promise<{
 }> {
   const response = await gatewayFetch(
     `/v1/consultations/${id}/assign-to-me`,
-    { method: "POST" },
+    {
+      method: "POST",
+      ...(legalFriendsHandling
+        ? { body: { legalFriendsHandling } }
+        : {}),
+    },
   );
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as {

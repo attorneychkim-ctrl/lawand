@@ -2234,6 +2234,102 @@ a.inbound-customer:hover { text-decoration: underline; }
   flex: 0 0 auto;
 }
 
+.legalfriends-review-card {
+  display: grid;
+  grid-template-columns: minmax(220px, .8fr) minmax(320px, 1.4fr) minmax(220px, .8fr);
+  align-items: end;
+  gap: 18px;
+  margin-bottom: 18px;
+  padding: 20px 22px;
+  border-color: color-mix(in srgb, var(--warning) 28%, var(--line));
+}
+
+.legalfriends-review-card h2 {
+  margin: 3px 0 7px;
+  font-size: 1rem;
+}
+
+.legalfriends-review-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: .75rem;
+  line-height: 1.55;
+}
+
+.legalfriends-review-options {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.legalfriends-review-options legend {
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: .67rem;
+  font-weight: 750;
+}
+
+.legalfriends-review-options label {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.legalfriends-review-options input {
+  margin-top: 3px;
+}
+
+.legalfriends-review-options span {
+  display: grid;
+  gap: 2px;
+}
+
+.legalfriends-review-options strong,
+.legalfriends-case-select > span {
+  color: var(--ink-soft);
+  font-size: .75rem;
+}
+
+.legalfriends-review-options small {
+  color: var(--muted);
+  font-size: .66rem;
+  line-height: 1.45;
+}
+
+.legalfriends-case-select,
+.legalfriends-review-action {
+  display: grid;
+  gap: 8px;
+}
+
+.legalfriends-case-select select {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: .72rem;
+}
+
+.legalfriends-review-action {
+  justify-items: end;
+}
+
+.legalfriends-review-action .claim-error {
+  max-width: 260px;
+  text-align: right;
+}
+
 .workflow-card .card-heading {
   padding-bottom: 16px;
 }
@@ -5265,6 +5361,8 @@ a.inbound-customer:hover { text-decoration: underline; }
   .queue-controls { grid-template-columns: minmax(220px, 310px) minmax(0, 1fr); }
   .consultation-row-link { grid-template-columns: 42px minmax(0, 1fr) 150px 18px; }
   .consultation-command-grid { grid-template-columns: minmax(0, 1.25fr) minmax(290px, .75fr); }
+  .legalfriends-review-card { grid-template-columns: minmax(220px, .8fr) minmax(320px, 1.2fr); }
+  .legalfriends-review-action { grid-column: 1 / -1; }
   .summary-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .summary-facts > div:nth-last-child(-n + 3) { border-bottom: 1px solid var(--line); }
   .summary-facts > div:nth-last-child(-n + 2) { border-bottom: 0; }
@@ -5315,6 +5413,9 @@ a.inbound-customer:hover { text-decoration: underline; }
   .browser-notification-toggle { width: 38px; padding: 0; justify-content: center; }
   .browser-notification-toggle span { display: none; }
   .staff-identity-copy { display: none; }
+  .legalfriends-review-card { grid-template-columns: 1fr; padding: 18px 16px; }
+  .legalfriends-review-action { grid-column: auto; justify-items: stretch; }
+  .legalfriends-review-action .claim-error { max-width: none; text-align: left; }
   .theme-toggle { width: 38px; padding: 0; justify-content: center; }
   .theme-toggle-label { display: none; }
   .text-button { padding-inline: 4px; font-size: .67rem; }

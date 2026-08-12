@@ -65,6 +65,8 @@ export const dedupeOutcomeEnum = pgEnum("dedupe_outcome", [
   "new",
   "exact_duplicate",
   "identity_enrichment",
+  "repeat_unassigned",
+  "repeat_assigned",
   "suspected_duplicate",
 ]);
 
@@ -1754,6 +1756,46 @@ export const consultationDirectorySources = pgTable(
       "consultation_directory_sources_crypto",
       sql`octet_length(${table.snapshotNonce}) = 12
         AND octet_length(${table.snapshotCiphertext}) >= 17`,
+    ),
+  ],
+);
+
+export const consultationLegalFriendsHandlings = pgTable(
+  "consultation_legalfriends_handlings",
+  {
+    consultationId: uuid("consultation_id")
+      .primaryKey()
+      .references(() => consultations.id, { onDelete: "restrict" }),
+    mode: varchar("mode", { length: 32 }).notNull(),
+    directoryClientIdx: integer("directory_client_idx"),
+    directoryCaseIdx: integer("directory_case_idx"),
+    decidedByUserId: uuid("decided_by_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "restrict" }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("consultation_legalfriends_handlings_directory_idx").on(
+      table.directoryClientIdx,
+      table.directoryCaseIdx,
+    ),
+    check(
+      "consultation_legalfriends_handlings_mode_allowed",
+      sql`${table.mode} IN ('existing_case', 'new_matter', 'shared_contact')`,
+    ),
+    check(
+      "consultation_legalfriends_handlings_directory_consistent",
+      sql`(${table.mode} = 'existing_case'
+        AND ${table.directoryClientIdx} IS NOT NULL
+        AND ${table.directoryClientIdx} > 0
+        AND ${table.directoryCaseIdx} IS NOT NULL
+        AND ${table.directoryCaseIdx} > 0)
+        OR (${table.mode} IN ('new_matter', 'shared_contact')
+          AND ${table.directoryClientIdx} IS NULL
+          AND ${table.directoryCaseIdx} IS NULL)`,
     ),
   ],
 );

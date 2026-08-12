@@ -12,6 +12,7 @@ export type ConsultationEventNotification = {
   eventType: string;
   consultationId: string;
   occurredAt: string;
+  notificationKind: "repeat_unassigned" | "repeat_assigned" | null;
 };
 
 export type ConsultationEventMessage =
@@ -41,7 +42,11 @@ export function parseConsultationEventNotification(
       typeof value.consultationId !== "string" ||
       !uuidPattern.test(value.consultationId) ||
       typeof value.occurredAt !== "string" ||
-      !Number.isFinite(Date.parse(value.occurredAt))
+      !Number.isFinite(Date.parse(value.occurredAt)) ||
+      (value.notificationKind !== undefined &&
+        value.notificationKind !== null &&
+        value.notificationKind !== "repeat_unassigned" &&
+        value.notificationKind !== "repeat_assigned")
     ) {
       return null;
     }
@@ -50,6 +55,11 @@ export function parseConsultationEventNotification(
       eventType: value.eventType,
       consultationId: value.consultationId,
       occurredAt: value.occurredAt,
+      notificationKind:
+        value.notificationKind === "repeat_unassigned" ||
+        value.notificationKind === "repeat_assigned"
+          ? value.notificationKind
+          : null,
     };
   } catch {
     return null;

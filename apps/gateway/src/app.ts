@@ -7,6 +7,7 @@ import {
 
 import {
   consultationSubmissionSchema,
+  consultationAssignmentInputSchema,
   createKakaoSkillResponse,
   kakaoHomepageEntryConfirmationSchema,
   kakaoHomepageEntrySubmissionSchema,
@@ -2173,9 +2174,22 @@ export function createGatewayServer(options?: {
           sessionToken,
           [...consultationAccessRoles],
         );
+        const assignmentBody = await readBody(request);
+        const assignmentInput = consultationAssignmentInputSchema.safeParse(
+          assignmentBody.length > 0 ? parseJson(assignmentBody) : {},
+        );
+        if (!assignmentInput.success) {
+          sendJson(
+            response,
+            400,
+            invalidRequestIssues(assignmentInput.error.issues),
+          );
+          return;
+        }
         const result = await options.service.assignToSelf(
           consultationId,
           actor,
+          assignmentInput.data.legalFriendsHandling,
         );
         sendJson(response, result.replayed ? 200 : 201, result);
         return;

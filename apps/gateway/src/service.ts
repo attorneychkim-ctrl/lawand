@@ -35,6 +35,7 @@ import {
   type KakaoHomepageEntryReceipt,
   type KakaoHomepageEntrySubmission,
   type KakaoConsultationReceipt,
+  type LegalFriendsConsultationHandling,
   type PlatformEvent,
   type ConsultationSubmission,
   type ConsultationSubmissionResponse,
@@ -50,6 +51,7 @@ import {
   consultationAssignments,
   consultationAttributions,
   consultationDirectorySources,
+  consultationLegalFriendsHandlings,
   consultationRequests,
   consultationStatusHistory,
   consultations,
@@ -77,6 +79,7 @@ import type { createDatabaseClient } from "@lawand/db";
 
 import type { DataProtection } from "./crypto.js";
 import type { StaffPrincipal } from "./auth.js";
+import { legalFriendsResidenceRegion } from "./telephony-service.js";
 import {
   CURRENT_NAVER_BOOKING_BASIS_VERSION,
   type NaverBookingEmail,
@@ -98,6 +101,42 @@ type ConsultationDirectorySnapshot = {
   staffNames: string[];
   caseCreatedOn: string;
   caseUpdatedOn: string;
+};
+
+type LegalFriendsPhoneMatchRow = {
+  client_idx: number;
+  client_name: string | null;
+  case_idx: number;
+  case_number: string | null;
+  case_name: string | null;
+  case_type: number;
+  case_state: number;
+  is_closed: number | null;
+  is_repealed: number | null;
+  primary_staff_name: string | null;
+  secondary_staff_name: string | null;
+  tertiary_staff_name: string | null;
+  court_name: string | null;
+  case_created_on: string;
+  case_updated_on: string;
+};
+
+type LegalFriendsDirectorySourceRow = {
+  client_name: string;
+  phone: string | null;
+  living_place: string | null;
+  case_type: number;
+  case_state: number;
+  is_closed: number | null;
+  is_repealed: number | null;
+  court_name: string | null;
+  case_number: string | null;
+  case_name: string | null;
+  primary_staff_name: string | null;
+  secondary_staff_name: string | null;
+  tertiary_staff_name: string | null;
+  case_created_on: string;
+  case_updated_on: string;
 };
 
 export type ConsultationListQuery = {
@@ -125,7 +164,9 @@ export class ConsultationAssignmentError extends Error {
     readonly code:
       | "consultation_not_found"
       | "consultation_already_assigned"
-      | "consultation_not_assignable",
+      | "consultation_not_assignable"
+      | "legalfriends_review_required"
+      | "legalfriends_handling_invalid",
     message: string,
   ) {
     super(message);
@@ -177,17 +218,55 @@ function createAnonymousLabel(now: Date): string {
   return `익명-${parts.year}${parts.month}${parts.day}-${parts.hour}${parts.minute}-${suffix}`;
 }
 
-function dedupeOutcomeForAction(action: string): DedupeOutcome {
-  switch (action) {
+function dedupeOutcomeForDecision(
+  decision: ReturnType<typeof classifyConsultationSubmission>,
+): DedupeOutcome {
+  switch (decision.action) {
     case "attach_exact_duplicate":
       return "exact_duplicate";
     case "attach_identity_enrichment":
       return "identity_enrichment";
+    case "attach_repeat_request":
+      return decision.stage === "before_assignment"
+        ? "repeat_unassigned"
+        : "repeat_assigned";
     case "create_suspected_duplicate":
       return "suspected_duplicate";
     default:
       return "new";
   }
+}
+
+function normalizeConsultationName(value: string) {
+  return value
+    .normalize("NFKC")
+    .trim()
+    .replace(/\s+/gu, " ")
+    .toLocaleLowerCase("ko-KR");
+}
+
+function directorySnapshot(
+  source: LegalFriendsDirectorySourceRow,
+): ConsultationDirectorySnapshot {
+  return {
+    clientName: source.client_name,
+    phone: source.phone,
+    residenceRegion: legalFriendsResidenceRegion(source.living_place),
+    caseType: source.case_type,
+    caseState: source.case_state,
+    isClosed: source.is_closed === 1,
+    isRepealed: source.is_repealed === 1,
+    courtName: source.court_name,
+    caseNumber: source.case_number,
+    caseName: source.case_name,
+    staffNames: [
+      source.primary_staff_name,
+      source.secondary_staff_name,
+      source.tertiary_staff_name,
+    ].filter((name): name is string => Boolean(name)),
+    caseCreatedOn: source.case_created_on,
+    caseUpdatedOn: source.case_updated_on,
+  };
 }
 
 function encryptedOrNull(
@@ -264,6 +343,33 @@ export function createConsultationService(options: {
       );
       return new Set<string>();
     }
+  }
+
+  async function legalFriendsCustomerMatches(phone: string) {
+    const normalizedPhone = phone.replace(/[^0-9]/g, "");
+    if (normalizedPhone.length < 9 || normalizedPhone.length > 15) return [];
+    const result = await db.execute(
+      sql<LegalFriendsPhoneMatchRow>`SELECT * FROM public.resolve_inbound_phone_directory(${normalizedPhone})`,
+    );
+    return (result.rows as LegalFriendsPhoneMatchRow[]).map((row) => ({
+      clientIdx: row.client_idx,
+      clientName: row.client_name ?? "이름 미확인",
+      caseIdx: row.case_idx,
+      caseNumber: row.case_number,
+      caseName: row.case_name,
+      caseType: row.case_type,
+      caseState: row.case_state,
+      isClosed: row.is_closed === 1,
+      isRepealed: row.is_repealed === 1,
+      courtName: row.court_name,
+      staffNames: [
+        row.primary_staff_name,
+        row.secondary_staff_name,
+        row.tertiary_staff_name,
+      ].filter((name): name is string => Boolean(name)),
+      caseCreatedOn: row.case_created_on,
+      caseUpdatedOn: row.case_updated_on,
+    }));
   }
 
   async function submitSelfDiagnosis(
@@ -412,6 +518,12 @@ export function createConsultationService(options: {
       contact: submission.contact,
       intake: submission.intake,
     });
+    const nameFingerprint = submission.name
+      ? protection.fingerprint({
+          kind: "consultation_name",
+          value: normalizeConsultationName(submission.name),
+        })
+      : null;
 
     return db.transaction(async (tx) => {
       await tx.execute(
@@ -455,6 +567,9 @@ export function createConsultationService(options: {
           payloadFingerprint: consultationRequests.payloadFingerprint,
           journeySessionId: consultationRequests.journeySessionId,
           hasProvidedName: consultationRequests.hasProvidedName,
+          preferredNameCiphertext: consultations.preferredNameCiphertext,
+          preferredNameNonce: consultations.preferredNameNonce,
+          preferredNameKeyVersion: consultations.preferredNameKeyVersion,
           submittedAt: consultationRequests.submittedAt,
         })
         .from(consultationRequests)
@@ -480,6 +595,19 @@ export function createConsultationService(options: {
       for (const row of candidateRows) {
         if (seenConsultations.has(row.consultationId)) continue;
         seenConsultations.add(row.consultationId);
+        const candidateName =
+          row.preferredNameCiphertext &&
+          row.preferredNameNonce &&
+          row.preferredNameKeyVersion
+            ? protection.decrypt(
+                {
+                  ciphertext: row.preferredNameCiphertext,
+                  nonce: row.preferredNameNonce,
+                  keyVersion: row.preferredNameKeyVersion,
+                },
+                `consultations.preferred_name:${row.consultationId}`,
+              )
+            : null;
         candidates.push({
           consultationId: row.consultationId,
           latestRequestId: row.requestId,
@@ -488,6 +616,14 @@ export function createConsultationService(options: {
           latestPayloadFingerprint: row.payloadFingerprint.toString("hex"),
           latestJourneySessionId: row.journeySessionId,
           hasProvidedName: row.hasProvidedName,
+          nameFingerprint: candidateName
+            ? protection
+                .fingerprint({
+                  kind: "consultation_name",
+                  value: normalizeConsultationName(candidateName),
+                })
+                .toString("hex")
+            : null,
           latestRequestAt: row.submittedAt,
         });
       }
@@ -498,6 +634,7 @@ export function createConsultationService(options: {
           payloadFingerprint: payloadFingerprint.toString("hex"),
           journeySessionId: submission.attribution?.journeySessionId ?? null,
           hasProvidedName: Boolean(submission.name),
+          nameFingerprint: nameFingerprint?.toString("hex") ?? null,
           submittedAt,
         },
         candidates,
@@ -511,7 +648,7 @@ export function createConsultationService(options: {
         ? createConsultationId()
         : decision.consultationId;
       const requestId = createConsultationRequestId();
-      const dedupeOutcome = dedupeOutcomeForAction(decision.action);
+      const dedupeOutcome = dedupeOutcomeForDecision(decision);
       let publicReceiptCode: string;
 
       const preferredName = encryptedOrNull(
@@ -818,6 +955,34 @@ export function createConsultationService(options: {
               : {}),
             updateReason: "identity_enriched",
             dedupeOutcome: "identity_enrichment",
+          },
+        };
+        assertPlatformEvent(event);
+        events.push(event);
+      }
+      if (decision.action === "attach_repeat_request") {
+        const event: PlatformEvent = {
+          eventId: createEventId(),
+          eventType: "consultation.request.updated",
+          eventVersion: 1,
+          occurredAt,
+          producer: "lawand.gateway",
+          correlationId: consultationId,
+          data: {
+            consultationId,
+            requestId,
+            intakeRef: `consultation_requests/${requestId}`,
+            ...(attributionId
+              ? {
+                  attributionRef: `consultation_attributions/${attributionId}`,
+                }
+              : {}),
+            updateReason: "repeat_request",
+            repeatStage: decision.stage,
+            dedupeOutcome:
+              decision.stage === "before_assignment"
+                ? "repeat_unassigned"
+                : "repeat_assigned",
           },
         };
         assertPlatformEvent(event);
@@ -1849,6 +2014,7 @@ export function createConsultationService(options: {
   async function assignToSelf(
     consultationId: string,
     actor: StaffPrincipal,
+    requestedHandling?: LegalFriendsConsultationHandling,
   ) {
     const now = new Date();
     return db.transaction(async (tx) => {
@@ -1937,7 +2103,11 @@ export function createConsultationService(options: {
       const [latestRequest] = await tx
         .select({
           id: consultationRequests.id,
+          source: consultationRequests.source,
           contactChannel: consultationRequests.contactChannel,
+          phoneCiphertext: consultationRequests.phoneCiphertext,
+          phoneNonce: consultationRequests.phoneNonce,
+          phoneKeyVersion: consultationRequests.phoneKeyVersion,
         })
         .from(consultationRequests)
         .where(eq(consultationRequests.consultationId, consultationId))
@@ -1948,6 +2118,136 @@ export function createConsultationService(options: {
           "consultation_not_assignable",
           "상담 요청 원장을 찾을 수 없어 담당자를 지정하지 못했습니다.",
         );
+      }
+
+      const [directorySource] = await tx
+        .select({ consultationId: consultationDirectorySources.consultationId })
+        .from(consultationDirectorySources)
+        .where(eq(consultationDirectorySources.consultationId, consultationId))
+        .limit(1);
+      const [storedHandling] = await tx
+        .select({ mode: consultationLegalFriendsHandlings.mode })
+        .from(consultationLegalFriendsHandlings)
+        .where(
+          eq(consultationLegalFriendsHandlings.consultationId, consultationId),
+        )
+        .limit(1);
+      let legalFriendsHandlingMode = storedHandling?.mode ?? null;
+      const reviewablePhone =
+        latestRequest.source === "homepage" &&
+        latestRequest.phoneCiphertext &&
+        latestRequest.phoneNonce &&
+        latestRequest.phoneKeyVersion
+          ? protection.decrypt(
+              {
+                ciphertext: latestRequest.phoneCiphertext,
+                nonce: latestRequest.phoneNonce,
+                keyVersion: latestRequest.phoneKeyVersion,
+              },
+              `consultation_requests.phone:${latestRequest.id}`,
+            )
+          : null;
+      if (!directorySource && reviewablePhone) {
+        const matchResult = await tx.execute(
+          sql<LegalFriendsPhoneMatchRow>`SELECT * FROM public.resolve_inbound_phone_directory(${reviewablePhone})`,
+        );
+        const matches = matchResult.rows as LegalFriendsPhoneMatchRow[];
+        if (matches.length > 0 && !legalFriendsHandlingMode) {
+          if (!requestedHandling) {
+            throw new ConsultationAssignmentError(
+              "legalfriends_review_required",
+              "리걸프렌즈 기존 고객입니다. 기존 사건 문의인지 새 사건 상담인지 먼저 선택해 주세요.",
+            );
+          }
+          let selectedSource: LegalFriendsDirectorySourceRow | null = null;
+          if (requestedHandling.mode === "existing_case") {
+            const selectedMatch = matches.find(
+              (match) =>
+                match.client_idx === requestedHandling.clientIdx &&
+                match.case_idx === requestedHandling.caseIdx,
+            );
+            if (!selectedMatch) {
+              throw new ConsultationAssignmentError(
+                "legalfriends_handling_invalid",
+                "현재 연락처와 일치하는 리걸프렌즈 사건을 다시 선택해 주세요.",
+              );
+            }
+            const sourceResult = await tx.execute(
+              sql<LegalFriendsDirectorySourceRow>`SELECT * FROM public.resolve_legalfriends_directory_consultation_source(${requestedHandling.clientIdx}, ${requestedHandling.caseIdx})`,
+            );
+            selectedSource =
+              (sourceResult.rows as LegalFriendsDirectorySourceRow[])[0] ??
+              null;
+            if (!selectedSource) {
+              throw new ConsultationAssignmentError(
+                "legalfriends_handling_invalid",
+                "삭제되었거나 현재 조회할 수 없는 리걸프렌즈 사건입니다.",
+              );
+            }
+          }
+
+          await tx.insert(consultationLegalFriendsHandlings).values({
+            consultationId,
+            mode: requestedHandling.mode,
+            directoryClientIdx:
+              requestedHandling.mode === "existing_case"
+                ? requestedHandling.clientIdx
+                : null,
+            directoryCaseIdx:
+              requestedHandling.mode === "existing_case"
+                ? requestedHandling.caseIdx
+                : null,
+            decidedByUserId: actor.id,
+            decidedAt: now,
+            createdAt: now,
+          });
+          legalFriendsHandlingMode = requestedHandling.mode;
+
+          if (
+            requestedHandling.mode === "existing_case" &&
+            selectedSource
+          ) {
+            const encryptedSnapshot = protection.encrypt(
+              JSON.stringify(directorySnapshot(selectedSource)),
+              `consultation_directory_sources/${consultationId}/snapshot`,
+            );
+            await tx.insert(consultationDirectorySources).values({
+              consultationId,
+              consultationRequestId: latestRequest.id,
+              directoryClientIdx: requestedHandling.clientIdx,
+              directoryCaseIdx: requestedHandling.caseIdx,
+              relationship: "customer",
+              snapshotCiphertext: encryptedSnapshot.ciphertext,
+              snapshotNonce: encryptedSnapshot.nonce,
+              snapshotKeyVersion: encryptedSnapshot.keyVersion,
+              createdByUserId: actor.id,
+              createdAt: now,
+            });
+          }
+          await tx.insert(staffAuditLogs).values({
+            id: createEventId(),
+            actorUserId: actor.id,
+            action: "consultation.legalfriends_handling_decided",
+            targetType: "consultation",
+            targetId: consultationId,
+            metadata: {
+              mode: requestedHandling.mode,
+              ...(requestedHandling.mode === "existing_case"
+                ? {
+                    directoryClientIdx: requestedHandling.clientIdx,
+                    directoryCaseIdx: requestedHandling.caseIdx,
+                  }
+                : {}),
+            },
+            occurredAt: now,
+            createdAt: now,
+          });
+        } else if (matches.length === 0 && requestedHandling) {
+          throw new ConsultationAssignmentError(
+            "legalfriends_handling_invalid",
+            "현재 연락처와 일치하는 리걸프렌즈 고객이 없어 처리 구분을 적용할 수 없습니다.",
+          );
+        }
       }
       const kakaoAssignmentPolicy = homepageKakaoEntry
         ? kakaoHomepageEntryAssignmentPolicy(homepageKakaoEntry)
@@ -2072,8 +2372,9 @@ export function createConsultationService(options: {
         },
       });
       if (
-        latestRequest.contactChannel === "phone" ||
-        latestRequest.contactChannel === "kakao_channel"
+        legalFriendsHandlingMode !== "existing_case" &&
+        (latestRequest.contactChannel === "phone" ||
+          latestRequest.contactChannel === "kakao_channel")
       ) {
         events.push({
           eventId: createEventId(),
@@ -2525,6 +2826,20 @@ export function createConsultationService(options: {
     const assigneeByConsultation = new Map(
       assignmentRows.map((row) => [row.consultationId, row]),
     );
+    const directorySourceRows = await db
+      .select({ consultationId: consultationDirectorySources.consultationId })
+      .from(consultationDirectorySources)
+      .where(inArray(consultationDirectorySources.consultationId, ids));
+    const directorySourceIds = new Set(
+      directorySourceRows.map((row) => row.consultationId),
+    );
+    const handlingRows = await db
+      .select({ consultationId: consultationLegalFriendsHandlings.consultationId })
+      .from(consultationLegalFriendsHandlings)
+      .where(inArray(consultationLegalFriendsHandlings.consultationId, ids));
+    const handlingIds = new Set(
+      handlingRows.map((row) => row.consultationId),
+    );
     const homepageEntryRows = await db
       .select({
         consultationId: kakaoHomepageEntries.consultationId,
@@ -2669,6 +2984,7 @@ export function createConsultationService(options: {
           displayName: preferredName ?? consultation.anonymousLabel,
           contactChannel: consultation.contactChannel,
           phone,
+          latestSource: request?.source ?? "homepage",
           residenceRegion: residenceRegion.success
             ? residenceRegion.data
             : null,
@@ -2711,12 +3027,22 @@ export function createConsultationService(options: {
     );
 
     return {
-      items: items.map((item) => ({
-        ...item,
-        existingCustomer:
+      items: items.map((item) => {
+        const { latestSource, ...publicItem } = item;
+        const existingCustomer =
           item.phone !== null &&
-          existingCustomerPhones.has(item.phone.replace(/[^0-9]/g, "")),
-      })),
+          existingCustomerPhones.has(item.phone.replace(/[^0-9]/g, ""));
+        return {
+          ...publicItem,
+          existingCustomer,
+          requiresLegalFriendsReview:
+            existingCustomer &&
+            item.state === "requested" &&
+            latestSource === "homepage" &&
+            !directorySourceIds.has(item.id) &&
+            !handlingIds.has(item.id),
+        };
+      }),
       total,
       page,
       pageSize: query.pageSize,
@@ -2773,6 +3099,21 @@ export function createConsultationService(options: {
       })
       .from(consultationDirectorySources)
       .where(eq(consultationDirectorySources.consultationId, consultationId))
+      .limit(1);
+    const [legalFriendsHandling] = await db
+      .select({
+        mode: consultationLegalFriendsHandlings.mode,
+        directoryClientIdx:
+          consultationLegalFriendsHandlings.directoryClientIdx,
+        directoryCaseIdx: consultationLegalFriendsHandlings.directoryCaseIdx,
+        decidedByUserId:
+          consultationLegalFriendsHandlings.decidedByUserId,
+        decidedAt: consultationLegalFriendsHandlings.decidedAt,
+      })
+      .from(consultationLegalFriendsHandlings)
+      .where(
+        eq(consultationLegalFriendsHandlings.consultationId, consultationId),
+      )
       .limit(1);
     const directorySnapshot = directorySourceRow
       ? (JSON.parse(
@@ -3061,9 +3402,10 @@ export function createConsultationService(options: {
     const latestPhone = requestRows[0]
       ? phoneByRequest.get(requestRows[0].id) ?? null
       : null;
-    const existingCustomerPhones = await existingLegalFriendsCustomerPhones(
-      latestPhone ? [latestPhone] : [],
-    );
+    const legalFriendsMatches = latestPhone
+      ? await legalFriendsCustomerMatches(latestPhone)
+      : [];
+    const latestRequestSource = requestRows[0]?.source ?? null;
 
     return {
       id: consultation.id,
@@ -3071,9 +3413,28 @@ export function createConsultationService(options: {
       state: consultation.state,
       displayName: preferredName ?? consultation.anonymousLabel,
       contactChannel: consultation.contactChannel,
-      existingCustomer:
-        latestPhone !== null &&
-        existingCustomerPhones.has(latestPhone.replace(/[^0-9]/g, "")),
+      existingCustomer: legalFriendsMatches.length > 0,
+      requiresLegalFriendsReview:
+        legalFriendsMatches.length > 0 &&
+        consultation.state === "requested" &&
+        latestRequestSource === "homepage" &&
+        !directorySourceRow &&
+        !legalFriendsHandling,
+      legalFriendsMatches,
+      legalFriendsHandling: legalFriendsHandling
+        ? {
+            mode:
+              legalFriendsHandling.mode === "existing_case"
+                ? ("existing_case" as const)
+                : legalFriendsHandling.mode === "shared_contact"
+                  ? ("shared_contact" as const)
+                  : ("new_matter" as const),
+            directoryClientIdx: legalFriendsHandling.directoryClientIdx,
+            directoryCaseIdx: legalFriendsHandling.directoryCaseIdx,
+            decidedByUserId: legalFriendsHandling.decidedByUserId,
+            decidedAt: legalFriendsHandling.decidedAt.toISOString(),
+          }
+        : null,
       kakaoEntry: kakaoEntry
         ? {
             id: kakaoEntry.id,

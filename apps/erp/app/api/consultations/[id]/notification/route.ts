@@ -27,8 +27,10 @@ export async function GET(
       phone: latestRequest?.phone ?? null,
       residenceRegion:
         typeof residenceRegion === "string" ? residenceRegion : null,
+      assigneeUserId: consultation.assignment?.assigneeUserId ?? null,
       canClaim:
         consultation.state === "requested" &&
+        !consultation.requiresLegalFriendsReview &&
         (consultation.kakaoEntry?.status !== "pending" ||
           consultation.kakaoEntry.nameProvided),
     });

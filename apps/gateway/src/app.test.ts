@@ -1070,6 +1070,7 @@ test("직원 상담 SSE는 연결 동기화 뒤 outbox 변경 이벤트를 전�
               eventType: "consultation.requested",
               consultationId,
               occurredAt: "2026-08-05T09:00:00+00:00",
+              notificationKind: null,
             },
           });
         });
@@ -2575,7 +2576,7 @@ test("인증된 직원은 본인의 실패한 센트릭스 bridge를 재배정�
   });
 });
 
-test("상담하기는 인증된 직원을 본인 담당 배정 서비스에 전달한다", async (context) => {
+test("상담하기는 인증된 직원과 리걸프렌즈 처리 구분을 본인 담당 배정 서비스에 전달한다", async (context) => {
   const consultationId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2a4";
   const actor = {
     id: "019fa6a4-6834-7782-aa0b-4e71ffb8a2b1",
@@ -2594,7 +2595,13 @@ test("상담하기는 인증된 직원을 본인 담당 배정 서비스에 전�
     roles: ["full_time"],
   } satisfies StaffPrincipal;
   let received:
-    | { consultationId: string; actor: StaffPrincipal }
+    | {
+        consultationId: string;
+        actor: StaffPrincipal;
+        handling:
+          | { mode: "existing_case"; clientIdx: number; caseIdx: number }
+          | undefined;
+      }
     | undefined;
   const authService = {
     authorize: async () => actor,
@@ -2603,10 +2610,16 @@ test("상담하기는 인증된 직원을 본인 담당 배정 서비스에 전�
     assignToSelf: async (
       receivedConsultationId: string,
       receivedActor: StaffPrincipal,
+      handling?: {
+        mode: "existing_case";
+        clientIdx: number;
+        caseIdx: number;
+      },
     ) => {
       received = {
         consultationId: receivedConsultationId,
         actor: receivedActor,
+        handling,
       };
       return {
         assignmentId: "019fa6a4-6834-7782-aa0b-4e71ffb8a2b3",
@@ -2647,15 +2660,28 @@ test("상담하기는 인증된 직원을 본인 담당 배정 서비스에 전�
     {
       method: "POST",
       headers: {
+        "content-type": "application/json",
         "x-lawand-internal-key": "test-internal-key",
         "x-lawand-staff-session": "s".repeat(43),
       },
+      body: JSON.stringify({
+        legalFriendsHandling: {
+          mode: "existing_case",
+          clientIdx: 101,
+          caseIdx: 202,
+        },
+      }),
     },
   );
 
   assert.equal(response.status, 201);
   assert.equal(received?.consultationId, consultationId);
   assert.equal(received?.actor.id, actor.id);
+  assert.deepEqual(received?.handling, {
+    mode: "existing_case",
+    clientIdx: 101,
+    caseIdx: 202,
+  });
 });
 
 test("상담 무효 처리는 인증된 직원과 상담 ID를 리걸프렌즈 변경 서비스에 전달한다", async (context) => {

@@ -1,6 +1,6 @@
 # 상담 접수·귀속·이벤트 계약 v1
 
-> 상태: 2026-07-28 거주 시·도, 직원 인증과 ERP 본인 담당 배정·외부 실행 요청 구현
+> 상태: 2026-08-13 동일 고객 재요청과 리걸프렌즈 기존 고객 처리 게이트 구현
 > 코드: `packages/core`, `packages/db`
 > 범위: 홈페이지 실제 상담 접수부터 ERP 목록·상세·담당 배정, 리걸프렌즈·알림톡
 > outbox와 Solapi 알림톡 실제 송신까지
@@ -46,6 +46,8 @@
   상담 원문, 자가진단 결과 카드 스냅샷, 연락 희망 구간, 동의 버전·시각, 중복 판정
 - `consultation_status_history`: 상태 전환과 행위자 감사 기록
 - `consultation_assignments`: 상담별 담당 직원·주 멤버십·배정자·배정 시각
+- `consultation_legalfriends_handlings`: 리걸프렌즈 연락처 일치 건의 기존 사건·새 사건·
+  공유 연락처 선택, 검증한 고객·사건 ID와 결정 직원·시각
 
 전화번호는 숫자만 남긴 정규화 값을 애플리케이션에서 HMAC-SHA-256 처리해
 `phone_fingerprint`로 비교한다. 단순 SHA 해시는 전화번호 공간이 작아 역추측하기 쉬우므로
@@ -109,8 +111,9 @@ ERP에서 `워커 대기/처리 중/재시도 예정/완료/확인 필요`와 �
 ### ERP 실시간 상담 목록
 
 `outbox_events`에 `consultation.*` 이벤트가 INSERT되고 트랜잭션이 커밋되면 PostgreSQL
-트리거가 이벤트 ID·유형·상담 ID·발생시각만 `lawand_consultation_events` 채널로
-`NOTIFY`한다. 이름·전화번호·상담 내용과 outbox 본문은 알림 payload에 넣지 않는다.
+트리거가 이벤트 ID·유형·상담 ID·발생시각과 재요청인 경우 배정 전후 알림 종류만
+`lawand_consultation_events` 채널로 `NOTIFY`한다. 이름·전화번호·상담 내용과 outbox
+본문은 알림 payload에 넣지 않는다.
 gateway는 전용 `LISTEN` 연결로 알림을 받아 인증된 직원 SSE에 전달하며 20초 heartbeat를
 보낸다.
 
@@ -139,12 +142,14 @@ gateway·네트워크 중단 중 PostgreSQL `NOTIFY`가 유실돼도 현재 DB �
 | 1 | 같은 `source + idempotency_key` | 기존 응답 재생, 새 row 없음 | 없음 |
 | 2 | 같은 전화 HMAC + 같은 payload HMAC, 10분 이내 | 기존 상담에 새 request 이력 부착, 기존 접수번호 반환 | 없음 |
 | 3 | 같은 전화 HMAC + 같은 journey session, 30분 이내, 익명 → 실명 | 기존 상담에 request 부착, 선호 이름 갱신 | `consultation.request.updated` |
-| 4 | 같은 전화 HMAC, 7일 이내 | 새 상담 생성 후 ERP 중복 의심 표시 | `consultation.requested`, `consultation.duplicate_suspected` |
-| 5 | 일치 없음 또는 기존 상담 종결 | 새 상담 생성 | `consultation.requested` |
+| 4 | 같은 전화 HMAC + 같은 정규화 이름 HMAC, 7일 이내, 기존 상담 미종결 | 기존 상담에 request 부착, 배정 전·후 재요청 구분 | `consultation.request.updated` |
+| 5 | 같은 전화 HMAC, 7일 이내이나 이름 없음·불일치 | 새 상담 생성 후 ERP 중복 의심 표시 | `consultation.requested`, `consultation.duplicate_suspected` |
+| 6 | 일치 없음 또는 기존 상담 종결 | 새 상담 생성 | `consultation.requested` |
 
-7일 기준은 자동 병합 기간이 아니라 운영자 확인 후보 기간이다. 운영 데이터에서 가족
-공유번호·다른 사건·반복 제출 비율을 확인한 뒤 버전으로 조정한다. IP 주소, User-Agent,
-기기 지문은 자동 병합 근거로 쓰지 않는다.
+7일 기준 안에서도 전화번호와 정규화 이름이 모두 같을 때만 동일 고객 재요청으로 묶는다.
+전화만 같은 경우는 자동 병합 기간이 아니라 운영자 확인 후보이며 가족 공유번호·다른
+사건 가능성을 남긴다. 운영 데이터의 반복 제출 비율을 확인한 뒤 기간을 버전으로 조정한다.
+IP 주소, User-Agent, 기기 지문은 자동 병합 근거로 쓰지 않는다.
 
 중복 접수에서도 각 `consultation_request`와 `consultation_attribution`을 남기므로 최초
 익명 제출과 이후 실명 제출, 서로 다른 광고 접점이 모두 보존된다. AdPilot 성과 환류는
@@ -186,9 +191,11 @@ gateway·네트워크 중단 중 PostgreSQL `NOTIFY`가 유실돼도 현재 DB �
 
 ### `consultation.request.updated` v1
 
-익명 접수 뒤 같은 세션에서 실명이나 추가정보를 남겨 기존 상담을 보강할 때 발생한다.
-`updateReason`은 v1에서 `identity_enriched`만 허용한다. 다른 보강 시나리오는 실제 운영
-사례를 확인한 뒤 계약 버전을 올려 추가한다.
+익명 접수 뒤 같은 세션에서 실명이나 추가정보를 남겨 기존 상담을 보강하거나, 같은
+이름·전화번호의 미종결 상담에 7일 안의 재요청을 붙일 때 발생한다. `updateReason`은
+`identity_enriched` 또는 `repeat_request`다. 재요청은 `repeatStage`를
+`before_assignment`와 `after_assignment`로 나누고, 이벤트에는 고객 개인정보 대신
+상담·요청 참조만 둔다.
 
 ### `consultation.duplicate_suspected` v1
 
@@ -204,11 +211,16 @@ Zod 계약은 모든 객체를 strict로 검증한다. 정의되지 않은 `phon
 배정한다. 같은 직원의 재시도는 기존 배정 결과를 반환하고 outbox를 추가하지 않으며,
 다른 직원의 동시·후속 요청은 이미 배정된 담당자를 안내하고 거부한다.
 
-한 트랜잭션에서 다음 세 이벤트를 각각 저장한다.
+일반 신건은 한 트랜잭션에서 다음 세 이벤트를 각각 저장한다.
 
 - `consultation.assigned`: 담당 배정 업무 사실
 - `legalfriends.consultation.registration.requested`: 리걸프렌즈 등록 실행 요청
 - `alimtalk.consultation.assignment_notification.requested`: 담당 배정 알림톡 실행 요청
+
+홈페이지 연락처가 리걸프렌즈에 이미 있으면 배정 전에 기존 사건 문의·기존 고객의 새
+사건·공유 연락처 중 하나를 선택해야 한다. 기존 사건 문의는 현재 리걸프렌즈 조회 결과로
+고객·사건 ID를 다시 검증하고 암호화 snapshot과 결정 감사를 저장하되 신건 등록 이벤트를
+생략한다. 나머지 선택은 결정 원장을 남기고 일반 신건 등록 이벤트를 계속 만든다.
 
 외부 실행 요청의 `causationId`는 `consultation.assigned`의 `eventId`다. payload에는
 전화번호·이름·상담 원문을 넣지 않고 `consultationId`, `requestId`, `assignmentId`,
@@ -283,6 +295,10 @@ V2 최초 등록의 담당자 반영은 실제 검증했다. 이후 ERP에서 �
 - [x] JourneyTracker가 최초 광고 파라미터를 strict 허용 목록으로 한 번만 포착한다.
 - [x] gateway POST가 암호화·중복·여정·귀속·상태·outbox 단일 트랜잭션을 구현한다.
 - [x] 같은 key 재시도, 동일 내용, 익명→실명, 7일 중복 의심을 개발 DB에서 통합 검증한다.
+- [x] 같은 이름·전화의 7일 내 재요청을 배정 전후로 묶고, 담당 배정 뒤 재요청을 현재
+  담당자에게만 알린다.
+- [x] 리걸프렌즈 연락처 일치 건은 기존 사건·새 사건·공유 연락처 선택 뒤에만 배정하며,
+  기존 사건 선택에서는 신건 등록을 생략한다.
 - [x] ERP 목록·상세에서 복호화 연락정보, 요청별 랜딩·CTA·광고값과 중복 근거를 본다.
 - [x] 모든 상담 요청에 최소화한 분석 귀속을 자동 연결한다.
 - [x] 빠른·상세 상담에 필수 거주 시·도를 받고 암호화 저장 후 ERP 목록·상세에 표시한다.

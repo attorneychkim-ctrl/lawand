@@ -24,6 +24,7 @@ import { CopyButton } from "../../_components/copy-button";
 import { KakaoEntryInvalidationButton } from "../../_components/kakao-entry-invalidation-button";
 import { KakaoEntryPanel } from "../../_components/kakao-entry-panel";
 import { LegalFriendsInvalidationButton } from "../../_components/legalfriends-invalidation-button";
+import { LegalFriendsReviewClaim } from "../../_components/legalfriends-review-claim";
 import { MessageComposeButton } from "../../_components/message-compose-button";
 import { StaffBar } from "../../_components/staff-bar";
 
@@ -159,6 +160,8 @@ const dedupeLabels: Record<
   new: "신규 접수",
   exact_duplicate: "동일 내용 재접수",
   identity_enrichment: "고객정보 보강",
+  repeat_unassigned: "배정 전 재요청",
+  repeat_assigned: "담당 상담 재요청",
   suspected_duplicate: "7일 내 중복 의심",
 };
 
@@ -499,6 +502,13 @@ function nextAction(consultation: ConsultationDetail) {
       description: "사건 담당자가 사내 무효 계정으로 변경됐고 기존 상담·실행 원장은 보존됩니다.",
     };
   }
+  if (consultation.requiresLegalFriendsReview) {
+    return {
+      title: "기존 고객의 이번 문의 성격을 확인해 주세요",
+      description:
+        "기존 사건 문의·새 사건·공유 연락처 중 하나를 선택해야 담당 배정할 수 있습니다.",
+    };
+  }
   if (consultation.kakaoEntry?.status === "pending") {
     if (consultation.kakaoEntry.nameProvided) {
       return {
@@ -659,6 +669,7 @@ export default async function ConsultationDetailPage({
   const action = nextAction(consultation);
   const canClaim =
     consultation.state === "requested" &&
+    !consultation.requiresLegalFriendsReview &&
     (consultation.kakaoEntry?.status !== "pending" ||
       consultation.kakaoEntry.nameProvided);
   const canClickToCall =
@@ -707,6 +718,18 @@ export default async function ConsultationDetailPage({
               </span>
               {consultation.existingCustomer ? (
                 <span className="flag-badge is-existing">기존고객</span>
+              ) : null}
+              {consultation.requiresLegalFriendsReview ? (
+                <span className="flag-badge is-attention">기존 사건 확인</span>
+              ) : null}
+              {consultation.legalFriendsHandling?.mode === "new_matter" ? (
+                <span className="flag-badge is-info">기존고객 · 새 사건</span>
+              ) : null}
+              {consultation.legalFriendsHandling?.mode === "shared_contact" ? (
+                <span className="flag-badge is-info">공유 연락처</span>
+              ) : null}
+              {consultation.legalFriendsHandling?.mode === "existing_case" ? (
+                <span className="flag-badge is-positive">기존 사건 연결</span>
               ) : null}
               {legalFriendsInvalidated ? (
                 <span className="flag-badge is-neutral">리걸프렌즈 무효</span>
@@ -846,6 +869,13 @@ export default async function ConsultationDetailPage({
           </aside>
         </div>
 
+        {consultation.requiresLegalFriendsReview ? (
+          <LegalFriendsReviewClaim
+            consultationId={consultation.id}
+            matches={consultation.legalFriendsMatches}
+          />
+        ) : null}
+
         {consultation.directorySource ? (
           <section className="detail-section directory-source-panel" aria-labelledby="directory-source-title">
             <header className="detail-section-heading">
@@ -859,7 +889,9 @@ export default async function ConsultationDetailPage({
                 <p>
                   {consultation.directorySource.relationship === "referrer"
                     ? `${consultation.directorySource.clientName ?? "기존 고객"} 고객이 소개한 상담입니다.`
-                    : "고객찾기에서 선택한 기존 고객의 새 상담입니다."}
+                    : consultation.legalFriendsHandling?.mode === "existing_case"
+                      ? "이번 요청을 선택한 기존 사건 문의로 연결했습니다. 리걸프렌즈 신건은 만들지 않습니다."
+                      : "고객찾기에서 선택한 기존 고객의 새 상담입니다."}
                 </p>
               </div>
               <a
