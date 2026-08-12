@@ -4,16 +4,15 @@
 CloudFormation 스택: `lawand-prod`
 리전: 서울(`ap-northeast-2`)
 최초 배포 릴리스: `20260804T085006Z-84e8708`
-현재 홈페이지 릴리스: `20260812T063358Z-integrated-worktrees-v1`
-현재 ERP 릴리스: `20260812T063358Z-integrated-worktrees-v1`
-현재 gateway 릴리스: `20260812T063358Z-integrated-worktrees-v1`
+현재 홈페이지 릴리스: `20260812T115219Z-integrated-all-worktrees-v2`
+현재 ERP 릴리스: `20260812T115219Z-integrated-all-worktrees-v2`
+현재 gateway 릴리스: `20260812T115219Z-integrated-all-worktrees-v2`
 현재 Windows bridge: `v0.8.3.0`
 
-bridge `v0.8.3.0` + migration `0049`·`0050` + 홈페이지·ERP·gateway를 통합 릴리스로
-운영 반영했다. 센트릭스 sentinel provider ID·ghost terminal state를 증거 기반으로 복구하고,
-고객찾기 신건·소개 상담과 전화 디렉터리 광역 거주지 동기화, 카카오 표시명 필수·기존고객
-배지를 함께 출시했다. 사용자의 명시적 승인으로 활성 통화를 배포 차단 조건으로 쓰지 않았지만,
-provider 종료 증거가 없는 connected root는 강제 종료하지 않았다.
+완료된 모든 worktree를 main에 통합한 뒤 migration `0051..0053`과 홈페이지·ERP·gateway를
+한 릴리스로 운영 반영했다. 상담 작업 큐 직접 등록·실시간 알림/즉시 배정, 전화데스크
+내선/당겨받기·검색/필터·후처리 연락 동작, SOLAPI MMS 대표 발신번호, 자가진단 원·만원 확인을
+함께 출시했다. bridge 코드는 바뀌지 않아 `v0.8.3.0`을 유지했다.
 
 이 문서는 정식 도메인 전환 이후를 포함한 실제 AWS 구성, 접속점, 데이터 이관 범위와
 운영 체크리스트를 기록한다. 비밀번호·API 키·AWS 계정 ID·RDS 마스터 시크릿 ARN은
@@ -76,8 +75,10 @@ provider 종료 증거가 없는 connected root는 강제 종료하지 않았다
 - 배포 S3 버킷은 전체 public access 차단, 버전 관리, TLS 강제, `artifacts/` 30일
   만료 정책을 사용한다. 홈페이지 사용자 파일 저장소로 사용하지 않는다.
 - 기본 CloudWatch 경보는 세 EC2 상태, RDS CPU, RDS 여유 저장공간을 감시한다.
-  SNS·PagerDuty·텔레그램 같은 실제 통지 대상은 아직 연결하지 않았다. 2026-08-12 통합
-  릴리스 최종 확인에서 센트릭스 분리 경보를 포함한 CloudWatch `ALARM`은 0건이다.
+  SNS·PagerDuty·텔레그램 같은 실제 통지 대상은 아직 연결하지 않았다. 2026-08-12 최신 통합
+  릴리스 최종 확인에서 앱·인프라·센트릭스 경보는 0건이다. 별도 `ai-agent-prod-01` 사례 생성
+  크론은 20:25 KST `codex_failed` 1회로 `lawand-case-generator-run-failure`만 ALARM이며,
+  다음 주기 재시도와 모델 런타임 점검이 필요하다.
 
 ## RDS 기준선
 
@@ -96,7 +97,7 @@ provider 종료 증거가 없는 connected root는 강제 종료하지 않았다
 - migration `0022_consultation_sse_notifications.sql`은 상담 outbox INSERT가 커밋될 때
   개인정보 없이 이벤트 ID·유형·상담 ID·발생시각만 PostgreSQL 채널로 알린다. gateway의
   전용 연결만 이 채널을 `LISTEN`하며 RDS를 인터넷에 노출하지 않는다.
-- 2026-08-12 기준 migration `0050`까지 51개가 모두 적용됐고 최근 `0042..0050` 파일 해시는
+- 2026-08-12 기준 migration `0053`까지 54개가 모두 적용됐고 최근 `0042..0053` 파일 해시는
   현재 Git과 일치한다.
   역사적으로 운영에 적용된 `0028_inbound_phone_directory_resolver.sql` 한 개만 현재 파일과
   해시가 다르다. 후속 `0037_phone_desk_directory_context.sql`이 같은 함수 계약을 대체했고
@@ -182,6 +183,36 @@ EC2에서 ARM64 네이티브 빌드한다. 서버 배포는
 systemd 앱 단위와 Caddy edge 단위는 부팅 시 자동 시작한다. 최종 검증에서 홈페이지·ERP는
 재기동 후 약 1초, gateway는 약 2초 안에 health를 회복했고 실패한 systemd unit과
 최근 error priority journal은 없었다.
+
+## 모든 완료 워크트리 통합 배포
+
+2026-08-12 HERDR의 완료 worktree 7개와 원격 `origin/worktree/*` 26개를 전수 대조해 모두
+main ancestor로 만든 뒤 릴리스 `20260812T115219Z-integrated-all-worktrees-v2`로
+홈페이지·ERP·gateway·migration `0051..0053`을 함께 운영 반영했다.
+
+- 배포 소스는 `34eada628508ba812e52aea3149f7f1b87dc5564`다. 전체 5패키지
+  typecheck·lint·test·production build, core 68개·gateway 119개 테스트, DB schema check와
+  표준 migrator 운영형 리허설을 통과했다.
+- 변경 전 암호화 스냅샷
+  `lawand-prod-pre-integrated-all-worktrees-20260812t115219z`은 available이다. private S3
+  AES256 앱 아티팩트는 6,665,960 bytes, SHA-256
+  `464276f57427c736e8245182130262707a6dd414df3f35b42a9750b4c3e1a45f`다.
+- migration 원장은 총 54개다. `0051` 해시는
+  `5052a19ca346a0eb95ee4c05980093618f9c4c8e00665a373ac65059b0d29305`, `0052`는
+  `0ad3060ba216f501c3e28132cc7997c1b6e89e3fade3701f65003681c1ff4688`, `0053`은
+  `a6d9c7533ee64ca0dce3b736f1dfe865fe4f41bb8e1ee18b4d526f1b77e7e339`다. 후처리 source
+  위반 0, 당겨받기 관계 11건, 전화번호 해석 함수의 `client_idx` 반환과 활성 root/leg 0을
+  확인했다.
+- 이미지 ID는 gateway
+  `sha256:c4b06f358ebe296a49e3a13665bd29e2e50c89f4d9b46f94e1393bc169139e1d`, 홈페이지
+  `sha256:263e1d1cc8a38cfcee704ff8eda2494bcf47b3003f6134e114a5f96bf56f257e`, ERP
+  `sha256:3d6ac2570161ba60a35002e10200cc0da83f5d16a79b553ffc6a0c9db89706ff`다. 세 앱과
+  Caddy는 active, Docker restart 0이며 최근 error priority journal은 없다.
+- 정식 DNS·EIP 고정 HTTPS의 홈페이지 `/bank`·`/bank/self-diagnosis`, ERP `/login`,
+  gateway `/health`가 모두 200이다. 임시 인증 세션으로 상담·전화데스크 목록 API와 ERP
+  화면을 검증하고 즉시 삭제해 잔존 세션은 0건이다. gateway의 MMS sender는 대표번호
+  `025557455`, Centrex bridge key는 `registry-v1` 단일 원천 51개다. 실제 상담·통화·문자·
+  MMS·외부 사건 canary는 만들지 않았다.
 
 ## 나머지 워크트리 통합·센트릭스/상담 전체 배포
 

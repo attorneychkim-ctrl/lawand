@@ -71,6 +71,46 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-12 — 모든 완료 워크트리 main 통합·홈페이지/ERP/gateway 운영 배포
+- `HERDR_ENV=1`에서 main과 HERDR worktree 7개, 원격 `origin/worktree/*` 26개를 전수
+  대조했다. 새로 완료된 `calm-meadow-8129`, `clear-meadow-3f2a`, `clear-stone-47b2`,
+  `lucky-field-d6d4`, `quiet-field-ec95`, `quiet-harbor-0aa5`, `silver-cloud-3f8f`을 모두
+  main에 병합했다. 상담 작업 큐 직접 등록·신규 상담 즉시 알림/배정, 전화데스크
+  내선/당겨받기·검색/필터·후처리 문자/발신, SOLAPI MMS 대표 발신번호, 카카오 접수 복구,
+  자가진단 원·만원 확인이 포함됐다. migration 번호 충돌은 당겨받기 `0051/0052`를 유지하고
+  전화 후속 동작을 `0053_phone_follow_up_actions.sql`로 재번호화했다. 최종 모든 원격
+  worktree HEAD는 main ancestor이고 배포 소스 `main`/`origin/main`은
+  `34eada628508ba812e52aea3149f7f1b87dc5564`다.
+- Drizzle migrator가 pending 파일을 한 트랜잭션에 적용해 `ALTER TYPE ... ADD VALUE` 직후
+  `0052`의 새 enum 사용이 실패하는 문제를 운영형 임시 DB 리허설에서 발견했다. `0051`이
+  두 enum을 새 전체 타입으로 원자 교체하도록 수정해 표준 migrate에서 `0051..0053`을 한 번에
+  적용하고 두 번째 실행도 멱등 통과했다. 전체 5패키지 typecheck·lint·production build,
+  core 68개·gateway 119개 테스트, DB schema check·migration 리허설, 홈페이지 production
+  smoke와 `git diff --check`를 통과했다.
+- 통합 릴리스 `20260812T115219Z-integrated-all-worktrees-v2`를 운영 반영했다. 암호화 RDS
+  스냅샷 `lawand-prod-pre-integrated-all-worktrees-20260812t115219z`은 available이다.
+  private S3 AES256 아티팩트는 6,665,960 bytes, SHA-256
+  `464276f57427c736e8245182130262707a6dd414df3f35b42a9750b4c3e1a45f`다. 이미지 ID는
+  gateway `sha256:c4b06f358ebe296a49e3a13665bd29e2e50c89f4d9b46f94e1393bc169139e1d`,
+  홈페이지 `sha256:263e1d1cc8a38cfcee704ff8eda2494bcf47b3003f6134e114a5f96bf56f257e`,
+  ERP `sha256:3d6ac2570161ba60a35002e10200cc0da83f5d16a79b553ffc6a0c9db89706ff`다.
+  세 앱과 Caddy는 active, Docker restart 0이고 Windows bridge는 코드 변경이 없어
+  v0.8.3.0을 유지했다.
+- 운영 migration 원장은 54개다. `0051` 해시는
+  `5052a19ca346a0eb95ee4c05980093618f9c4c8e00665a373ac65059b0d29305`, `0052`는
+  `0ad3060ba216f501c3e28132cc7997c1b6e89e3fade3701f65003681c1ff4688`, `0053`은
+  `a6d9c7533ee64ca0dce3b736f1dfe865fe4f41bb8e1ee18b4d526f1b77e7e339`로 Git과 일치한다.
+  후처리 source 위반 0, 당겨받기 관계 11건, `client_idx` 반환 함수, 활성 root/leg 0을
+  확인했다. gateway secret과 권한 600 환경파일의 `LAWAND_SOLAPI_MMS_SENDER`는 대표번호
+  `025557455`로 전환했고 bridge key는 중복 secret 없이 `registry-v1`의 51개만 적용했다.
+- 정식 DNS와 EIP 고정 HTTPS에서 홈페이지 `/bank`·자가진단, ERP `/login`, API `/health`가
+  모두 200이다. 임시 직원 세션으로 상담/전화데스크 목록 API와 두 ERP 화면의 200·페이지
+  계약을 확인하고 세션을 0건으로 삭제했다. 세 앱의 최근 error priority journal은 0이다.
+  별도 `ai-agent-prod-01` 사례 생성 크론이 20:25 KST `codex_failed`로 1회 실패해
+  `lawand-case-generator-run-failure` 경보만 ALARM이다. 이번 앱 릴리스와 별개이며 다음
+  크론 재시도·모델 런타임 점검이 필요하다. 실제 상담·통화·문자·MMS·외부 사건 canary는
+  만들지 않았다. `PROJECT_PLAN.md`는 v1.23이다.
+
 ### 2026-08-12 — SOLAPI MMS 발신번호 대표번호 전환 후보
 - SOLAPI 인증이 완료된 대표번호 `02-555-7455`를 이미지 MMS의 새 발신번호로 확정했다.
   운영 secret 생성기는 기존 로컬 환경파일이나 Secrets Manager의 과거 `010` 번호를 다시
