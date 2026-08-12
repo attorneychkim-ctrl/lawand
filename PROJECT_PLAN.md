@@ -1,4 +1,4 @@
-# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.14)
+# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.15)
 
 > 이 문서는 새 로앤 홈페이지 + 새 ERP + 리걸플로/리걸프렌즈 연동을 하나의 플랫폼으로
 > 묶기 위한 **저장소 구조·아키텍처 설계 초안**이다. 코덱스/클로드코드 세션이 번갈아
@@ -564,6 +564,20 @@
 > CloudWatch ALARM 0을 확인했다. 남은 acceptance는 실제 전화를 새로 만들지 않은 이번 배포와
 > 분리해 일반 내선·무조건/통화 후 호전환·실패 복귀 네 시나리오와 통제 문자 회신을 수행하는
 > 것이다.
+> 2026-08-12에는 Windows bridge v0.8.0의 v2 `call.ringing` 직렬화 결함을 확인했다.
+> `incomingLineNumber`가 `callerNumber`와 같은 조건문 안에 있어, caller 원문을 싣지 않는
+> v2 수신·내선 관측에서 필수 수신 회선만 JSON에서 빠졌고 gateway가 HTTP 400으로 거부했다.
+> v1 병행 원장은 정상이라 고객 통화 자체와 종료 상태는 보존됐지만, 해당 구간의 일부 외부
+> 통화는 새 root/leg 연결이 없었다. v0.8.1 출시 후보는 수신 회선을 독립 직렬화하고 C#·core
+> 양쪽에 inbound v2 계약 회귀 테스트를 둔다. health monitor는 대기 중 재시도 큐
+> `QueueDepth`와 영구 거부 `DeadLetterDepth`를 별도 metric으로 발행하되 기존
+> `DpapiQueueDepth` 합계도 호환용으로 유지한다. migration
+> `0048_centrex_v2_ringing_recovery.sql`은 병행 v1 원장의 암호문·AAD와 UUID를 그대로 사용해
+> 빠진 external root/customer leg/provider 식별자를 멱등 복구하고, 기존 v2 leg가 있으면
+> 중복 생성하지 않고 연결하며 후처리 원천도 root로 원자적으로 승격한다. 필수 필드가 이미
+> 빠진 과거 암호화 dead-letter는 재처리로 복구하지 않고 migration 대조 뒤 hash를 보존한
+> archive로 이동한다. 이 후보는 main 반영까지만 수행했으며 운영 bridge 교체, 운영 migration,
+> dead-letter 이동과 CloudWatch 경보 재구성은 통합 운영 배포에서 별도로 수행한다.
 > `Office_idx=56` 사건만 이름·전화·사건번호·원본 사건 ID 없이 추출한 자가진단
 > 런타임 읽기 모델을 만들었다. 현재 1,759건(회생 1,342·파산면책 417)이며 gateway만
 > 이 모델을 읽는다. `/bank/self-diagnosis`는 고객 상황과 유사한 다섯 건의 월 변제금·

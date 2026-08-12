@@ -171,10 +171,18 @@ gateway 응답 본문은 기록하지 않는다. 운영자가 원인 조사 후 
 `gateway-dead-letter-archive`로 이동하며 평문으로 풀어 저장하지 않는다.
 
 bridge v0.7.2의 상대·채널 종류 로그로 내선과 호전환의 실측 관계를 확정했다. v0.8.0
-출시 후보는 같은 비식별 필드를 v2 관측 이벤트로 전달한다. 기존 외부 수·발신 v1은
+은 같은 비식별 필드를 v2 관측 이벤트로 전달한다. 기존 외부 수·발신 v1은
 병행해 호환성을 유지하고, 정상 무조건 호전환의 원수신 회선 불일치는 v2 전용 엄격한
 상관 경계에서만 수용한다. 통화 후 호전환의 최종 고객 leg처럼 증거가 부족한 관계는
 `호전환 확인 필요`로 남기며 `local_xfer`나 종료 cause만으로 완료를 추정하지 않는다.
+
+v0.8.1 출시 후보는 v2 `call.ringing`에서 `callerNumber` 유무와 관계없이
+`incomingLineNumber`를 독립 직렬화한다. v2는 caller 원문을 보내지 않으므로 두 필드를 같은
+조건문으로 묶으면 gateway 필수 수신 회선이 누락돼 HTTP 400과 영구 dead-letter가 생긴다.
+C# self-test와 core schema test가 inbound v2의 수신 회선 존재와 caller 원문 부재를 양쪽에서
+고정한다. 결함이 들어간 과거 dead-letter는 필드가 이미 소실돼 그대로 재처리하지 않는다.
+병행 v1 원장을 migration `0048_centrex_v2_ringing_recovery.sql`로 승격한 뒤 암호문 hash를
+검증해 archive한다.
 
 ## 운영 점검과 부하시험
 
@@ -182,7 +190,10 @@ bridge v0.7.2의 상대·채널 종류 로그로 내선과 호전환의 실측 �
 부팅·1분 주기로 등록한다. 최신 비식별 상태는
 `C:\ProgramData\Lawand\CentrexBridge\pool-health.json`에서 확인한다. 기본 CloudWatch
 metric은 `AssignedOffline`, `LoginFailures`, `DpapiQueueDepth`, `SupervisorHealthy`,
-`RunningBridges`, `WarmIdleRunning`이다.
+`RunningBridges`, `WarmIdleRunning`이며, v0.8.1부터 실제 재시도 대기분 `QueueDepth`와 영구
+거부분 `DeadLetterDepth`도 별도로 발행한다. `DpapiQueueDepth`는 두 값의 합인 기존 경보
+호환 metric이다. 운영 경보는 두 세부 metric을 분리해 원인과 조치를 구분하고 합계 경보는
+전환 기간 동안만 호환용으로 유지한다.
 
 실부하 canary는 supervisor를 잠시 비활성화하고 10개 10분, 25개 10분, 50개 30분을 5초
 간격으로 측정한다. 여유 메모리가 768MB 아래로 떨어지거나 목표 프로세스 수가 60초 동안

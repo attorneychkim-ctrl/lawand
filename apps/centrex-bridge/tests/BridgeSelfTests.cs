@@ -211,6 +211,21 @@ namespace Lawand.CentrexBridge
             True(ringing.Contains("\"contextProviderCallId\":\"1785994319.2999991\""));
             True(!ringing.Contains("incomingLineNumber"));
 
+            string inboundRinging = GatewayEventPayload.ObservedRinging(
+                configuration,
+                "1785994319.3000011",
+                "inbound",
+                "external",
+                "01012345678",
+                "07000004591",
+                null,
+                "sip",
+                "none").ToJson();
+            True(inboundRinging.Contains("\"eventType\":\"call.ringing\""));
+            True(inboundRinging.Contains(
+                "\"incomingLineNumber\":\"07000004591\""));
+            True(!inboundRinging.Contains("callerNumber"));
+
             string channels = GatewayEventPayload.ObservedChannels(
                 configuration,
                 "1785994319.3000001",

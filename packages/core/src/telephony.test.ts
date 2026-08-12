@@ -349,6 +349,30 @@ test("센트릭스 v2 관측은 내선 상담의 상위 외부 통화 문맥을 
   );
 });
 
+test("센트릭스 v2 수신 관측은 최초 수신 회선을 반드시 보존한다", () => {
+  const observation = {
+    schemaVersion: 2,
+    eventId: "01980000-0000-7000-8000-000000000054",
+    bridgeId: "seoul-phone-01",
+    endpointId: "01980000-0000-7000-8000-000000000002",
+    eventType: "call.ringing",
+    occurredAt: "2026-08-12T08:30:14.1598970+09:00",
+    providerCallId: "1785994319.3000011",
+    agentExtension: "4591",
+    direction: "inbound",
+    remotePartyKind: "external",
+    remotePartyNumber: "01012345678",
+    incomingLineNumber: "07000004591",
+    channelKind: "sip",
+    relatedChannelKind: "none",
+  } as const;
+
+  assert.deepEqual(centrexBridgeEventSchema.parse(observation), observation);
+  const { incomingLineNumber: _incomingLineNumber, ...missingLine } =
+    observation;
+  assert.equal(centrexBridgeEventSchema.safeParse(missingLine).success, false);
+});
+
 test("센트릭스 v2 채널·종료 관측은 양쪽 provider 식별자를 보존한다", () => {
   const base = {
     schemaVersion: 2,
