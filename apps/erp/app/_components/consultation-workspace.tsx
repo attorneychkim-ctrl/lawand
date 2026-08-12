@@ -10,6 +10,7 @@ import type {
   ListPageSize,
 } from "../../lib/gateway";
 import { ClaimConsultationButton } from "./claim-consultation-button";
+import { ConsultationCreateButton } from "./consultation-create-button";
 import {
   ListDateControls,
   ListPagination,
@@ -416,6 +417,7 @@ export function ConsultationWorkspace({
               <h2 id="consultation-list-title">상담 작업 큐</h2>
             </div>
             <div className="queue-result-summary">
+              <ConsultationCreateButton />
               <span
                 aria-live="polite"
                 className={`realtime-status is-${realtimeStatus}`}

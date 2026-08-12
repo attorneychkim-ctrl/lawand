@@ -3,6 +3,7 @@ import "server-only";
 import type {
   LegalFriendsDirectoryConsultationCreate,
   ResidenceRegion,
+  StaffConsultationCreate,
 } from "@lawand/core";
 
 import { readStaffSessionToken } from "./session";
@@ -853,6 +854,17 @@ export async function createClientDirectoryConsultation(
 ): Promise<ClientDirectoryConsultationResult> {
   return phoneDeskResponse<ClientDirectoryConsultationResult>(
     await gatewayFetch("/v1/client-directory/consultations", {
+      method: "POST",
+      body: input,
+    }),
+  );
+}
+
+export async function createStaffConsultation(
+  input: StaffConsultationCreate,
+): Promise<ClientDirectoryConsultationResult> {
+  return phoneDeskResponse<ClientDirectoryConsultationResult>(
+    await gatewayFetch("/v1/staff/consultations", {
       method: "POST",
       body: input,
     }),

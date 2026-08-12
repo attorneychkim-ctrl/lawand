@@ -15,6 +15,7 @@ import {
   messageTemplateUpdateSchema,
   phoneDeskAftercareSaveSchema,
   renderMessageTemplate,
+  staffConsultationCreateSchema,
   telephonyCallDispositionConfirmationSchema,
   telephonyMessageSendSchema,
 } from "./telephony.js";
@@ -82,6 +83,52 @@ test("고객찾기 신건상담은 수정된 고객정보와 소개 여부를 �
     legalFriendsDirectoryConsultationCreateSchema.safeParse({
       ...input,
       caseType: 4,
+    }).success,
+    false,
+  );
+});
+
+test("직원 신규상담은 일반·기존고객·소개 등록 문맥을 엄격히 검증한다", () => {
+  const input = {
+    idempotencyKey: "01980000-0000-7000-8000-000000000044",
+    customerName: " 신규 고객 ",
+    phone: "010-2345-6789",
+    residenceRegion: "gyeonggi",
+    caseType: 1,
+    directorySource: null,
+  } as const;
+  assert.deepEqual(staffConsultationCreateSchema.parse(input), {
+    ...input,
+    customerName: "신규 고객",
+    phone: "01023456789",
+  });
+  assert.equal(
+    staffConsultationCreateSchema.safeParse({
+      ...input,
+      directorySource: {
+        clientIdx: 10,
+        caseIdx: 20,
+        relationship: "customer",
+      },
+    }).success,
+    true,
+  );
+  assert.equal(
+    staffConsultationCreateSchema.safeParse({
+      ...input,
+      directorySource: {
+        clientIdx: 10,
+        caseIdx: 20,
+        relationship: "invalid",
+      },
+    }).success,
+    false,
+  );
+  assert.equal(
+    staffConsultationCreateSchema.safeParse({
+      ...input,
+      directorySource: null,
+      isReferral: false,
     }).success,
     false,
   );
