@@ -493,6 +493,19 @@ export function ConsultationWorkspace({
                     <span className="consultation-row-main">
                       <span className="consultation-row-title">
                         <strong>{consultation.displayName}</strong>
+                        <span
+                          className={`consultation-region-badge${
+                            consultation.residenceRegion ? "" : " is-missing"
+                          }`}
+                        >
+                          <svg aria-hidden="true" viewBox="0 0 24 24">
+                            <path d="M12 21s6-5.2 6-11a6 6 0 1 0-12 0c0 5.8 6 11 6 11Z" />
+                            <circle cx="12" cy="10" r="2" />
+                          </svg>
+                          {consultation.residenceRegion
+                            ? residenceRegionLabels[consultation.residenceRegion]
+                            : "지역 미기록"}
+                        </span>
                         <span className={`state-badge is-${consultation.state}`}>
                           {stateLabels[consultation.state] ?? consultation.state}
                         </span>
@@ -503,10 +516,6 @@ export function ConsultationWorkspace({
                           : "전화번호 미수집"}
                         <span aria-hidden="true">·</span>
                         {modeLabel(consultation)}
-                        <span aria-hidden="true">·</span>
-                        {consultation.residenceRegion
-                          ? residenceRegionLabels[consultation.residenceRegion]
-                          : "지역 미기록"}
                       </span>
                       <StatusBadges item={consultation} />
                     </span>

@@ -263,9 +263,100 @@ svg {
   gap: 12px;
 }
 
+.browser-notification-toggle {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-subtle);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: .72rem;
+  font-weight: 750;
+}
+
+.browser-notification-toggle:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--brand) 42%, var(--line));
+  color: var(--brand-strong);
+}
+
+.browser-notification-toggle:disabled {
+  cursor: default;
+}
+
+.browser-notification-toggle.is-granted {
+  border-color: color-mix(in srgb, var(--brand) 28%, var(--line));
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+}
+
+.browser-notification-toggle.is-denied {
+  color: var(--muted-2);
+}
+
+.browser-notification-toggle svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
 .inbound-call-strip {
   border-top: 1px solid color-mix(in srgb, var(--brand) 26%, var(--line));
   background: color-mix(in srgb, var(--brand-soft) 82%, var(--surface));
+}
+
+.inbound-call-strip-toolbar {
+  display: flex;
+  width: min(1240px, calc(100% - 40px));
+  min-height: 30px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 0 auto;
+  padding-top: 5px;
+  color: var(--muted);
+  font-size: .66rem;
+  font-weight: 650;
+}
+
+.inbound-call-strip-toolbar strong {
+  color: var(--brand-strong);
+}
+
+.inbound-call-strip-toolbar button {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--brand-strong);
+  cursor: pointer;
+  font-size: .66rem;
+  font-weight: 800;
+}
+
+.inbound-call-strip-toolbar button:hover {
+  background: color-mix(in srgb, var(--brand) 10%, transparent);
+}
+
+.inbound-call-strip-toolbar svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.9;
 }
 
 .inbound-call-strip-inner {
@@ -1186,6 +1277,39 @@ a.inbound-customer:hover { text-decoration: underline; }
   font-size: .94rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.consultation-region-badge {
+  display: inline-flex;
+  min-height: 24px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px 3px 6px;
+  border: 1px solid color-mix(in srgb, var(--brand) 58%, transparent);
+  border-radius: 999px;
+  background: var(--brand);
+  color: var(--surface);
+  box-shadow: 0 3px 9px color-mix(in srgb, var(--brand) 18%, transparent);
+  font-size: .65rem;
+  font-weight: 850;
+}
+
+.consultation-region-badge.is-missing {
+  border-color: color-mix(in srgb, var(--warning) 56%, transparent);
+  background: var(--warning-soft);
+  color: var(--warning);
+  box-shadow: none;
+}
+
+.consultation-region-badge svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
 }
 
 .state-badge {
@@ -4762,6 +4886,8 @@ a.inbound-customer:hover { text-decoration: underline; }
 
 @media (max-width: 1040px) {
   .staff-bar-leading { gap: 20px; }
+  .browser-notification-toggle { width: 38px; padding: 0; justify-content: center; }
+  .browser-notification-toggle span { display: none; }
   .queue-controls { grid-template-columns: minmax(220px, 310px) minmax(0, 1fr); }
   .consultation-row-link { grid-template-columns: 42px minmax(0, 1fr) 150px 18px; }
   .consultation-command-grid { grid-template-columns: minmax(0, 1.25fr) minmax(290px, .75fr); }
@@ -4811,6 +4937,8 @@ a.inbound-customer:hover { text-decoration: underline; }
   .staff-primary-nav a { min-height: 38px; padding-inline: 9px; }
   .staff-primary-nav a.is-active::after { bottom: -12px; right: 9px; left: 9px; }
   .staff-actions { gap: 6px; }
+  .browser-notification-toggle { width: 38px; padding: 0; justify-content: center; }
+  .browser-notification-toggle span { display: none; }
   .staff-identity-copy { display: none; }
   .theme-toggle { width: 38px; padding: 0; justify-content: center; }
   .theme-toggle-label { display: none; }
@@ -4836,6 +4964,10 @@ a.inbound-customer:hover { text-decoration: underline; }
   .detail-actions .message-button { width: 100%; }
 
   .inbound-call-strip-inner {
+    width: calc(100% - 24px);
+  }
+
+  .inbound-call-strip-toolbar {
     width: calc(100% - 24px);
   }
 
@@ -5031,6 +5163,7 @@ a.inbound-customer:hover { text-decoration: underline; }
     padding: 15px 14px 12px;
   }
   .consultation-channel-icon { width: 38px; height: 38px; border-radius: 10px; align-self: start; }
+  .consultation-region-badge { min-height: 22px; }
   .consultation-row-owner {
     grid-column: 2 / 3;
     grid-row: 2;
