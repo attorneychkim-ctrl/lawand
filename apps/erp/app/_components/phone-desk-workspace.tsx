@@ -16,6 +16,8 @@ import {
   listDateQuery,
   type ListDateFilter,
 } from "./list-navigation";
+import { ClickToCallButton } from "./click-to-call-button";
+import { MessageComposeButton } from "./message-compose-button";
 
 type SourceFilter = PhoneDeskListFilter;
 type ConnectionState = "connecting" | "connected" | "disconnected";
@@ -554,17 +556,65 @@ export function PhoneDeskWorkspace({
                 new Date(task.dueAt).getTime() < currentTime;
               return (
                 <article className={overdue ? "is-overdue" : undefined} key={task.id}>
-                  <div>
-                    <span className="phone-follow-up-result">{resultCopy[task.result]}</span>
-                    <strong>{formatDateTime(task.dueAt)}</strong>
-                    <span>{overdue ? "기한 지남" : "재통화 예정"} · 담당 {task.assignee.displayName}</span>
+                  <div className="phone-follow-up-summary">
+                    <div className="phone-follow-up-customer">
+                      <strong>{task.customerName}</strong>
+                      <span>{formatPhone(task.remotePhone) || "전화번호 확인 필요"}</span>
+                    </div>
+                    <div className="phone-follow-up-schedule">
+                      <span className="phone-follow-up-result">{resultCopy[task.result]}</span>
+                      <strong>{formatDateTime(task.dueAt)}</strong>
+                      <span>{overdue ? "기한 지남" : "재통화 예정"} · 담당 {task.assignee.displayName}</span>
+                    </div>
                   </div>
                   <div className="phone-follow-up-actions">
                     <Link href={`/phone-desk/${task.callId}`}>통화 상세</Link>
                     {task.consultationId ? (
                       <Link href={`/consultations/${task.consultationId}`}>상담 상세</Link>
                     ) : null}
+                    {task.contactTarget?.source === "consultation" ? (
+                      <>
+                        <MessageComposeButton
+                          consultationId={task.contactTarget.consultationId}
+                          customerName={task.customerName}
+                          receiptCode={task.contactTarget.receiptCode}
+                          staffName={currentStaff.displayName}
+                        />
+                        <ClickToCallButton
+                          consultationId={task.contactTarget.consultationId}
+                          idleLabel="센트릭스 전화하기"
+                          staffName={currentStaff.displayName}
+                        />
+                      </>
+                    ) : task.contactTarget?.source === "legal_friends_directory" ? (
+                      <>
+                        <MessageComposeButton
+                          customerName={task.customerName}
+                          directoryTarget={{
+                            clientIdx: task.contactTarget.clientIdx,
+                            caseIdx: task.contactTarget.caseIdx,
+                          }}
+                          receiptCode={task.contactTarget.receiptCode}
+                          staffName={currentStaff.displayName}
+                        />
+                        <ClickToCallButton
+                          directoryTarget={{
+                            clientIdx: task.contactTarget.clientIdx,
+                            caseIdx: task.contactTarget.caseIdx,
+                            clientName: task.customerName,
+                          }}
+                          idleLabel="센트릭스 전화하기"
+                          staffName={currentStaff.displayName}
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <button disabled type="button">문자 보내기</button>
+                        <button disabled type="button">센트릭스 전화하기</button>
+                      </>
+                    )}
                     <button
+                      className="phone-follow-up-complete"
                       disabled={completingTaskIds.has(task.id)}
                       onClick={() => void completeFollowUp(task.id)}
                       type="button"

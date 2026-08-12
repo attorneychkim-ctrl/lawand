@@ -198,6 +198,23 @@
   main 병합·운영 migration·gateway/ERP 배포·운영 원장 변경을 수행하지 않았으며 운영 반영은
    `0051`·`0052`·gateway·ERP를 같은 통합 릴리스로 배포한 뒤 세 실통화 회귀 canary로 확인한다.
 
+### 2026-08-12 — 전화 후처리 기본 상담완료·문자·재통화 즉시 연락 출시 후보
+- 전화데스크 후처리를 새로 열면 통화 결과가 `상담완료`로 기본 선택된다. 이미 저장된
+  후처리는 기존 결과를 보존한다. 결과 분류와 독립된 `고객에게 문자 남기기`를 추가해 기존
+  상담 또는 정확히 일치한 리걸프렌즈 고객에게 개인 템플릿·직접 입력·SMS/LMS/MMS 흐름을
+  그대로 사용할 수 있다.
+- 전화데스크의 재통화 업무 큐는 각 업무에 고객명·전화번호를 표시하고 `문자 보내기`와
+  `센트릭스 전화하기`를 제공한다. 브라우저는 실제 액션에 전화번호를 다시 보내지 않고 상담
+  ID 또는 리걸프렌즈 고객·사건 ID만 전달하며, gateway가 삭제 사건·현재 전화번호·직원
+  권한을 기존 경계에서 다시 검증한다. 원시 번호만 있고 안전한 고객 연결이 없는 통화는
+  이름·번호만 표시하고 두 액션을 비활성화한다. 문자 본문·전화번호는 SSE·outbox·로그에
+  추가하지 않았다.
+- 통합 과정에서 `0053_phone_follow_up_actions.sql`로 재번호화한 migration은 정확 전화번호 resolver에 `client_idx`를
+  추가한다. 로컬 운영형 DB 복제본에 migration을 두 번 적용해 멱등성과 반환 계약을 확인했고,
+  전체 5패키지 typecheck·lint·production build, core 67개·gateway 115개 테스트, DB schema
+   check와 `git diff --check`를 통과했다. `PROJECT_PLAN.md`는 v1.21이다. 이 워크트리에서는
+   main 병합·운영 migration·gateway/ERP 배포·실제 문자/전화 canary를 수행하지 않았다.
+
 ### 2026-08-12 — 나머지 워크트리 main 통합·0049/0050·v0.8.3 전체 운영 배포
 - `HERDR_ENV=1`에서 main과 HERDR worktree 5개, 원격 `origin/worktree/*` 19개를 전수
   대조했다. 미반영이던 `brave-cloud-9c88`의 Cafe24 구 DNS 안전 문서는 merge commit

@@ -733,6 +733,7 @@ export default async function ConsultationDetailPage({
               <ClickToCallButton
                 consultationId={consultation.id}
                 initialCall={latestMyCall ?? null}
+                staffName={staff.displayName}
               />
             ) : null}
             {canInvalidateLegalFriendsCase ? (

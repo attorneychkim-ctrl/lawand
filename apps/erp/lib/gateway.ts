@@ -257,6 +257,7 @@ export type TelephonyInboundCall = {
         source: "legal_friends";
         clientName: string;
         cases: Array<{
+          clientIdx: number;
           caseIdx: number;
           caseNumber: string | null;
           caseName: string | null;
@@ -453,6 +454,21 @@ export type PhoneDeskFollowUp = {
   callId: string;
   result: PhoneDeskCallResult;
   consultationId: string | null;
+  customerName: string;
+  remotePhone: string;
+  contactTarget:
+    | {
+        source: "consultation";
+        consultationId: string;
+        receiptCode: string;
+      }
+    | {
+        source: "legal_friends_directory";
+        clientIdx: number;
+        caseIdx: number;
+        receiptCode: string;
+      }
+    | null;
   dueAt: string;
   assignee: { staffUserId: string; displayName: string };
 };

@@ -4348,14 +4348,23 @@ a.inbound-customer:hover { text-decoration: underline; }
   border-color: color-mix(in srgb, var(--danger) 35%, var(--line));
 }
 
-.phone-follow-up-list article > div:first-child { display: grid; gap: 3px; }
+.phone-follow-up-summary {
+  display: grid;
+  grid-template-columns: minmax(150px, .8fr) minmax(190px, 1fr);
+  align-items: center;
+  gap: 16px;
+}
+.phone-follow-up-customer,
+.phone-follow-up-schedule { display: grid; gap: 3px; }
+.phone-follow-up-customer strong { color: var(--ink); font-size: .82rem !important; }
+.phone-follow-up-customer span { color: var(--ink-soft) !important; font-size: .72rem !important; font-weight: 760; }
 .phone-follow-up-list article strong { font-size: .78rem; }
 .phone-follow-up-list article span { color: var(--muted); font-size: .64rem; }
 .phone-follow-up-result { color: var(--warning) !important; font-weight: 850; }
-.phone-follow-up-actions { justify-content: flex-end; }
+.phone-follow-up-actions { align-items: flex-start; justify-content: flex-end; flex-wrap: wrap; }
 
-.phone-follow-up-actions a,
-.phone-follow-up-actions button {
+.phone-follow-up-actions > a,
+.phone-follow-up-actions > button {
   padding: 7px 9px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -4369,10 +4378,36 @@ a.inbound-customer:hover { text-decoration: underline; }
   white-space: nowrap;
 }
 
-.phone-follow-up-actions button {
+.phone-follow-up-actions .message-button,
+.phone-follow-up-actions .call-button {
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: .64rem;
+  box-shadow: none;
+}
+
+.phone-follow-up-actions .centrex-call-control {
+  max-width: 230px;
+  justify-items: start;
+}
+
+.phone-follow-up-actions .centrex-call-message {
+  font-size: .61rem;
+  text-align: left;
+}
+
+.phone-follow-up-actions .phone-follow-up-complete {
   border-color: var(--brand);
   background: var(--brand);
   color: white;
+}
+
+.phone-follow-up-actions > button:disabled {
+  border-color: var(--line);
+  background: var(--surface-muted);
+  color: var(--muted-2);
+  cursor: not-allowed;
 }
 
 .phone-desk-detail-shell { max-width: 1080px; }
@@ -4454,6 +4489,27 @@ a.inbound-customer:hover { text-decoration: underline; }
   border-color: var(--brand);
   background: var(--brand-soft);
   color: var(--brand-strong);
+}
+
+.phone-aftercare-message-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 15px 16px;
+  border: 1px solid color-mix(in srgb, var(--brand) 25%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--brand-soft) 48%, var(--surface));
+}
+
+.phone-aftercare-message-action > div:first-child { display: grid; gap: 4px; }
+.phone-aftercare-message-action strong { color: var(--ink); font-size: .74rem; }
+.phone-aftercare-message-action span,
+.phone-aftercare-message-unavailable small { color: var(--muted); font-size: .64rem; line-height: 1.45; }
+.phone-aftercare-message-unavailable { display: grid; justify-items: end; gap: 5px; }
+.phone-aftercare-message-unavailable .message-button:disabled {
+  cursor: not-allowed;
+  opacity: .55;
 }
 
 .phone-aftercare-choice,
@@ -5361,6 +5417,7 @@ a.inbound-customer:hover { text-decoration: underline; }
   .phone-follow-up-assignee-filter { min-width: 0; flex: 1; }
   .phone-follow-up-assignee-filter select { min-width: 0; width: 100%; }
   .phone-follow-up-actions { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
+  .phone-follow-up-summary { width: 100%; grid-template-columns: 1fr; gap: 9px; }
   .phone-desk-detail-summary { grid-template-columns: 1fr 1fr; }
   .phone-desk-detail-summary > div,
   .phone-desk-detail-summary > div:nth-child(3n) { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
@@ -5368,6 +5425,9 @@ a.inbound-customer:hover { text-decoration: underline; }
   .phone-desk-detail-summary > div:nth-last-child(-n + 2) { border-bottom: 0; }
   .phone-desk-back-link { align-self: flex-start; }
   .phone-aftercare-results { grid-template-columns: 1fr 1fr; }
+  .phone-aftercare-message-action { align-items: stretch; flex-direction: column; }
+  .phone-aftercare-message-action .message-button { width: 100%; }
+  .phone-aftercare-message-unavailable { justify-items: stretch; }
   .phone-aftercare-grid { grid-template-columns: 1fr; }
   .phone-aftercare-consultation-context { margin-left: 13px; }
   .phone-aftercare-consultation-context dl,
