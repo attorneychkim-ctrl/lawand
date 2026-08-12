@@ -71,6 +71,29 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-12 — calm-valley ERP 상담 알림 UX 긴급 단독 운영 배포
+- `HERDR_ENV=1`에서 main과 HERDR worktree 5개, 원격 `origin/worktree/*` 18개를 전수
+  대조했다. `worktree/calm-valley-fbf9`의 `b69c037`·`6550ebc`만 merge commit
+  `7b86517`로 main에 병합하고 `origin/main`까지 push했다. 원격 16개 HEAD는 병합 뒤 main
+  ancestor다. `brave-cloud-9c88`의 Cafe24 문서 작업과 `rapid-meadow-adae`의 카카오 상담
+  UX는 사용자 요청에 따라 명시적으로 제외했고, `clear-river-b502`의 커밋 전 고객찾기·
+  migration `0050` 작업은 진행 중으로 제외했다.
+- 영향 범위인 ERP typecheck·lint·production build와 `git diff --check`를 다시 통과했다.
+  릴리스 `20260812T061230Z-erp-consultation-alerts-v1`의 private S3 AES256 아티팩트 SHA-256은
+  `38f23964e2c0ab04707110a84592e341792e0d5e8d02ecd74ee2b7cc49f4463b`이고, 운영 ERP 이미지
+  ID는 `sha256:9b10dbf77512b7def49f7a7e42a5c1b161c5a63aae4a3a146903aa5b6024ac1a`다.
+- 이번 긴급 배포는 ERP와 해당 EC2의 Caddy만 전환했다. main에 먼저 들어 있던 v0.8.3·
+  migration `0049`·gateway·Windows bridge는 명시적으로 운영 반영하지 않았다. gateway는
+  기존 릴리스 `20260812T015203Z-centrex-ringing-recovery-v1`, 이미지
+  `sha256:e0ca5390fea42144569080a8d3950c7d13ea09c27244074ae53966c7e1d90a9e`로 active·restart 0,
+  health 정상이다. 운영 DB migration과 Windows 프로세스·통화 원장은 건드리지 않았다.
+- ERP·Caddy는 active·restart 0이고 정식 도메인 DNS/EIP 고정 HTTPS·`sslip.io` 로그인은
+  모두 200, 루트는 로그인으로 307이다. 운영 Next bundle에서 `알림 켜기`와
+  `최근 1건만 보기`를 확인했고 최근 error priority journal과 CloudWatch ALARM은 0이다.
+  실제 상담·알림·통화 canary나 임시 직원 세션은 만들지 않았다. 직전 ERP rollback 태그는
+  `20260812T015203Z-centrex-ringing-recovery-v1`, 이미지 ID는
+  `sha256:59cbac811381880c5706d057400d3aa8208c0be0568516372ad34b03619fdbf7`다.
+
 ### 2026-08-12 — ERP 통화 최근 1건 접기·상담 지역 강조·전 직원 등록 알림 후보
 - ERP 상단 통화 활동은 수신·발신·내선과 legacy 카드를 합친 뒤 `lastEventAt`이 가장 최근인
   한 건만 기본 표시한다. 두 건 이상이면 총 건수와 `모두 펼치기/최근 1건만 보기` 버튼으로

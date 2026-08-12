@@ -5,7 +5,7 @@ CloudFormation 스택: `lawand-prod`
 리전: 서울(`ap-northeast-2`)
 최초 배포 릴리스: `20260804T085006Z-84e8708`
 현재 홈페이지 릴리스: `20260810T064408Z-homepage-cutover-ready-v3`
-현재 ERP 릴리스: `20260812T015203Z-centrex-ringing-recovery-v1`
+현재 ERP 릴리스: `20260812T061230Z-erp-consultation-alerts-v1`
 현재 gateway 릴리스: `20260812T015203Z-centrex-ringing-recovery-v1`
 현재 Windows bridge: `v0.8.2.0`
 
@@ -173,6 +173,32 @@ EC2에서 ARM64 네이티브 빌드한다. 서버 배포는
 systemd 앱 단위와 Caddy edge 단위는 부팅 시 자동 시작한다. 최종 검증에서 홈페이지·ERP는
 재기동 후 약 1초, gateway는 약 2초 안에 health를 회복했고 실패한 systemd unit과
 최근 error priority journal은 없었다.
+
+## ERP 상담 알림 UX 긴급 단독 배포
+
+2026-08-12 사용자가 지정한 `worktree/calm-valley-fbf9`만 `main`에 병합한 뒤 릴리스
+`20260812T061230Z-erp-consultation-alerts-v1`로 ERP를 단독 전환했다.
+
+- 배포 소스는 `main`/`origin/main` merge commit `7b86517`이다. 영향 범위인 ERP
+  typecheck·lint·production build와 `git diff --check`를 다시 통과했다.
+- private S3 AES256 아티팩트 SHA-256은
+  `38f23964e2c0ab04707110a84592e341792e0d5e8d02ecd74ee2b7cc49f4463b`, ERP 이미지 ID는
+  `sha256:9b10dbf77512b7def49f7a7e42a5c1b161c5a63aae4a3a146903aa5b6024ac1a`다.
+- ERP 상단은 전체 통화 활동 중 최근 한 건을 기본 표시하고 필요할 때 모두 펼친다. 상담
+  목록은 거주 시·도를 고객명 옆 고대비 배지로 표시하며, 전 직원이 기존 개인정보 없는
+  `consultation.requested` SSE를 받아 보이는 탭의 토스트와 권한 허용 브라우저 Notification으로
+  새 상담 상세에 이동한다.
+- ERP·Caddy는 active·restart 0이다. 정식 도메인의 DNS/EIP 고정 HTTPS와 `sslip.io`
+  `/login`은 모두 200이고 운영 bundle에 `알림 켜기`·`최근 1건만 보기`가 포함됐다. 최근
+  error priority journal과 CloudWatch ALARM은 0이다. 실제 상담·알림·통화 canary와 임시
+  직원 세션은 만들지 않았다.
+- 이번 긴급 범위에서는 운영 DB migration, gateway, Windows bridge를 변경하지 않았다.
+  main에 먼저 병합된 v0.8.3·migration `0049`는 별도 통합 릴리스 안전 게이트에 남아 있다.
+  gateway는 직전 릴리스 `20260812T015203Z-centrex-ringing-recovery-v1`와 이미지
+  `sha256:e0ca5390fea42144569080a8d3950c7d13ea09c27244074ae53966c7e1d90a9e`로 active·restart 0,
+  health 정상이다. ERP rollback은 직전 태그
+  `20260812T015203Z-centrex-ringing-recovery-v1`과 이미지
+  `sha256:59cbac811381880c5706d057400d3aa8208c0be0568516372ad34b03619fdbf7`를 사용한다.
 
 ## 센트릭스 지연 수신·중복 원장 복구 통합 배포
 
