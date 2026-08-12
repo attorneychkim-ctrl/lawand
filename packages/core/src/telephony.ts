@@ -218,6 +218,36 @@ export type LegalFriendsDirectoryConsultationCreate = z.infer<
   typeof legalFriendsDirectoryConsultationCreateSchema
 >;
 
+export const staffConsultationCreateSchema = z
+  .object({
+    idempotencyKey: z.uuid(),
+    customerName: z.string().trim().min(1).max(50),
+    phone: z
+      .string()
+      .trim()
+      .transform((value) => value.replace(/\D/g, ""))
+      .pipe(
+        z
+          .string()
+          .regex(/^010\d{8}$/, "휴대전화는 010으로 시작하는 11자리 번호여야 합니다."),
+      ),
+    residenceRegion: residenceRegionSchema,
+    caseType: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+    directorySource: z
+      .object({
+        clientIdx: z.number().int().positive(),
+        caseIdx: z.number().int().positive(),
+        relationship: z.enum(["customer", "referrer"]),
+      })
+      .strict()
+      .nullable(),
+  })
+  .strict();
+
+export type StaffConsultationCreate = z.infer<
+  typeof staffConsultationCreateSchema
+>;
+
 export type TelephonyCallDisposition = z.infer<
   typeof telephonyCallDispositionSchema
 >;

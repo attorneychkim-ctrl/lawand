@@ -553,7 +553,7 @@ test("클릭투콜 API는 인증된 현재 담당자와 상담 ID를 서비스�
   assert.equal(received?.actor.id, realtimeActor.id);
 });
 
-test("고객찾기 API는 검색·연락·신건상담 입력을 인증된 서비스에 전달한다", async (context) => {
+test("고객찾기와 직원 신규등록 API는 인증된 서비스에 입력을 전달한다", async (context) => {
   let searchedQuery = "";
   let clickTarget: { clientIdx: number; caseIdx: number } | undefined;
   let messageTarget: { clientIdx: number; caseIdx: number } | undefined;
@@ -567,6 +567,20 @@ test("고객찾기 API는 검색·연락·신건상담 입력을 인증된 서�
         residenceRegion: string;
         caseType: number;
         isReferral: boolean;
+      }
+    | undefined;
+  let staffConsultationInput:
+    | {
+        idempotencyKey: string;
+        customerName: string;
+        phone: string;
+        residenceRegion: string;
+        caseType: number;
+        directorySource: {
+          clientIdx: number;
+          caseIdx: number;
+          relationship: "customer" | "referrer";
+        } | null;
       }
     | undefined;
   const telephonyService = {
@@ -652,6 +666,19 @@ test("고객찾기 API는 검색·연락·신건상담 입력을 인증된 서�
         replayed: false,
       };
     },
+    createStaffConsultation: async (
+      input: NonNullable<typeof staffConsultationInput>,
+      actor: StaffPrincipal,
+    ) => {
+      staffConsultationInput = input;
+      assert.equal(actor.id, realtimeActor.id);
+      return {
+        consultationId: "019fa6a4-6834-7782-aa0b-4e71ffb8a2e6",
+        publicReceiptCode: "LW-20260812-TEST02",
+        acceptedAt: "2026-08-12T07:01:00.000Z",
+        replayed: false,
+      };
+    },
   } as unknown as TelephonyService;
   const authService = {
     authorize: async () => realtimeActor,
@@ -734,6 +761,39 @@ test("고객찾기 API는 검색·연락·신건상담 입력을 인증된 서�
     residenceRegion: "seoul",
     caseType: 1,
     isReferral: true,
+  });
+
+  const staffConsultationResponse = await fetch(
+    `http://127.0.0.1:${address.port}/v1/staff/consultations`,
+    {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({
+        idempotencyKey: "019fa6a4-6834-7782-aa0b-4e71ffb8a2e6",
+        customerName: "직접 등록 고객",
+        phone: "010-9876-5432",
+        residenceRegion: "gyeonggi",
+        caseType: 2,
+        directorySource: {
+          clientIdx: 123,
+          caseIdx: 456,
+          relationship: "customer",
+        },
+      }),
+    },
+  );
+  assert.equal(staffConsultationResponse.status, 201);
+  assert.deepEqual(staffConsultationInput, {
+    idempotencyKey: "019fa6a4-6834-7782-aa0b-4e71ffb8a2e6",
+    customerName: "직접 등록 고객",
+    phone: "01098765432",
+    residenceRegion: "gyeonggi",
+    caseType: 2,
+    directorySource: {
+      clientIdx: 123,
+      caseIdx: 456,
+      relationship: "customer",
+    },
   });
 });
 

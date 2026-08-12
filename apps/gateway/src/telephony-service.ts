@@ -35,6 +35,7 @@ import {
   type CentrexBridgeCommandResult,
   type PlatformEvent,
   type ResidenceRegion,
+  type StaffConsultationCreate,
 } from "@lawand/core";
 import {
   consultationAssignments,
@@ -666,23 +667,36 @@ export function createTelephonyService(options: {
     };
   }
 
-  async function createDirectoryConsultation(
-    input: LegalFriendsDirectoryConsultationCreate,
+  async function createStaffConsultation(
+    input: StaffConsultationCreate,
     actor: StaffPrincipal,
   ) {
     const acceptedAt = now();
-    const payloadFingerprint = protection.fingerprint({
-      source: "erp_client_directory",
-      clientIdx: input.clientIdx,
-      caseIdx: input.caseIdx,
-      customerName: input.customerName,
-      phone: input.phone,
-      residenceRegion: input.residenceRegion,
-      caseType: input.caseType,
-      isReferral: input.isReferral,
-    });
+    const requestSource = input.directorySource
+      ? "erp_client_directory"
+      : "erp_staff";
+    const payloadFingerprint = protection.fingerprint(
+      input.directorySource
+        ? {
+            source: requestSource,
+            clientIdx: input.directorySource.clientIdx,
+            caseIdx: input.directorySource.caseIdx,
+            customerName: input.customerName,
+            phone: input.phone,
+            residenceRegion: input.residenceRegion,
+            caseType: input.caseType,
+            isReferral: input.directorySource.relationship === "referrer",
+          }
+        : {
+            source: requestSource,
+            customerName: input.customerName,
+            phone: input.phone,
+            residenceRegion: input.residenceRegion,
+            caseType: input.caseType,
+          },
+    );
     const idempotencyFingerprint = protection.fingerprint({
-      source: "erp_client_directory",
+      source: requestSource,
       idempotencyKey: input.idempotencyKey,
     });
 
@@ -704,7 +718,7 @@ export function createTelephonyService(options: {
         )
         .where(
           and(
-            eq(consultationRequests.source, "erp_client_directory"),
+            eq(consultationRequests.source, requestSource),
             eq(consultationRequests.idempotencyKey, input.idempotencyKey),
           ),
         )
@@ -724,16 +738,19 @@ export function createTelephonyService(options: {
         };
       }
 
-      const sourceResult = await tx.execute(
-        sql<LegalFriendsDirectoryConsultationSourceRow>`SELECT * FROM public.resolve_legalfriends_directory_consultation_source(${input.clientIdx}, ${input.caseIdx})`,
-      );
-      const [source] =
-        sourceResult.rows as LegalFriendsDirectoryConsultationSourceRow[];
-      if (!source) {
-        throw new TelephonyCallError(
-          "directory_target_not_found",
-          "삭제되었거나 현재 조회할 수 없는 리걸프렌즈 고객입니다.",
+      let source: LegalFriendsDirectoryConsultationSourceRow | undefined;
+      if (input.directorySource) {
+        const sourceResult = await tx.execute(
+          sql<LegalFriendsDirectoryConsultationSourceRow>`SELECT * FROM public.resolve_legalfriends_directory_consultation_source(${input.directorySource.clientIdx}, ${input.directorySource.caseIdx})`,
         );
+        [source] =
+          sourceResult.rows as LegalFriendsDirectoryConsultationSourceRow[];
+        if (!source) {
+          throw new TelephonyCallError(
+            "directory_target_not_found",
+            "삭제되었거나 현재 조회할 수 없는 리걸프렌즈 고객입니다.",
+          );
+        }
       }
 
       const consultationId = createConsultationId();
@@ -765,29 +782,32 @@ export function createTelephonyService(options: {
         JSON.stringify(intake),
         `consultation_requests.intake:${requestId}`,
       );
-      const sourceSnapshot = {
-        clientName: source.client_name,
-        phone: source.phone,
-        residenceRegion: legalFriendsResidenceRegion(source.living_place),
-        caseType: source.case_type,
-        caseState: source.case_state,
-        isClosed: source.is_closed === 1,
-        isRepealed: source.is_repealed === 1,
-        courtName: source.court_name,
-        caseNumber: source.case_number,
-        caseName: source.case_name,
-        staffNames: [
-          source.primary_staff_name,
-          source.secondary_staff_name,
-          source.tertiary_staff_name,
-        ].filter((name): name is string => Boolean(name)),
-        caseCreatedOn: source.case_created_on,
-        caseUpdatedOn: source.case_updated_on,
-      };
-      const sourceSnapshotEncrypted = protection.encrypt(
-        JSON.stringify(sourceSnapshot),
-        `consultation_directory_sources/${consultationId}/snapshot`,
-      );
+      const sourceSnapshotEncrypted = source
+        ? protection.encrypt(
+            JSON.stringify({
+              clientName: source.client_name,
+              phone: source.phone,
+              residenceRegion: legalFriendsResidenceRegion(
+                source.living_place,
+              ),
+              caseType: source.case_type,
+              caseState: source.case_state,
+              isClosed: source.is_closed === 1,
+              isRepealed: source.is_repealed === 1,
+              courtName: source.court_name,
+              caseNumber: source.case_number,
+              caseName: source.case_name,
+              staffNames: [
+                source.primary_staff_name,
+                source.secondary_staff_name,
+                source.tertiary_staff_name,
+              ].filter((name): name is string => Boolean(name)),
+              caseCreatedOn: source.case_created_on,
+              caseUpdatedOn: source.case_updated_on,
+            }),
+            `consultation_directory_sources/${consultationId}/snapshot`,
+          )
+        : null;
 
       await tx.insert(consultations).values({
         id: consultationId,
@@ -795,7 +815,7 @@ export function createTelephonyService(options: {
         state: "requested",
         contactChannel: "phone",
         phoneFingerprint,
-        anonymousLabel: `고객찾기_${publicReceiptCode.slice(-6)}`,
+        anonymousLabel: `${source ? "고객찾기" : "직접등록"}_${publicReceiptCode.slice(-6)}`,
         preferredNameCiphertext: nameEncrypted.ciphertext,
         preferredNameNonce: nameEncrypted.nonce,
         preferredNameKeyVersion: nameEncrypted.keyVersion,
@@ -807,7 +827,7 @@ export function createTelephonyService(options: {
       await tx.insert(consultationRequests).values({
         id: requestId,
         consultationId,
-        source: "erp_client_directory",
+        source: requestSource,
         idempotencyKey: input.idempotencyKey,
         mode: "quick",
         contactChannel: "phone",
@@ -835,26 +855,31 @@ export function createTelephonyService(options: {
         submittedAt: acceptedAt,
         createdAt: acceptedAt,
       });
-      await tx.insert(consultationDirectorySources).values({
-        consultationId,
-        consultationRequestId: requestId,
-        directoryClientIdx: input.clientIdx,
-        directoryCaseIdx: input.caseIdx,
-        relationship: input.isReferral ? "referrer" : "customer",
-        snapshotCiphertext: sourceSnapshotEncrypted.ciphertext,
-        snapshotNonce: sourceSnapshotEncrypted.nonce,
-        snapshotKeyVersion: sourceSnapshotEncrypted.keyVersion,
-        createdByUserId: actor.id,
-        createdAt: acceptedAt,
-      });
+      if (input.directorySource && sourceSnapshotEncrypted) {
+        await tx.insert(consultationDirectorySources).values({
+          consultationId,
+          consultationRequestId: requestId,
+          directoryClientIdx: input.directorySource.clientIdx,
+          directoryCaseIdx: input.directorySource.caseIdx,
+          relationship: input.directorySource.relationship,
+          snapshotCiphertext: sourceSnapshotEncrypted.ciphertext,
+          snapshotNonce: sourceSnapshotEncrypted.nonce,
+          snapshotKeyVersion: sourceSnapshotEncrypted.keyVersion,
+          createdByUserId: actor.id,
+          createdAt: acceptedAt,
+        });
+      }
       await tx.insert(consultationStatusHistory).values({
         id: createEventId(),
         consultationId,
         fromState: null,
         toState: "requested",
-        reason: input.isReferral
-          ? "client_directory_referral"
-          : "client_directory_conversion",
+        reason:
+          input.directorySource?.relationship === "referrer"
+            ? "client_directory_referral"
+            : input.directorySource?.relationship === "customer"
+              ? "client_directory_conversion"
+              : "staff_manual_registration",
         actorType: "staff",
         actorId: actor.id,
         changedAt: acceptedAt,
@@ -885,14 +910,16 @@ export function createTelephonyService(options: {
       await tx.insert(staffAuditLogs).values({
         id: createEventId(),
         actorUserId: actor.id,
-        action: "legalfriends.client_directory.consultation_created",
+        action: input.directorySource
+          ? "legalfriends.client_directory.consultation_created"
+          : "consultation.staff_registered",
         targetType: "consultation",
         targetId: consultationId,
         metadata: {
           requestId,
-          directoryClientIdx: input.clientIdx,
-          directoryCaseIdx: input.caseIdx,
-          relationship: input.isReferral ? "referrer" : "customer",
+          directoryClientIdx: input.directorySource?.clientIdx ?? null,
+          directoryCaseIdx: input.directorySource?.caseIdx ?? null,
+          relationship: input.directorySource?.relationship ?? null,
         },
         occurredAt: acceptedAt,
         createdAt: acceptedAt,
@@ -905,6 +932,27 @@ export function createTelephonyService(options: {
         replayed: false,
       };
     });
+  }
+
+  async function createDirectoryConsultation(
+    input: LegalFriendsDirectoryConsultationCreate,
+    actor: StaffPrincipal,
+  ) {
+    return createStaffConsultation(
+      {
+        idempotencyKey: input.idempotencyKey,
+        customerName: input.customerName,
+        phone: input.phone,
+        residenceRegion: input.residenceRegion,
+        caseType: input.caseType,
+        directorySource: {
+          clientIdx: input.clientIdx,
+          caseIdx: input.caseIdx,
+          relationship: input.isReferral ? "referrer" : "customer",
+        },
+      },
+      actor,
+    );
   }
 
   async function resolvePhoneCustomer(phone: string): Promise<PhoneCustomerMatch> {
@@ -5144,6 +5192,7 @@ export function createTelephonyService(options: {
     completeInboundAnswerCommand,
     confirmDisposition,
     createDirectoryConsultation,
+    createStaffConsultation,
     createMessageTemplate,
     deleteMessageTemplate,
     getCall,

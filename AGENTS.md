@@ -101,6 +101,24 @@
   hydration 오류 0건을 확인했다. 구현 커밋은 `26af5ce`, `PROJECT_PLAN.md`는 v1.21이다.
   이 워크트리에서는 main 병합·운영 배포·운영 데이터 변경을 수행하지 않았다.
 
+### 2026-08-12 — ERP 상담 작업 큐 직접 신규·기존고객·소개건 등록 후보
+- ERP 상담 작업 큐 상단에 `신규등록`을 추가했다. 모달에서 이름·010 휴대전화·광역
+  거주지·사건 유형을 직접 입력하며, `기존고객`과 `소개건`은 서로 겹치지 않게 선택한다.
+  두 항목 중 하나를 고르면 같은 모달에서 리걸프렌즈 고객찾기를 실행한다. 기존고객은 선택
+  고객정보를 수정 가능한 기본값으로 채우고, 소개건은 선택 고객을 소개자로만 남겨 새 고객
+  정보와 섞지 않는다. 모바일에서는 체크 항목·검색 결과·등록 액션을 한 열로 표시한다.
+- 인증된 직원 전용 `POST /v1/staff/consultations`와 엄격한 core 계약을 추가했다. 일반 신규는
+  `erp_staff`, 고객 원천이 있으면 기존 `erp_client_directory` 요청으로 멱등 저장한다. 선택한
+  `client_idx·case_idx`는 기존 security-definer 함수로 삭제 사건 제외 조건까지 서버에서 다시
+  검증하고, 기존 고객/소개자 관계와 사건·담당 snapshot을 AES-GCM 암호문으로 보존한다.
+  세 경로 모두 `requested` 상담·상태 이력·감사로그·개인정보 없는
+  `consultation.requested` outbox를 한 트랜잭션으로 만들어 전 직원 SSE/토스트/허용된 브라우저
+  Notification과 즉시 활성화된 `상담하기` 흐름을 재사용한다. 생성만으로 알림톡이나
+  리걸프렌즈 외부 사건을 만들지는 않는다.
+- core 68개·gateway 115개 테스트, 전체 5패키지 typecheck·lint·production build와
+  `git diff --check`를 통과했다. DB migration은 없고 `PROJECT_PLAN.md`는 v1.21이다. 이
+  워크트리에서는 main 병합·운영 배포·실제 상담/알림/리걸프렌즈 canary를 수행하지 않는다.
+
 ### 2026-08-12 — 나머지 워크트리 main 통합·0049/0050·v0.8.3 전체 운영 배포
 - `HERDR_ENV=1`에서 main과 HERDR worktree 5개, 원격 `origin/worktree/*` 19개를 전수
   대조했다. 미반영이던 `brave-cloud-9c88`의 Cafe24 구 DNS 안전 문서는 merge commit

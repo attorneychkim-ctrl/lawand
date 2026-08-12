@@ -31,6 +31,7 @@ import {
   legalFriendsDirectoryConsultationCreateSchema,
   legalFriendsDirectoryClickToCallSchema,
   legalFriendsDirectoryMessageSendSchema,
+  staffConsultationCreateSchema,
   telephonyCallDispositionConfirmationSchema,
   telephonyMessageSendSchema,
 } from "@lawand/core";
@@ -1502,6 +1503,46 @@ export function createGatewayServer(options?: {
             Number(url.searchParams.get("limit") ?? "30"),
           ),
         );
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        url.pathname === "/v1/staff/consultations"
+      ) {
+        if (
+          !options?.telephonyService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const parsed = staffConsultationCreateSchema.safeParse(
+          await readJson(request),
+        );
+        if (!parsed.success) {
+          sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        const result = await options.telephonyService.createStaffConsultation(
+          parsed.data,
+          actor,
+        );
+        sendJson(response, result.replayed ? 200 : 201, result);
         return;
       }
 
