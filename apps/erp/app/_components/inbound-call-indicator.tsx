@@ -11,6 +11,7 @@ import type {
   TelephonyInboundCall,
   TelephonyInboundCallSnapshot,
 } from "../../lib/gateway";
+import { notificationPermissionChangedEvent } from "./browser-notification-toggle";
 import { PhoneAftercareDialog } from "./phone-aftercare-form";
 
 type ConnectionState = "connecting" | "connected" | "disconnected";
@@ -204,8 +205,9 @@ export function InboundCallIndicator({
   const [activities, setActivities] = useState<TelephonyCallActivity[]>([]);
   const [deskCalls, setDeskCalls] = useState<PhoneDeskCall[]>([]);
   const [toasts, setToasts] = useState<
-    Array<{ id: string; title: string; body: string }>
+    Array<{ id: string; title: string; body: string; href?: string }>
   >([]);
+  const [callsExpanded, setCallsExpanded] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<
     "default" | "denied" | "granted" | "unsupported"
   >("default");
@@ -226,12 +228,20 @@ export function InboundCallIndicator({
   const deskStartedAt = useRef(0);
   const seenDeskEndedCallIds = useRef<Set<string>>(new Set());
   const seenNotificationKeys = useRef<Set<string>>(new Set());
+  const seenConsultationEventIds = useRef<Set<string>>(new Set());
   const notificationLeader = useRef(false);
   const notificationTabId = useRef("");
 
   useEffect(() => {
-    setNotificationPermission(
-      "Notification" in window ? Notification.permission : "unsupported",
+    const synchronizeNotificationPermission = () => {
+      setNotificationPermission(
+        "Notification" in window ? Notification.permission : "unsupported",
+      );
+    };
+    synchronizeNotificationPermission();
+    window.addEventListener(
+      notificationPermissionChangedEvent,
+      synchronizeNotificationPermission,
     );
     notificationTabId.current = window.crypto.randomUUID();
     const leaseKey = "lawand:telephony-notification-leader";
@@ -265,6 +275,10 @@ export function InboundCallIndicator({
     claimLeadership();
     const timer = window.setInterval(claimLeadership, 3_000);
     return () => {
+      window.removeEventListener(
+        notificationPermissionChangedEvent,
+        synchronizeNotificationPermission,
+      );
       window.clearInterval(timer);
       try {
         const lease = JSON.parse(
@@ -285,6 +299,22 @@ export function InboundCallIndicator({
       return;
     }
     setNotificationPermission(await Notification.requestPermission());
+    window.dispatchEvent(new Event(notificationPermissionChangedEvent));
+  }, []);
+
+  const enqueueToast = useCallback((toast: {
+    id: string;
+    title: string;
+    body: string;
+    href?: string;
+  }) => {
+    setToasts((items) => [
+      ...items.filter((item) => item.id !== toast.id),
+      toast,
+    ]);
+    window.setTimeout(() => {
+      setToasts((items) => items.filter((item) => item.id !== toast.id));
+    }, 9_000);
   }, []);
 
   const enqueueAftercareCalls = useCallback((callIds: string[]) => {
@@ -500,15 +530,11 @@ export function InboundCallIndicator({
       if (window.localStorage.getItem(storageKey)) continue;
       window.localStorage.setItem(storageKey, String(current));
       const copy = notificationCopy(activity);
-      setToasts((items) => [
-        ...items.filter((item) => item.id !== notificationKey),
-        { id: notificationKey, ...copy },
-      ]);
-      window.setTimeout(() => {
-        setToasts((items) =>
-          items.filter((item) => item.id !== notificationKey),
-        );
-      }, 9_000);
+      enqueueToast({
+        id: notificationKey,
+        ...copy,
+        href: `/phone-desk/${activity.id}`,
+      });
       if (notificationPermission === "granted") {
         const notification = new Notification(copy.title, {
           body: copy.body,
@@ -521,7 +547,75 @@ export function InboundCallIndicator({
         };
       }
     }
-  }, [activities, notificationPermission, staffUserId]);
+  }, [activities, enqueueToast, notificationPermission, staffUserId]);
+
+  useEffect(() => {
+    const stream = new EventSource("/api/consultations/stream");
+    const handleConsultationChange = (event: MessageEvent<string>) => {
+      let payload: {
+        eventId?: unknown;
+        eventType?: unknown;
+        consultationId?: unknown;
+      };
+      try {
+        payload = JSON.parse(event.data) as typeof payload;
+      } catch {
+        return;
+      }
+      if (
+        payload.eventType !== "consultation.requested" ||
+        typeof payload.eventId !== "string" ||
+        typeof payload.consultationId !== "string" ||
+        seenConsultationEventIds.current.has(payload.eventId)
+      ) {
+        return;
+      }
+      seenConsultationEventIds.current.add(payload.eventId);
+
+      const notificationKey = `consultation:${payload.eventId}`;
+      const href = `/consultations/${payload.consultationId}`;
+      const title = "새 상담이 등록됐습니다";
+      const body = "상담 데스크에서 접수 내용과 거주지역을 확인해 주세요.";
+
+      if (document.visibilityState === "visible") {
+        enqueueToast({ id: notificationKey, title, body, href });
+      }
+      if (
+        notificationPermission !== "granted" ||
+        !notificationLeader.current
+      ) {
+        return;
+      }
+
+      const storageKey = `lawand:consultation-notified:${payload.eventId}`;
+      try {
+        if (window.localStorage.getItem(storageKey)) return;
+        window.localStorage.setItem(storageKey, String(Date.now()));
+        const notification = new Notification(title, {
+          body,
+          tag: notificationKey,
+        });
+        notification.onclick = () => {
+          window.focus();
+          window.location.assign(href);
+          notification.close();
+        };
+      } catch {
+        // 저장소 또는 Notification API가 막힌 환경에서도 페이지 토스트는 유지한다.
+      }
+    };
+    stream.addEventListener(
+      "consultation.changed",
+      handleConsultationChange as EventListener,
+    );
+    return () => {
+      stream.removeEventListener(
+        "consultation.changed",
+        handleConsultationChange as EventListener,
+      );
+      stream.close();
+    };
+  }, [enqueueToast, notificationPermission]);
 
   useEffect(() => {
     if (!calls.some((call) => call.state === "ended")) return;
@@ -588,10 +682,34 @@ export function InboundCallIndicator({
           : new Date(call.lastEventAt).getTime() >=
             deskStartedAt.current - 20_000),
   );
-  const hasCards =
-    activities.length > 0 ||
-    visibleLegacyCalls.length > 0 ||
-    visibleOutboundCalls.length > 0;
+  const callCards = [
+    ...activities.map((activity) => ({
+      key: `activity:${activity.id}`,
+      lastEventAt: activity.lastEventAt,
+    })),
+    ...visibleOutboundCalls.map((call) => ({
+      key: `outbound:${call.id}`,
+      lastEventAt: call.lastEventAt,
+    })),
+    ...visibleLegacyCalls.map((call) => ({
+      key: `legacy:${call.id}`,
+      lastEventAt: call.lastEventAt,
+    })),
+  ];
+  const latestCallCardKey = callCards.reduce<string | null>(
+    (latestKey, card) => {
+      if (!latestKey) return card.key;
+      const latestCard = callCards.find((item) => item.key === latestKey);
+      return !latestCard ||
+        Date.parse(card.lastEventAt) > Date.parse(latestCard.lastEventAt)
+        ? card.key
+        : latestKey;
+    },
+    null,
+  );
+  const shouldDisplayCallCard = (key: string) =>
+    callsExpanded || key === latestCallCardKey;
+  const hasCards = callCards.length > 0;
 
   if (!hasCards && !aftercareCallId && toasts.length === 0) return null;
 
@@ -602,8 +720,29 @@ export function InboundCallIndicator({
         aria-live="assertive"
         className="inbound-call-strip"
       >
-        <div className="inbound-call-strip-inner">
-        {activities.map((activity) => {
+        {callCards.length > 1 ? (
+          <div className="inbound-call-strip-toolbar">
+            <span>
+              통화 활동 <strong>{callCards.length}건</strong>
+              {!callsExpanded ? " · 최근 1건 표시 중" : ""}
+            </span>
+            <button
+              aria-controls="current-call-activity-list"
+              aria-expanded={callsExpanded}
+              onClick={() => setCallsExpanded((expanded) => !expanded)}
+              type="button"
+            >
+              {callsExpanded ? "최근 1건만 보기" : "모두 펼치기"}
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <path d={callsExpanded ? "m6 15 6-6 6 6" : "m6 9 6 6 6-6"} />
+              </svg>
+            </button>
+          </div>
+        ) : null}
+        <div className="inbound-call-strip-inner" id="current-call-activity-list">
+        {activities.filter((activity) =>
+          shouldDisplayCallCard(`activity:${activity.id}`)
+        ).map((activity) => {
           const copy = activityCopy(activity, staffUserId);
           const legacyCall = activity.observedCallId
             ? calls.find((call) => call.id === activity.observedCallId)
@@ -726,7 +865,9 @@ export function InboundCallIndicator({
             </article>
           );
         })}
-        {visibleOutboundCalls.map((call) => {
+        {visibleOutboundCalls.filter((call) =>
+          shouldDisplayCallCard(`outbound:${call.id}`)
+        ).map((call) => {
           const copy = outboundCopy(call);
           return (
             <article
@@ -777,7 +918,9 @@ export function InboundCallIndicator({
             </article>
           );
         })}
-        {visibleLegacyCalls.map((call) => {
+        {visibleLegacyCalls.filter((call) =>
+          shouldDisplayCallCard(`legacy:${call.id}`)
+        ).map((call) => {
           const copy = stateCopy[call.state];
           const isOwner = call.owners.some(
             (owner) => owner.staffUserId === staffUserId,
@@ -877,11 +1020,12 @@ export function InboundCallIndicator({
             <button
               className="telephony-toast"
               key={toast.id}
-              onClick={() =>
+              onClick={() => {
                 setToasts((items) =>
                   items.filter((item) => item.id !== toast.id),
-                )
-              }
+                );
+                if (toast.href) window.location.assign(toast.href);
+              }}
               type="button"
             >
               <strong>{toast.title}</strong>

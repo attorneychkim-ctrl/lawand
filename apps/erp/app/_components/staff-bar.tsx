@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import type { StaffPrincipal } from "../../lib/staff-auth";
 import { logoutAction } from "../auth-actions";
+import { BrowserNotificationToggle } from "./browser-notification-toggle";
 import { ErpNav } from "./erp-nav";
 import { InboundCallIndicator } from "./inbound-call-indicator";
 import { ThemeToggle } from "./theme-toggle";
@@ -18,6 +19,7 @@ export function StaffBar({ staff }: { staff: StaffPrincipal }) {
           <ErpNav showStaff={staff.roles.includes("admin")} />
         </div>
         <div className="staff-actions">
+          <BrowserNotificationToggle />
           <ThemeToggle />
           <Link
             aria-label="내 정보 열기"
