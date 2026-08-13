@@ -9,6 +9,7 @@ import { StaffBar } from "../_components/staff-bar";
 const emptySnapshot: PhoneDeskCallSnapshot = {
   snapshotAt: "1970-01-01T00:00:00.000Z",
   items: [],
+  assigneeOptions: [],
   total: 0,
   page: 1,
   pageSize: 20,

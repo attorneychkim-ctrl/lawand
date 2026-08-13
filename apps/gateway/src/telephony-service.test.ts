@@ -5,6 +5,8 @@ import {
   canonicalizePhoneDeskObservedCalls,
   isCentrexInboundAnswerDeliveryDelayed,
   legalFriendsResidenceRegion,
+  phoneDeskItemAssignees,
+  phoneDeskItemMatchesAssignee,
   phoneDeskItemMatchesFilter,
 } from "./telephony-service.js";
 
@@ -31,6 +33,50 @@ test("같은 root의 U+ 연결 이력과 bridge 장시간 울림은 원장 한 �
   assert.equal(items[0]?.record, "uplus-answered");
   assert.equal(items[0]?.receptionMode, "uplus_network");
   assert.equal(items[0]?.correlationStatus, "needs_confirmation");
+});
+
+test("전화데스크 담당자는 전체 결과를 페이지로 자르기 전에 통화 성격별로 판정한다", () => {
+  const owner = { staffUserId: "staff-owner", displayName: "회선 담당" };
+  const requester = {
+    staffUserId: "staff-requester",
+    displayName: "ERP 발신자",
+  };
+  const external = {
+    scope: "external" as const,
+    clickToCall: null,
+    endpointOwners: [owner],
+    participants: [],
+  };
+  const clickToCall = {
+    ...external,
+    clickToCall: { requestedBy: requester },
+  };
+  const internal = {
+    scope: "internal" as const,
+    clickToCall: null,
+    endpointOwners: [],
+    participants: [
+      { staffUserId: "staff-a", displayName: "내선 A" },
+      { staffUserId: "staff-b", displayName: "내선 B" },
+      { staffUserId: "staff-a", displayName: "내선 A" },
+    ],
+  };
+
+  assert.deepEqual(phoneDeskItemAssignees(external), [owner]);
+  assert.deepEqual(phoneDeskItemAssignees(clickToCall), [requester]);
+  assert.equal(
+    phoneDeskItemMatchesAssignee(clickToCall, owner.staffUserId),
+    false,
+  );
+  assert.equal(
+    phoneDeskItemMatchesAssignee(clickToCall, requester.staffUserId),
+    true,
+  );
+  assert.deepEqual(
+    phoneDeskItemAssignees(internal).map((item) => item.staffUserId),
+    ["staff-a", "staff-b"],
+  );
+  assert.equal(phoneDeskItemMatchesAssignee(internal, "staff-b"), true);
 });
 
 test("전화데스크 출처 필터는 다른 출처를 섞지 않고 진행 중 상태만 선별한다", () => {

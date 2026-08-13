@@ -8,11 +8,15 @@ import {
 
 export const dynamic = "force-dynamic";
 
+const uuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 export async function GET(request: Request) {
   const searchParams = new URL(request.url).searchParams;
   const page = Number(searchParams.get("page") ?? "1");
   const pageSize = Number(searchParams.get("pageSize") ?? "20");
   const filter = searchParams.get("filter") ?? "all";
+  const assigneeUserId = searchParams.get("assigneeUserId") ?? undefined;
   const fromValue = searchParams.get("from");
   const toValue = searchParams.get("to");
   const from = fromValue ? new Date(fromValue) : undefined;
@@ -29,6 +33,7 @@ export async function GET(request: Request) {
       "internal",
       "active",
     ].includes(filter) ||
+    (assigneeUserId !== undefined && !uuidPattern.test(assigneeUserId)) ||
     (from && Number.isNaN(from.getTime())) ||
     (to && Number.isNaN(to.getTime())) ||
     (from && to && from >= to)
@@ -44,6 +49,7 @@ export async function GET(request: Request) {
         page,
         pageSize: pageSize as ListPageSize,
         filter: filter as PhoneDeskListFilter,
+        ...(assigneeUserId ? { assigneeUserId } : {}),
         from: fromValue ?? undefined,
         to: toValue ?? undefined,
       }),

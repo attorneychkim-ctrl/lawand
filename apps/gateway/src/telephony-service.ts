@@ -154,9 +154,55 @@ export type PhoneDeskListQuery = {
   page: number;
   pageSize: 20 | 50 | 100;
   filter?: PhoneDeskListFilter;
+  assigneeUserId?: string;
   from?: Date;
   to?: Date;
 };
+
+type PhoneDeskAssigneeItem = {
+  scope: "external" | "internal";
+  clickToCall: {
+    requestedBy: { staffUserId: string; displayName: string };
+  } | null;
+  endpointOwners: Array<{ staffUserId: string; displayName: string }>;
+  participants: Array<{
+    staffUserId: string | null;
+    displayName: string | null;
+  }>;
+};
+
+export function phoneDeskItemAssignees(
+  item: PhoneDeskAssigneeItem,
+): Array<{ staffUserId: string; displayName: string }> {
+  if (item.scope === "internal") {
+    const seen = new Set<string>();
+    return item.participants.flatMap((participant) => {
+      if (
+        !participant.staffUserId ||
+        !participant.displayName ||
+        seen.has(participant.staffUserId)
+      ) {
+        return [];
+      }
+      seen.add(participant.staffUserId);
+      return [{
+        staffUserId: participant.staffUserId,
+        displayName: participant.displayName,
+      }];
+    });
+  }
+  if (item.clickToCall) return [item.clickToCall.requestedBy];
+  return item.endpointOwners;
+}
+
+export function phoneDeskItemMatchesAssignee(
+  item: PhoneDeskAssigneeItem,
+  assigneeUserId: string | undefined,
+): boolean {
+  return !assigneeUserId || phoneDeskItemAssignees(item).some(
+    (assignee) => assignee.staffUserId === assigneeUserId,
+  );
+}
 
 export function canonicalizePhoneDeskObservedCalls<
   T extends {
@@ -2003,6 +2049,9 @@ export function createTelephonyService(options: {
     const selectedFilter = typeof queryOrLimit === "number"
       ? "all"
       : queryOrLimit.filter ?? "all";
+    const selectedAssigneeUserId = typeof queryOrLimit === "number"
+      ? undefined
+      : queryOrLimit.assigneeUserId;
     const from = typeof queryOrLimit === "number"
       ? undefined
       : queryOrLimit.from;
@@ -2105,7 +2154,7 @@ export function createTelephonyService(options: {
           Number(internalSummary?.active ?? 0),
       };
     }
-    const total = callId
+    const unfilteredTotal = callId
       ? 0
       : selectedFilter === "click_to_call"
         ? summary.clickToCall
@@ -2114,9 +2163,6 @@ export function createTelephonyService(options: {
           : selectedFilter === "internal"
             ? summary.internal
           : summary[selectedFilter];
-    const pageCount = Math.max(1, Math.ceil(total / normalizedLimit));
-    const page = callId ? 1 : Math.min(requestedPage, pageCount);
-    const offset = callId ? 0 : (page - 1) * normalizedLimit;
     const observedFilterCondition = selectedFilter === "inbound"
       ? eq(telephonyInboundCalls.direction, "inbound")
       : selectedFilter === "click_to_call"
@@ -2846,7 +2892,7 @@ export function createTelephonyService(options: {
       }];
     });
 
-    const baseItems = [
+    const allBaseItems = [
       ...canonicalObservedItems,
       ...standaloneClickItems,
       ...internalItems,
@@ -2856,8 +2902,31 @@ export function createTelephonyService(options: {
           new Date(right.occurredAt).getTime() -
           new Date(left.occurredAt).getTime(),
       )
-      .filter((item) => phoneDeskItemMatchesFilter(item, selectedFilter))
-      .slice(offset, offset + normalizedLimit);
+      .filter((item) => phoneDeskItemMatchesFilter(item, selectedFilter));
+    const assigneeOptions = [
+      ...new Map(
+        allBaseItems
+          .flatMap(phoneDeskItemAssignees)
+          .map((assignee) => [assignee.staffUserId, assignee] as const),
+      ).values(),
+    ].sort((left, right) =>
+      left.displayName.localeCompare(right.displayName, "ko-KR"),
+    );
+    const assigneeFilteredItems = allBaseItems.filter((item) =>
+      phoneDeskItemMatchesAssignee(item, selectedAssigneeUserId),
+    );
+    const total = callId
+      ? assigneeFilteredItems.length
+      : selectedAssigneeUserId
+        ? assigneeFilteredItems.length
+        : unfilteredTotal;
+    const pageCount = Math.max(1, Math.ceil(total / normalizedLimit));
+    const page = callId ? 1 : Math.min(requestedPage, pageCount);
+    const offset = callId ? 0 : (page - 1) * normalizedLimit;
+    const baseItems = assigneeFilteredItems.slice(
+      offset,
+      offset + normalizedLimit,
+    );
     const observedIds = baseItems.flatMap((item) =>
       item.observedCallId ? [item.observedCallId] : [],
     );
@@ -3371,6 +3440,7 @@ export function createTelephonyService(options: {
     return {
       snapshotAt: snapshotAt.toISOString(),
       items,
+      assigneeOptions,
       total: callId ? items.length : total,
       page,
       pageSize: normalizedLimit,
