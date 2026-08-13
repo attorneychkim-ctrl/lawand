@@ -21,8 +21,9 @@ Parameters:
     Type: String
     Default: "16.14"
   LatestArmAmi:
-    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+    Type: AWS::EC2::Image::Id
+    Default: ami-0a1231e819ae021a0
+    Description: Explicitly pinned production ARM64 AMI; update only through a reviewed replacement release.
 
 Resources:
   Vpc:

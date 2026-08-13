@@ -84,6 +84,9 @@ Route 53·AWS 설정은 이 rollback의 대상이 아니다. 구 WordPress는 4.
   `10.42.0.0/24`, `10.42.1.0/24`에 나눴다.
 - RDS 서브넷은 `10.42.10.0/24`, `10.42.11.0/24`이며 인터넷 경로가 없다.
 - 앱 서버는 Amazon Linux 2023 ARM64, Docker, 4GB swap, systemd 자동 기동을 사용한다.
+- 운영 ARM64 AMI는 CloudFormation 파라미터에 현재 검증된 이미지 ID를 명시적으로 고정한다.
+  최신 AMI SSM 별칭을 자동 재해석하지 않으며, AMI 교체는 세 EC2 replacement를 검토한
+  별도 릴리스로만 수행한다.
 - SSH 인바운드는 열지 않았다. 서버 관리는 AWS Systems Manager Session Manager와
   Run Command만 사용한다.
 - 공개 인바운드는 각 edge의 80/443뿐이다. gateway의 원본 3022 포트는 홈페이지·ERP
