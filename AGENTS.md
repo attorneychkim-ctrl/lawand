@@ -34,7 +34,9 @@
 - Linux 운영 앱의 표준 배포는 **GitHub Actions가 검증된 `main` commit으로 `linux/arm64`
   이미지를 빌드해 앱별 private ECR에 올리고, EC2는 tag가 아닌 `repository@sha256:digest`를
   pull해 실행하는 방식**이다. 운영 EC2에서 소스를 내려받아 `docker build`하지 않으며,
-  GitHub OIDC 역할은 해당 저장소의 `main` ref만 신뢰하고 장기 AWS access key를 두지 않는다.
+  GitHub OIDC 역할은 immutable owner/repository 숫자 ID가 포함된 해당 저장소의 정확한 `main`
+  subject만 신뢰하고, 이름만 쓴 구형 subject나 wildcard로 완화하지 않으며 장기 AWS access key를
+  두지 않는다.
   migration이 있으면 같은 gateway digest를 먼저 pull해 스냅샷 뒤 migration을 적용하고,
   gateway와 영향 앱을 같은 릴리스 ID로 전환한다. ECR tag는 commit SHA의 불변 추적값일 뿐
   배포 입력으로 사용하지 않는다.

@@ -29,6 +29,10 @@ Parameters:
     Default: attorneychkim-ctrl/lawand
     AllowedPattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
     Description: GitHub owner/repository allowed to publish production images from main.
+  GitHubOidcSubject:
+    Type: String
+    Default: repo:attorneychkim-ctrl@304214520/lawand@1310561610:ref:refs/heads/main
+    Description: Exact main-branch GitHub OIDC subject including immutable owner and repository IDs.
 
 Resources:
   Vpc:
@@ -438,7 +442,7 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepository}:ref:refs/heads/main
+                token.actions.githubusercontent.com:sub: !Ref GitHubOidcSubject
       Description: Main-only GitHub Actions role for publishing Lawand ARM64 images to ECR
       MaxSessionDuration: 3600
       Policies:

@@ -1864,8 +1864,8 @@ e-Post 적용 사건의 1회 기준금액 5,640원을 사용한다. 예시 합�
 로컬 포트/파일시스템에 의존하지 않는다.
 
 Linux 앱의 운영 배포 단일 경로는 `main` 검증 → GitHub Actions/Buildx `linux/arm64` 빌드 →
-앱별 private ECR → EC2의 immutable digest pull이다. GitHub는 장기 AWS 키 대신
-`repo:attorneychkim-ctrl/lawand:ref:refs/heads/main`으로 제한한 OIDC 역할을 사용하고, ECR은
+앱별 private ECR → EC2의 immutable digest pull이다. GitHub는 장기 AWS 키 대신 immutable
+owner/repository 숫자 ID가 포함된 정확한 `main` subject로 제한한 OIDC 역할을 사용하고, ECR은
 tag 변경을 막고 push scan과 최근 10개 lifecycle을 적용한다. EC2 systemd는
 `repository@sha256:digest`를 직접 실행하므로 commit tag 재지정이 운영 바이너리를 바꾸지
 못한다. migration이 있는 릴리스는 gateway digest로 migration을 먼저 적용한 뒤 gateway와

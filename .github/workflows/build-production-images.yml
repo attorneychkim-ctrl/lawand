@@ -6,8 +6,10 @@ on:
     branches:
       - main
     paths:
+      - ".github/workflows/build-production-images.yml"
       - "apps/**"
       - "packages/**"
+      - "infra/aws/**"
       - "infra/docker/**"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"

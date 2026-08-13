@@ -203,8 +203,10 @@ null 0건, 사건-고객 누락·타 사무소·전화 정규화 위반 0건을 
 
 이미지는 [`infra/docker/Dockerfile`](../infra/docker/Dockerfile)과
 [`build-production-images.yml`](../.github/workflows/build-production-images.yml)로 CI에서
-만든다. GitHub는 `main` ref만 신뢰하는 AWS OIDC 역할을 사용하고 장기 access key를 저장하지
-않는다. ECR의 commit SHA tag는 추적용 불변값이며 실제 배포 입력은 반드시 workflow가 기록한
+만든다. GitHub는 immutable owner/repository 숫자 ID가 포함된 정확한 `main` subject만 신뢰하는
+AWS OIDC 역할을 사용하고 장기 access key를 저장하지 않는다. CloudTrail과 GitHub API의 실제
+ID를 대조하며 이름만 쓴 구형 subject나 wildcard로 완화하지 않는다. ECR의 commit SHA tag는
+추적용 불변값이며 실제 배포 입력은 반드시 workflow가 기록한
 `repository@sha256:digest`여야 한다. 서버는
 [`infra/aws/instance-deploy-ecr.sh`](../infra/aws/instance-deploy-ecr.sh)로 이미지를 pull하고
 기존 systemd/Caddy 경계를 전환한다. Docker Compose 도입 여부와 무관하게 운영 서버에서
