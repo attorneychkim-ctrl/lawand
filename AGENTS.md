@@ -71,6 +71,15 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-13 — ERP 직원관리 업무 연동 기본 접힘 후보
+- 관리자 직원관리의 각 직원 카드에서 항상 펼쳐지던 센트릭스 전화·리걸프렌즈 편집 폼을
+  하나의 `업무 연동 설정` disclosure로 묶고 기본 접힘으로 바꿨다. 접힌 요약에는 전화의
+  정상·연결 중·실패·미설정 상태와 리걸프렌즈 연결 여부를 유지해 목록을 훑으면서도 확인이
+  필요한 직원을 바로 구분할 수 있다. 기본 정보·역할 수정도 기존처럼 접힌 상태를 유지한다.
+- ERP typecheck·ESLint·production build와 `git diff --check`를 통과했다. DB·gateway·
+  Windows bridge 변경과 migration은 없고 `PROJECT_PLAN.md`는 v1.33이다. 이 워크트리에서는
+  main 병합·운영 배포를 수행하지 않는다.
+
 ### 2026-08-13 — 모든 완료 워크트리 main 통합·세 앱/0055·0056 운영 배포
 - main과 HERDR worktree 5개, 원격 `origin/worktree/*` 31개를 전수 대조해 미반영 4개를 모두
   병합했고 최종 모든 원격 HEAD가 main ancestor임을 확인했다. 배포 소스

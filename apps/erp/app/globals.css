@@ -3744,6 +3744,80 @@ a.inbound-customer:hover { text-decoration: underline; }
   gap: 14px;
 }
 
+.staff-integrations-disclosure {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.staff-integrations-disclosure > summary {
+  display: flex;
+  min-height: 54px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.staff-integrations-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.staff-integrations-disclosure > summary:hover {
+  background: var(--surface-subtle);
+}
+
+.staff-integrations-disclosure > summary:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: -2px;
+}
+
+.staff-integrations-disclosure > summary > span:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.staff-integrations-disclosure > summary strong {
+  color: var(--ink-soft);
+  font-size: .76rem;
+}
+
+.staff-integration-statuses {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.staff-disclosure-label {
+  color: var(--brand-strong);
+  font-size: .65rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.staff-disclosure-label::after {
+  display: inline-block;
+  margin-left: 6px;
+  content: "↓";
+}
+
+.staff-integrations-disclosure[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.staff-integrations-disclosure[open] .staff-disclosure-label::after {
+  content: "↑";
+}
+
+.staff-integrations-disclosure > .staff-directory-integrations {
+  padding: 14px;
+  background: var(--surface-subtle);
+}
+
 .centrex-line-form,
 .staff-legalfriends-card {
   display: grid;
@@ -5879,6 +5953,8 @@ a.inbound-customer:hover { text-decoration: underline; }
   .staff-profile-heading,
   .integration-form-heading,
   .integration-form-actions { align-items: flex-start; flex-direction: column; }
+  .staff-integrations-disclosure > summary { align-items: flex-start; flex-direction: column; }
+  .staff-integration-statuses { flex-wrap: wrap; justify-content: flex-start; }
   .centrex-field-grid { grid-template-columns: 1fr; }
   .integration-form-actions .secondary-button { width: 100%; }
   .external-account-form { grid-template-columns: 1fr; }

@@ -3,7 +3,10 @@
 import { useMemo, useState } from "react";
 
 import type { StaffDirectoryItem } from "../../lib/staff-auth";
-import { CentrexLineForm } from "./centrex-line-form";
+import {
+  centrexConnectionCopy,
+  CentrexLineForm,
+} from "./centrex-line-form";
 import { LegalFriendsAccountForm } from "./legalfriends-account-form";
 import { StaffProfileForm } from "./staff-profile-form";
 
@@ -200,34 +203,59 @@ export function StaffDirectoryWorkspace({
                 <StaffProfileForm allowRoleEdit profile={member} />
               </details>
             </header>
-            <div className="staff-directory-integrations">
-              <CentrexLineForm
-                centrexExtension={member.centrexExtension}
-                centrexLineNumber={member.centrexLineNumber}
-                connection={member.centrexConnection}
-                staffUserId={member.id}
-              />
-              <div className="staff-legalfriends-card">
-                <div className="integration-form-heading">
-                  <div>
-                    <span className="integration-kicker">리걸프렌즈</span>
-                    <strong>직원 외부 계정</strong>
-                  </div>
+            <details className="staff-integrations-disclosure">
+              <summary>
+                <span>
+                  <span className="integration-kicker">업무 연동</span>
+                  <strong>센트릭스 전화 · 리걸프렌즈</strong>
+                </span>
+                <span className="staff-integration-statuses">
+                  <span
+                    className={`connection-badge ${
+                      centrexConnectionCopy[member.centrexConnection.status].tone
+                    }`}
+                  >
+                    전화 {centrexConnectionCopy[member.centrexConnection.status].label}
+                  </span>
                   <span
                     className={`connection-badge ${
                       member.legalFriendsId ? "is-connected" : "is-neutral"
                     }`}
                   >
-                    {member.legalFriendsId ? "연결 완료" : "미연결"}
+                    리걸프렌즈 {member.legalFriendsId ? "연결" : "미연결"}
                   </span>
-                </div>
-                <LegalFriendsAccountForm
-                  legalFriendsId={member.legalFriendsId}
-                  legalFriendsMemberIdx={member.legalFriendsMemberIdx}
+                  <span className="staff-disclosure-label">설정 보기</span>
+                </span>
+              </summary>
+              <div className="staff-directory-integrations">
+                <CentrexLineForm
+                  centrexExtension={member.centrexExtension}
+                  centrexLineNumber={member.centrexLineNumber}
+                  connection={member.centrexConnection}
                   staffUserId={member.id}
                 />
+                <div className="staff-legalfriends-card">
+                  <div className="integration-form-heading">
+                    <div>
+                      <span className="integration-kicker">리걸프렌즈</span>
+                      <strong>직원 외부 계정</strong>
+                    </div>
+                    <span
+                      className={`connection-badge ${
+                        member.legalFriendsId ? "is-connected" : "is-neutral"
+                      }`}
+                    >
+                      {member.legalFriendsId ? "연결 완료" : "미연결"}
+                    </span>
+                  </div>
+                  <LegalFriendsAccountForm
+                    legalFriendsId={member.legalFriendsId}
+                    legalFriendsMemberIdx={member.legalFriendsMemberIdx}
+                    staffUserId={member.id}
+                  />
+                </div>
               </div>
-            </div>
+            </details>
           </article>
         ))}
         {filteredItems.length === 0 ? (
