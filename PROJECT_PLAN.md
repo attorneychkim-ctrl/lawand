@@ -1,4 +1,4 @@
-# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.25)
+# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.26)
 
 > 이 문서는 새 로앤 홈페이지 + 새 ERP + 리걸플로/리걸프렌즈 연동을 하나의 플랫폼으로
 > 묶기 위한 **저장소 구조·아키텍처 설계 초안**이다. 코덱스/클로드코드 세션이 번갈아
@@ -794,6 +794,18 @@
 > ERP A `3.34.72.9`와 API A `3.36.255.226`을 명시했다. Cafe24 네임서버 4곳이 두 레코드를
 > TTL 1,800초로 반환하고 새 EIP의 Let's Encrypt 인증서와 ERP login·gateway health 200을
 > 확인했다. 기존 apex·`revivetouch`·wildcard·MX·SPF와 호스팅·SSL은 변경하지 않았다.
+> 2026-08-13에는 직원의 구 홈페이지 전용 접속점으로 Cafe24 무료 도메인
+> `https://lawyerkch3.cafe24.com`을 활성화했다. 최초 302는 `.htaccess`가 아니라
+> WordPress 4.7.2 멀티사이트의 고정 `DOMAIN_CURRENT_SITE=lawandfirm.com`이 알 수 없는
+> Host를 네트워크 루트로 보내면서 발생했다. 무료 Host에서만 `sunrise.php`를 로드해 기존
+> 사이트를 요청 단위 별칭으로 매핑하고, home·siteurl·쿠키·canonical과 HTML 및 정적
+> CSS/JS의 하드코딩 절대 URL을 무료 도메인으로 바꾼다. DB의 주 도메인과 원본 정적 파일은
+> 수정하지 않으며 `lawandfirm.com` Host에는 이 경계가 적용되지 않는다. 무료 도메인의
+> 루트·`/lawnadmin`은 200, 존재하지 않는 경로는 현 Host의 404이고 모두 정식 도메인
+> `Location`이 없다. 별칭 응답은 `X-Robots-Tag: noindex, nofollow, noarchive`로 검색 노출을
+> 막는다. 공개 `lawandfirm.com`은 계속 AWS EIP `15.165.23.84`와 새 홈페이지 `/bank`를
+> 사용한다. 구 WordPress가 노후 버전이므로 장기 보존 시 별도 인증 또는 접속 IP 제한과
+> 업데이트·격리 계획이 필요하다.
 > rollback은 NS 재변경이 아니라 Route 53 apex A를 구 `222.239.248.41`로
 > 되돌리는 것을 1차로 한다. Secrets Manager의 ERP 공개 URL만 정식 주소로 갱신했으나
 > 업무 통화가 이어져 gateway·ERP 프로세스 재시작은 무통화 시점으로 미뤘다. 실제

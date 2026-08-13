@@ -71,6 +71,28 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-13 — Cafe24 무료 도메인 구 홈페이지 직원 접속 별칭 운영 반영
+- `lawyerkch3.cafe24.com`과 `lawandfirm.com`이 각각 구 Cafe24 `222.239.248.41`과 새 AWS
+  `15.165.23.84`로 분리된 것을 확인했다. 무료 도메인의 루트와 `/lawnadmin`이 경로를 버리고
+  `https://lawandfirm.com/`으로 302되던 원인은 원본 `.htaccess`나 루트 `index.php`가 아니라
+  WordPress 4.7.2 멀티사이트의 고정 `DOMAIN_CURRENT_SITE=lawandfirm.com`과 사이트 미발견
+  부트스트랩이었다.
+- 구 Cafe24 운영 호스팅에 정확한 무료 Host에서만 `SUNRISE`·별칭 home/siteurl·쿠키 도메인을
+  켜는 `wp-config.php` 조건을 추가하고, `wp-content/sunrise.php`에서 기존 사이트를 요청 단위
+  별칭으로 매핑해 canonical 리다이렉트를 막았다. 동적 HTML과 기존 정적 CSS/JS의 하드코딩
+  절대 URL도 무료 Host 응답에서만 별칭으로 바꾼다. 정적 처리는 `.htaccess`의 Host 조건과
+  `.lawand-cafe24-text-alias.php`를 사용하며 원본 파일과 WordPress DB 주 도메인은 수정하지
+  않았다. 별칭에만 `X-Robots-Tag: noindex, nofollow, noarchive`를 적용했다.
+- 무료 Host의 `/`·`/lawnadmin`·`/lawnadmin/manager_members` HEAD/GET 200, 알 수 없는 한글
+  경로 404와 정식 도메인 `Location` 0건, 로그인 200·별칭 쿠키, 대표 HTML·JS의 구 절대
+  도메인 잔존 0건을 확인했다. CSS·이미지는 200이고 wrapper의 설정 파일·경로이탈 probe는
+  404/406이다. 원격 4개 파일은 로컬 승인본과 바이트 일치하고 두 PHP 파일과 wrapper 문법을
+  통과했다. Cafe24 원본의 `lawandfirm.com` Host는 기존 200·하드코딩 URL을 유지하며 공개
+  `lawandfirm.com`은 계속 AWS Caddy에서 `/bank`로 307된다.
+- AWS 앱·DB·DNS·실서비스 배포는 변경하지 않았다. 구 WordPress 4.7.2가 노후했으므로 장기
+  사용 전 별도 인증 또는 접속 IP 제한과 업데이트·격리 계획이 필요하다. rollback은 운영
+  문서의 별칭 블록·두 파일 제거 절차를 따른다. `PROJECT_PLAN.md`는 v1.26이다.
+
 ### 2026-08-13 — 상담 재요청·리걸프렌즈 연락처 처리 gateway/ERP 운영 배포
 - `HERDR_ENV=1`에서 main과 HERDR worktree 8개, 원격 `origin/worktree/*` 26개를 전수
   대조했다. 모든 원격 HEAD가 이미 `main`의 ancestor였고, 배포 소스

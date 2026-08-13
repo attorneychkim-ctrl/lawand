@@ -26,6 +26,7 @@ CloudFormation 스택: `lawand-prod`
 | ERP | `https://erp.lawandfirm.com/login` | `https://3-34-72-9.sslip.io/login` | `t4g.small`, 100GB gp3 |
 | gateway | `https://api.lawandfirm.com/health` | `https://3-36-255-226.sslip.io/health` | `t4g.medium`, 100GB gp3 |
 | Centrex bridge canary | 해당 없음 | `15.165.2.138`(SSM·제한된 RDP 전용) | Windows Server 2022 x64, `t3.medium`, 100GB gp3 |
+| 구 홈페이지 직원 접속 | 해당 없음 | `https://lawyerkch3.cafe24.com` | Cafe24 `husw7-0006`, `222.239.248.41` |
 
 정식 HTTPS를 운영 접속점으로 사용한다. 기존 EIP·`sslip.io` 주소는 rollback과 운영
 진단을 위해 당분간 유지하되 검색 노출, 광고, canonical 주소로 사용하지 않는다. ERP의
@@ -45,6 +46,25 @@ CloudFormation 스택: `lawand-prod`
 각 새 EIP의 Let's Encrypt SAN과 ERP `/login`·gateway `/health` 200을 확인했다. 기존 apex,
 `revivetouch`, wildcard, MX, SPF와 Cafe24 호스팅·SSL은 그대로 유지한다. 잔여 resolver
 캐시가 끝날 때까지 이 두 구 zone 명시 레코드도 제거하지 않는다.
+
+2026-08-13 Cafe24 무료 도메인 `lawyerkch3.cafe24.com`을 직원의 구 홈페이지 전용
+별칭으로 활성화했다. 리다이렉트 원인은 원본 `.htaccess`나 루트 `index.php`가 아니라
+WordPress 4.7.2 멀티사이트의 `DOMAIN_CURRENT_SITE=lawandfirm.com` 고정값이었다. 구
+호스팅의 `wp-config.php`는 정확한 무료 Host에서만 `SUNRISE`·별칭 home/siteurl·쿠키
+도메인을 켜고, `wp-content/sunrise.php`는 기존 사이트를 요청 단위로 매핑하며 PHP
+텍스트 응답의 하드코딩 절대 URL을 별칭으로 바꾼다. `.htaccess`는 같은 Host의 기존
+CSS/JS만 `.lawand-cafe24-text-alias.php`로 보내 원본 파일을 바꾸지 않고 URL을 치환한다.
+주 도메인 DB 값과 원본 정적 파일, `lawandfirm.com` Host 응답에는 영향을 주지 않는다.
+무료 Host의 `/`·`/lawnadmin`·`/lawnadmin/manager_members`는 HEAD/GET 200이고 존재하지
+않는 경로는 같은 Host의 404이며 정식 도메인 `Location`은 없다. 동적 HTML과 대표 정적
+JS의 `lawandfirm.com` 절대 URL 잔존은 0건이고, 설정 파일·경로이탈 wrapper probe는
+404/406이다. 무료 Host에만 `X-Robots-Tag: noindex, nofollow, noarchive`를 붙인다.
+
+이 별칭을 되돌릴 때는 `.htaccess`의 `lawand-cafe24-text-alias` 조건부 블록을 제거하고,
+`wp-config.php`의 `lawand_legacy_alias_host` 블록을 제거한 다음
+`wp-content/sunrise.php`와 `.lawand-cafe24-text-alias.php`를 삭제한다. Cafe24 연결 도메인과
+Route 53·AWS 설정은 이 rollback의 대상이 아니다. 구 WordPress는 4.7.2로 노후했으므로
+장기 사용 전 별도 인증 또는 접속 IP 제한과 업데이트·격리 계획을 마련한다.
 
 ## 실제 AWS 구성
 
