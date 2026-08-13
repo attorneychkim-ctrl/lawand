@@ -1,18 +1,18 @@
 # AWS 운영 배포 기준선 v2
 
-기준 시각: 2026-08-12 KST
+기준 시각: 2026-08-13 KST
 CloudFormation 스택: `lawand-prod`
 리전: 서울(`ap-northeast-2`)
 최초 배포 릴리스: `20260804T085006Z-84e8708`
 현재 홈페이지 릴리스: `20260812T115219Z-integrated-all-worktrees-v2`
-현재 ERP 릴리스: `20260812T115219Z-integrated-all-worktrees-v2`
-현재 gateway 릴리스: `20260812T115219Z-integrated-all-worktrees-v2`
+현재 ERP 릴리스: `20260813T002157Z-repeat-consultation-handling-v1`
+현재 gateway 릴리스: `20260813T002157Z-repeat-consultation-handling-v1`
 현재 Windows bridge: `v0.8.3.0`
 
-완료된 모든 worktree를 main에 통합한 뒤 migration `0051..0053`과 홈페이지·ERP·gateway를
-한 릴리스로 운영 반영했다. 상담 작업 큐 직접 등록·실시간 알림/즉시 배정, 전화데스크
-내선/당겨받기·검색/필터·후처리 연락 동작, SOLAPI MMS 대표 발신번호, 자가진단 원·만원 확인을
-함께 출시했다. bridge 코드는 바뀌지 않아 `v0.8.3.0`을 유지했다.
+완료된 모든 worktree를 main에 통합한 기준선 위에 migration `0054`와 gateway·ERP를
+같은 릴리스로 운영 반영했다. 같은 고객의 배정 전후 재요청을 기존 상담에 묶고, 리걸프렌즈에만
+일치하는 연락처는 기존 사건·새 사건·공유 연락처 중 하나를 직원이 명시적으로 결정한다.
+홈페이지와 bridge 코드는 바뀌지 않아 각각 직전 릴리스와 `v0.8.3.0`을 유지했다.
 
 이 문서는 정식 도메인 전환 이후를 포함한 실제 AWS 구성, 접속점, 데이터 이관 범위와
 운영 체크리스트를 기록한다. 비밀번호·API 키·AWS 계정 ID·RDS 마스터 시크릿 ARN은
@@ -75,10 +75,8 @@ CloudFormation 스택: `lawand-prod`
 - 배포 S3 버킷은 전체 public access 차단, 버전 관리, TLS 강제, `artifacts/` 30일
   만료 정책을 사용한다. 홈페이지 사용자 파일 저장소로 사용하지 않는다.
 - 기본 CloudWatch 경보는 세 EC2 상태, RDS CPU, RDS 여유 저장공간을 감시한다.
-  SNS·PagerDuty·텔레그램 같은 실제 통지 대상은 아직 연결하지 않았다. 2026-08-12 최신 통합
-  릴리스 최종 확인에서 앱·인프라·센트릭스 경보는 0건이다. 별도 `ai-agent-prod-01` 사례 생성
-  크론은 20:25 KST `codex_failed` 1회로 `lawand-case-generator-run-failure`만 ALARM이며,
-  다음 주기 재시도와 모델 런타임 점검이 필요하다.
+  SNS·PagerDuty·텔레그램 같은 실제 통지 대상은 아직 연결하지 않았다. 2026-08-13 최신
+  릴리스 최종 확인에서 metric·composite ALARM은 모두 0건이다.
 
 ## RDS 기준선
 
@@ -97,7 +95,7 @@ CloudFormation 스택: `lawand-prod`
 - migration `0022_consultation_sse_notifications.sql`은 상담 outbox INSERT가 커밋될 때
   개인정보 없이 이벤트 ID·유형·상담 ID·발생시각만 PostgreSQL 채널로 알린다. gateway의
   전용 연결만 이 채널을 `LISTEN`하며 RDS를 인터넷에 노출하지 않는다.
-- 2026-08-12 기준 migration `0053`까지 54개가 모두 적용됐고 최근 `0042..0053` 파일 해시는
+- 2026-08-13 기준 migration `0054`까지 55개가 모두 적용됐고 최근 `0042..0054` 파일 해시는
   현재 Git과 일치한다.
   역사적으로 운영에 적용된 `0028_inbound_phone_directory_resolver.sql` 한 개만 현재 파일과
   해시가 다르다. 후속 `0037_phone_desk_directory_context.sql`이 같은 함수 계약을 대체했고
@@ -183,6 +181,41 @@ EC2에서 ARM64 네이티브 빌드한다. 서버 배포는
 systemd 앱 단위와 Caddy edge 단위는 부팅 시 자동 시작한다. 최종 검증에서 홈페이지·ERP는
 재기동 후 약 1초, gateway는 약 2초 안에 health를 회복했고 실패한 systemd unit과
 최근 error priority journal은 없었다.
+
+## 상담 재요청 묶음·리걸프렌즈 연락처 처리 배포
+
+2026-08-13 `main`과 HERDR worktree 8개, 원격 `origin/worktree/*` 26개를 대조해 모든 원격
+HEAD가 `main`의 ancestor임을 확인한 뒤 릴리스
+`20260813T002157Z-repeat-consultation-handling-v1`로 migration `0054`·gateway·ERP를 운영
+반영했다. 홈페이지와 Windows bridge는 변경하지 않았다.
+
+- 배포 소스는 `438ab241ee5f780ead83d0d67d54246312fbcc51`이다. 전체 5패키지
+  typecheck·lint·production build, core 76개·gateway 120개 테스트, DB schema check와
+  빈 운영형 PostgreSQL의 migration `0000..0054` 2회 적용, `git diff --check`를 통과했다.
+- 변경 전 암호화 스냅샷
+  `lawand-prod-pre-repeat-consultation-20260813t002157z`은 available이다. private S3 AES256
+  아티팩트는 6,704,486 bytes, SHA-256
+  `9d8da2a21aeef21081b52ad6ef0dcc52eaec55fb4d349e8527d1d16f61b45651`다.
+- 운영 migration 원장은 55개다. `0054` 해시는
+  `955e8fb227a3a62c462a8bf78d0575292646be2b4765c45703cffff17b323465`로 Git과 일치한다.
+  재요청 enum 6개 값, `consultation_legalfriends_handlings`, 앱 SELECT·INSERT/viewer SELECT·
+  PUBLIC 차단 권한과 `notificationKind` 실시간 알림 계약을 확인했다.
+- 이미지 ID는 gateway
+  `sha256:f1941c25281ac4e8b7f4bd83bb19b0c8e30189c1560252f3c52b221e2016b8d3`, ERP
+  `sha256:8f143bcdacc4d009f4461bc8d1ce5b8585a9a555ce5dd27ba4b93a6e86214f2f`다. 두 앱과 각
+  Caddy는 active/running, Docker restart 0, 환경파일 600이다. gateway는 단일
+  `registry-v1`의 bridge 키 51개와 상담·전화 실시간 source, 리걸프렌즈·알림톡·네이버·
+  센트릭스 worker 시작을 확인했다.
+- 정식 도메인·EIP 고정 HTTPS의 ERP `/login`과 gateway `/health`가 모두 200이다. 임시
+  5분 직원 세션으로 ERP 상담·전화데스크 페이지와 목록 API 4개를 200으로 확인하고 해당
+  세션 ID를 삭제했다. 홈페이지 `/bank`·자가진단도 200이며 최근 error priority journal과
+  CloudWatch metric·composite ALARM은 0이다. 실제 상담·외부 사건·고객 메시지 canary는
+  만들지 않았다.
+- 배포 직전 30분 넘게 새 이벤트가 없던 internal connected root/leg 한 쌍은 사용자가
+  재시작 진행을 승인해 차단 조건에서 제외했다. 외부 수신과 queued/dispatching 받기 명령은
+  0건이었고 해당 원장을 추정 종료하거나 수정하지 않았다. 최초 전환 명령은 존재하지 않는
+  bridge secret 경로로 서비스 재시작 전에 중단됐으며, 실제
+  `lawand/prod/centrex-bridge/registry-v1`로 바로잡아 정상 전환했다.
 
 ## 모든 완료 워크트리 통합 배포
 

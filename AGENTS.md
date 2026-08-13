@@ -71,6 +71,35 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-13 — 상담 재요청·리걸프렌즈 연락처 처리 gateway/ERP 운영 배포
+- `HERDR_ENV=1`에서 main과 HERDR worktree 8개, 원격 `origin/worktree/*` 26개를 전수
+  대조했다. 모든 원격 HEAD가 이미 `main`의 ancestor였고, 배포 소스
+  `438ab241ee5f780ead83d0d67d54246312fbcc51`는 `origin/main`과 일치했다. 전체 5패키지
+  typecheck·lint·production build, core 76개·gateway 120개 테스트, DB schema check,
+  운영형 빈 PostgreSQL migration `0000..0054` 2회 적용과 `git diff --check`를 통과했다.
+- 릴리스 `20260813T002157Z-repeat-consultation-handling-v1`을 운영 반영했다. 변경 전 암호화
+  RDS 스냅샷 `lawand-prod-pre-repeat-consultation-20260813t002157z`은 available이다.
+  private S3 AES256 아티팩트는 6,704,486 bytes, SHA-256
+  `9d8da2a21aeef21081b52ad6ef0dcc52eaec55fb4d349e8527d1d16f61b45651`다. 홈페이지와 Windows
+  bridge는 코드 영향이 없어 직전 릴리스와 v0.8.3.0을 유지했다.
+- gateway보다 먼저 migration `0054`를 적용했다. 운영 migration 원장은 55개이고 최신
+  해시는 `955e8fb227a3a62c462a8bf78d0575292646be2b4765c45703cffff17b323465`로 Git과 일치한다.
+  재요청 enum 6개 값, `consultation_legalfriends_handlings`, app SELECT·INSERT/viewer SELECT·
+  PUBLIC 차단 권한과 `notificationKind` 알림 함수를 확인했다. gateway 이미지 ID는
+  `sha256:f1941c25281ac4e8b7f4bd83bb19b0c8e30189c1560252f3c52b221e2016b8d3`, ERP는
+  `sha256:8f143bcdacc4d009f4461bc8d1ce5b8585a9a555ce5dd27ba4b93a6e86214f2f`다.
+- gateway·ERP와 각 Caddy는 active/running, Docker restart 0이고 환경파일 권한은 600이다.
+  gateway bridge key 51개와 실시간 source·worker 시작, 정식 도메인·EIP 고정 HTTPS의
+  gateway health·ERP login 200을 확인했다. 임시 5분 세션으로 상담·전화데스크 페이지와
+  목록 API 4개를 200으로 검증하고 해당 세션 ID를 삭제했다. 홈페이지 `/bank`·자가진단도
+  200이며 최근 error journal과 CloudWatch metric·composite ALARM은 0이다. 실제 상담·
+  외부 사건·문자 canary는 만들지 않았다.
+- 배포 전 마지막 이벤트가 30분 넘게 지난 internal connected root/leg 한 쌍은 사용자가
+  재시작을 명시 승인해 차단 조건에서 제외했다. 외부 수신·받기 대기 명령은 0이었고 해당
+  통화 원장을 추정 종료하지 않았다. 첫 전환 명령은 잘못된 bridge secret 복수형 경로로
+  서비스 재시작 전에 중단됐고, 실제 `lawand/prod/centrex-bridge/registry-v1`로 바로잡아
+  정상 전환했다. `PROJECT_PLAN.md`는 v1.25다.
+
 ### 2026-08-13 — 상담 재요청 묶음·리걸프렌즈 기존 연락처 처리 main 통합
 - 홈페이지 상담·자가진단이 7일 안에 같은 정규화 이름·전화번호로 다시 들어오면 미종결
   `consultation`에 새 `consultation_request`로 붙인다. 미배정이면 `repeat_unassigned`,
