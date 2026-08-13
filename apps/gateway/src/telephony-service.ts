@@ -247,6 +247,12 @@ export function messagePhoneDisplay(value: string): string {
   return value;
 }
 
+export function externalInboundNotificationTargetUserIds(
+  activeStaff: readonly { staffUserId: string }[],
+): string[] {
+  return [...new Set(activeStaff.map((staff) => staff.staffUserId))];
+}
+
 export type PhoneCustomerMatch =
   | {
       source: "consultation";
@@ -1705,21 +1711,9 @@ export function createTelephonyService(options: {
         );
       } else if (root.direction === "inbound") {
         notificationKind = "external_inbound";
-        notificationTargetUserIds = [
-          ...new Set(
-            rootRows.flatMap((row) =>
-              ownersByActivityEndpoint.get(row.legEndpointId ?? "") ?? [],
-            ),
-          ),
-        ];
-        if (customerMatch?.source === "consultation") {
-          const assignee = customerMatch.consultation.assigneeUserId;
-          if (assignee) notificationTargetUserIds.push(assignee);
-        } else if (customerMatch?.source === "legal_friends") {
-          notificationTargetUserIds.push(
-            ...customerMatch.cases.flatMap((item) => item.staffUserIds),
-          );
-        }
+        notificationTargetUserIds = externalInboundNotificationTargetUserIds(
+          allActiveStaff,
+        );
       }
       notificationTargetUserIds = [...new Set(notificationTargetUserIds)];
       if (notificationKind && notificationTargetUserIds.length === 0) {

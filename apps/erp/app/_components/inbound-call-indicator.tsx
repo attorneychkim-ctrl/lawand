@@ -14,6 +14,7 @@ import type {
 import {
   prepareBrowserNotifications,
   showConsultationBrowserNotification,
+  showTelephonyBrowserNotification,
 } from "./browser-notification";
 import { notificationPermissionChangedEvent } from "./browser-notification-toggle";
 import { subscribeConsultationRealtime } from "./consultation-realtime";
@@ -75,6 +76,15 @@ const consultationChannelLabels: Record<
   phone: "전화 상담",
   kakao_channel: "카카오 상담",
   naver_booking: "네이버 예약",
+};
+
+const consultationStateLabels: Record<string, string> = {
+  requested: "신규 접수",
+  assigned: "상담 진행",
+  contacted: "연락 완료",
+  completed: "상담 완료",
+  engaged: "계약",
+  closed: "종결",
 };
 
 const stateCopy: Record<
@@ -257,32 +267,49 @@ function notificationCopy(activity: TelephonyCallActivity) {
           ? "내선 전화"
           : "고객 전화 수신";
   const customer = activity.customerMatch;
+  const customerName = customer?.source === "consultation"
+    ? customer.consultation.displayName
+    : customer?.source === "legal_friends"
+      ? customer.clientName
+      : "발신자 정보 없음";
   const details: string[] = [];
   if (customer?.source === "consultation") {
     details.push(
-      `${customer.consultation.displayName} · ${customer.consultation.publicReceiptCode}`,
+      `상담데스크 · ${customer.consultation.publicReceiptCode} · ${consultationStateLabels[customer.consultation.state] ?? customer.consultation.state}`,
     );
-    if (customer.consultation.assigneeDisplayName) {
-      details.push(`담당 ${customer.consultation.assigneeDisplayName}`);
-    }
+    details.push(
+      customer.consultation.assigneeDisplayName
+        ? `기존 담당 ${customer.consultation.assigneeDisplayName}`
+        : "기존 담당 미배정",
+    );
   } else if (customer?.source === "legal_friends") {
     const latestCase = customer.cases[0];
-    details.push(customer.clientName);
     if (latestCase) {
       details.push(
-        `${caseTypeLabel(latestCase.caseType)} · ${caseStateLabel(latestCase.caseType, latestCase.caseState)}`,
+        `리걸프렌즈 · ${caseTypeLabel(latestCase.caseType)} · ${caseStateLabel(latestCase.caseType, latestCase.caseState)}`,
       );
     }
-    if (latestCase?.caseNumber) details.push(latestCase.caseNumber);
-    if (latestCase?.caseName) details.push(latestCase.caseName);
+    const caseDetails = [
+      latestCase?.caseNumber,
+      latestCase?.caseName,
+      latestCase?.courtName,
+    ].filter((value): value is string => Boolean(value));
+    if (caseDetails.length) details.push(caseDetails.join(" · "));
     const names = [...new Set(customer.cases.flatMap((item) => item.staffNames))];
-    if (names.length) details.push(`담당 ${names.join("·")}`);
+    details.push(names.length ? `기존 담당 ${names.join(" · ")}` : "기존 담당 미확인");
+    if (customer.cases.length > 1) {
+      details.push(`연결 사건 ${customer.cases.length}건`);
+    }
   } else {
-    details.push("고객 정보 확인 중");
+    details.push("상담·리걸프렌즈 일치 고객 없음");
   }
-  if (activity.remotePhone) details.push(formatPhone(activity.remotePhone));
   details.push(
-    `${activity.currentEndpoint.label} · 내선 ${activity.currentEndpoint.extension}`,
+    activity.remotePhone
+      ? `전화 ${formatPhone(activity.remotePhone)}`
+      : "전화번호 확인 중",
+  );
+  details.push(
+    `수신 ${activity.currentEndpoint.label} · ${formatPhone(activity.currentEndpoint.lineNumber)} · 내선 ${activity.currentEndpoint.extension}`,
   );
   const participantNames = [
     ...new Set(
@@ -294,7 +321,7 @@ function notificationCopy(activity: TelephonyCallActivity) {
   if (activity.notificationKind === "transferred_customer" && participantNames.length) {
     details.push(`전달 ${participantNames.join(" → ")}`);
   }
-  return { title: kindLabel, body: details.join("\n") };
+  return { title: `${kindLabel} · ${customerName}`, body: details.join("\n") };
 }
 
 export function InboundCallIndicator({
@@ -713,15 +740,13 @@ export function InboundCallIndicator({
         href: `/phone-desk/${activity.id}`,
       });
       if (notificationPermission === "granted") {
-        const notification = new Notification(copy.title, {
-          body: copy.body,
-          tag: notificationKey,
+        void showTelephonyBrowserNotification({
+          ...copy,
+          notificationId: notificationKey,
+          callId: activity.id,
+          href: `/phone-desk/${activity.id}`,
+          occurredAt: activity.lastEventAt,
         });
-        notification.onclick = () => {
-          window.focus();
-          window.location.assign(`/phone-desk/${activity.id}`);
-          notification.close();
-        };
       }
     }
   }, [activities, enqueueToast, notificationPermission, staffUserId]);
