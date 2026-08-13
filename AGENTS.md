@@ -71,6 +71,15 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-13 — ERP 직원관리 업무 연동 기본 접힘 후보
+- 관리자 직원관리의 각 직원 카드에서 항상 펼쳐지던 센트릭스 전화·리걸프렌즈 편집 폼을
+  하나의 `업무 연동 설정` disclosure로 묶고 기본 접힘으로 바꿨다. 접힌 요약에는 전화의
+  정상·연결 중·실패·미설정 상태와 리걸프렌즈 연결 여부를 유지해 목록을 훑으면서도 확인이
+  필요한 직원을 바로 구분할 수 있다. 기본 정보·역할 수정도 기존처럼 접힌 상태를 유지한다.
+- ERP typecheck·ESLint·production build와 `git diff --check`를 통과했다. DB·gateway·
+  Windows bridge 변경과 migration은 없고 `PROJECT_PLAN.md`는 v1.33이다. 이 워크트리에서는
+  main 병합·운영 배포를 수행하지 않는다.
+
 ### 2026-08-13 — gateway/RDS CPU 긴급 복구·RDS xlarge 상향
 - 16:45~17:38 KST 운영 RDS CPU가 반복적으로 99%까지 상승하고 gateway 요청 풀 대기가
   최대 523개까지 쌓여 ERP가 server error 화면을 표시했다. EC2와 RDS 상태 자체는

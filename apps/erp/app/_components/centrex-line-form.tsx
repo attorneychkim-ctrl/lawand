@@ -7,7 +7,7 @@ import {
   updateCentrexLineAction,
 } from "../auth-actions";
 
-type CentrexConnection = {
+export type CentrexConnection = {
   status:
     | "unconfigured"
     | "incomplete"
@@ -42,7 +42,7 @@ const initialState: CentrexLineActionState = {
   reassigned: false,
 };
 
-const connectionCopy: Record<
+export const centrexConnectionCopy: Record<
   CentrexConnection["status"],
   { label: string; description: string; tone: string }
 > = {
@@ -133,7 +133,7 @@ export function CentrexLineForm({
     updateCentrexLineAction,
     initialState,
   );
-  const copy = connectionCopy[connection.status];
+  const copy = centrexConnectionCopy[connection.status];
   const passwordRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
