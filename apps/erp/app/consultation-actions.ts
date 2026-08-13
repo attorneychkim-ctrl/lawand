@@ -2,7 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 
-import { consultationAssigneeTransferInputSchema } from "@lawand/core";
+import {
+  consultationAssigneeTransferInputSchema,
+  consultationGroupLinkSchema,
+} from "@lawand/core";
 
 import {
   assignConsultationToMe,
@@ -10,8 +13,10 @@ import {
   ConsultationGatewayError,
   invalidateLegalFriendsCase,
   invalidateKakaoHomepageEntry,
+  linkConsultationGroup,
   requestConsultationAssigneeTransfer,
   softDeleteStaffConsultation,
+  splitConsultationGroup,
 } from "../lib/gateway";
 import { requireAdmin, requireStaff } from "../lib/session";
 
@@ -171,5 +176,68 @@ export async function softDeleteStaffConsultationAction(
   }
   revalidatePath("/");
   revalidatePath(`/consultations/${consultationId}`);
+  return { error: "" };
+}
+
+export type ConsultationGroupActionState = {
+  error: string;
+};
+
+export async function linkConsultationGroupAction(
+  consultationId: string,
+  previousState: ConsultationGroupActionState,
+  formData: FormData,
+): Promise<ConsultationGroupActionState> {
+  void previousState;
+  await requireStaff();
+  const parsed = consultationGroupLinkSchema.safeParse({
+    targetReceiptCode: String(formData.get("targetReceiptCode") ?? "")
+      .trim()
+      .toUpperCase(),
+  });
+  if (!parsed.success) {
+    return { error: "연결할 상담의 접수번호를 정확히 입력해 주세요." };
+  }
+  try {
+    const result = await linkConsultationGroup(
+      consultationId,
+      parsed.data.targetReceiptCode,
+    );
+    revalidatePath("/");
+    revalidatePath(`/consultations/${consultationId}`);
+    revalidatePath(
+      `/consultations/${result.canonicalConsultationId}`,
+    );
+  } catch (error) {
+    return {
+      error:
+        error instanceof ConsultationGatewayError
+          ? error.message
+          : "상담을 묶지 못했습니다. 잠시 후 다시 시도해 주세요.",
+    };
+  }
+  return { error: "" };
+}
+
+export async function splitConsultationGroupAction(
+  consultationId: string,
+  canonicalConsultationId: string,
+  previousState: ConsultationGroupActionState,
+): Promise<ConsultationGroupActionState> {
+  void previousState;
+  await requireStaff();
+  try {
+    await splitConsultationGroup(consultationId);
+  } catch (error) {
+    return {
+      error:
+        error instanceof ConsultationGatewayError
+          ? error.message
+          : "상담을 분리하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+    };
+  }
+  revalidatePath("/");
+  revalidatePath(`/consultations/${consultationId}`);
+  revalidatePath(`/consultations/${canonicalConsultationId}`);
   return { error: "" };
 }

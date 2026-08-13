@@ -2790,6 +2790,100 @@ test("상담하기는 인증된 직원과 리걸프렌즈 처리 구분을 본�
   });
 });
 
+test("직원은 접수번호로 상담을 묶고 구성원을 별도 상담으로 분리한다", async (context) => {
+  const consultationId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2a4";
+  const targetReceiptCode = "LA-260813-23456789";
+  const calls: Array<{
+    action: "link" | "split";
+    consultationId: string;
+    targetReceiptCode?: string;
+    actorId: string;
+  }> = [];
+  const authService = {
+    authorize: async () => realtimeActor,
+  } as unknown as StaffAuthService;
+  const service = {
+    linkConsultationGroup: async (
+      receivedConsultationId: string,
+      receivedTargetReceiptCode: string,
+      actor: StaffPrincipal,
+    ) => {
+      calls.push({
+        action: "link",
+        consultationId: receivedConsultationId,
+        targetReceiptCode: receivedTargetReceiptCode,
+        actorId: actor.id,
+      });
+      return {
+        groupId: "019fa6a4-6834-7782-aa0b-4e71ffb8a2c1",
+        canonicalConsultationId: receivedConsultationId,
+        memberCount: 2,
+        replayed: false,
+      };
+    },
+    splitConsultationGroup: async (
+      receivedConsultationId: string,
+      actor: StaffPrincipal,
+    ) => {
+      calls.push({
+        action: "split",
+        consultationId: receivedConsultationId,
+        actorId: actor.id,
+      });
+      return {
+        previousGroupId: "019fa6a4-6834-7782-aa0b-4e71ffb8a2c1",
+        newGroupId: "019fa6a4-6834-7782-aa0b-4e71ffb8a2c2",
+        consultationId: receivedConsultationId,
+        previousGroupCanonicalConsultationId: receivedConsultationId,
+      };
+    },
+  } as unknown as ConsultationService;
+  const server = createGatewayServer({
+    authService,
+    internalApiKey: "test-internal-key",
+    service,
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const headers = {
+    "content-type": "application/json",
+    "x-lawand-internal-key": "test-internal-key",
+    "x-lawand-staff-session": "s".repeat(43),
+  };
+
+  const linkResponse = await fetch(
+    `http://127.0.0.1:${address.port}/v1/consultations/${consultationId}/group/link`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ targetReceiptCode }),
+    },
+  );
+  const splitResponse = await fetch(
+    `http://127.0.0.1:${address.port}/v1/consultations/${consultationId}/group/split`,
+    { method: "POST", headers, body: "{}" },
+  );
+
+  assert.equal(linkResponse.status, 201);
+  assert.equal(splitResponse.status, 201);
+  assert.deepEqual(calls, [
+    {
+      action: "link",
+      consultationId,
+      targetReceiptCode,
+      actorId: realtimeActor.id,
+    },
+    {
+      action: "split",
+      consultationId,
+      actorId: realtimeActor.id,
+    },
+  ]);
+});
+
 test("상담 무효 처리는 인증된 직원과 상담 ID를 리걸프렌즈 변경 서비스에 전달한다", async (context) => {
   const consultationId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2a4";
   let received:

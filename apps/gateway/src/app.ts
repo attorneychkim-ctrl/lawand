@@ -9,6 +9,7 @@ import {
   consultationSubmissionSchema,
   consultationAssignmentInputSchema,
   consultationAssigneeTransferInputSchema,
+  consultationGroupLinkSchema,
   createKakaoSkillResponse,
   kakaoHomepageEntryConfirmationSchema,
   kakaoHomepageEntrySubmissionSchema,
@@ -72,6 +73,7 @@ import type { ConsultationService } from "./service.js";
 import {
   ConsultationAssignmentError,
   ConsultationAssigneeTransferError,
+  ConsultationGroupError,
   ConsultationSoftDeleteError,
   ConsultationValidationError,
   KakaoHomepageEntryError,
@@ -2175,6 +2177,69 @@ export function createGatewayServer(options?: {
       if (
         request.method === "POST" &&
         url.pathname.startsWith("/v1/consultations/") &&
+        (url.pathname.endsWith("/group/link") ||
+          url.pathname.endsWith("/group/split"))
+      ) {
+        if (
+          !options?.service ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const action = url.pathname.endsWith("/group/link")
+          ? "link"
+          : "split";
+        const suffix = action === "link" ? "/group/link" : "/group/split";
+        const consultationId = url.pathname.slice(
+          "/v1/consultations/".length,
+          -suffix.length,
+        );
+        if (!validUuid(consultationId)) {
+          sendJson(response, 400, { error: "invalid_consultation_id" });
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        if (action === "link") {
+          const parsed = consultationGroupLinkSchema.safeParse(
+            await readJson(request),
+          );
+          if (!parsed.success) {
+            sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+            return;
+          }
+          const result = await options.service.linkConsultationGroup(
+            consultationId,
+            parsed.data.targetReceiptCode,
+            actor,
+          );
+          sendJson(response, result.replayed ? 200 : 201, result);
+          return;
+        }
+        const result = await options.service.splitConsultationGroup(
+          consultationId,
+          actor,
+        );
+        sendJson(response, 201, result);
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        url.pathname.startsWith("/v1/consultations/") &&
         url.pathname.endsWith("/legalfriends/invalidate")
       ) {
         if (
@@ -2743,6 +2808,20 @@ export function createGatewayServer(options?: {
         sendJson(
           response,
           error.code === "consultation_not_found" ? 404 : 409,
+          {
+            error: error.code,
+            message: error.message,
+          },
+        );
+        return;
+      }
+      if (error instanceof ConsultationGroupError) {
+        sendJson(
+          response,
+          error.code === "consultation_not_found" ||
+            error.code === "target_not_found"
+            ? 404
+            : 409,
           {
             error: error.code,
             message: error.message,

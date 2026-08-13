@@ -45,6 +45,9 @@ import {
 import {
   consultationAssignments,
   consultationDirectorySources,
+  consultationGroupEvents,
+  consultationGroupMembers,
+  consultationGroups,
   consultationRequests,
   consultationStatusHistory,
   consultations,
@@ -948,6 +951,7 @@ export function createTelephonyService(options: {
       }
 
       let decision: ReturnType<typeof classifyConsultationSubmission>;
+      let createGroupedMember = false;
       if (input.directorySource) {
         decision = {
           action: "create_new",
@@ -988,28 +992,82 @@ export function createTelephonyService(options: {
           )
           .orderBy(desc(consultationRequests.submittedAt));
 
+        const candidateGroupRows = candidateRows.length > 0
+          ? await tx
+              .select({
+                consultationId: consultationGroupMembers.consultationId,
+                groupId: consultationGroups.id,
+                canonicalConsultationId:
+                  consultationGroups.canonicalConsultationId,
+              })
+              .from(consultationGroupMembers)
+              .innerJoin(
+                consultationGroups,
+                eq(consultationGroups.id, consultationGroupMembers.groupId),
+              )
+              .where(
+                and(
+                  inArray(
+                    consultationGroupMembers.consultationId,
+                    candidateRows.map((row) => row.consultationId),
+                  ),
+                  eq(consultationGroups.status, "active"),
+                ),
+              )
+          : [];
+        const groupByCandidate = new Map(
+          candidateGroupRows.map((row) => [row.consultationId, row]),
+        );
+        const canonicalIds = [
+          ...new Set(
+            candidateGroupRows.map((row) => row.canonicalConsultationId),
+          ),
+        ];
+        const canonicalRows = canonicalIds.length > 0
+          ? await tx
+              .select({
+                id: consultations.id,
+                state: consultations.state,
+                preferredNameCiphertext:
+                  consultations.preferredNameCiphertext,
+                preferredNameNonce: consultations.preferredNameNonce,
+                preferredNameKeyVersion:
+                  consultations.preferredNameKeyVersion,
+              })
+              .from(consultations)
+              .where(inArray(consultations.id, canonicalIds))
+          : [];
+        const canonicalById = new Map(
+          canonicalRows.map((row) => [row.id, row]),
+        );
         const seenConsultations = new Set<string>();
         const candidates: ExistingConsultationCandidate[] = [];
         for (const row of candidateRows) {
-          if (seenConsultations.has(row.consultationId)) continue;
-          seenConsultations.add(row.consultationId);
+          const canonicalConsultationId =
+            groupByCandidate.get(row.consultationId)
+              ?.canonicalConsultationId ?? row.consultationId;
+          if (seenConsultations.has(canonicalConsultationId)) continue;
+          seenConsultations.add(canonicalConsultationId);
+          const identityRow =
+            canonicalById.get(canonicalConsultationId) ?? row;
           const candidateName =
-            row.preferredNameCiphertext &&
-            row.preferredNameNonce &&
-            row.preferredNameKeyVersion
+            identityRow.preferredNameCiphertext &&
+            identityRow.preferredNameNonce &&
+            identityRow.preferredNameKeyVersion
               ? protection.decrypt(
                   {
-                    ciphertext: row.preferredNameCiphertext,
-                    nonce: row.preferredNameNonce,
-                    keyVersion: row.preferredNameKeyVersion,
+                    ciphertext: identityRow.preferredNameCiphertext,
+                    nonce: identityRow.preferredNameNonce,
+                    keyVersion: identityRow.preferredNameKeyVersion,
                   },
-                  `consultations.preferred_name:${row.consultationId}`,
+                  `consultations.preferred_name:${canonicalConsultationId}`,
                 )
               : null;
           candidates.push({
-            consultationId: row.consultationId,
+            consultationId: canonicalConsultationId,
             latestRequestId: row.requestId,
-            state: row.state,
+            state:
+              canonicalById.get(canonicalConsultationId)?.state ?? row.state,
             phoneFingerprint: phoneFingerprint.toString("hex"),
             latestPayloadFingerprint: row.payloadFingerprint.toString("hex"),
             latestJourneySessionId: row.journeySessionId,
@@ -1039,6 +1097,45 @@ export function createTelephonyService(options: {
         if (decision.action === "idempotent_replay") {
           throw new Error("직원 신규등록 멱등성 판정 경로가 올바르지 않습니다.");
         }
+
+        const repeatConsultationId =
+          decision.action === "attach_repeat_request"
+            ? decision.consultationId
+            : null;
+        const repeatGroupHasSameName =
+          repeatConsultationId !== null &&
+          candidateRows.some((row) => {
+            if (
+              (groupByCandidate.get(row.consultationId)
+                ?.canonicalConsultationId ?? row.consultationId) !==
+              repeatConsultationId
+            ) {
+              return false;
+            }
+            const candidateName =
+              row.preferredNameCiphertext &&
+              row.preferredNameNonce &&
+              row.preferredNameKeyVersion
+                ? protection.decrypt(
+                    {
+                      ciphertext: row.preferredNameCiphertext,
+                      nonce: row.preferredNameNonce,
+                      keyVersion: row.preferredNameKeyVersion,
+                    },
+                    `consultations.preferred_name:${row.consultationId}`,
+                  )
+                : null;
+            return candidateName
+              ? normalizeConsultationName(candidateName) ===
+                  normalizeConsultationName(input.customerName)
+              : false;
+          });
+        if (
+          decision.action === "attach_repeat_request" &&
+          !repeatGroupHasSameName
+        ) {
+          createGroupedMember = true;
+        }
       }
 
       let source: LegalFriendsDirectoryConsultationSourceRow | undefined;
@@ -1056,9 +1153,16 @@ export function createTelephonyService(options: {
         }
       }
 
-      const consultationId = decision.createConsultation
+      const createConsultation =
+        decision.createConsultation || createGroupedMember;
+      const existingConsultationId =
+        "consultationId" in decision ? decision.consultationId : null;
+      if (!createConsultation && !existingConsultationId) {
+        throw new Error("기존 상담 식별자를 찾을 수 없습니다.");
+      }
+      const consultationId = createConsultation
         ? createConsultationId()
-        : decision.consultationId;
+        : existingConsultationId!;
       const requestId = createConsultationRequestId();
       const dedupeOutcome = staffDedupeOutcome(decision);
       let publicReceiptCode: string;
@@ -1110,7 +1214,7 @@ export function createTelephonyService(options: {
           )
         : null;
 
-      if (decision.createConsultation) {
+      if (createConsultation) {
         publicReceiptCode = createPublicReceiptCode(acceptedAt);
         const nameEncrypted = protection.encrypt(
           input.customerName,
@@ -1145,6 +1249,20 @@ export function createTelephonyService(options: {
           .update(consultations)
           .set({ lastRequestedAt: acceptedAt, updatedAt: acceptedAt })
           .where(eq(consultations.id, consultationId));
+        await tx
+          .update(consultationGroups)
+          .set({ lastRequestedAt: acceptedAt, updatedAt: acceptedAt })
+          .where(
+            and(
+              eq(consultationGroups.status, "active"),
+              sql<boolean>`exists (
+                select 1
+                from ${consultationGroupMembers}
+                where ${consultationGroupMembers.groupId} = ${consultationGroups.id}
+                  and ${consultationGroupMembers.consultationId} = ${consultationId}
+              )`,
+            ),
+          );
       }
       await tx.insert(consultationRequests).values({
         id: requestId,
@@ -1180,6 +1298,104 @@ export function createTelephonyService(options: {
         submittedAt: acceptedAt,
         createdAt: acceptedAt,
       });
+      let groupedCanonicalConsultationId: string | null = null;
+      if (
+        createGroupedMember &&
+        decision.action === "attach_repeat_request"
+      ) {
+        groupedCanonicalConsultationId = decision.consultationId;
+        const [existingGroup] = await tx
+          .select({ id: consultationGroups.id })
+          .from(consultationGroupMembers)
+          .innerJoin(
+            consultationGroups,
+            eq(consultationGroups.id, consultationGroupMembers.groupId),
+          )
+          .where(
+            and(
+              eq(
+                consultationGroupMembers.consultationId,
+                groupedCanonicalConsultationId,
+              ),
+              eq(consultationGroups.status, "active"),
+            ),
+          )
+          .limit(1);
+        const groupId = existingGroup?.id ?? createEventId();
+        if (!existingGroup) {
+          const [canonical] = await tx
+            .select({
+              firstRequestedAt: consultations.firstRequestedAt,
+            })
+            .from(consultations)
+            .where(
+              eq(consultations.id, groupedCanonicalConsultationId),
+            )
+            .limit(1);
+          if (!canonical) {
+            throw new Error("반복 상담의 대표 상담을 찾을 수 없습니다.");
+          }
+          await tx.insert(consultationGroups).values({
+            id: groupId,
+            canonicalConsultationId: groupedCanonicalConsultationId,
+            phoneFingerprint,
+            status: "active",
+            createdReason: "automatic_phone_7d",
+            createdByUserId: null,
+            firstRequestedAt: canonical.firstRequestedAt,
+            lastRequestedAt: acceptedAt,
+            createdAt: acceptedAt,
+            updatedAt: acceptedAt,
+          });
+          await tx.insert(consultationGroupMembers).values({
+            consultationId: groupedCanonicalConsultationId,
+            groupId,
+            linkMethod: "automatic_phone_7d",
+            linkedByUserId: null,
+            linkedAt: acceptedAt,
+            createdAt: acceptedAt,
+          });
+          await tx.insert(consultationGroupEvents).values({
+            id: createEventId(),
+            groupId,
+            consultationId: groupedCanonicalConsultationId,
+            eventType: "created",
+            actorUserId: null,
+            metadata: { reason: "same_phone_within_7_days" },
+            occurredAt: acceptedAt,
+            createdAt: acceptedAt,
+          });
+        }
+        await tx.insert(consultationGroupMembers).values({
+          consultationId,
+          groupId,
+          linkMethod: "automatic_phone_7d",
+          linkedByUserId: null,
+          linkedAt: acceptedAt,
+          createdAt: acceptedAt,
+        });
+        await tx.insert(consultationGroupEvents).values({
+          id: createEventId(),
+          groupId,
+          consultationId,
+          eventType: "linked",
+          actorUserId: null,
+          metadata: {
+            reason: "same_phone_within_7_days",
+            canonicalConsultationId: groupedCanonicalConsultationId,
+          },
+          occurredAt: acceptedAt,
+          createdAt: acceptedAt,
+        });
+        await tx
+          .update(consultationGroups)
+          .set({ lastRequestedAt: acceptedAt, updatedAt: acceptedAt })
+          .where(eq(consultationGroups.id, groupId));
+        await tx
+          .update(consultations)
+          .set({ lastRequestedAt: acceptedAt, updatedAt: acceptedAt })
+          .where(eq(consultations.id, groupedCanonicalConsultationId));
+      }
       if (input.directorySource && sourceSnapshotEncrypted) {
         await tx.insert(consultationDirectorySources).values({
           consultationId,
@@ -1194,7 +1410,7 @@ export function createTelephonyService(options: {
           createdAt: acceptedAt,
         });
       }
-      if (decision.createConsultation) {
+      if (createConsultation) {
         await tx.insert(consultationStatusHistory).values({
           id: createEventId(),
           consultationId,
@@ -1255,15 +1471,17 @@ export function createTelephonyService(options: {
         events.push(requestedEvent, requestNotificationEvent);
       }
       if (decision.action === "attach_repeat_request") {
+        const eventConsultationId =
+          groupedCanonicalConsultationId ?? consultationId;
         events.push({
           eventId: createEventId(),
           eventType: "consultation.request.updated",
           eventVersion: 1,
           occurredAt,
           producer: "lawand.gateway",
-          correlationId: consultationId,
+          correlationId: eventConsultationId,
           data: {
-            consultationId,
+            consultationId: eventConsultationId,
             requestId,
             intakeRef: `consultation_requests/${requestId}`,
             updateReason: "repeat_request",
@@ -1298,7 +1516,7 @@ export function createTelephonyService(options: {
           .insert(outboxEvents)
           .values(
             events.map((event) =>
-              eventRow(event, consultationId, "consultation"),
+              eventRow(event, event.correlationId, "consultation"),
             ),
           );
       }
@@ -1316,7 +1534,7 @@ export function createTelephonyService(options: {
           directoryCaseIdx: input.directorySource?.caseIdx ?? null,
           relationship: input.directorySource?.relationship ?? null,
           dedupeOutcome,
-          createdNewConsultation: decision.createConsultation,
+          createdNewConsultation: createConsultation,
         },
         occurredAt: acceptedAt,
         createdAt: acceptedAt,

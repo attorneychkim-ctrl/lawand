@@ -11,6 +11,7 @@ import {
   isNotNull,
   isNull,
   lt,
+  ne,
   sql,
 } from "drizzle-orm";
 
@@ -55,6 +56,9 @@ import {
   consultationAssignments,
   consultationAttributions,
   consultationDirectorySources,
+  consultationGroupEvents,
+  consultationGroupMembers,
+  consultationGroups,
   consultationLegalFriendsHandlings,
   consultationRequests,
   consultationStatusHistory,
@@ -176,6 +180,7 @@ export class ConsultationAssignmentError extends Error {
       | "consultation_not_found"
       | "consultation_already_assigned"
       | "consultation_not_assignable"
+      | "consultation_group_noncanonical"
       | "legalfriends_review_required"
       | "legalfriends_handling_invalid",
     message: string,
@@ -189,7 +194,27 @@ export class ConsultationSoftDeleteError extends Error {
     readonly code:
       | "consultation_not_found"
       | "consultation_not_staff_created"
+      | "consultation_grouped"
       | "assignment_transfer_pending",
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+export class ConsultationGroupError extends Error {
+  constructor(
+    readonly code:
+      | "consultation_not_found"
+      | "target_not_found"
+      | "same_consultation"
+      | "already_grouped"
+      | "group_not_found"
+      | "last_group_member"
+      | "consultation_not_groupable"
+      | "phone_mismatch"
+      | "assignment_conflict"
+      | "legalfriends_case_conflict",
     message: string,
   ) {
     super(message);
@@ -359,6 +384,201 @@ export function createConsultationService(options: {
   protection: DataProtection;
 }) {
   const { db, protection } = options;
+
+  type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
+  async function activeGroup(
+    tx: Transaction,
+    consultationId: string,
+  ) {
+    const [row] = await tx
+      .select({
+        groupId: consultationGroups.id,
+        canonicalConsultationId: consultationGroups.canonicalConsultationId,
+        phoneFingerprint: consultationGroups.phoneFingerprint,
+        firstRequestedAt: consultationGroups.firstRequestedAt,
+        lastRequestedAt: consultationGroups.lastRequestedAt,
+      })
+      .from(consultationGroupMembers)
+      .innerJoin(
+        consultationGroups,
+        eq(consultationGroups.id, consultationGroupMembers.groupId),
+      )
+      .where(
+        and(
+          eq(consultationGroupMembers.consultationId, consultationId),
+          eq(consultationGroups.status, "active"),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  }
+
+  async function groupMemberIds(
+    tx: Transaction,
+    consultationId: string,
+  ) {
+    const group = await activeGroup(tx, consultationId);
+    if (!group) {
+      return {
+        group: null,
+        canonicalConsultationId: consultationId,
+        memberIds: [consultationId],
+      };
+    }
+    const rows = await tx
+      .select({ consultationId: consultationGroupMembers.consultationId })
+      .from(consultationGroupMembers)
+      .where(eq(consultationGroupMembers.groupId, group.groupId));
+    return {
+      group,
+      canonicalConsultationId: group.canonicalConsultationId,
+      memberIds: rows.map((row) => row.consultationId),
+    };
+  }
+
+  async function automaticallyGroupByPhone(
+    tx: Transaction,
+    input: {
+      consultationId: string;
+      phoneFingerprint: Buffer | null;
+      requestedAt: Date;
+    },
+  ) {
+    if (!input.phoneFingerprint) return null;
+    const [candidate] = await tx
+      .select({
+        id: consultations.id,
+        state: consultations.state,
+        firstRequestedAt: consultations.firstRequestedAt,
+        lastRequestedAt: consultations.lastRequestedAt,
+      })
+      .from(consultations)
+      .where(
+        and(
+          ne(consultations.id, input.consultationId),
+          eq(consultations.phoneFingerprint, input.phoneFingerprint),
+          isNull(consultations.softDeletedAt),
+          ne(consultations.state, "closed"),
+          gte(
+            consultations.lastRequestedAt,
+            new Date(
+              input.requestedAt.getTime() -
+                DEDUPE_WINDOWS.suspectedDuplicateMs,
+            ),
+          ),
+          lt(
+            consultations.lastRequestedAt,
+            new Date(input.requestedAt.getTime() + 1),
+          ),
+          sql<boolean>`not exists (
+            select 1
+            from ${kakaoHomepageEntries}
+            where ${kakaoHomepageEntries.consultationId} = ${consultations.id}
+              and ${kakaoHomepageEntries.status} = 'invalid'
+          )`,
+          sql<boolean>`not exists (
+            select 1
+            from ${consultationGroupMembers} candidate_member
+            inner join ${consultationGroups} candidate_group
+              on candidate_group.id = candidate_member.group_id
+             and candidate_group.status = 'active'
+            inner join ${consultationGroupMembers} grouped_member
+              on grouped_member.group_id = candidate_member.group_id
+            inner join ${kakaoHomepageEntries} grouped_kakao
+              on grouped_kakao.consultation_id = grouped_member.consultation_id
+             and grouped_kakao.status = 'invalid'
+            where candidate_member.consultation_id = ${consultations.id}
+          )`,
+        ),
+      )
+      .orderBy(desc(consultations.lastRequestedAt))
+      .limit(1)
+      .for("update");
+    if (!candidate) return null;
+
+    const candidateGroup = await activeGroup(tx, candidate.id);
+    const groupId = candidateGroup?.groupId ?? createEventId();
+    const canonicalConsultationId =
+      candidateGroup?.canonicalConsultationId ?? candidate.id;
+    if (!candidateGroup) {
+      await tx.insert(consultationGroups).values({
+        id: groupId,
+        canonicalConsultationId,
+        phoneFingerprint: input.phoneFingerprint,
+        status: "active",
+        createdReason: "automatic_phone_7d",
+        createdByUserId: null,
+        firstRequestedAt: candidate.firstRequestedAt,
+        lastRequestedAt: input.requestedAt,
+        createdAt: input.requestedAt,
+        updatedAt: input.requestedAt,
+      });
+      await tx.insert(consultationGroupMembers).values({
+        consultationId: candidate.id,
+        groupId,
+        linkMethod: "automatic_phone_7d",
+        linkedByUserId: null,
+        linkedAt: input.requestedAt,
+        createdAt: input.requestedAt,
+      });
+      await tx.insert(consultationGroupEvents).values({
+        id: createEventId(),
+        groupId,
+        consultationId: candidate.id,
+        eventType: "created",
+        actorUserId: null,
+        metadata: { reason: "same_phone_within_7_days" },
+        occurredAt: input.requestedAt,
+        createdAt: input.requestedAt,
+      });
+    }
+    await tx.insert(consultationGroupMembers).values({
+      consultationId: input.consultationId,
+      groupId,
+      linkMethod: "automatic_phone_7d",
+      linkedByUserId: null,
+      linkedAt: input.requestedAt,
+      createdAt: input.requestedAt,
+    });
+    await tx.insert(consultationGroupEvents).values({
+      id: createEventId(),
+      groupId,
+      consultationId: input.consultationId,
+      eventType: "linked",
+      actorUserId: null,
+      metadata: {
+        reason: "same_phone_within_7_days",
+        canonicalConsultationId,
+      },
+      occurredAt: input.requestedAt,
+      createdAt: input.requestedAt,
+    });
+    await tx
+      .update(consultationGroups)
+      .set({
+        lastRequestedAt: input.requestedAt,
+        updatedAt: input.requestedAt,
+      })
+      .where(eq(consultationGroups.id, groupId));
+    await tx
+      .update(consultations)
+      .set({
+        lastRequestedAt: input.requestedAt,
+        updatedAt: input.requestedAt,
+      })
+      .where(eq(consultations.id, canonicalConsultationId));
+    const [canonical] = await tx
+      .select({ state: consultations.state })
+      .from(consultations)
+      .where(eq(consultations.id, canonicalConsultationId))
+      .limit(1);
+    return {
+      groupId,
+      canonicalConsultationId,
+      canonicalState: canonical?.state ?? candidate.state,
+    };
+  }
 
   async function existingLegalFriendsCustomerConsultationIds(
     candidates: readonly ConsultationPhoneDirectoryCandidate[],
@@ -643,28 +863,86 @@ export function createConsultationService(options: {
         )
         .orderBy(desc(consultationRequests.submittedAt));
 
+      const candidateGroupRows = candidateRows.length > 0
+        ? await tx
+            .select({
+              consultationId: consultationGroupMembers.consultationId,
+              canonicalConsultationId:
+                consultationGroups.canonicalConsultationId,
+            })
+            .from(consultationGroupMembers)
+            .innerJoin(
+              consultationGroups,
+              eq(consultationGroups.id, consultationGroupMembers.groupId),
+            )
+            .where(
+              and(
+                inArray(
+                  consultationGroupMembers.consultationId,
+                  candidateRows.map((row) => row.consultationId),
+                ),
+                eq(consultationGroups.status, "active"),
+              ),
+            )
+        : [];
+      const canonicalByCandidate = new Map(
+        candidateGroupRows.map((row) => [
+          row.consultationId,
+          row.canonicalConsultationId,
+        ]),
+      );
+      const groupedCanonicalIds = [
+        ...new Set(
+          candidateGroupRows.map((row) => row.canonicalConsultationId),
+        ),
+      ];
+      const groupedCanonicalRows = groupedCanonicalIds.length > 0
+        ? await tx
+            .select({
+              consultationId: consultations.id,
+              state: consultations.state,
+              preferredNameCiphertext:
+                consultations.preferredNameCiphertext,
+              preferredNameNonce: consultations.preferredNameNonce,
+              preferredNameKeyVersion:
+                consultations.preferredNameKeyVersion,
+            })
+            .from(consultations)
+            .where(inArray(consultations.id, groupedCanonicalIds))
+        : [];
+      const groupedCanonicalById = new Map(
+        groupedCanonicalRows.map((row) => [row.consultationId, row]),
+      );
+
       const seenConsultations = new Set<string>();
       const candidates: ExistingConsultationCandidate[] = [];
       for (const row of candidateRows) {
-        if (seenConsultations.has(row.consultationId)) continue;
-        seenConsultations.add(row.consultationId);
+        const canonicalConsultationId =
+          canonicalByCandidate.get(row.consultationId) ?? row.consultationId;
+        if (seenConsultations.has(canonicalConsultationId)) continue;
+        seenConsultations.add(canonicalConsultationId);
+        const canonical = groupedCanonicalById.get(canonicalConsultationId);
+        const identityRow = canonical ?? row;
+        const nameCiphertext = identityRow.preferredNameCiphertext;
+        const nameNonce = identityRow.preferredNameNonce;
+        const nameKeyVersion = identityRow.preferredNameKeyVersion;
         const candidateName =
-          row.preferredNameCiphertext &&
-          row.preferredNameNonce &&
-          row.preferredNameKeyVersion
+          nameCiphertext &&
+          nameNonce &&
+          nameKeyVersion
             ? protection.decrypt(
                 {
-                  ciphertext: row.preferredNameCiphertext,
-                  nonce: row.preferredNameNonce,
-                  keyVersion: row.preferredNameKeyVersion,
+                  ciphertext: nameCiphertext,
+                  nonce: nameNonce,
+                  keyVersion: nameKeyVersion,
                 },
-                `consultations.preferred_name:${row.consultationId}`,
+                `consultations.preferred_name:${canonicalConsultationId}`,
               )
             : null;
         candidates.push({
-          consultationId: row.consultationId,
+          consultationId: canonicalConsultationId,
           latestRequestId: row.requestId,
-          state: row.state,
+          state: canonical?.state ?? row.state,
           phoneFingerprint: phoneFingerprint.toString("hex"),
           latestPayloadFingerprint: row.payloadFingerprint.toString("hex"),
           latestJourneySessionId: row.journeySessionId,
@@ -697,7 +975,43 @@ export function createConsultationService(options: {
         throw new Error("트랜잭션 내 멱등성 판정 경로가 올바르지 않습니다.");
       }
 
-      const consultationId = decision.createConsultation
+      const incomingNormalizedName = submission.name
+        ? normalizeConsultationName(submission.name)
+        : null;
+      const repeatGroupHasSameName =
+        decision.action === "attach_repeat_request" &&
+        candidateRows.some((row) => {
+          if (
+            (canonicalByCandidate.get(row.consultationId) ??
+              row.consultationId) !== decision.consultationId
+          ) {
+            return false;
+          }
+          const candidateName =
+            row.preferredNameCiphertext &&
+            row.preferredNameNonce &&
+            row.preferredNameKeyVersion
+              ? protection.decrypt(
+                  {
+                    ciphertext: row.preferredNameCiphertext,
+                    nonce: row.preferredNameNonce,
+                    keyVersion: row.preferredNameKeyVersion,
+                  },
+                  `consultations.preferred_name:${row.consultationId}`,
+                )
+              : null;
+          return (
+            (candidateName
+              ? normalizeConsultationName(candidateName)
+              : null) === incomingNormalizedName
+          );
+        });
+      const createGroupedMember =
+        decision.action === "attach_repeat_request" &&
+        !repeatGroupHasSameName;
+      const createConsultation =
+        decision.createConsultation || createGroupedMember;
+      const consultationId = createConsultation
         ? createConsultationId()
         : decision.consultationId;
       const requestId = createConsultationRequestId();
@@ -710,7 +1024,7 @@ export function createConsultationService(options: {
         `consultations.preferred_name:${consultationId}`,
       );
 
-      if (decision.createConsultation) {
+      if (createConsultation) {
         publicReceiptCode = createPublicReceiptCode(submittedAt);
         await tx.insert(consultations).values({
           id: consultationId,
@@ -750,6 +1064,16 @@ export function createConsultationService(options: {
               : {}),
           })
           .where(eq(consultations.id, consultationId));
+        const requestGroup = await activeGroup(tx, consultationId);
+        if (requestGroup) {
+          await tx
+            .update(consultationGroups)
+            .set({
+              lastRequestedAt: submittedAt,
+              updatedAt: submittedAt,
+            })
+            .where(eq(consultationGroups.id, requestGroup.groupId));
+        }
       }
 
       let journeySessionId: string | null = null;
@@ -927,7 +1251,7 @@ export function createConsultationService(options: {
         await tx.insert(consultationAttributions).values(pendingAttribution);
       }
 
-      if (decision.createConsultation) {
+      if (createConsultation) {
         await tx.insert(consultationStatusHistory).values({
           id: createEventId(),
           consultationId,
@@ -938,6 +1262,17 @@ export function createConsultationService(options: {
           actorId: "lawand.gateway",
           changedAt: submittedAt,
         });
+      }
+
+      const groupedRepeat = createGroupedMember
+        ? await automaticallyGroupByPhone(tx, {
+            consultationId,
+            phoneFingerprint,
+            requestedAt: submittedAt,
+          })
+        : null;
+      if (createGroupedMember && !groupedRepeat) {
+        throw new Error("반복 상담을 기존 상담 묶음에 연결하지 못했습니다.");
       }
 
       const occurredAt = submittedAt.toISOString();
@@ -1014,15 +1349,17 @@ export function createConsultationService(options: {
         events.push(event);
       }
       if (decision.action === "attach_repeat_request") {
+        const eventConsultationId =
+          groupedRepeat?.canonicalConsultationId ?? consultationId;
         const event: PlatformEvent = {
           eventId: createEventId(),
           eventType: "consultation.request.updated",
           eventVersion: 1,
           occurredAt,
           producer: "lawand.gateway",
-          correlationId: consultationId,
+          correlationId: eventConsultationId,
           data: {
-            consultationId,
+            consultationId: eventConsultationId,
             requestId,
             intakeRef: `consultation_requests/${requestId}`,
             ...(attributionId
@@ -1128,6 +1465,28 @@ export function createConsultationService(options: {
             updatedAt: receivedAt,
           })
           .where(eq(consultations.id, existing.consultationId));
+        const existingScope = await groupMemberIds(
+          tx,
+          existing.consultationId,
+        );
+        if (existingScope.group) {
+          await tx
+            .update(consultationGroups)
+            .set({
+              lastRequestedAt: receivedAt,
+              updatedAt: receivedAt,
+            })
+            .where(eq(consultationGroups.id, existingScope.group.groupId));
+          await tx
+            .update(consultations)
+            .set({ lastRequestedAt: receivedAt, updatedAt: receivedAt })
+            .where(
+              eq(
+                consultations.id,
+                existingScope.canonicalConsultationId,
+              ),
+            );
+        }
         return {
           publicReceiptCode: existing.publicReceiptCode,
           acceptedAt: existing.acceptedAt.toISOString(),
@@ -1258,11 +1617,19 @@ export function createConsultationService(options: {
       provider: "homepage_kakao_entry",
       idempotencyKey: input.idempotencyKey,
     });
+    const entryPhoneFingerprint = input.phone
+      ? protection.fingerprint(input.phone)
+      : null;
 
     return db.transaction(async (tx) => {
       await tx.execute(
         sql`select pg_advisory_xact_lock(cast(${protection.advisoryLockKey(idempotencyFingerprint)} as bigint))`,
       );
+      if (entryPhoneFingerprint) {
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(cast(${protection.advisoryLockKey(entryPhoneFingerprint)} as bigint))`,
+        );
+      }
 
       const [existing] = await tx
         .select({
@@ -1305,6 +1672,28 @@ export function createConsultationService(options: {
             updatedAt: receivedAt,
           })
           .where(eq(consultations.id, existing.consultationId));
+        const existingScope = await groupMemberIds(
+          tx,
+          existing.consultationId,
+        );
+        if (existingScope.group) {
+          await tx
+            .update(consultationGroups)
+            .set({
+              lastRequestedAt: receivedAt,
+              updatedAt: receivedAt,
+            })
+            .where(eq(consultationGroups.id, existingScope.group.groupId));
+          await tx
+            .update(consultations)
+            .set({ lastRequestedAt: receivedAt, updatedAt: receivedAt })
+            .where(
+              eq(
+                consultations.id,
+                existingScope.canonicalConsultationId,
+              ),
+            );
+        }
         return {
           publicReceiptCode: existing.publicReceiptCode,
           acceptedAt: existing.acceptedAt.toISOString(),
@@ -1337,9 +1726,7 @@ export function createConsultationService(options: {
         submittedDisplayName,
         `consultation_requests.name:${requestId}`,
       );
-      const phoneFingerprint = input.phone
-        ? protection.fingerprint(input.phone)
-        : null;
+      const phoneFingerprint = entryPhoneFingerprint;
       const requestPhoneEncrypted = input.phone
         ? protection.encrypt(
             input.phone,
@@ -1555,32 +1942,77 @@ export function createConsultationService(options: {
         createdAt: receivedAt,
       });
 
-      const requestedEvent: PlatformEvent = {
-        eventId: createEventId(),
-        eventType: "consultation.requested",
-        eventVersion: 1,
-        occurredAt: receivedAt.toISOString(),
-        producer: "lawand.gateway",
-        correlationId: consultationId,
-        data: {
-          consultationId,
-          requestId,
-          intakeRef: `consultation_requests/${requestId}`,
-          ...(attributionId
-            ? {
-                attributionRef:
-                  `consultation_attributions/${attributionId}`,
-              }
-            : {}),
-          mode: "quick",
-          privacyNoticeVersion:
-            CURRENT_KAKAO_HOMEPAGE_ENTRY_NOTICE_VERSION,
-          privacyBasis: "customer_initiated_channel_entry",
-          dedupeOutcome: "new",
-        },
-      };
-      assertPlatformEvent(requestedEvent);
-      await tx.insert(outboxEvents).values(eventRow(requestedEvent));
+      const grouped = await automaticallyGroupByPhone(tx, {
+        consultationId,
+        phoneFingerprint,
+        requestedAt: receivedAt,
+      });
+      const event: PlatformEvent = grouped
+        ? {
+            eventId: createEventId(),
+            eventType: "consultation.request.updated",
+            eventVersion: 1,
+            occurredAt: receivedAt.toISOString(),
+            producer: "lawand.gateway",
+            correlationId: grouped.canonicalConsultationId,
+            data: {
+              consultationId: grouped.canonicalConsultationId,
+              requestId,
+              intakeRef: `consultation_requests/${requestId}`,
+              ...(attributionId
+                ? {
+                    attributionRef:
+                      `consultation_attributions/${attributionId}`,
+                  }
+                : {}),
+              updateReason: "repeat_request",
+              repeatStage:
+                grouped.canonicalState === "requested"
+                  ? "before_assignment"
+                  : "after_assignment",
+              dedupeOutcome:
+                grouped.canonicalState === "requested"
+                  ? "repeat_unassigned"
+                  : "repeat_assigned",
+            },
+          }
+        : {
+            eventId: createEventId(),
+            eventType: "consultation.requested",
+            eventVersion: 1,
+            occurredAt: receivedAt.toISOString(),
+            producer: "lawand.gateway",
+            correlationId: consultationId,
+            data: {
+              consultationId,
+              requestId,
+              intakeRef: `consultation_requests/${requestId}`,
+              ...(attributionId
+                ? {
+                    attributionRef:
+                      `consultation_attributions/${attributionId}`,
+                  }
+                : {}),
+              mode: "quick",
+              privacyNoticeVersion:
+                CURRENT_KAKAO_HOMEPAGE_ENTRY_NOTICE_VERSION,
+              privacyBasis: "customer_initiated_channel_entry",
+              dedupeOutcome: "new",
+            },
+          };
+      if (grouped) {
+        await tx
+          .update(consultationRequests)
+          .set({
+            dedupeOutcome:
+              grouped.canonicalState === "requested"
+                ? "repeat_unassigned"
+                : "repeat_assigned",
+          })
+          .where(eq(consultationRequests.id, requestId));
+      }
+      assertPlatformEvent(event);
+      await tx.insert(outboxEvents).values(eventRow(event));
 
       return {
         publicReceiptCode,
@@ -1757,6 +2189,13 @@ export function createConsultationService(options: {
         throw new KakaoHomepageEntryError(
           "consultation_not_found",
           "상담을 찾을 수 없습니다.",
+        );
+      }
+      const groupScope = await groupMemberIds(tx, consultationId);
+      if (groupScope.group && groupScope.memberIds.length > 1) {
+        throw new KakaoHomepageEntryError(
+          "consultation_not_actionable",
+          "묶음에 포함된 접수는 먼저 별도 상담으로 분리한 뒤 미진입·무효 처리해 주세요.",
         );
       }
 
@@ -2098,6 +2537,22 @@ export function createConsultationService(options: {
           "상담을 찾을 수 없습니다.",
         );
       }
+      const assignmentScope = await groupMemberIds(tx, consultationId);
+      if (assignmentScope.canonicalConsultationId !== consultationId) {
+        throw new ConsultationAssignmentError(
+          "consultation_group_noncanonical",
+          "묶음의 대표 상담에서 담당자를 지정해 주세요.",
+        );
+      }
+      if (assignmentScope.group) {
+        const groupLock = protection.fingerprint({
+          kind: "consultation_group_assignment",
+          groupId: assignmentScope.group.groupId,
+        });
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(cast(${protection.advisoryLockKey(groupLock)} as bigint))`,
+        );
+      }
 
       const [existingAssignment] = await tx
         .select({
@@ -2112,7 +2567,10 @@ export function createConsultationService(options: {
           eq(staffProfiles.userId, consultationAssignments.assigneeUserId),
         )
         .where(
-          eq(consultationAssignments.consultationId, consultationId),
+          inArray(
+            consultationAssignments.consultationId,
+            assignmentScope.memberIds,
+          ),
         )
         .limit(1);
 
@@ -2149,9 +2607,10 @@ export function createConsultationService(options: {
         );
       }
 
-      const [homepageKakaoEntry] = await tx
+      const homepageKakaoEntries = await tx
         .select({
           id: kakaoHomepageEntries.id,
+          consultationId: kakaoHomepageEntries.consultationId,
           firstRequestId: kakaoHomepageEntries.firstRequestId,
           nameProvided: consultationRequests.hasProvidedName,
           status: kakaoHomepageEntries.status,
@@ -2161,8 +2620,13 @@ export function createConsultationService(options: {
           consultationRequests,
           eq(kakaoHomepageEntries.firstRequestId, consultationRequests.id),
         )
-        .where(eq(kakaoHomepageEntries.consultationId, consultationId))
-        .limit(1);
+        .where(
+          inArray(
+            kakaoHomepageEntries.consultationId,
+            assignmentScope.memberIds,
+          ),
+        )
+        .orderBy(desc(kakaoHomepageEntries.lastClickedAt));
 
       const [latestRequest] = await tx
         .select({
@@ -2174,8 +2638,16 @@ export function createConsultationService(options: {
           phoneKeyVersion: consultationRequests.phoneKeyVersion,
         })
         .from(consultationRequests)
-        .where(eq(consultationRequests.consultationId, consultationId))
-        .orderBy(desc(consultationRequests.submittedAt))
+        .where(
+          inArray(
+            consultationRequests.consultationId,
+            assignmentScope.memberIds,
+          ),
+        )
+        .orderBy(
+          sql`${consultationRequests.phoneCiphertext} IS NOT NULL DESC`,
+          desc(consultationRequests.submittedAt),
+        )
         .limit(1);
       if (!latestRequest) {
         throw new ConsultationAssignmentError(
@@ -2313,21 +2785,23 @@ export function createConsultationService(options: {
           );
         }
       }
-      const kakaoAssignmentPolicy = homepageKakaoEntry
-        ? kakaoHomepageEntryAssignmentPolicy(homepageKakaoEntry)
-        : "assign";
-      if (kakaoAssignmentPolicy === "blocked") {
+      const kakaoAssignmentPolicies = homepageKakaoEntries.map((entry) => ({
+        entry,
+        policy: kakaoHomepageEntryAssignmentPolicy(entry),
+      }));
+      if (
+        kakaoAssignmentPolicies.some(({ policy }) => policy === "blocked")
+      ) {
         throw new ConsultationAssignmentError(
           "consultation_not_assignable",
           "카카오 채팅방의 고객명을 확인한 뒤 담당자를 지정해 주세요.",
         );
       }
 
-      const kakaoEntryToConfirm =
-        kakaoAssignmentPolicy === "confirm_and_assign" && homepageKakaoEntry
-          ? homepageKakaoEntry
-          : null;
-      if (kakaoEntryToConfirm) {
+      const kakaoEntriesToConfirm = kakaoAssignmentPolicies
+        .filter(({ policy }) => policy === "confirm_and_assign")
+        .map(({ entry }) => entry);
+      if (kakaoEntriesToConfirm.length > 0) {
         await tx
           .update(kakaoHomepageEntries)
           .set({
@@ -2336,20 +2810,28 @@ export function createConsultationService(options: {
             confirmedByUserId: actor.id,
             updatedAt: now,
           })
-          .where(eq(kakaoHomepageEntries.id, kakaoEntryToConfirm.id));
-        await tx.insert(staffAuditLogs).values({
-          id: createEventId(),
-          actorUserId: actor.id,
-          action: "consultation.kakao_chat_confirmed_from_assignment",
-          targetType: "consultation",
-          targetId: consultationId,
-          metadata: {
-            entryId: kakaoEntryToConfirm.id,
-            requestId: kakaoEntryToConfirm.firstRequestId,
-          },
-          occurredAt: now,
-          createdAt: now,
-        });
+          .where(
+            inArray(
+              kakaoHomepageEntries.id,
+              kakaoEntriesToConfirm.map((entry) => entry.id),
+            ),
+          );
+        await tx.insert(staffAuditLogs).values(
+          kakaoEntriesToConfirm.map((entry) => ({
+            id: createEventId(),
+            actorUserId: actor.id,
+            action: "consultation.kakao_chat_confirmed_from_assignment",
+            targetType: "consultation",
+            targetId: consultationId,
+            metadata: {
+              entryId: entry.id,
+              requestId: entry.firstRequestId,
+              entryConsultationId: entry.consultationId,
+            },
+            occurredAt: now,
+            createdAt: now,
+          })),
+        );
       }
 
       const assignmentId = createEventId();
@@ -2403,7 +2885,7 @@ export function createConsultationService(options: {
       };
       const occurredAt = now.toISOString();
       const events: PlatformEvent[] = [];
-      if (kakaoEntryToConfirm) {
+      for (const kakaoEntryToConfirm of kakaoEntriesToConfirm) {
         events.push({
           eventId: createEventId(),
           eventType: "consultation.kakao_chat.confirmed",
@@ -3011,6 +3493,557 @@ export function createConsultationService(options: {
     });
   }
 
+  async function linkConsultationGroup(
+    consultationId: string,
+    targetReceiptCode: string,
+    actor: StaffPrincipal,
+  ) {
+    const now = new Date();
+    return db.transaction(async (tx) => {
+      let [current, target] = await Promise.all([
+        tx
+          .select()
+          .from(consultations)
+          .where(eq(consultations.id, consultationId))
+          .limit(1),
+        tx
+          .select()
+          .from(consultations)
+          .where(eq(consultations.publicReceiptCode, targetReceiptCode))
+          .limit(1),
+      ]).then(([currentRows, targetRows]) => [
+        currentRows[0],
+        targetRows[0],
+      ]);
+      if (!current) {
+        throw new ConsultationGroupError(
+          "consultation_not_found",
+          "상담을 찾을 수 없습니다.",
+        );
+      }
+      if (!target) {
+        throw new ConsultationGroupError(
+          "target_not_found",
+          "연결할 접수번호의 상담을 찾을 수 없습니다.",
+        );
+      }
+      if (current.id === target.id) {
+        throw new ConsultationGroupError(
+          "same_consultation",
+          "같은 상담끼리는 연결할 수 없습니다.",
+        );
+      }
+      const lockIds = [current.id, target.id].sort();
+      for (const lockId of lockIds) {
+        const lockFingerprint = protection.fingerprint({
+          kind: "consultation_group_manual_link",
+          consultationId: lockId,
+        });
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(cast(${protection.advisoryLockKey(lockFingerprint)} as bigint))`,
+        );
+      }
+      const lockedConsultations = await tx
+        .select()
+        .from(consultations)
+        .where(inArray(consultations.id, lockIds))
+        .orderBy(asc(consultations.id))
+        .for("update");
+      current = lockedConsultations.find((row) => row.id === current?.id);
+      target = lockedConsultations.find((row) => row.id === target?.id);
+      if (!current || !target) {
+        throw new ConsultationGroupError(
+          "consultation_not_found",
+          "상담을 다시 확인해 주세요.",
+        );
+      }
+
+      const groupableIds = [current.id, target.id];
+      const invalidEntries = await tx
+        .select({ consultationId: kakaoHomepageEntries.consultationId })
+        .from(kakaoHomepageEntries)
+        .where(
+          and(
+            inArray(kakaoHomepageEntries.consultationId, groupableIds),
+            eq(kakaoHomepageEntries.status, "invalid"),
+          ),
+        );
+      if (
+        current.softDeletedAt ||
+        target.softDeletedAt ||
+        invalidEntries.length > 0
+      ) {
+        throw new ConsultationGroupError(
+          "consultation_not_groupable",
+          "소프트삭제 또는 미진입·무효 상담은 묶을 수 없습니다.",
+        );
+      }
+      if (
+        current.phoneFingerprint &&
+        target.phoneFingerprint &&
+        !current.phoneFingerprint.equals(target.phoneFingerprint)
+      ) {
+        throw new ConsultationGroupError(
+          "phone_mismatch",
+          "서로 다른 전화번호의 상담은 자동으로 연결할 수 없습니다.",
+        );
+      }
+
+      const [currentScope, targetScope] = await Promise.all([
+        groupMemberIds(tx, current.id),
+        groupMemberIds(tx, target.id),
+      ]);
+      if (
+        currentScope.group &&
+        targetScope.group &&
+        currentScope.group.groupId === targetScope.group.groupId
+      ) {
+        return {
+          groupId: currentScope.group.groupId,
+          canonicalConsultationId:
+            currentScope.group.canonicalConsultationId,
+          memberCount: currentScope.memberIds.length,
+          replayed: true,
+        };
+      }
+      const memberIds = [
+        ...new Set([...currentScope.memberIds, ...targetScope.memberIds]),
+      ];
+      const [blockedMembers, invalidMemberEntries] = await Promise.all([
+        tx
+          .select({ id: consultations.id })
+          .from(consultations)
+          .where(
+            and(
+              inArray(consultations.id, memberIds),
+              isNotNull(consultations.softDeletedAt),
+            ),
+          ),
+        tx
+          .select({ consultationId: kakaoHomepageEntries.consultationId })
+          .from(kakaoHomepageEntries)
+          .where(
+            and(
+              inArray(kakaoHomepageEntries.consultationId, memberIds),
+              eq(kakaoHomepageEntries.status, "invalid"),
+            ),
+          ),
+      ]);
+      if (blockedMembers.length > 0 || invalidMemberEntries.length > 0) {
+        throw new ConsultationGroupError(
+          "consultation_not_groupable",
+          "묶음 안에 소프트삭제 또는 미진입·무효 상담이 있어 연결할 수 없습니다.",
+        );
+      }
+      const assignments = await tx
+        .select({
+          consultationId: consultationAssignments.consultationId,
+          assigneeUserId: consultationAssignments.assigneeUserId,
+        })
+        .from(consultationAssignments)
+        .where(inArray(consultationAssignments.consultationId, memberIds));
+      if (assignments.length > 1) {
+        throw new ConsultationGroupError(
+          "assignment_conflict",
+          "이미 각각 담당자가 지정된 상담끼리는 묶을 수 없습니다.",
+        );
+      }
+      const caseLinks = await tx
+        .select({
+          consultationId: legalFriendsCaseLinks.consultationId,
+          caseIdx: legalFriendsCaseLinks.caseIdx,
+        })
+        .from(legalFriendsCaseLinks)
+        .where(inArray(legalFriendsCaseLinks.consultationId, memberIds));
+      if (caseLinks.length > 1) {
+        throw new ConsultationGroupError(
+          "legalfriends_case_conflict",
+          "이미 각각 리걸프렌즈 사건이 등록된 상담끼리는 묶을 수 없습니다.",
+        );
+      }
+
+      const assignmentOwner = assignments[0]?.consultationId ?? null;
+      const caseOwner = caseLinks[0]?.consultationId ?? null;
+      const preferredCanonicalId = caseOwner ?? assignmentOwner ?? target.id;
+      const destinationScope = currentScope.memberIds.includes(
+        preferredCanonicalId,
+      )
+        ? currentScope
+        : targetScope;
+      const sourceScope = destinationScope === currentScope
+        ? targetScope
+        : currentScope;
+      const canonicalConsultationId = destinationScope.group
+        ? destinationScope.group.canonicalConsultationId
+        : preferredCanonicalId;
+      const groupId = destinationScope.group?.groupId ?? createEventId();
+      const memberRows = await tx
+        .select({
+          id: consultations.id,
+          firstRequestedAt: consultations.firstRequestedAt,
+          lastRequestedAt: consultations.lastRequestedAt,
+          phoneFingerprint: consultations.phoneFingerprint,
+        })
+        .from(consultations)
+        .where(inArray(consultations.id, memberIds));
+      if (
+        new Set(
+          memberRows
+            .map((row) => row.phoneFingerprint?.toString("hex") ?? null)
+            .filter((value): value is string => Boolean(value)),
+        ).size > 1
+      ) {
+        throw new ConsultationGroupError(
+          "phone_mismatch",
+          "묶음 안에 서로 다른 전화번호가 있어 연결할 수 없습니다.",
+        );
+      }
+      const firstRequestedAt = new Date(
+        Math.min(...memberRows.map((row) => row.firstRequestedAt.getTime())),
+      );
+      const lastRequestedAt = new Date(
+        Math.max(...memberRows.map((row) => row.lastRequestedAt.getTime())),
+      );
+      const phoneFingerprint =
+        memberRows.find((row) => row.phoneFingerprint)?.phoneFingerprint ??
+        null;
+
+      if (!destinationScope.group) {
+        await tx.insert(consultationGroups).values({
+          id: groupId,
+          canonicalConsultationId,
+          phoneFingerprint,
+          status: "active",
+          createdReason: "manual_link",
+          createdByUserId: actor.id,
+          firstRequestedAt,
+          lastRequestedAt,
+          createdAt: now,
+          updatedAt: now,
+        });
+        await tx.insert(consultationGroupEvents).values({
+          id: createEventId(),
+          groupId,
+          consultationId: canonicalConsultationId,
+          eventType: "created",
+          actorUserId: actor.id,
+          metadata: { reason: "manual_link" },
+          occurredAt: now,
+          createdAt: now,
+        });
+      }
+      for (const memberId of destinationScope.memberIds) {
+        if (destinationScope.group) continue;
+        await tx.insert(consultationGroupMembers).values({
+          consultationId: memberId,
+          groupId,
+          linkMethod: "manual_link",
+          linkedByUserId: actor.id,
+          linkedAt: now,
+          createdAt: now,
+        });
+      }
+      if (sourceScope.group) {
+        await tx
+          .update(consultationGroupMembers)
+          .set({
+            groupId,
+            linkMethod: "manual_link",
+            linkedByUserId: actor.id,
+            linkedAt: now,
+          })
+          .where(eq(consultationGroupMembers.groupId, sourceScope.group.groupId));
+        await tx
+          .update(consultationGroups)
+          .set({
+            status: "merged",
+            mergedIntoGroupId: groupId,
+            updatedAt: now,
+          })
+          .where(eq(consultationGroups.id, sourceScope.group.groupId));
+        await tx.insert(consultationGroupEvents).values({
+          id: createEventId(),
+          groupId: sourceScope.group.groupId,
+          consultationId: sourceScope.group.canonicalConsultationId,
+          eventType: "merged",
+          actorUserId: actor.id,
+          metadata: { mergedIntoGroupId: groupId },
+          occurredAt: now,
+          createdAt: now,
+        });
+      } else {
+        for (const memberId of sourceScope.memberIds) {
+          await tx.insert(consultationGroupMembers).values({
+            consultationId: memberId,
+            groupId,
+            linkMethod: "manual_link",
+            linkedByUserId: actor.id,
+            linkedAt: now,
+            createdAt: now,
+          });
+        }
+      }
+      await tx
+        .update(consultationGroups)
+        .set({
+          canonicalConsultationId,
+          phoneFingerprint,
+          firstRequestedAt,
+          lastRequestedAt,
+          updatedAt: now,
+        })
+        .where(eq(consultationGroups.id, groupId));
+      await tx
+        .update(consultations)
+        .set({ lastRequestedAt, updatedAt: now })
+        .where(eq(consultations.id, canonicalConsultationId));
+      await tx.insert(consultationGroupEvents).values(
+        sourceScope.memberIds.map((memberId) => ({
+          id: createEventId(),
+          groupId,
+          consultationId: memberId,
+          eventType: "linked" as const,
+          actorUserId: actor.id,
+          metadata: {
+            targetReceiptCode,
+            canonicalConsultationId,
+          },
+          occurredAt: now,
+          createdAt: now,
+        })),
+      );
+      await tx.insert(staffAuditLogs).values({
+        id: createEventId(),
+        actorUserId: actor.id,
+        action: "consultation.group_linked",
+        targetType: "consultation_group",
+        targetId: groupId,
+        metadata: {
+          canonicalConsultationId,
+          memberConsultationIds: memberIds,
+        },
+        occurredAt: now,
+        createdAt: now,
+      });
+      const groupedEvent: PlatformEvent = {
+        eventId: createEventId(),
+        eventType: "consultation.group.updated",
+        eventVersion: 1,
+        occurredAt: now.toISOString(),
+        producer: "lawand.gateway",
+        correlationId: canonicalConsultationId,
+        data: {
+          consultationId: canonicalConsultationId,
+          groupId,
+          action: "linked",
+          actorUserId: actor.id,
+        },
+      };
+      assertPlatformEvent(groupedEvent);
+      await tx.insert(outboxEvents).values(eventRow(groupedEvent));
+      return {
+        groupId,
+        canonicalConsultationId,
+        memberCount: memberIds.length,
+        replayed: false,
+      };
+    });
+  }
+
+  async function splitConsultationGroup(
+    consultationId: string,
+    actor: StaffPrincipal,
+  ) {
+    const now = new Date();
+    return db.transaction(async (tx) => {
+      const scope = await groupMemberIds(tx, consultationId);
+      if (!scope.group) {
+        throw new ConsultationGroupError(
+          "group_not_found",
+          "묶음에 속한 상담이 아닙니다.",
+        );
+      }
+      if (scope.memberIds.length < 2) {
+        throw new ConsultationGroupError(
+          "last_group_member",
+          "이미 별도 상담으로 분리되어 있습니다.",
+        );
+      }
+      const groupLock = protection.fingerprint({
+        kind: "consultation_group_split",
+        groupId: scope.group.groupId,
+      });
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(cast(${protection.advisoryLockKey(groupLock)} as bigint))`,
+      );
+      const remainingIds = scope.memberIds.filter(
+        (memberId) => memberId !== consultationId,
+      );
+      const [assignmentRows, caseRows, consultationRows, requestRows] =
+        await Promise.all([
+          tx
+            .select({ consultationId: consultationAssignments.consultationId })
+            .from(consultationAssignments)
+            .where(inArray(consultationAssignments.consultationId, remainingIds)),
+          tx
+            .select({ consultationId: legalFriendsCaseLinks.consultationId })
+            .from(legalFriendsCaseLinks)
+            .where(inArray(legalFriendsCaseLinks.consultationId, remainingIds)),
+          tx
+            .select({
+              id: consultations.id,
+              firstRequestedAt: consultations.firstRequestedAt,
+            })
+            .from(consultations)
+            .where(inArray(consultations.id, remainingIds))
+            .orderBy(asc(consultations.firstRequestedAt)),
+          tx
+            .select({
+              consultationId: consultationRequests.consultationId,
+              submittedAt: consultationRequests.submittedAt,
+            })
+            .from(consultationRequests)
+            .where(inArray(consultationRequests.consultationId, scope.memberIds))
+            .orderBy(asc(consultationRequests.submittedAt)),
+        ]);
+      const newCanonicalConsultationId =
+        caseRows[0]?.consultationId ??
+        assignmentRows[0]?.consultationId ??
+        consultationRows[0]!.id;
+      const remainingRequests = requestRows.filter((request) =>
+        remainingIds.includes(request.consultationId),
+      );
+      const splitRequests = requestRows.filter(
+        (request) => request.consultationId === consultationId,
+      );
+      const remainingFirst = remainingRequests[0]!.submittedAt;
+      const remainingLast = remainingRequests.at(-1)!.submittedAt;
+      const splitFirst = splitRequests[0]!.submittedAt;
+      const splitLast = splitRequests.at(-1)!.submittedAt;
+      const [splitConsultation] = await tx
+        .select({ phoneFingerprint: consultations.phoneFingerprint })
+        .from(consultations)
+        .where(eq(consultations.id, consultationId))
+        .limit(1);
+      const newGroupId = createEventId();
+      await tx
+        .update(consultationGroups)
+        .set({
+          canonicalConsultationId: newCanonicalConsultationId,
+          firstRequestedAt: remainingFirst,
+          lastRequestedAt: remainingLast,
+          updatedAt: now,
+        })
+        .where(eq(consultationGroups.id, scope.group.groupId));
+      await tx.insert(consultationGroups).values({
+        id: newGroupId,
+        canonicalConsultationId: consultationId,
+        phoneFingerprint: splitConsultation?.phoneFingerprint ?? null,
+        status: "active",
+        createdReason: "manual_split",
+        createdByUserId: actor.id,
+        firstRequestedAt: splitFirst,
+        lastRequestedAt: splitLast,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await tx
+        .update(consultationGroupMembers)
+        .set({
+          groupId: newGroupId,
+          linkMethod: "manual_split",
+          linkedByUserId: actor.id,
+          linkedAt: now,
+        })
+        .where(eq(consultationGroupMembers.consultationId, consultationId));
+      await tx
+        .update(consultations)
+        .set({ lastRequestedAt: remainingLast, updatedAt: now })
+        .where(eq(consultations.id, newCanonicalConsultationId));
+      await tx
+        .update(consultations)
+        .set({ lastRequestedAt: splitLast, updatedAt: now })
+        .where(eq(consultations.id, consultationId));
+      const groupEvents: (typeof consultationGroupEvents.$inferInsert)[] = [
+        {
+          id: createEventId(),
+          groupId: scope.group.groupId,
+          consultationId,
+          eventType: "unlinked" as const,
+          actorUserId: actor.id,
+          metadata: { newGroupId },
+          occurredAt: now,
+          createdAt: now,
+        },
+        {
+          id: createEventId(),
+          groupId: newGroupId,
+          consultationId,
+          eventType: "created" as const,
+          actorUserId: actor.id,
+          metadata: { splitFromGroupId: scope.group.groupId },
+          occurredAt: now,
+          createdAt: now,
+        },
+      ];
+      if (
+        newCanonicalConsultationId !==
+        scope.group.canonicalConsultationId
+      ) {
+        groupEvents.push({
+          id: createEventId(),
+          groupId: scope.group.groupId,
+          consultationId: newCanonicalConsultationId,
+          eventType: "canonical_changed",
+          actorUserId: actor.id,
+          metadata: {
+            previousCanonicalConsultationId:
+              scope.group.canonicalConsultationId,
+          },
+          occurredAt: now,
+          createdAt: now,
+        });
+      }
+      await tx.insert(consultationGroupEvents).values(groupEvents);
+      await tx.insert(staffAuditLogs).values({
+        id: createEventId(),
+        actorUserId: actor.id,
+        action: "consultation.group_split",
+        targetType: "consultation_group",
+        targetId: scope.group.groupId,
+        metadata: {
+          consultationId,
+          newGroupId,
+          newCanonicalConsultationId,
+        },
+        occurredAt: now,
+        createdAt: now,
+      });
+      const splitEvent: PlatformEvent = {
+        eventId: createEventId(),
+        eventType: "consultation.group.updated",
+        eventVersion: 1,
+        occurredAt: now.toISOString(),
+        producer: "lawand.gateway",
+        correlationId: newCanonicalConsultationId,
+        data: {
+          consultationId: newCanonicalConsultationId,
+          groupId: scope.group.groupId,
+          action: "split",
+          actorUserId: actor.id,
+        },
+      };
+      assertPlatformEvent(splitEvent);
+      await tx.insert(outboxEvents).values(eventRow(splitEvent));
+      return {
+        previousGroupId: scope.group.groupId,
+        newGroupId,
+        consultationId,
+        previousGroupCanonicalConsultationId: newCanonicalConsultationId,
+      };
+    });
+  }
+
 
   async function softDeleteStaffConsultation(
     consultationId: string,
@@ -3034,6 +4067,13 @@ export function createConsultationService(options: {
         throw new ConsultationSoftDeleteError(
           "consultation_not_found",
           "상담을 찾을 수 없습니다.",
+        );
+      }
+      const groupScope = await groupMemberIds(tx, consultationId);
+      if (groupScope.group && groupScope.memberIds.length > 1) {
+        throw new ConsultationSoftDeleteError(
+          "consultation_grouped",
+          "묶음에 포함된 상담은 먼저 별도 상담으로 분리한 뒤 삭제해 주세요.",
         );
       }
 
@@ -3148,7 +4188,17 @@ export function createConsultationService(options: {
   }
 
   async function list(query: ConsultationListQuery) {
+    const visibleCondition = sql<boolean>`not exists (
+      select 1
+      from ${consultationGroupMembers} visible_member
+      inner join ${consultationGroups} visible_group
+        on visible_group.id = visible_member.group_id
+      where visible_member.consultation_id = ${consultations.id}
+        and visible_group.status = 'active'
+        and visible_group.canonical_consultation_id <> ${consultations.id}
+    )`;
     const dateCondition = and(
+      visibleCondition,
       query.from
         ? gte(consultations.lastRequestedAt, query.from)
         : undefined,
@@ -3194,6 +4244,17 @@ export function createConsultationService(options: {
         from ${kakaoHomepageEntries}
         where ${kakaoHomepageEntries.consultationId} = ${consultations.id}
           and ${kakaoHomepageEntries.status} = 'pending'
+      )
+      or exists (
+        select 1
+        from ${consultationGroupMembers} attention_member
+        inner join ${consultationGroups} attention_group
+          on attention_group.id = attention_member.group_id
+        inner join ${kakaoHomepageEntries} grouped_kakao
+          on grouped_kakao.consultation_id = attention_member.consultation_id
+        where attention_group.status = 'active'
+          and attention_group.canonical_consultation_id = ${consultations.id}
+          and grouped_kakao.status = 'pending'
       )
       or exists (
         select 1
@@ -3291,7 +4352,39 @@ export function createConsultationService(options: {
       };
     }
 
-    const ids = consultationRows.map((row) => row.id);
+    const canonicalIds = consultationRows.map((row) => row.id);
+    const groupedMemberRows = await db
+      .select({
+        canonicalConsultationId: consultationGroups.canonicalConsultationId,
+        consultationId: consultationGroupMembers.consultationId,
+      })
+      .from(consultationGroups)
+      .innerJoin(
+        consultationGroupMembers,
+        eq(consultationGroupMembers.groupId, consultationGroups.id),
+      )
+      .where(
+        and(
+          eq(consultationGroups.status, "active"),
+          inArray(consultationGroups.canonicalConsultationId, canonicalIds),
+        ),
+      );
+    const canonicalByMember = new Map<string, string>();
+    const groupMemberCounts = new Map<string, number>();
+    for (const row of groupedMemberRows) {
+      canonicalByMember.set(row.consultationId, row.canonicalConsultationId);
+      groupMemberCounts.set(
+        row.canonicalConsultationId,
+        (groupMemberCounts.get(row.canonicalConsultationId) ?? 0) + 1,
+      );
+    }
+    for (const canonicalId of canonicalIds) {
+      canonicalByMember.set(canonicalId, canonicalId);
+      if (!groupMemberCounts.has(canonicalId)) {
+        groupMemberCounts.set(canonicalId, 1);
+      }
+    }
+    const ids = [...new Set([...canonicalIds, ...canonicalByMember.keys()])];
     const requestRows = await db
       .select()
       .from(consultationRequests)
@@ -3301,13 +4394,15 @@ export function createConsultationService(options: {
     const firstByConsultation = new Map<string, (typeof requestRows)[number]>();
     const requestCounts = new Map<string, number>();
     for (const request of requestRows) {
-      firstByConsultation.set(request.consultationId, request);
+      const canonicalId =
+        canonicalByMember.get(request.consultationId) ?? request.consultationId;
+      firstByConsultation.set(canonicalId, request);
       requestCounts.set(
-        request.consultationId,
-        (requestCounts.get(request.consultationId) ?? 0) + 1,
+        canonicalId,
+        (requestCounts.get(canonicalId) ?? 0) + 1,
       );
-      if (!latestByConsultation.has(request.consultationId)) {
-        latestByConsultation.set(request.consultationId, request);
+      if (!latestByConsultation.has(canonicalId)) {
+        latestByConsultation.set(canonicalId, request);
       }
     }
 
@@ -3323,22 +4418,32 @@ export function createConsultationService(options: {
         eq(staffProfiles.userId, consultationAssignments.assigneeUserId),
       )
       .where(inArray(consultationAssignments.consultationId, ids));
-    const assigneeByConsultation = new Map(
-      assignmentRows.map((row) => [row.consultationId, row]),
-    );
+    const assigneeByConsultation = new Map<string, (typeof assignmentRows)[number]>();
+    for (const row of assignmentRows) {
+      assigneeByConsultation.set(
+        canonicalByMember.get(row.consultationId) ?? row.consultationId,
+        row,
+      );
+    }
     const directorySourceRows = await db
       .select({ consultationId: consultationDirectorySources.consultationId })
       .from(consultationDirectorySources)
       .where(inArray(consultationDirectorySources.consultationId, ids));
     const directorySourceIds = new Set(
-      directorySourceRows.map((row) => row.consultationId),
+      directorySourceRows.map(
+        (row) =>
+          canonicalByMember.get(row.consultationId) ?? row.consultationId,
+      ),
     );
     const handlingRows = await db
       .select({ consultationId: consultationLegalFriendsHandlings.consultationId })
       .from(consultationLegalFriendsHandlings)
       .where(inArray(consultationLegalFriendsHandlings.consultationId, ids));
     const handlingIds = new Set(
-      handlingRows.map((row) => row.consultationId),
+      handlingRows.map(
+        (row) =>
+          canonicalByMember.get(row.consultationId) ?? row.consultationId,
+      ),
     );
     const legalFriendsCaseRows = await db
       .select({
@@ -3348,7 +4453,10 @@ export function createConsultationService(options: {
       .from(legalFriendsCaseLinks)
       .where(inArray(legalFriendsCaseLinks.consultationId, ids));
     const legalFriendsCaseByConsultation = new Map(
-      legalFriendsCaseRows.map((row) => [row.consultationId, row]),
+      legalFriendsCaseRows.map((row) => [
+        canonicalByMember.get(row.consultationId) ?? row.consultationId,
+        row,
+      ]),
     );
     const homepageEntryRows = await db
       .select({
@@ -3363,10 +4471,19 @@ export function createConsultationService(options: {
         consultationRequests,
         eq(kakaoHomepageEntries.firstRequestId, consultationRequests.id),
       )
-      .where(inArray(kakaoHomepageEntries.consultationId, ids));
-    const homepageEntryByConsultation = new Map(
-      homepageEntryRows.map((row) => [row.consultationId, row]),
-    );
+      .where(inArray(kakaoHomepageEntries.consultationId, ids))
+      .orderBy(desc(kakaoHomepageEntries.lastClickedAt));
+    const homepageEntryByConsultation = new Map<
+      string,
+      (typeof homepageEntryRows)[number]
+    >();
+    for (const row of homepageEntryRows) {
+      const canonicalId =
+        canonicalByMember.get(row.consultationId) ?? row.consultationId;
+      if (!homepageEntryByConsultation.has(canonicalId)) {
+        homepageEntryByConsultation.set(canonicalId, row);
+      }
+    }
     const naverBookingRows = await db
       .select({
         consultationId: naverBookingEntries.consultationId,
@@ -3376,9 +4493,17 @@ export function createConsultationService(options: {
       })
       .from(naverBookingEntries)
       .where(inArray(naverBookingEntries.consultationId, ids));
-    const naverBookingByConsultation = new Map(
-      naverBookingRows.map((row) => [row.consultationId, row]),
-    );
+    const naverBookingByConsultation = new Map<
+      string,
+      (typeof naverBookingRows)[number]
+    >();
+    for (const row of naverBookingRows) {
+      const canonicalId =
+        canonicalByMember.get(row.consultationId) ?? row.consultationId;
+      if (!naverBookingByConsultation.has(canonicalId)) {
+        naverBookingByConsultation.set(canonicalId, row);
+      }
+    }
     const telephonyRows = await db
       .select({
         consultationId: telephonyCalls.consultationId,
@@ -3417,8 +4542,10 @@ export function createConsultationService(options: {
     >();
     for (const call of telephonyRows) {
       if (!call.consultationId) continue;
-      if (!latestTelephonyByConsultation.has(call.consultationId)) {
-        latestTelephonyByConsultation.set(call.consultationId, {
+      const canonicalId =
+        canonicalByMember.get(call.consultationId) ?? call.consultationId;
+      if (!latestTelephonyByConsultation.has(canonicalId)) {
+        latestTelephonyByConsultation.set(canonicalId, {
           disposition: call.disposition,
           aftercareResult: null,
           occurredAt: call.requestedAt,
@@ -3427,11 +4554,12 @@ export function createConsultationService(options: {
     }
     for (const aftercare of aftercareRows) {
       if (!aftercare.consultationId) continue;
-      const existing = latestTelephonyByConsultation.get(
-        aftercare.consultationId,
-      );
+      const canonicalId =
+        canonicalByMember.get(aftercare.consultationId) ??
+        aftercare.consultationId;
+      const existing = latestTelephonyByConsultation.get(canonicalId);
       if (!existing || aftercare.confirmedAt > existing.occurredAt) {
-        latestTelephonyByConsultation.set(aftercare.consultationId, {
+        latestTelephonyByConsultation.set(canonicalId, {
           disposition: null,
           aftercareResult: aftercare.result,
           occurredAt: aftercare.confirmedAt,
@@ -3487,6 +4615,35 @@ export function createConsultationService(options: {
         const latestTelephony = latestTelephonyByConsultation.get(
           consultation.id,
         );
+        const groupedRequests = requestRows.filter(
+          (candidate) =>
+            (canonicalByMember.get(candidate.consultationId) ??
+              candidate.consultationId) === consultation.id,
+        );
+        const providedNames = groupedRequests
+          .map((candidate) =>
+            candidate.nameCiphertext &&
+            candidate.nameNonce &&
+            candidate.nameKeyVersion
+              ? protection.decrypt(
+                  {
+                    ciphertext: candidate.nameCiphertext,
+                    nonce: candidate.nameNonce,
+                    keyVersion: candidate.nameKeyVersion,
+                  },
+                  `consultation_requests.name:${candidate.id}`,
+                )
+              : null,
+          )
+          .filter((name): name is string => Boolean(name))
+          .map(normalizeConsultationName);
+        const channelCounts = groupedRequests.reduce(
+          (counts, candidate) => {
+            counts[candidate.contactChannel] += 1;
+            return counts;
+          },
+          { phone: 0, kakao_channel: 0, naver_booking: 0 },
+        );
         return {
           id: consultation.id,
           publicReceiptCode: consultation.publicReceiptCode,
@@ -3506,6 +4663,9 @@ export function createConsultationService(options: {
           mode: request?.mode ?? "quick",
           dedupeOutcome: request?.dedupeOutcome ?? "new",
           requestCount: requestCounts.get(consultation.id) ?? 0,
+          groupMemberCount: groupMemberCounts.get(consultation.id) ?? 1,
+          channelCounts,
+          nameMismatch: new Set(providedNames).size > 1,
           assigneeUserId:
             assigneeByConsultation.get(consultation.id)?.assigneeUserId ??
             null,
@@ -3584,7 +4744,59 @@ export function createConsultationService(options: {
     };
   }
 
-  async function detail(consultationId: string) {
+  async function detail(requestedConsultationId: string) {
+    const [groupRow] = await db
+      .select({
+        id: consultationGroups.id,
+        canonicalConsultationId: consultationGroups.canonicalConsultationId,
+        createdReason: consultationGroups.createdReason,
+        firstRequestedAt: consultationGroups.firstRequestedAt,
+        lastRequestedAt: consultationGroups.lastRequestedAt,
+        createdAt: consultationGroups.createdAt,
+      })
+      .from(consultationGroupMembers)
+      .innerJoin(
+        consultationGroups,
+        eq(consultationGroups.id, consultationGroupMembers.groupId),
+      )
+      .where(
+        and(
+          eq(
+            consultationGroupMembers.consultationId,
+            requestedConsultationId,
+          ),
+          eq(consultationGroups.status, "active"),
+        ),
+      )
+      .limit(1);
+    const consultationId =
+      groupRow?.canonicalConsultationId ?? requestedConsultationId;
+    const memberRows = groupRow
+      ? await db
+          .select({
+            id: consultations.id,
+            publicReceiptCode: consultations.publicReceiptCode,
+            state: consultations.state,
+            contactChannel: consultations.contactChannel,
+            preferredNameCiphertext: consultations.preferredNameCiphertext,
+            preferredNameNonce: consultations.preferredNameNonce,
+            preferredNameKeyVersion: consultations.preferredNameKeyVersion,
+            anonymousLabel: consultations.anonymousLabel,
+            firstRequestedAt: consultations.firstRequestedAt,
+            lastRequestedAt: consultations.lastRequestedAt,
+            softDeletedAt: consultations.softDeletedAt,
+          })
+          .from(consultationGroupMembers)
+          .innerJoin(
+            consultations,
+            eq(consultations.id, consultationGroupMembers.consultationId),
+          )
+          .where(eq(consultationGroupMembers.groupId, groupRow.id))
+          .orderBy(asc(consultations.firstRequestedAt))
+      : [];
+    const memberIds = groupRow
+      ? memberRows.map((row) => row.id)
+      : [consultationId];
     const [consultation] = await db
       .select()
       .from(consultations)
@@ -3592,9 +4804,10 @@ export function createConsultationService(options: {
       .limit(1);
     if (!consultation) return null;
 
-    const [kakaoEntry] = await db
+    const kakaoEntries = await db
       .select({
         id: kakaoHomepageEntries.id,
+        consultationId: kakaoHomepageEntries.consultationId,
         firstRequestId: kakaoHomepageEntries.firstRequestId,
         status: kakaoHomepageEntries.status,
         clickCount: kakaoHomepageEntries.clickCount,
@@ -3604,8 +4817,9 @@ export function createConsultationService(options: {
         invalidatedAt: kakaoHomepageEntries.invalidatedAt,
       })
       .from(kakaoHomepageEntries)
-      .where(eq(kakaoHomepageEntries.consultationId, consultationId))
-      .limit(1);
+      .where(inArray(kakaoHomepageEntries.consultationId, memberIds))
+      .orderBy(desc(kakaoHomepageEntries.lastClickedAt));
+    const kakaoEntry = kakaoEntries[0];
     const [naverBooking] = await db
       .select({
         id: naverBookingEntries.id,
@@ -3619,7 +4833,8 @@ export function createConsultationService(options: {
         cancelledAt: naverBookingEntries.cancelledAt,
       })
       .from(naverBookingEntries)
-      .where(eq(naverBookingEntries.consultationId, consultationId))
+      .where(inArray(naverBookingEntries.consultationId, memberIds))
+      .orderBy(desc(naverBookingEntries.sourceReceivedAt))
       .limit(1);
     const [directorySourceRow] = await db
       .select({
@@ -3979,12 +5194,12 @@ export function createConsultationService(options: {
     const requestRows = await db
       .select()
       .from(consultationRequests)
-      .where(eq(consultationRequests.consultationId, consultationId))
+      .where(inArray(consultationRequests.consultationId, memberIds))
       .orderBy(desc(consultationRequests.submittedAt));
     const attributionRows = await db
       .select()
       .from(consultationAttributions)
-      .where(eq(consultationAttributions.consultationId, consultationId));
+      .where(inArray(consultationAttributions.consultationId, memberIds));
     const attributionByRequest = new Map(
       attributionRows.map((row) => [row.requestId, row]),
     );
@@ -4035,9 +5250,10 @@ export function createConsultationService(options: {
           : null,
       ]),
     );
-    const latestPhone = requestRows[0]
-      ? phoneByRequest.get(requestRows[0].id) ?? null
-      : null;
+    const latestPhone =
+      requestRows
+        .map((request) => phoneByRequest.get(request.id) ?? null)
+        .find((phone): phone is string => Boolean(phone)) ?? null;
     const unfilteredLegalFriendsMatches = latestPhone
       ? await legalFriendsCustomerMatches(latestPhone)
       : [];
@@ -4047,6 +5263,59 @@ export function createConsultationService(options: {
     );
     const latestRequestSource = requestRows[0]?.source ?? null;
     const firstRequestSource = requestRows.at(-1)?.source ?? null;
+    const latestRequestByMember = new Map<
+      string,
+      (typeof requestRows)[number]
+    >();
+    const requestCountByMember = new Map<string, number>();
+    for (const request of requestRows) {
+      requestCountByMember.set(
+        request.consultationId,
+        (requestCountByMember.get(request.consultationId) ?? 0) + 1,
+      );
+      if (!latestRequestByMember.has(request.consultationId)) {
+        latestRequestByMember.set(request.consultationId, request);
+      }
+    }
+    const groupedNames = requestRows
+      .map((request) =>
+        request.nameCiphertext &&
+        request.nameNonce &&
+        request.nameKeyVersion
+          ? protection.decrypt(
+              {
+                ciphertext: request.nameCiphertext,
+                nonce: request.nameNonce,
+                keyVersion: request.nameKeyVersion,
+              },
+              `consultation_requests.name:${request.id}`,
+            )
+          : null,
+      )
+      .filter((name): name is string => Boolean(name))
+      .map(normalizeConsultationName);
+    const groupEventRows = groupRow
+      ? await db
+          .select({
+            id: consultationGroupEvents.id,
+            consultationId: consultationGroupEvents.consultationId,
+            eventType: consultationGroupEvents.eventType,
+            actorUserId: consultationGroupEvents.actorUserId,
+            actorDisplayName: staffProfiles.displayName,
+            metadata: consultationGroupEvents.metadata,
+            occurredAt: consultationGroupEvents.occurredAt,
+          })
+          .from(consultationGroupEvents)
+          .leftJoin(
+            staffProfiles,
+            eq(staffProfiles.userId, consultationGroupEvents.actorUserId),
+          )
+          .where(eq(consultationGroupEvents.groupId, groupRow.id))
+          .orderBy(desc(consultationGroupEvents.occurredAt))
+      : [];
+    const kakaoEntryByConsultation = new Map(
+      kakaoEntries.map((entry) => [entry.consultationId, entry]),
+    );
 
     return {
       id: consultation.id,
@@ -4054,6 +5323,7 @@ export function createConsultationService(options: {
       state: consultation.state,
       displayName: preferredName ?? consultation.anonymousLabel,
       contactChannel: consultation.contactChannel,
+      phone: latestPhone,
       softDeletedAt: consultation.softDeletedAt?.toISOString() ?? null,
       softDeletedByUserId: consultation.softDeletedByUserId,
       staffCreated: ["erp_staff", "erp_client_directory"].includes(
@@ -4061,6 +5331,7 @@ export function createConsultationService(options: {
       ),
       existingCustomer: legalFriendsMatches.length > 0,
       legalFriendsRegistered: Boolean(legalFriendsCase),
+      nameMismatch: new Set(groupedNames).size > 1,
       requiresLegalFriendsReview:
         legalFriendsMatches.length > 0 &&
         consultation.softDeletedAt === null &&
@@ -4083,9 +5354,62 @@ export function createConsultationService(options: {
             decidedAt: legalFriendsHandling.decidedAt.toISOString(),
           }
         : null,
+      group: groupRow
+        ? {
+            id: groupRow.id,
+            canonicalConsultationId: groupRow.canonicalConsultationId,
+            createdReason: groupRow.createdReason,
+            createdAt: groupRow.createdAt.toISOString(),
+            memberCount: memberRows.length,
+            nameMismatch: new Set(groupedNames).size > 1,
+            members: memberRows.map((member) => {
+              const request = latestRequestByMember.get(member.id);
+              const memberName =
+                member.preferredNameCiphertext &&
+                member.preferredNameNonce &&
+                member.preferredNameKeyVersion
+                  ? protection.decrypt(
+                      {
+                        ciphertext: member.preferredNameCiphertext,
+                        nonce: member.preferredNameNonce,
+                        keyVersion: member.preferredNameKeyVersion,
+                      },
+                      `consultations.preferred_name:${member.id}`,
+                    )
+                  : member.anonymousLabel;
+              return {
+                id: member.id,
+                publicReceiptCode: member.publicReceiptCode,
+                canonical:
+                  member.id === groupRow.canonicalConsultationId,
+                state: member.state,
+                displayName: memberName,
+                contactChannel: member.contactChannel,
+                phone: request
+                  ? phoneByRequest.get(request.id) ?? null
+                  : null,
+                requestCount: requestCountByMember.get(member.id) ?? 0,
+                firstRequestedAt: member.firstRequestedAt.toISOString(),
+                lastRequestedAt: member.lastRequestedAt.toISOString(),
+                kakaoStatus:
+                  kakaoEntryByConsultation.get(member.id)?.status ?? null,
+              };
+            }),
+            events: groupEventRows.map((event) => ({
+              id: event.id,
+              consultationId: event.consultationId,
+              eventType: event.eventType,
+              actorUserId: event.actorUserId,
+              actorDisplayName: event.actorDisplayName,
+              metadata: event.metadata,
+              occurredAt: event.occurredAt.toISOString(),
+            })),
+          }
+        : null,
       kakaoEntry: kakaoEntry
         ? {
             id: kakaoEntry.id,
+            consultationId: kakaoEntry.consultationId,
             status: kakaoEntry.status,
             nameProvided: Boolean(
               requestRows.find(
@@ -4302,12 +5626,20 @@ export function createConsultationService(options: {
         lastErrorCode: call.lastErrorCode,
         lastErrorMessage: call.lastErrorMessage,
       })),
-      firstRequestedAt: consultation.firstRequestedAt.toISOString(),
-      lastRequestedAt: consultation.lastRequestedAt.toISOString(),
+      firstRequestedAt: (
+        groupRow?.firstRequestedAt ?? consultation.firstRequestedAt
+      ).toISOString(),
+      lastRequestedAt: (
+        groupRow?.lastRequestedAt ?? consultation.lastRequestedAt
+      ).toISOString(),
       requests: requestRows.map((request) => {
         const attribution = attributionByRequest.get(request.id);
         return {
           id: request.id,
+          consultationId: request.consultationId,
+          consultationReceiptCode:
+            memberRows.find((member) => member.id === request.consultationId)
+              ?.publicReceiptCode ?? consultation.publicReceiptCode,
           mode: request.mode,
           source: request.source,
           contactChannel: request.contactChannel,
@@ -4364,6 +5696,7 @@ export function createConsultationService(options: {
 
   return {
     assignToSelf,
+    linkConsultationGroup,
     requestAssigneeTransfer,
     confirmKakaoHomepageEntry,
     detail,
@@ -4371,6 +5704,7 @@ export function createConsultationService(options: {
     invalidateLegalFriendsCase,
     invalidateKakaoHomepageEntry,
     list,
+    splitConsultationGroup,
     softDeleteStaffConsultation,
     submit,
     submitSelfDiagnosis,

@@ -1550,6 +1550,140 @@ export const consultations = pgTable(
   ],
 );
 
+export const consultationGroups = pgTable(
+  "consultation_groups",
+  {
+    id: uuid("id").primaryKey(),
+    canonicalConsultationId: uuid("canonical_consultation_id")
+      .notNull()
+      .references(() => consultations.id, { onDelete: "restrict" }),
+    phoneFingerprint: bytea("phone_fingerprint"),
+    status: varchar("status", { length: 20 }).default("active").notNull(),
+    mergedIntoGroupId: uuid("merged_into_group_id"),
+    createdReason: varchar("created_reason", { length: 40 }).notNull(),
+    createdByUserId: uuid("created_by_user_id").references(
+      () => staffUsers.id,
+      { onDelete: "restrict" },
+    ),
+    firstRequestedAt: timestamp("first_requested_at", {
+      withTimezone: true,
+    }).notNull(),
+    lastRequestedAt: timestamp("last_requested_at", {
+      withTimezone: true,
+    }).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("consultation_groups_canonical_uidx")
+      .on(table.canonicalConsultationId)
+      .where(sql`${table.status} = 'active'`),
+    index("consultation_groups_phone_last_requested_idx").on(
+      table.phoneFingerprint,
+      table.lastRequestedAt,
+    ),
+    index("consultation_groups_merged_into_idx").on(table.mergedIntoGroupId),
+    foreignKey({
+      columns: [table.mergedIntoGroupId],
+      foreignColumns: [table.id],
+      name: "consultation_groups_merged_into_group_id_fk",
+    }).onDelete("restrict"),
+    check(
+      "consultation_groups_status_allowed",
+      sql`${table.status} IN ('active', 'merged')`,
+    ),
+    check(
+      "consultation_groups_merge_consistent",
+      sql`(${table.status} = 'active' AND ${table.mergedIntoGroupId} IS NULL)
+        OR (${table.status} = 'merged' AND ${table.mergedIntoGroupId} IS NOT NULL AND ${table.mergedIntoGroupId} <> ${table.id})`,
+    ),
+    check(
+      "consultation_groups_reason_allowed",
+      sql`${table.createdReason} IN ('automatic_phone_7d', 'manual_link', 'manual_split')`,
+    ),
+    check(
+      "consultation_groups_actor_consistent",
+      sql`(${table.createdReason} = 'automatic_phone_7d' AND ${table.createdByUserId} IS NULL)
+        OR (${table.createdReason} IN ('manual_link', 'manual_split') AND ${table.createdByUserId} IS NOT NULL)`,
+    ),
+    check(
+      "consultation_groups_request_time_order",
+      sql`${table.lastRequestedAt} >= ${table.firstRequestedAt}`,
+    ),
+    check(
+      "consultation_groups_phone_fingerprint_length",
+      sql`${table.phoneFingerprint} IS NULL OR octet_length(${table.phoneFingerprint}) = 32`,
+    ),
+  ],
+);
+
+export const consultationGroupMembers = pgTable(
+  "consultation_group_members",
+  {
+    consultationId: uuid("consultation_id")
+      .primaryKey()
+      .references(() => consultations.id, { onDelete: "restrict" }),
+    groupId: uuid("group_id")
+      .notNull()
+      .references(() => consultationGroups.id, { onDelete: "restrict" }),
+    linkMethod: varchar("link_method", { length: 40 }).notNull(),
+    linkedByUserId: uuid("linked_by_user_id").references(
+      () => staffUsers.id,
+      { onDelete: "restrict" },
+    ),
+    linkedAt: timestamp("linked_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("consultation_group_members_group_idx").on(table.groupId),
+    check(
+      "consultation_group_members_method_allowed",
+      sql`${table.linkMethod} IN ('automatic_phone_7d', 'manual_link', 'manual_split')`,
+    ),
+    check(
+      "consultation_group_members_actor_consistent",
+      sql`(${table.linkMethod} = 'automatic_phone_7d' AND ${table.linkedByUserId} IS NULL)
+        OR (${table.linkMethod} IN ('manual_link', 'manual_split') AND ${table.linkedByUserId} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export const consultationGroupEvents = pgTable(
+  "consultation_group_events",
+  {
+    id: uuid("id").primaryKey(),
+    groupId: uuid("group_id")
+      .notNull()
+      .references(() => consultationGroups.id, { onDelete: "restrict" }),
+    consultationId: uuid("consultation_id")
+      .notNull()
+      .references(() => consultations.id, { onDelete: "restrict" }),
+    eventType: varchar("event_type", { length: 40 }).notNull(),
+    actorUserId: uuid("actor_user_id").references(() => staffUsers.id, {
+      onDelete: "restrict",
+    }),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("consultation_group_events_group_occurred_idx").on(
+      table.groupId,
+      table.occurredAt,
+    ),
+    index("consultation_group_events_consultation_idx").on(
+      table.consultationId,
+    ),
+    check(
+      "consultation_group_events_type_allowed",
+      sql`${table.eventType} IN ('created', 'linked', 'unlinked', 'canonical_changed', 'merged')`,
+    ),
+  ],
+);
+
 export const consultationAssignments = pgTable(
   "consultation_assignments",
   {

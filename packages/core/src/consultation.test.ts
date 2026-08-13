@@ -5,6 +5,7 @@ import {
   classifyConsultationSubmission,
   consultationAssigneeTransferInputSchema,
   consultationAssignmentInputSchema,
+  consultationGroupLinkSchema,
   type ExistingConsultationCandidate,
 } from "./consultation.js";
 import {
@@ -135,7 +136,7 @@ test("담당자 지정 뒤 같은 고객의 재요청은 기존 상담에 붙인
   }
 });
 
-test("같은 전화번호라도 이름이 다르면 자동 병합하지 않는다", () => {
+test("7일 안의 같은 전화번호는 입력 이름이 달라도 재요청으로 묶는다", () => {
   const decision = classifyConsultationSubmission(
     {
       phoneFingerprint: "phone-a",
@@ -148,12 +149,24 @@ test("같은 전화번호라도 이름이 다르면 자동 병합하지 않는�
     [candidate({ nameFingerprint: "name-a" })],
   );
 
-  assert.equal(decision.action, "create_suspected_duplicate");
-  assert.equal(decision.createConsultation, true);
-  assert.deepEqual(decision.eventTypes, [
-    "consultation.requested",
-    "consultation.duplicate_suspected",
-  ]);
+  assert.equal(decision.action, "attach_repeat_request");
+  assert.equal(decision.createConsultation, false);
+  assert.deepEqual(decision.eventTypes, ["consultation.request.updated"]);
+});
+
+test("수동 상담 연결은 정식 접수번호만 받는다", () => {
+  assert.equal(
+    consultationGroupLinkSchema.parse({
+      targetReceiptCode: "LA-260813-23456789",
+    }).targetReceiptCode,
+    "LA-260813-23456789",
+  );
+  assert.equal(
+    consultationGroupLinkSchema.safeParse({
+      targetReceiptCode: "LA-260813-INVALID!",
+    }).success,
+    false,
+  );
 });
 
 test("종결 상담과 같은 전화번호여도 새 상담으로 접수한다", () => {
