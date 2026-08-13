@@ -71,6 +71,26 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-13 — 직원 대량 추가 중 gateway DB 풀·bridge 큐 긴급 복구
+- 직원 센트릭스 회선을 연속 추가하던 15:40 KST부터 새 callback 등록·과거 이력 보강과 ERP
+  전화 snapshot 재조회가 겹쳤다. 전화번호 250개를
+  `resolve_inbound_phone_directory`로 대조하는 같은 SQL 20개가 요청 풀을 모두 점유해 각각
+  6분 이상 실행됐고, RDS `db.t4g.small` CPU는 15:41~15:47 99.5~99.9%, gateway DB 풀
+  waiting은 CloudWatch 기준 최대 1,658까지 증가했다. 그 결과 Windows bridge 재시도 큐가
+  22건까지 쌓이고 배정 32개가 heartbeat 기준 일시 오프라인으로 판정됐다. dead-letter는
+  계속 0건이었다. warm 4개는 배정 직후 대체 슬롯 기동 지연으로 15:39에 5개로 복구됐고,
+  별도 로그인 실패 한 슬롯도 이후 자동 회복했다.
+- 사용자가 응급 재시작을 명시 승인했다. 당시 활성 통화 root 4건·수신 2건을 확인하고 원장을
+  종료·보정하지 않은 채 15:48 KST gateway systemd 서비스만 재시작해 기존 DB 연결과 대기
+  HTTP 요청을 끊었다. 서비스·HTTPS health는 200으로 복구됐고 15:49 RDS CPU 5.34%, 요청 풀
+  used/waiting 0, 배정 32개 오프라인 0, warm 5개, queue/dead-letter 0, supervisor 정상과
+  callback 32개 재등록을 확인했다. 앱 이미지·DB·Windows bridge·운영 데이터·통화 원장은
+  변경하지 않았다.
+- 재발 원인은 전화 snapshot의 250개 리걸프렌즈 고객조회가 ERP 세션 간 전역 중복 억제 없이
+  동시에 실행되는 경계다. 단순 DB 풀 증가는 RDS CPU 포화를 키우므로 해결책이 아니며, 전역
+  single-flight/짧은 snapshot 캐시, 조회 상한·statement timeout과 디렉터리 함수 일괄조회
+  최적화를 적용하기 전에는 직원 회선의 연속 대량 추가를 중단한다.
+
 ### 2026-08-13 — 모든 완료 워크트리 main 통합·세 앱/0055·0056 운영 배포
 - main과 HERDR worktree 5개, 원격 `origin/worktree/*` 31개를 전수 대조해 미반영 4개를 모두
   병합했고 최종 모든 원격 HEAD가 main ancestor임을 확인했다. 배포 소스
