@@ -1141,6 +1141,13 @@ summary:focus-visible {
   font-weight: 900;
 }
 
+.kakao-entry-modal-message-guide .kakao-entry-modal-message-example {
+  padding: 10px 11px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 14px;
+}
+
 .kakao-entry-modal-actions {
   display: grid;
   margin-top: 8px;

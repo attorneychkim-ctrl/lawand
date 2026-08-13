@@ -299,10 +299,19 @@ export function KakaoConsultationEntry({
               카카오톡 채팅방이 열리기만 하면 상담원에게 접수되지 않아요.
             </p>
             <p>
-              카카오톡으로 이동한 뒤 <strong>“상담 신청합니다”라고 메시지를 한 번
-              보내주세요.</strong>
+              카카오톡으로 이동한 뒤 아래 문장을 메시지로 한 번 보내주세요.
             </p>
-            <p>메시지를 보내야 상담원이 고객님의 상담 요청을 확인할 수 있어요.</p>
+            <p className="kakao-entry-modal-message-example">
+              <strong>
+                {displayName.trim()
+                  ? `“홈페이지에 입력한 이름은 ${displayName.trim()}입니다. 상담 요청합니다.”`
+                  : "이름을 입력하면 보낼 문장이 여기에 표시됩니다."}
+              </strong>
+            </p>
+            <p>
+              입력한 이름을 함께 보내야 채팅방 이름이 달라도 상담원이 고객님의
+              상담 요청을 확인할 수 있어요.
+            </p>
           </aside>
 
           <div className="kakao-entry-modal-actions">
