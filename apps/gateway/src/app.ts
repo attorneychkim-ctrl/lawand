@@ -72,6 +72,7 @@ import type { ConsultationService } from "./service.js";
 import {
   ConsultationAssignmentError,
   ConsultationAssigneeTransferError,
+  ConsultationSoftDeleteError,
   ConsultationValidationError,
   KakaoHomepageEntryError,
   LegalFriendsInvalidationError,
@@ -302,6 +303,46 @@ export function createGatewayServer(options?: {
             ? { databasePools: options.databasePoolHealth() }
             : {}),
         });
+        return;
+      }
+
+      if (
+        request.method === "DELETE" &&
+        url.pathname.startsWith("/v1/consultations/")
+      ) {
+        if (
+          !options?.service ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const consultationId = url.pathname.slice(
+          "/v1/consultations/".length,
+        );
+        if (!validUuid(consultationId)) {
+          sendJson(response, 400, { error: "invalid_consultation_id" });
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          "admin",
+        ]);
+        const result = await options.service.softDeleteStaffConsultation(
+          consultationId,
+          actor,
+        );
+        sendJson(response, 200, result);
         return;
       }
 
@@ -2697,6 +2738,17 @@ export function createGatewayServer(options?: {
             : error.code === "transfer_forbidden"
               ? 403
               : 409,
+          {
+            error: error.code,
+            message: error.message,
+          },
+        );
+        return;
+      }
+      if (error instanceof ConsultationSoftDeleteError) {
+        sendJson(
+          response,
+          error.code === "consultation_not_found" ? 404 : 409,
           {
             error: error.code,
             message: error.message,

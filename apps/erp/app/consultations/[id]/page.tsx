@@ -21,6 +21,7 @@ import { requireStaff } from "../../../lib/session";
 import { ClaimConsultationButton } from "../../_components/claim-consultation-button";
 import { ConsultationAssigneeTransfer } from "../../_components/consultation-assignee-transfer";
 import { ClickToCallButton } from "../../_components/click-to-call-button";
+import { ConsultationSoftDeleteButton } from "../../_components/consultation-soft-delete-button";
 import { CopyButton } from "../../_components/copy-button";
 import { KakaoEntryInvalidationButton } from "../../_components/kakao-entry-invalidation-button";
 import { KakaoEntryPanel } from "../../_components/kakao-entry-panel";
@@ -200,6 +201,7 @@ function sourceLabel(request: ConsultationDetail["requests"][number]) {
     homepage_kakao: "홈페이지 카카오 진입",
     naver_booking_email: "네이버 예약",
     erp_phone_desk: "전화데스크 신건상담",
+    erp_staff: "상담데스크 직접등록",
     erp_client_directory: "고객찾기 신건상담",
   };
   return labels[request.source];
@@ -695,6 +697,7 @@ export default async function ConsultationDetailPage({
   if (!consultation) notFound();
 
   const latestRequest = consultation.requests[0];
+  const isSoftDeleted = Boolean(consultation.softDeletedAt);
   const latestPhone = latestRequest?.phone ?? null;
   const latestRegion = latestRequest?.intake.residenceRegion;
   const action = nextAction(consultation);
@@ -704,6 +707,7 @@ export default async function ConsultationDetailPage({
     (consultation.kakaoEntry?.status !== "pending" ||
       consultation.kakaoEntry.nameProvided);
   const canClickToCall =
+    !isSoftDeleted &&
     Boolean(latestPhone) &&
     consultation.assignment?.assigneeUserId === staff.id &&
     consultation.assignmentTransfers[0]?.status !== "pending";
@@ -727,6 +731,7 @@ export default async function ConsultationDetailPage({
         ? "failed"
         : "ready";
   const canInvalidateLegalFriendsCase =
+    !isSoftDeleted &&
     (Boolean(consultation.legalFriendsCase) ||
       consultation.kakaoEntry?.status === "confirmed") &&
     (consultation.assignment?.assigneeUserId === staff.id ||
@@ -747,7 +752,7 @@ export default async function ConsultationDetailPage({
   return (
     <>
       <StaffBar staff={staff} />
-      <main className={`erp-shell detail-shell${canClaim ? " has-mobile-action" : ""}`}>
+      <main className={`erp-shell detail-shell${canClaim ? " has-mobile-action" : ""}${isSoftDeleted ? " is-soft-deleted" : ""}`}>
         <Link className="page-back-link" href="/">
           <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7" /></svg>
           상담 목록
@@ -760,6 +765,9 @@ export default async function ConsultationDetailPage({
               <span className={`state-badge is-${consultation.state}`}>
                 {stateLabels[consultation.state] ?? consultation.state}
               </span>
+              {isSoftDeleted ? (
+                <span className="flag-badge is-danger">삭제됨</span>
+              ) : null}
               {consultation.existingCustomer ? (
                 <span className="flag-badge is-existing">기존고객</span>
               ) : null}
@@ -782,7 +790,9 @@ export default async function ConsultationDetailPage({
                 <span className="flag-badge is-info">소개 상담</span>
               ) : null}
             </div>
-            <h1>{consultation.displayName}</h1>
+            <h1 className={isSoftDeleted ? "soft-delete-blur" : undefined}>
+              {consultation.displayName}
+            </h1>
             <p>
               최초 접수 {formatDate(consultation.firstRequestedAt)} · 최근 요청 {formatDate(consultation.lastRequestedAt)}
             </p>
@@ -809,7 +819,7 @@ export default async function ConsultationDetailPage({
                 status={invalidationStatus}
               />
             ) : null}
-            {consultation.kakaoEntry?.status === "pending" ? (
+            {!isSoftDeleted && consultation.kakaoEntry?.status === "pending" ? (
               <KakaoEntryInvalidationButton
                 consultationId={consultation.id}
               />
@@ -817,8 +827,20 @@ export default async function ConsultationDetailPage({
             {canClaim ? (
               <ClaimConsultationButton consultationId={consultation.id} />
             ) : null}
+            {!isSoftDeleted && consultation.staffCreated && staff.roles.includes("admin") ? (
+              <ConsultationSoftDeleteButton consultationId={consultation.id} />
+            ) : null}
           </div>
         </header>
+
+        {isSoftDeleted ? (
+          <div className="soft-delete-notice" role="status">
+            <strong>삭제된 신규등록 상담입니다.</strong>
+            <span>
+              {formatDate(consultation.softDeletedAt)}에 소프트삭제되어 고객정보와 업무 내용을 블러 처리했습니다.
+            </span>
+          </div>
+        ) : null}
 
         <div className="consultation-command-grid">
           <section className="erp-panel customer-summary-card" aria-labelledby="customer-summary-title">

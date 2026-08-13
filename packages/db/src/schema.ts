@@ -1489,6 +1489,11 @@ export const consultations = pgTable(
       withTimezone: true,
     }).notNull(),
     closedAt: timestamp("closed_at", { withTimezone: true }),
+    softDeletedAt: timestamp("soft_deleted_at", { withTimezone: true }),
+    softDeletedByUserId: uuid("soft_deleted_by_user_id").references(
+      () => staffUsers.id,
+      { onDelete: "restrict" },
+    ),
     ...timestamps,
   },
   (table) => [
@@ -1497,6 +1502,7 @@ export const consultations = pgTable(
     ),
     index("consultations_phone_fingerprint_idx").on(table.phoneFingerprint),
     index("consultations_last_requested_idx").on(table.lastRequestedAt),
+    index("consultations_soft_deleted_at_idx").on(table.softDeletedAt),
     index("consultations_state_last_requested_idx").on(
       table.state,
       table.lastRequestedAt,
@@ -1524,7 +1530,8 @@ export const consultations = pgTable(
     check(
       "consultations_contact_channel_identity",
       sql`(${table.contactChannel} = 'phone' AND ${table.phoneFingerprint} IS NOT NULL)
-        OR (${table.contactChannel} IN ('kakao_channel', 'naver_booking') AND ${table.phoneFingerprint} IS NULL)`,
+        OR ${table.contactChannel} = 'kakao_channel'
+        OR (${table.contactChannel} = 'naver_booking' AND ${table.phoneFingerprint} IS NULL)`,
     ),
     check(
       "consultations_name_nonce_length",
@@ -1534,6 +1541,11 @@ export const consultations = pgTable(
       "consultations_closed_state_consistent",
       sql`(${table.state} = 'closed' AND ${table.closedAt} IS NOT NULL)
         OR (${table.state} <> 'closed' AND ${table.closedAt} IS NULL)`,
+    ),
+    check(
+      "consultations_soft_delete_consistent",
+      sql`(${table.softDeletedAt} IS NULL AND ${table.softDeletedByUserId} IS NULL)
+        OR (${table.softDeletedAt} IS NOT NULL AND ${table.softDeletedByUserId} IS NOT NULL AND ${table.state} = 'closed')`,
     ),
   ],
 );
@@ -1682,18 +1694,20 @@ export const consultationRequests = pgTable(
     check(
       "consultation_requests_phone_crypto_complete",
       sql`(
-        ${table.contactChannel} = 'phone'
-        AND ${table.phoneFingerprint} IS NOT NULL
-        AND ${table.phoneCiphertext} IS NOT NULL
-        AND ${table.phoneNonce} IS NOT NULL
-        AND ${table.phoneKeyVersion} IS NOT NULL
-      ) OR (
-        ${table.contactChannel} IN ('kakao_channel', 'naver_booking')
-        AND ${table.phoneFingerprint} IS NULL
-        AND ${table.phoneCiphertext} IS NULL
-        AND ${table.phoneNonce} IS NULL
-        AND ${table.phoneKeyVersion} IS NULL
-      )`,
+        (
+          ${table.phoneFingerprint} IS NOT NULL
+          AND ${table.phoneCiphertext} IS NOT NULL
+          AND ${table.phoneNonce} IS NOT NULL
+          AND ${table.phoneKeyVersion} IS NOT NULL
+        ) OR (
+          ${table.phoneFingerprint} IS NULL
+          AND ${table.phoneCiphertext} IS NULL
+          AND ${table.phoneNonce} IS NULL
+          AND ${table.phoneKeyVersion} IS NULL
+        )
+      )
+        AND (${table.contactChannel} <> 'phone' OR ${table.phoneFingerprint} IS NOT NULL)
+        AND (${table.contactChannel} <> 'naver_booking' OR ${table.phoneFingerprint} IS NULL)`,
     ),
     check(
       "consultation_requests_privacy_basis_consistent",

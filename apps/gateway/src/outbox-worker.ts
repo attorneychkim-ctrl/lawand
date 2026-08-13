@@ -19,6 +19,7 @@ import {
   legalfriendsManagerChangeRequestedEventSchema,
   legalfriendsRegistrationRequestedEventSchema,
   type PlatformEvent,
+  residenceRegionSchema,
 } from "@lawand/core";
 import {
   consultationAssignmentTransfers,
@@ -426,16 +427,17 @@ export function createOutboxWorker(options: {
       throw new LegalFriendsPayloadError("consultation_phone_not_collected");
     }
 
-    const phone = isKakaoConsultation
-      ? KAKAO_LEGALFRIENDS_PLACEHOLDER_PHONE
-      : protection.decrypt(
-          {
-            ciphertext: request.phoneCiphertext!,
-            nonce: request.phoneNonce!,
-            keyVersion: request.phoneKeyVersion!,
-          },
-          `consultation_requests.phone:${request.id}`,
-        );
+    const phone =
+      request.phoneCiphertext && request.phoneNonce && request.phoneKeyVersion
+        ? protection.decrypt(
+            {
+              ciphertext: request.phoneCiphertext,
+              nonce: request.phoneNonce,
+              keyVersion: request.phoneKeyVersion,
+            },
+            `consultation_requests.phone:${request.id}`,
+          )
+        : KAKAO_LEGALFRIENDS_PLACEHOLDER_PHONE;
     const storedIntake = JSON.parse(
       protection.decrypt(
         {
@@ -449,11 +451,18 @@ export function createOutboxWorker(options: {
     const parsedIntake = consultationIntakeAnswersSchema.safeParse(
       storedIntake,
     );
+    const storedResidenceRegion = residenceRegionSchema.safeParse(
+      storedIntake && typeof storedIntake === "object"
+        ? (storedIntake as Record<string, unknown>).residenceRegion
+        : undefined,
+    );
     const intake = parsedIntake.success
       ? parsedIntake.data
       : isKakaoConsultation
         ? {
-            residenceRegion: "overseas_or_other" as const,
+            residenceRegion: storedResidenceRegion.success
+              ? storedResidenceRegion.data
+              : ("overseas_or_other" as const),
             urgencies: [],
             incomes: [],
             concern: "카카오 채팅방에서 상담 내용을 확인",
@@ -494,7 +503,7 @@ export function createOutboxWorker(options: {
         name,
         phone,
         intake,
-        ...(isKakaoConsultation
+        ...(isKakaoConsultation && !storedResidenceRegion.success
           ? {
               livingPlaceOverride:
                 KAKAO_LEGALFRIENDS_PLACEHOLDER_LIVING_PLACE,

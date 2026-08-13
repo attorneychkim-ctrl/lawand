@@ -1,6 +1,6 @@
 {
-  "id": "b89f3dc4-99c4-4a34-812c-77a1dbb5471d",
-  "prevId": "9b007525-448f-4f44-bcfa-3014b6d6ea99",
+  "id": "135ceecf-8291-46fb-b5c7-818662fe517c",
+  "prevId": "b89f3dc4-99c4-4a34-812c-77a1dbb5471d",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1471,7 +1471,7 @@
         },
         "consultation_requests_phone_crypto_complete": {
           "name": "consultation_requests_phone_crypto_complete",
-          "value": "(\n        \"consultation_requests\".\"contact_channel\" = 'phone'\n        AND \"consultation_requests\".\"phone_fingerprint\" IS NOT NULL\n        AND \"consultation_requests\".\"phone_ciphertext\" IS NOT NULL\n        AND \"consultation_requests\".\"phone_nonce\" IS NOT NULL\n        AND \"consultation_requests\".\"phone_key_version\" IS NOT NULL\n      ) OR (\n        \"consultation_requests\".\"contact_channel\" IN ('kakao_channel', 'naver_booking')\n        AND \"consultation_requests\".\"phone_fingerprint\" IS NULL\n        AND \"consultation_requests\".\"phone_ciphertext\" IS NULL\n        AND \"consultation_requests\".\"phone_nonce\" IS NULL\n        AND \"consultation_requests\".\"phone_key_version\" IS NULL\n      )"
+          "value": "(\n        (\n          \"consultation_requests\".\"phone_fingerprint\" IS NOT NULL\n          AND \"consultation_requests\".\"phone_ciphertext\" IS NOT NULL\n          AND \"consultation_requests\".\"phone_nonce\" IS NOT NULL\n          AND \"consultation_requests\".\"phone_key_version\" IS NOT NULL\n        ) OR (\n          \"consultation_requests\".\"phone_fingerprint\" IS NULL\n          AND \"consultation_requests\".\"phone_ciphertext\" IS NULL\n          AND \"consultation_requests\".\"phone_nonce\" IS NULL\n          AND \"consultation_requests\".\"phone_key_version\" IS NULL\n        )\n      )\n        AND (\"consultation_requests\".\"contact_channel\" <> 'phone' OR \"consultation_requests\".\"phone_fingerprint\" IS NOT NULL)\n        AND (\"consultation_requests\".\"contact_channel\" <> 'naver_booking' OR \"consultation_requests\".\"phone_fingerprint\" IS NULL)"
         },
         "consultation_requests_privacy_basis_consistent": {
           "name": "consultation_requests_privacy_basis_consistent",
@@ -1687,6 +1687,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "soft_deleted_at": {
+          "name": "soft_deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "soft_deleted_by_user_id": {
+          "name": "soft_deleted_by_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -1748,6 +1760,21 @@
           "method": "btree",
           "with": {}
         },
+        "consultations_soft_deleted_at_idx": {
+          "name": "consultations_soft_deleted_at_idx",
+          "columns": [
+            {
+              "expression": "soft_deleted_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "consultations_state_last_requested_idx": {
           "name": "consultations_state_last_requested_idx",
           "columns": [
@@ -1770,7 +1797,21 @@
           "with": {}
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "consultations_soft_deleted_by_user_id_staff_users_id_fk": {
+          "name": "consultations_soft_deleted_by_user_id_staff_users_id_fk",
+          "tableFrom": "consultations",
+          "tableTo": "staff_users",
+          "columnsFrom": [
+            "soft_deleted_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -1789,7 +1830,7 @@
         },
         "consultations_contact_channel_identity": {
           "name": "consultations_contact_channel_identity",
-          "value": "(\"consultations\".\"contact_channel\" = 'phone' AND \"consultations\".\"phone_fingerprint\" IS NOT NULL)\n        OR (\"consultations\".\"contact_channel\" IN ('kakao_channel', 'naver_booking') AND \"consultations\".\"phone_fingerprint\" IS NULL)"
+          "value": "(\"consultations\".\"contact_channel\" = 'phone' AND \"consultations\".\"phone_fingerprint\" IS NOT NULL)\n        OR \"consultations\".\"contact_channel\" = 'kakao_channel'\n        OR (\"consultations\".\"contact_channel\" = 'naver_booking' AND \"consultations\".\"phone_fingerprint\" IS NULL)"
         },
         "consultations_name_nonce_length": {
           "name": "consultations_name_nonce_length",
@@ -1798,6 +1839,10 @@
         "consultations_closed_state_consistent": {
           "name": "consultations_closed_state_consistent",
           "value": "(\"consultations\".\"state\" = 'closed' AND \"consultations\".\"closed_at\" IS NOT NULL)\n        OR (\"consultations\".\"state\" <> 'closed' AND \"consultations\".\"closed_at\" IS NULL)"
+        },
+        "consultations_soft_delete_consistent": {
+          "name": "consultations_soft_delete_consistent",
+          "value": "(\"consultations\".\"soft_deleted_at\" IS NULL AND \"consultations\".\"soft_deleted_by_user_id\" IS NULL)\n        OR (\"consultations\".\"soft_deleted_at\" IS NOT NULL AND \"consultations\".\"soft_deleted_by_user_id\" IS NOT NULL AND \"consultations\".\"state\" = 'closed')"
         }
       },
       "isRLSEnabled": false

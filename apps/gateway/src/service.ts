@@ -9,6 +9,7 @@ import {
   gte,
   inArray,
   isNotNull,
+  isNull,
   lt,
   sql,
 } from "drizzle-orm";
@@ -179,6 +180,18 @@ export class ConsultationAssignmentError extends Error {
   }
 }
 
+export class ConsultationSoftDeleteError extends Error {
+  constructor(
+    readonly code:
+      | "consultation_not_found"
+      | "consultation_not_staff_created"
+      | "assignment_transfer_pending",
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 export class LegalFriendsInvalidationError extends Error {
   constructor(
     readonly code:
@@ -269,6 +282,14 @@ function normalizeConsultationName(value: string) {
     .trim()
     .replace(/\s+/gu, " ")
     .toLocaleLowerCase("ko-KR");
+}
+
+function requiresLegalFriendsHandling(source: string | null | undefined) {
+  return (
+    source === "homepage" ||
+    source === "homepage_kakao" ||
+    source === "erp_staff"
+  );
 }
 
 function directorySnapshot(
@@ -1305,8 +1326,18 @@ export function createConsultationService(options: {
         submittedDisplayName,
         `consultation_requests.name:${requestId}`,
       );
+      const phoneFingerprint = input.phone
+        ? protection.fingerprint(input.phone)
+        : null;
+      const requestPhoneEncrypted = input.phone
+        ? protection.encrypt(
+            input.phone,
+            `consultation_requests.phone:${requestId}`,
+          )
+        : null;
       const intakeEncrypted = protection.encrypt(
         JSON.stringify({
+          residenceRegion: input.residenceRegion,
           channel: "kakao_channel",
           entrySource: "homepage_button",
           messageStorage: "not_stored",
@@ -1318,6 +1349,8 @@ export function createConsultationService(options: {
         source: input.source,
         idempotencyKey: input.idempotencyKey,
         displayName: submittedDisplayName,
+        residenceRegion: input.residenceRegion,
+        phone: input.phone,
       });
 
       let journeySessionId: string | null = null;
@@ -1443,7 +1476,7 @@ export function createConsultationService(options: {
         id: consultationId,
         publicReceiptCode,
         contactChannel: "kakao_channel",
-        phoneFingerprint: null,
+        phoneFingerprint,
         anonymousLabel: internalAlias,
         preferredNameCiphertext: preferredNameEncrypted.ciphertext,
         preferredNameNonce: preferredNameEncrypted.nonce,
@@ -1460,10 +1493,10 @@ export function createConsultationService(options: {
         idempotencyKey: input.idempotencyKey,
         mode: "quick",
         contactChannel: "kakao_channel",
-        phoneFingerprint: null,
-        phoneCiphertext: null,
-        phoneNonce: null,
-        phoneKeyVersion: null,
+        phoneFingerprint,
+        phoneCiphertext: requestPhoneEncrypted?.ciphertext ?? null,
+        phoneNonce: requestPhoneEncrypted?.nonce ?? null,
+        phoneKeyVersion: requestPhoneEncrypted?.keyVersion ?? null,
         hasProvidedName: true,
         nameCiphertext: requestNameEncrypted.ciphertext,
         nameNonce: requestNameEncrypted.nonce,
@@ -2154,7 +2187,7 @@ export function createConsultationService(options: {
         .limit(1);
       let legalFriendsHandlingMode = storedHandling?.mode ?? null;
       const reviewablePhone =
-        latestRequest.source === "homepage" &&
+        requiresLegalFriendsHandling(latestRequest.source) &&
         latestRequest.phoneCiphertext &&
         latestRequest.phoneNonce &&
         latestRequest.phoneKeyVersion
@@ -2967,6 +3000,142 @@ export function createConsultationService(options: {
     });
   }
 
+
+  async function softDeleteStaffConsultation(
+    consultationId: string,
+    actor: StaffPrincipal,
+  ) {
+    const deletedAt = new Date();
+    return db.transaction(async (tx) => {
+      const [consultation] = await tx
+        .select({
+          id: consultations.id,
+          state: consultations.state,
+          closedAt: consultations.closedAt,
+          softDeletedAt: consultations.softDeletedAt,
+          softDeletedByUserId: consultations.softDeletedByUserId,
+        })
+        .from(consultations)
+        .where(eq(consultations.id, consultationId))
+        .limit(1)
+        .for("update");
+      if (!consultation) {
+        throw new ConsultationSoftDeleteError(
+          "consultation_not_found",
+          "상담을 찾을 수 없습니다.",
+        );
+      }
+
+      const [firstRequest] = await tx
+        .select({ source: consultationRequests.source })
+        .from(consultationRequests)
+        .where(eq(consultationRequests.consultationId, consultationId))
+        .orderBy(asc(consultationRequests.submittedAt))
+        .limit(1);
+      if (
+        !firstRequest ||
+        !["erp_staff", "erp_client_directory"].includes(firstRequest.source)
+      ) {
+        throw new ConsultationSoftDeleteError(
+          "consultation_not_staff_created",
+          "신규등록으로 만든 상담만 삭제할 수 있습니다.",
+        );
+      }
+
+      if (consultation.softDeletedAt) {
+        return {
+          consultationId,
+          state: "closed" as const,
+          softDeletedAt: consultation.softDeletedAt.toISOString(),
+          softDeletedByUserId: consultation.softDeletedByUserId!,
+          replayed: true,
+        };
+      }
+
+      const [pendingTransfer] = await tx
+        .select({ id: consultationAssignmentTransfers.id })
+        .from(consultationAssignmentTransfers)
+        .where(
+          and(
+            eq(
+              consultationAssignmentTransfers.consultationId,
+              consultationId,
+            ),
+            eq(consultationAssignmentTransfers.status, "pending"),
+          ),
+        )
+        .limit(1);
+      if (pendingTransfer) {
+        throw new ConsultationSoftDeleteError(
+          "assignment_transfer_pending",
+          "담당자 변경이 끝난 뒤 삭제할 수 있습니다.",
+        );
+      }
+
+      await tx
+        .update(consultations)
+        .set({
+          state: "closed",
+          closedAt: consultation.closedAt ?? deletedAt,
+          softDeletedAt: deletedAt,
+          softDeletedByUserId: actor.id,
+          updatedAt: deletedAt,
+        })
+        .where(eq(consultations.id, consultationId));
+
+      if (consultation.state !== "closed") {
+        await tx.insert(consultationStatusHistory).values({
+          id: createEventId(),
+          consultationId,
+          fromState: consultation.state,
+          toState: "closed",
+          reason: "staff_manual_soft_delete",
+          actorType: "staff",
+          actorId: actor.id,
+          changedAt: deletedAt,
+          createdAt: deletedAt,
+        });
+      }
+
+      const event: PlatformEvent = {
+        eventId: createEventId(),
+        eventType: "consultation.soft_deleted",
+        eventVersion: 1,
+        occurredAt: deletedAt.toISOString(),
+        producer: "lawand.gateway",
+        correlationId: consultationId,
+        data: {
+          consultationId,
+          deletedByUserId: actor.id,
+          deletionKind: "staff_manual_soft_delete",
+        },
+      };
+      assertPlatformEvent(event);
+      await tx.insert(outboxEvents).values(eventRow(event));
+      await tx.insert(staffAuditLogs).values({
+        id: createEventId(),
+        actorUserId: actor.id,
+        action: "consultation.soft_deleted",
+        targetType: "consultation",
+        targetId: consultationId,
+        metadata: {
+          firstRequestSource: firstRequest.source,
+          previousState: consultation.state,
+        },
+        occurredAt: deletedAt,
+        createdAt: deletedAt,
+      });
+
+      return {
+        consultationId,
+        state: "closed" as const,
+        softDeletedAt: deletedAt.toISOString(),
+        softDeletedByUserId: actor.id,
+        replayed: false,
+      };
+    });
+  }
+
   async function list(query: ConsultationListQuery) {
     const dateCondition = and(
       query.from
@@ -2975,6 +3144,7 @@ export function createConsultationService(options: {
       query.to ? lt(consultations.lastRequestedAt, query.to) : undefined,
     );
     const waitingCondition = and(
+      isNull(consultations.softDeletedAt),
       eq(consultations.state, "requested"),
       sql<boolean>`not exists (
         select 1
@@ -2983,13 +3153,18 @@ export function createConsultationService(options: {
           and ${kakaoHomepageEntries.status} = 'invalid'
       )`,
     );
-    const mineCondition = sql<boolean>`exists (
-      select 1
-      from ${consultationAssignments}
-      where ${consultationAssignments.consultationId} = ${consultations.id}
-        and ${consultationAssignments.assigneeUserId} = ${query.staffUserId}
-    )`;
-    const attentionCondition = sql<boolean>`(
+    const mineCondition = and(
+      isNull(consultations.softDeletedAt),
+      sql<boolean>`exists (
+        select 1
+        from ${consultationAssignments}
+        where ${consultationAssignments.consultationId} = ${consultations.id}
+          and ${consultationAssignments.assigneeUserId} = ${query.staffUserId}
+      )`,
+    );
+    const attentionCondition = and(
+      isNull(consultations.softDeletedAt),
+      sql<boolean>`(
       exists (
         select 1
         from ${consultationRequests}
@@ -3045,7 +3220,8 @@ export function createConsultationService(options: {
             'rejected'
           )
       )
-    )`;
+      )`,
+    );
     const todayCondition = sql<boolean>`(
       ${consultations.lastRequestedAt} >= (
         date_trunc('day', now() at time zone 'Asia/Seoul')
@@ -3111,8 +3287,10 @@ export function createConsultationService(options: {
       .where(inArray(consultationRequests.consultationId, ids))
       .orderBy(desc(consultationRequests.submittedAt));
     const latestByConsultation = new Map<string, (typeof requestRows)[number]>();
+    const firstByConsultation = new Map<string, (typeof requestRows)[number]>();
     const requestCounts = new Map<string, number>();
     for (const request of requestRows) {
+      firstByConsultation.set(request.consultationId, request);
       requestCounts.set(
         request.consultationId,
         (requestCounts.get(request.consultationId) ?? 0) + 1,
@@ -3295,6 +3473,11 @@ export function createConsultationService(options: {
           displayName: preferredName ?? consultation.anonymousLabel,
           contactChannel: consultation.contactChannel,
           phone,
+          softDeletedAt: consultation.softDeletedAt?.toISOString() ?? null,
+          softDeletedByUserId: consultation.softDeletedByUserId,
+          staffCreated: ["erp_staff", "erp_client_directory"].includes(
+            firstByConsultation.get(consultation.id)?.source ?? "",
+          ),
           latestSource: request?.source ?? "homepage",
           residenceRegion: residenceRegion.success
             ? residenceRegion.data
@@ -3348,8 +3531,9 @@ export function createConsultationService(options: {
           existingCustomer,
           requiresLegalFriendsReview:
             existingCustomer &&
+            item.softDeletedAt === null &&
             item.state === "requested" &&
-            latestSource === "homepage" &&
+            requiresLegalFriendsHandling(latestSource) &&
             !directorySourceIds.has(item.id) &&
             !handlingIds.has(item.id),
         };
@@ -3820,6 +4004,7 @@ export function createConsultationService(options: {
       ? await legalFriendsCustomerMatches(latestPhone)
       : [];
     const latestRequestSource = requestRows[0]?.source ?? null;
+    const firstRequestSource = requestRows.at(-1)?.source ?? null;
 
     return {
       id: consultation.id,
@@ -3827,11 +4012,17 @@ export function createConsultationService(options: {
       state: consultation.state,
       displayName: preferredName ?? consultation.anonymousLabel,
       contactChannel: consultation.contactChannel,
+      softDeletedAt: consultation.softDeletedAt?.toISOString() ?? null,
+      softDeletedByUserId: consultation.softDeletedByUserId,
+      staffCreated: ["erp_staff", "erp_client_directory"].includes(
+        firstRequestSource ?? "",
+      ),
       existingCustomer: legalFriendsMatches.length > 0,
       requiresLegalFriendsReview:
         legalFriendsMatches.length > 0 &&
+        consultation.softDeletedAt === null &&
         consultation.state === "requested" &&
-        latestRequestSource === "homepage" &&
+        requiresLegalFriendsHandling(latestRequestSource) &&
         !directorySourceRow &&
         !legalFriendsHandling,
       legalFriendsMatches,
@@ -4137,6 +4328,7 @@ export function createConsultationService(options: {
     invalidateLegalFriendsCase,
     invalidateKakaoHomepageEntry,
     list,
+    softDeleteStaffConsultation,
     submit,
     submitSelfDiagnosis,
     submitKakao,

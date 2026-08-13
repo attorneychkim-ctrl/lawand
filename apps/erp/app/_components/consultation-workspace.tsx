@@ -191,6 +191,9 @@ function ChannelIcon({ tone }: { tone: ReturnType<typeof channelTone> }) {
 function StatusBadges({ item }: { item: ConsultationListItem }) {
   return (
     <div className="consultation-flags">
+      {item.softDeletedAt ? (
+        <span className="flag-badge is-danger">삭제됨</span>
+      ) : null}
       {item.existingCustomer ? (
         <span className="flag-badge is-existing">기존고객</span>
       ) : null}
@@ -502,9 +505,16 @@ export function ConsultationWorkspace({
             {filtered.map((consultation) => {
               const tone = channelTone(consultation);
               return (
-                <li className="consultation-row" key={consultation.id}>
+                <li
+                  className={`consultation-row${consultation.softDeletedAt ? " is-soft-deleted" : ""}`}
+                  key={consultation.id}
+                >
                   <Link
-                    aria-label={`${consultation.displayName} 상담 상세 보기`}
+                    aria-label={
+                      consultation.softDeletedAt
+                        ? "삭제된 상담 상세 보기"
+                        : `${consultation.displayName} 상담 상세 보기`
+                    }
                     className="consultation-row-link"
                     href={`/consultations/${consultation.id}`}
                   >
@@ -512,7 +522,7 @@ export function ConsultationWorkspace({
                       <ChannelIcon tone={tone} />
                     </span>
                     <span className="consultation-row-main">
-                      <span className="consultation-row-title">
+                      <span className="consultation-row-title consultation-row-sensitive">
                         <strong>{consultation.displayName}</strong>
                         <span
                           className={`consultation-region-badge${
@@ -531,7 +541,7 @@ export function ConsultationWorkspace({
                           {stateLabels[consultation.state] ?? consultation.state}
                         </span>
                       </span>
-                      <span className="consultation-row-contact">
+                      <span className="consultation-row-contact consultation-row-sensitive">
                         {consultation.phone
                           ? formatPhone(consultation.phone)
                           : "전화번호 미수집"}
@@ -556,6 +566,7 @@ export function ConsultationWorkspace({
                     </svg>
                   </Link>
                   {consultation.state === "requested" &&
+                  !consultation.softDeletedAt &&
                   !consultation.requiresLegalFriendsReview &&
                   (consultation.kakaoEntry?.status !== "pending" ||
                     consultation.kakaoEntry.nameProvided) ? (

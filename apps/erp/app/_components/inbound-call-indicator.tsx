@@ -38,7 +38,11 @@ type IndicatorToast = {
   body: string;
   href?: string;
   consultation?: ConsultationNotificationSummary;
-  consultationKind?: "new" | "repeat_unassigned" | "repeat_assigned";
+  consultationKind?:
+    | "new"
+    | "repeat_unassigned"
+    | "repeat_assigned"
+    | "assignment_transferred";
   claimStatus?: "idle" | "claiming" | "failed";
   claimError?: string;
 };
@@ -1267,6 +1271,8 @@ export function InboundCallIndicator({
                     <span className="consultation-alert-kicker">
                       {toast.consultationKind === "repeat_assigned"
                         ? "담당 상담 재요청"
+                        : toast.consultationKind === "assignment_transferred"
+                          ? "새 담당 상담"
                         : toast.consultationKind === "repeat_unassigned"
                           ? "상담 재요청"
                           : "새 상담 접수"}

@@ -94,6 +94,14 @@ const duplicateSuspectedDataSchema = z
   })
   .strict();
 
+const softDeletedDataSchema = z
+  .object({
+    consultationId: z.uuid(),
+    deletedByUserId: z.uuid(),
+    deletionKind: z.literal("staff_manual_soft_delete"),
+  })
+  .strict();
+
 const assignmentReferenceDataSchema = z
   .object({
     consultationId: z.uuid(),
@@ -303,6 +311,13 @@ export const consultationDuplicateSuspectedEventSchema = eventEnvelopeSchema
   })
   .strict();
 
+export const consultationSoftDeletedEventSchema = eventEnvelopeSchema
+  .extend({
+    eventType: z.literal("consultation.soft_deleted"),
+    data: softDeletedDataSchema,
+  })
+  .strict();
+
 export const consultationAssignedEventSchema = eventEnvelopeSchema
   .extend({
     eventType: z.literal("consultation.assigned"),
@@ -409,6 +424,7 @@ export const platformEventSchema = z.discriminatedUnion("eventType", [
   consultationRequestedEventSchema,
   consultationRequestUpdatedEventSchema,
   consultationDuplicateSuspectedEventSchema,
+  consultationSoftDeletedEventSchema,
   consultationAssignedEventSchema,
   consultationAssignmentTransferredEventSchema,
   consultationKakaoChatConfirmedEventSchema,
@@ -430,6 +446,9 @@ export type ConsultationRequestUpdatedEvent = z.infer<
 >;
 export type ConsultationDuplicateSuspectedEvent = z.infer<
   typeof consultationDuplicateSuspectedEventSchema
+>;
+export type ConsultationSoftDeletedEvent = z.infer<
+  typeof consultationSoftDeletedEventSchema
 >;
 export type ConsultationAssignedEvent = z.infer<
   typeof consultationAssignedEventSchema

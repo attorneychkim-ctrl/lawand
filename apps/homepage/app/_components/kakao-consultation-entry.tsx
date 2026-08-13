@@ -9,10 +9,45 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import type { ResidenceRegion } from "@lawand/core";
+
 import { getConsultationAttributionForCta } from "./journey-tracker";
 
-const KAKAO_ENTRY_STORAGE_KEY = "lawand.bank.kakao-entry.v2";
+const KAKAO_ENTRY_STORAGE_KEY = "lawand.bank.kakao-entry.v4";
 const KAKAO_ENTRY_REUSE_MS = 30 * 60 * 1_000;
+
+const RESIDENCE_REGION_OPTIONS: Array<{
+  value: ResidenceRegion;
+  label: string;
+}> = [
+  { value: "seoul", label: "서울" },
+  { value: "busan", label: "부산" },
+  { value: "daegu", label: "대구" },
+  { value: "incheon", label: "인천" },
+  { value: "gwangju", label: "광주" },
+  { value: "daejeon", label: "대전" },
+  { value: "ulsan", label: "울산" },
+  { value: "sejong", label: "세종" },
+  { value: "gyeonggi", label: "경기" },
+  { value: "gangwon", label: "강원" },
+  { value: "chungbuk", label: "충북" },
+  { value: "chungnam", label: "충남" },
+  { value: "jeonbuk", label: "전북" },
+  { value: "jeonnam", label: "전남" },
+  { value: "gyeongbuk", label: "경북" },
+  { value: "gyeongnam", label: "경남" },
+  { value: "jeju", label: "제주" },
+  { value: "overseas_or_other", label: "해외·기타" },
+];
+
+function formatPhone(value: string) {
+  const digits = value.replace(/\D/g, "").slice(0, 11);
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 7) {
+    return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+  }
+  return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
+}
 
 function entryIdempotencyKey(): string {
   try {
@@ -56,9 +91,15 @@ export function KakaoConsultationEntry({
 }) {
   const [open, setOpen] = useState(false);
   const [displayName, setDisplayName] = useState("");
+  const [residenceRegion, setResidenceRegion] = useState<
+    ResidenceRegion | ""
+  >("");
+  const [phone, setPhone] = useState("");
   const dialogTitleId = useId();
   const dialogDescriptionId = useId();
   const displayNameId = useId();
+  const residenceRegionId = useId();
+  const phoneId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const displayNameRef = useRef<HTMLInputElement>(null);
@@ -83,7 +124,7 @@ export function KakaoConsultationEntry({
 
       const focusable = [
         ...(dialogRef.current?.querySelectorAll<HTMLElement>(
-          'a[href], button:not([disabled]), input:not([disabled])',
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled])',
         ) ?? []),
       ];
       const first = focusable[0];
@@ -157,6 +198,10 @@ export function KakaoConsultationEntry({
               displayNameRef.current?.reportValidity();
               return;
             }
+            if (!residenceRegion) {
+              event.preventDefault();
+              return;
+            }
             if (idempotencyInput.current) {
               idempotencyInput.current.value = entryIdempotencyKey();
             }
@@ -193,18 +238,81 @@ export function KakaoConsultationEntry({
             type="text"
             value={displayName}
           />
+          <label htmlFor={residenceRegionId}>
+            거주 지역 <span>필수</span>
+          </label>
+          <select
+            id={residenceRegionId}
+            name="residenceRegion"
+            onChange={(event) =>
+              setResidenceRegion(event.target.value as ResidenceRegion | "")
+            }
+            required
+            value={residenceRegion}
+          >
+            <option value="">시·도 선택</option>
+            {RESIDENCE_REGION_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <label htmlFor={phoneId}>
+            휴대전화 번호
+            <span className="is-optional">선택 · 입력하지 않으셔도 돼요</span>
+          </label>
+          <input
+            autoComplete="tel"
+            id={phoneId}
+            inputMode="numeric"
+            maxLength={13}
+            name="phone"
+            onChange={(event) =>
+              setPhone(event.target.value.replace(/\D/g, "").slice(0, 11))
+            }
+            pattern="010-[0-9]{4}-[0-9]{4}"
+            placeholder="010-0000-0000"
+            type="tel"
+            value={formatPhone(phone)}
+          />
           <p className="kakao-entry-modal-help">
-            확인을 누르면 이 이름으로 상담이 접수되고 카카오톡 채팅방이 새로
-            열립니다. 전화번호와 카카오 사용자 ID는 홈페이지에서 수집하지
-            않습니다.
+            버튼을 누르면 이 이름과 거주 지역으로 상담이 접수되고 카카오톡
+            채팅방이 새로 열립니다. 전화번호를 남기면 상담원이 더 빠르게 고객을
+            확인할 수 있지만, 입력하지 않으셔도 카카오 상담을 이용할 수 있어요.
           </p>
           <p className="kakao-entry-modal-privacy">
-            입력한 이름은 상담 확인을 위해 암호화해 보관합니다. 자세한 내용은{" "}
+            입력한 이름·거주 지역과 선택 입력한 전화번호는 상담 확인을 위해
+            암호화해 보관합니다. 카카오 사용자 ID와 메시지 원문은 홈페이지에서
+            받지 않습니다. 자세한 내용은{" "}
             <a href="/privacy" rel="noopener noreferrer" target="_blank">
               개인정보처리방침
             </a>
             에서 확인할 수 있습니다.
           </p>
+
+          <aside
+            aria-label="카카오톡 상담 접수 안내"
+            className="kakao-entry-modal-message-guide"
+          >
+            <strong>꼭 확인해 주세요</strong>
+            <p>
+              카카오톡 채팅방이 열리기만 하면 상담원에게 접수되지 않아요.
+            </p>
+            <p>
+              카카오톡으로 이동한 뒤 아래 문장을 메시지로 한 번 보내주세요.
+            </p>
+            <p className="kakao-entry-modal-message-example">
+              <strong>
+                {displayName.trim()
+                  ? `“홈페이지에 입력한 이름은 ${displayName.trim()}입니다. 상담 요청합니다.”`
+                  : "이름을 입력하면 보낼 문장이 여기에 표시됩니다."}
+              </strong>
+            </p>
+            <p>
+              입력한 이름을 함께 보내야 채팅방 이름이 달라도 상담원이 고객님의
+              상담 요청을 확인할 수 있어요.
+            </p>
+          </aside>
 
           <div className="kakao-entry-modal-actions">
             <button
@@ -216,12 +324,15 @@ export function KakaoConsultationEntry({
             </button>
             <button
               className="kakao-entry-modal-submit"
-              disabled={!displayName.trim()}
+              disabled={!displayName.trim() || !residenceRegion}
               type="submit"
             >
-              확인하고 카카오톡 열기
+              카카오톡 열고 상담 메시지 보내기
             </button>
           </div>
+          <p className="kakao-entry-modal-submit-note">
+            카카오톡이 열리면 채팅방에서 메시지를 꼭 보내주세요.
+          </p>
         </form>
       </section>
     </div>

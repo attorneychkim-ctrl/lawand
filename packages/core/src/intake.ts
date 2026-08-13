@@ -28,7 +28,7 @@ export const residenceRegionSchema = z.enum([
   "overseas_or_other",
 ]);
 
-const phoneSchema = z
+export const consultationPhoneSchema = z
   .string()
   .trim()
   .transform((value) => value.replace(/\D/g, ""))
@@ -72,7 +72,7 @@ export const consultationSubmissionSchema = z
     source: z.literal("homepage").default("homepage"),
     idempotencyKey: z.uuid(),
     mode: consultationModeSchema,
-    phone: phoneSchema,
+    phone: consultationPhoneSchema,
     name: z.string().trim().min(1).max(30).optional(),
     contact: z.discriminatedUnion("preference", [
       asapContactSchema,

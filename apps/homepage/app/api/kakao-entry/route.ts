@@ -49,6 +49,8 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const idempotencyValue = formData.get("idempotencyKey");
     const displayNameValue = formData.get("displayName");
+    const residenceRegionValue = formData.get("residenceRegion");
+    const phoneValue = formData.get("phone");
     const parsed = kakaoHomepageEntrySubmissionSchema.safeParse({
       source: "homepage_kakao",
       idempotencyKey:
@@ -57,6 +59,12 @@ export async function POST(request: Request) {
           : randomUUID(),
       displayName:
         typeof displayNameValue === "string" ? displayNameValue : "",
+      residenceRegion:
+        typeof residenceRegionValue === "string" ? residenceRegionValue : "",
+      phone:
+        typeof phoneValue === "string" && phoneValue.trim()
+          ? phoneValue
+          : undefined,
       attribution: parseAttribution(formData.get("attribution")),
     });
     if (!parsed.success) {
@@ -70,7 +78,8 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error: "invalid_kakao_entry",
-          message: "이름 또는 카카오톡 표시명을 입력해 주세요.",
+          message:
+            "이름 또는 카카오톡 표시명과 거주 지역을 확인해 주세요. 전화번호를 입력했다면 010 휴대전화 번호인지 확인해 주세요.",
         },
         { status: 400 },
       );

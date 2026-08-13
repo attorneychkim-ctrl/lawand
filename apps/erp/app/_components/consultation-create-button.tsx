@@ -242,7 +242,7 @@ export function ConsultationCreateButton() {
             <p className="section-kicker">NEW CONSULTATION</p>
             <h2 id={titleId}>신규상담 등록</h2>
             <p>
-              직원이 접수한 상담도 신규 요청과 동일하게 알림을 보내고 상담 작업 큐에 등록합니다.
+              직원이 접수한 상담도 최초 알림톡을 보내고 작업 큐에 등록합니다. 최근 같은 고객은 기존 상담에 묶고, 리걸프렌즈 고객이면 담당 배정 전에 처리 방법을 확인합니다.
             </p>
           </div>
           <button
