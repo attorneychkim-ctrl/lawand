@@ -71,6 +71,24 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-13 — ERP 상담 네이티브 브라우저 알림 보강 후보
+- 상담 SSE와 인증된 최소 조회는 유지하면서 네이티브 알림 표시를 전용 서비스 워커로
+  보강했다. 제목은 신규·배정 전 재요청·담당 상담 재요청과 고객명을 구분하고, 본문에는
+  채널·접수번호와 전화·광역지역을 두 줄로 표시한다. LAW& 전용 icon·단색 badge, 상담 ID별
+  교체 tag·event ID 안전 닫힘·10초 자동 닫힘을 적용했다. 페이지 카드도 재요청을 더 이상
+  `새 상담 접수`로 잘못 표시하지 않는다.
+- 지원 브라우저는 persistent Notification에 `상담 보기`와 `상담데스크` 두 안전한 이동
+  액션을 표시한다. 알림 본체와 상담 보기 액션은 기존 ERP 창을 상담 상세로 이동·포커스하고,
+  상담데스크 액션은 목록을 연다. 직접 담당 배정은 오클릭 위험 때문에 넣지 않았다. 서비스
+  워커 등록·표시가 실패하거나 액션을 지원하지 않는 환경은 기존 페이지 Notification으로
+  자동 대체한다. `localStorage` 쓰기가 막혀도 현재 탭의 네이티브 알림 시도를 중단하지 않는다.
+- ERP typecheck·lint·production build, 서비스 워커 `node --check`, `git diff --check`를
+  통과했다. 로컬 production 서버에서 서비스 워커는 `application/javascript`, icon·badge
+  PNG는 `image/png` 200과 `max-age=0`으로 제공됐다. DB migration·gateway 변경은 없다.
+  이 서비스 워커에는 Push 구독·서버 발송이 없으므로 ERP 탭을 완전히 닫은 상태의 알림은
+  아직 보장하지 않는다. 실제 OS 알림·브라우저별 액션 실기기 canary, main 병합과 운영
+  배포는 이 워크트리에서 수행하지 않았다. `PROJECT_PLAN.md`는 v1.26이다.
+
 ### 2026-08-13 — 상담 재요청·리걸프렌즈 연락처 처리 gateway/ERP 운영 배포
 - `HERDR_ENV=1`에서 main과 HERDR worktree 8개, 원격 `origin/worktree/*` 26개를 전수
   대조했다. 모든 원격 HEAD가 이미 `main`의 ancestor였고, 배포 소스

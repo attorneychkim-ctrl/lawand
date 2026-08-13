@@ -11,6 +11,10 @@ import type {
   TelephonyInboundCall,
   TelephonyInboundCallSnapshot,
 } from "../../lib/gateway";
+import {
+  prepareBrowserNotifications,
+  showConsultationBrowserNotification,
+} from "./browser-notification";
 import { notificationPermissionChangedEvent } from "./browser-notification-toggle";
 import { subscribeConsultationRealtime } from "./consultation-realtime";
 import { PhoneAftercareDialog } from "./phone-aftercare-form";
@@ -34,6 +38,7 @@ type IndicatorToast = {
   body: string;
   href?: string;
   consultation?: ConsultationNotificationSummary;
+  consultationKind?: "new" | "repeat_unassigned" | "repeat_assigned";
   claimStatus?: "idle" | "claiming" | "failed";
   claimError?: string;
 };
@@ -332,6 +337,7 @@ export function InboundCallIndicator({
       );
     };
     synchronizeNotificationPermission();
+    void prepareBrowserNotifications()?.catch(() => undefined);
     window.addEventListener(
       notificationPermissionChangedEvent,
       synchronizeNotificationPermission,
@@ -353,13 +359,17 @@ export function InboundCallIndicator({
         lease.expiresAt <= current ||
         lease.tabId === notificationTabId.current
       ) {
-        window.localStorage.setItem(
-          leaseKey,
-          JSON.stringify({
-            tabId: notificationTabId.current,
-            expiresAt: current + 8_000,
-          }),
-        );
+        try {
+          window.localStorage.setItem(
+            leaseKey,
+            JSON.stringify({
+              tabId: notificationTabId.current,
+              expiresAt: current + 8_000,
+            }),
+          );
+        } catch {
+          // 저장소가 막혀도 이 탭의 네이티브 알림 자체는 계속 시도한다.
+        }
         notificationLeader.current = true;
       } else {
         notificationLeader.current = false;
@@ -774,8 +784,8 @@ export function InboundCallIndicator({
           : "새 상담이 등록됐습니다";
         const body = consultation
           ? [
-              consultationPhoneLabel(consultation),
-              `거주지역 ${consultationRegionLabel(consultation)}`,
+              `${consultationChannelLabels[consultation.contactChannel]} · ${consultation.publicReceiptCode}`,
+              `${consultationPhoneLabel(consultation)} · ${consultationRegionLabel(consultation)}`,
             ].join("\n")
           : "상담 데스크에서 접수 내용을 확인해 주세요.";
 
@@ -786,7 +796,11 @@ export function InboundCallIndicator({
             body,
             href,
             ...(consultation
-              ? { consultation, claimStatus: "idle" as const }
+              ? {
+                  consultation,
+                  consultationKind: payload.notificationKind ?? "new",
+                  claimStatus: "idle" as const,
+                }
               : {}),
           });
         }
@@ -803,24 +817,14 @@ export function InboundCallIndicator({
           // 저장소가 막힌 브라우저에서도 Notification API는 별도로 시도한다.
         }
         if (alreadyNotified) return;
-        try {
-          const notification = new Notification(title, {
-            body,
-            tag: notificationKey,
-          });
-          const closeTimer = window.setTimeout(
-            () => notification.close(),
-            10_000,
-          );
-          notification.onclick = () => {
-            window.clearTimeout(closeTimer);
-            window.focus();
-            window.location.assign(href);
-            notification.close();
-          };
-        } catch {
-          // Notification API가 막힌 환경에서도 페이지 토스트는 유지한다.
-        }
+        await showConsultationBrowserNotification({
+          title,
+          body,
+          eventId: payload.eventId,
+          consultationId: payload.consultationId,
+          href,
+          occurredAt: payload.occurredAt,
+        });
       })();
     });
     return () => {
@@ -1258,7 +1262,11 @@ export function InboundCallIndicator({
                 <header className="consultation-alert-heading">
                   <div>
                     <span className="consultation-alert-kicker">
-                      새 상담 접수
+                      {toast.consultationKind === "repeat_assigned"
+                        ? "담당 상담 재요청"
+                        : toast.consultationKind === "repeat_unassigned"
+                          ? "상담 재요청"
+                          : "새 상담 접수"}
                     </span>
                     <span className="consultation-alert-channel">
                       {consultationChannelLabels[consultation.contactChannel]}
