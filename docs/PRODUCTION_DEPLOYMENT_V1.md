@@ -103,7 +103,7 @@ Route 53·AWS 설정은 이 rollback의 대상이 아니다. 구 WordPress는 4.
 
 ## RDS 기준선
 
-- PostgreSQL `16.14`, `db.t4g.small`, 단일 AZ
+- PostgreSQL `16.14`, `db.t4g.xlarge`, 단일 AZ
 - gp3 30GB, 최대 100GB 자동 확장
 - 저장소 암호화, Performance Insights 7일, PostgreSQL 로그 내보내기
 - 자동 백업 7일, 시점 복구 활성화, 삭제 방지 활성화
@@ -127,6 +127,16 @@ Route 53·AWS 설정은 이 rollback의 대상이 아니다. 구 WordPress는 4.
 
 단일 AZ는 초기 비용·운영 복잡도를 낮춘 선택이다. 광고 트래픽을 본격 전환하기 전
 Multi-AZ 전환, 수동 스냅샷, 실제 복원 훈련과 경보 통지 연결을 완료한다.
+
+2026-08-13 16:45~17:38 KST에는 전화번호 디렉터리 일괄조회가 RDS CPU를 반복적으로
+99%까지 사용하고 gateway 요청 풀 대기를 최대 523개까지 만들면서 ERP가 server error를
+표시했다. EC2와 RDS 상태 자체는 정상이었지만 `db.t4g.small`의 2 vCPU가 실제 동시 조회를
+처리하지 못했다. gateway·ERP 재기동만으로 부하가 재발해 사용자 승인 아래 RDS를
+`db.t4g.xlarge`로 즉시 상향했다. 17:39:13에 기존 DB가 정상 종료됐고 17:42:25에 클래스
+변경, 17:43:35에 `available` 복귀를 확인했다. CloudFormation 변경 세트
+`lawand-rds-xlarge-baseline-20260813t0844z`는 `Database.DBInstanceClass` 한 항목만
+교체 없이 수정했고 스택은 `UPDATE_COMPLETE`다. 이후 gateway 요청 풀 대기 0과 정식
+gateway·ERP HTTPS 200을 확인했다. 앱·migration·운영 데이터와 통화 원장은 변경하지 않았다.
 
 ## 운영 DB에 이관한 범위
 

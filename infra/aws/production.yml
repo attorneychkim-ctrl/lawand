@@ -16,7 +16,7 @@ Parameters:
     Default: t4g.medium
   DatabaseInstanceClass:
     Type: String
-    Default: db.t4g.small
+    Default: db.t4g.xlarge
   DatabaseEngineVersion:
     Type: String
     Default: "16.14"

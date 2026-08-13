@@ -71,6 +71,25 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-13 — gateway/RDS CPU 긴급 복구·RDS xlarge 상향
+- 16:45~17:38 KST 운영 RDS CPU가 반복적으로 99%까지 상승하고 gateway 요청 풀 대기가
+  최대 523개까지 쌓여 ERP가 server error 화면을 표시했다. EC2와 RDS 상태 자체는
+  running/available이었고, Performance Insights의 주 부하는 다건 전화번호 후보마다
+  `resolve_inbound_phone_directory`를 실행하는 gateway 일괄조회였다. CB 디렉터리 동기화
+  DDL도 같은 구간에 있었지만 부하 비중은 작았다.
+- gateway와 ERP를 재기동해 일시 복구했으나 20개 요청 연결이 다시 점유돼 CPU 포화가
+  재발했다. 사용자가 통화 중 세션을 배포 차단 조건에서 제외하고 RDS xlarge 상향을 명시
+  승인해 `db.t4g.small`(2 vCPU)에서 `db.t4g.xlarge`(4 vCPU)로 즉시 변경했다. DB는
+  17:39:13 정상 종료, 17:42:25 클래스 변경 완료, 17:43:35 available로 복귀했다.
+- CloudFormation 변경 세트 `lawand-rds-xlarge-baseline-20260813t0844z`는 Database의
+  `DBInstanceClass` 한 항목만 replacement 없이 수정했고 스택은 `UPDATE_COMPLETE`다.
+  실제 RDS와 스택 파라미터가 모두 xlarge로 일치하며, gateway 요청 풀 대기 0·LISTEN 3/4,
+  정식 gateway·ERP HTTPS 200을 연속 확인했다. 앱·migration·운영 데이터와 통화 원장은
+  변경하지 않았다. 다건 전화번호 해석 쿼리 자체의 최적화는 후속 과제다.
+- `infra/aws/production.yml` 기본값과 운영 문서·`PROJECT_PLAN.md` v1.33을 xlarge 기준으로
+  갱신했다. 이 워크트리에서는 사용자 명시 요청에 따른 긴급 운영 복구와 해당 문서화만
+  수행했고 main 병합·앱 배포는 하지 않는다.
+
 ### 2026-08-13 — 직원 대량 추가 중 gateway DB 풀·bridge 큐 긴급 복구
 - 직원 센트릭스 회선을 연속 추가하던 15:40 KST부터 새 callback 등록·과거 이력 보강과 ERP
   전화 snapshot 재조회가 겹쳤다. 전화번호 250개를
