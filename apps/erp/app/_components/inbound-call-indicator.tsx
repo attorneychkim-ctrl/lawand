@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 import type {
   PhoneDeskCallSnapshot,
@@ -257,7 +258,23 @@ function outboundCopy(call: PhoneDeskCall) {
   return { label: "발신 확인 중", description: "센트릭스 결과를 확인하고 있어요" };
 }
 
-function notificationCopy(activity: TelephonyCallActivity) {
+function isMyCustomer(
+  activity: TelephonyCallActivity,
+  staffUserId: string,
+) {
+  const customer = activity.customerMatch;
+  if (customer?.source === "consultation") {
+    return customer.consultation.assigneeUserId === staffUserId;
+  }
+  return customer?.source === "legal_friends"
+    ? customer.cases.some((item) => item.staffUserIds.includes(staffUserId))
+    : false;
+}
+
+function notificationCopy(
+  activity: TelephonyCallActivity,
+  staffUserId: string,
+) {
   const kindLabel =
     activity.notificationKind === "transferred_customer"
       ? "전달된 고객 전화"
@@ -273,6 +290,8 @@ function notificationCopy(activity: TelephonyCallActivity) {
       ? customer.clientName
       : "발신자 정보 없음";
   const details: string[] = [];
+  const myCustomer = isMyCustomer(activity, staffUserId);
+  if (myCustomer) details.push("★ 내가 담당하는 고객입니다");
   if (customer?.source === "consultation") {
     details.push(
       `상담데스크 · ${customer.consultation.publicReceiptCode} · ${consultationStateLabels[customer.consultation.state] ?? customer.consultation.state}`,
@@ -321,7 +340,12 @@ function notificationCopy(activity: TelephonyCallActivity) {
   if (activity.notificationKind === "transferred_customer" && participantNames.length) {
     details.push(`전달 ${participantNames.join(" → ")}`);
   }
-  return { title: `${kindLabel} · ${customerName}`, body: details.join("\n") };
+  return {
+    title: myCustomer
+      ? `★ 내 담당 고객 전화 · ${customerName}`
+      : `${kindLabel} · ${customerName}`,
+    body: details.join("\n"),
+  };
 }
 
 export function InboundCallIndicator({
@@ -331,6 +355,8 @@ export function InboundCallIndicator({
   staffDisplayName: string;
   staffUserId: string;
 }) {
+  const pathname = usePathname();
+  const showPhoneDeskStatus = pathname.startsWith("/phone-desk");
   const [calls, setCalls] = useState<TelephonyInboundCall[]>([]);
   const [activities, setActivities] = useState<TelephonyCallActivity[]>([]);
   const [deskCalls, setDeskCalls] = useState<PhoneDeskCall[]>([]);
@@ -602,6 +628,10 @@ export function InboundCallIndicator({
   }, []);
 
   useEffect(() => {
+    if (!showPhoneDeskStatus) {
+      setCalls([]);
+      return;
+    }
     let disposed = false;
     void refresh().catch(() => {
       if (!disposed) setConnection("disconnected");
@@ -631,45 +661,46 @@ export function InboundCallIndicator({
       stream.removeEventListener("telephony.inbound.changed", handleChange);
       stream.close();
     };
-  }, [refresh]);
+  }, [refresh, showPhoneDeskStatus]);
 
-  const refreshDirectOutboundAftercare = useCallback(async () => {
+  const refreshCallActivities = useCallback(async () => {
     const sequence = ++deskRequestSequence.current;
-    const [response, activityResponse] = await Promise.all([
-      fetch("/api/phone-desk/calls?pageSize=100", {
-        cache: "no-store",
-        headers: { accept: "application/json" },
-      }),
-      fetch("/api/telephony-call-activities", {
-        cache: "no-store",
-        headers: { accept: "application/json" },
-      }),
-    ]);
-    if (!response.ok || !activityResponse.ok) {
+    const response = await fetch("/api/telephony-call-activities", {
+      cache: "no-store",
+      headers: { accept: "application/json" },
+    });
+    if (!response.ok) {
       throw new Error("telephony_desk_sync_failed");
     }
-    const [snapshot, activitySnapshot] = await Promise.all([
-      response.json() as Promise<PhoneDeskCallSnapshot>,
-      activityResponse.json() as Promise<TelephonyCallActivitySnapshot>,
-    ]);
-    if (
-      !Array.isArray(snapshot.items) ||
-      typeof snapshot.snapshotAt !== "string" ||
-      sequence !== deskRequestSequence.current
-    ) {
-      if (sequence === deskRequestSequence.current) {
-        throw new Error("telephony_desk_sync_invalid");
-      }
-      return;
-    }
+    const activitySnapshot =
+      (await response.json()) as TelephonyCallActivitySnapshot;
     if (
       !Array.isArray(activitySnapshot.items) ||
-      typeof activitySnapshot.snapshotAt !== "string"
+      typeof activitySnapshot.snapshotAt !== "string" ||
+      sequence !== deskRequestSequence.current
     ) {
+      if (sequence !== deskRequestSequence.current) return;
       throw new Error("telephony_call_activity_sync_invalid");
     }
-    setDeskCalls(snapshot.items);
     setActivities(activitySnapshot.items);
+  }, []);
+
+  const refreshCurrentDeskCalls = useCallback(async () => {
+    if (!showPhoneDeskStatus) return;
+    const from = new Date(Date.now() - 12 * 60 * 60_000).toISOString();
+    const response = await fetch(
+      `/api/phone-desk/calls?pageSize=20&filter=active&from=${encodeURIComponent(from)}&to=${encodeURIComponent(new Date().toISOString())}`,
+      {
+        cache: "no-store",
+        headers: { accept: "application/json" },
+      },
+    );
+    if (!response.ok) throw new Error("telephony_current_calls_sync_failed");
+    const snapshot = (await response.json()) as PhoneDeskCallSnapshot;
+    if (!Array.isArray(snapshot.items) || typeof snapshot.snapshotAt !== "string") {
+      throw new Error("telephony_current_calls_sync_invalid");
+    }
+    setDeskCalls(snapshot.items);
 
     const candidates: string[] = [];
     for (const call of snapshot.items) {
@@ -692,14 +723,20 @@ export function InboundCallIndicator({
       candidates.push(call.id);
     }
     enqueueAftercareCalls(candidates);
-  }, [enqueueAftercareCalls, staffUserId]);
+  }, [enqueueAftercareCalls, showPhoneDeskStatus, staffUserId]);
 
   useEffect(() => {
     deskStartedAt.current = Date.now();
-    void refreshDirectOutboundAftercare().catch(() => undefined);
+    void refreshCallActivities().catch(() => undefined);
+    if (showPhoneDeskStatus) {
+      void refreshCurrentDeskCalls().catch(() => undefined);
+    }
     const stream = new EventSource("/api/phone-desk/stream");
     const handleChange = () => {
-      void refreshDirectOutboundAftercare().catch(() => undefined);
+      void refreshCallActivities().catch(() => undefined);
+      if (showPhoneDeskStatus) {
+        void refreshCurrentDeskCalls().catch(() => undefined);
+      }
     };
     stream.addEventListener("telephony.desk.sync", handleChange);
     stream.addEventListener("telephony.desk.changed", handleChange);
@@ -709,7 +746,7 @@ export function InboundCallIndicator({
       stream.removeEventListener("telephony.desk.changed", handleChange);
       stream.close();
     };
-  }, [refreshDirectOutboundAftercare]);
+  }, [refreshCallActivities, refreshCurrentDeskCalls, showPhoneDeskStatus]);
 
   useEffect(() => {
     if (!notificationLeader.current) return;
@@ -731,14 +768,17 @@ export function InboundCallIndicator({
       if (seenNotificationKeys.current.has(notificationKey)) continue;
       seenNotificationKeys.current.add(notificationKey);
       const storageKey = `lawand:telephony-notified:${notificationKey}`;
-      if (window.localStorage.getItem(storageKey)) continue;
-      window.localStorage.setItem(storageKey, String(current));
-      const copy = notificationCopy(activity);
-      enqueueToast({
-        id: notificationKey,
-        ...copy,
-        href: `/phone-desk/${activity.id}`,
-      });
+      let alreadyNotified = false;
+      try {
+        alreadyNotified = Boolean(window.localStorage.getItem(storageKey));
+        if (!alreadyNotified) {
+          window.localStorage.setItem(storageKey, String(current));
+        }
+      } catch {
+        // 저장소가 막힌 브라우저에서도 Notification API는 별도로 시도한다.
+      }
+      if (alreadyNotified) continue;
+      const copy = notificationCopy(activity, staffUserId);
       if (notificationPermission === "granted") {
         void showTelephonyBrowserNotification({
           ...copy,
@@ -749,7 +789,7 @@ export function InboundCallIndicator({
         });
       }
     }
-  }, [activities, enqueueToast, notificationPermission, staffUserId]);
+  }, [activities, notificationPermission, staffUserId]);
 
   useEffect(() => {
     let active = true;
@@ -866,14 +906,16 @@ export function InboundCallIndicator({
   }, [enqueueToast, notificationPermission, staffUserId]);
 
   useEffect(() => {
+    if (!showPhoneDeskStatus) return;
     if (!calls.some((call) => call.state === "ended")) return;
     const timer = window.setTimeout(() => {
       void refresh().catch(() => setConnection("disconnected"));
     }, 21_000);
     return () => window.clearTimeout(timer);
-  }, [calls, refresh]);
+  }, [calls, refresh, showPhoneDeskStatus]);
 
   useEffect(() => {
+    if (!showPhoneDeskStatus) return;
     const activityObservedIds = new Set(
       activities.flatMap((activity) =>
         activity.observedCallId ? [activity.observedCallId] : [],
@@ -892,7 +934,7 @@ export function InboundCallIndicator({
         .filter((activity) => activity.canOpenAftercare)
         .map((activity) => activity.id),
     );
-  }, [activities, calls, enqueueAftercareCalls, staffUserId]);
+  }, [activities, calls, enqueueAftercareCalls, showPhoneDeskStatus, staffUserId]);
 
   useEffect(() => {
     if (aftercareCallId || pendingAftercareCallIds.length === 0) return;
@@ -930,8 +972,15 @@ export function InboundCallIndicator({
           : new Date(call.lastEventAt).getTime() >=
             deskStartedAt.current - 20_000),
   );
-  const callCards = [
-    ...activities.map((activity) => ({
+  const visibleActivities = activities.filter(
+    (activity) =>
+      activity.scope === "external" ||
+      activity.participants.some(
+        (participant) => participant.staffUserId === staffUserId,
+      ),
+  );
+  const callCards = showPhoneDeskStatus ? [
+    ...visibleActivities.map((activity) => ({
       key: `activity:${activity.id}`,
       lastEventAt: activity.lastEventAt,
     })),
@@ -943,7 +992,7 @@ export function InboundCallIndicator({
       key: `legacy:${call.id}`,
       lastEventAt: call.lastEventAt,
     })),
-  ];
+  ] : [];
   const latestCallCardKey = callCards.reduce<string | null>(
     (latestKey, card) => {
       if (!latestKey) return card.key;
@@ -988,7 +1037,7 @@ export function InboundCallIndicator({
           </div>
         ) : null}
         <div className="inbound-call-strip-inner" id="current-call-activity-list">
-        {activities.filter((activity) =>
+        {visibleActivities.filter((activity) =>
           shouldDisplayCallCard(`activity:${activity.id}`)
         ).map((activity) => {
           const copy = activityCopy(activity, staffUserId);
@@ -1389,6 +1438,8 @@ export function InboundCallIndicator({
           }
           setAftercareCallId(null);
           void refresh();
+          void refreshCallActivities();
+          void refreshCurrentDeskCalls();
         }}
         open={Boolean(aftercareCallId)}
       />

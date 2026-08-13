@@ -862,6 +862,8 @@ type PagedDateOptions<TFilter extends string> = {
   filter?: TFilter;
   from?: string;
   to?: string;
+  search?: string;
+  includeFollowUps?: boolean;
 };
 
 function pagedDateParams<TFilter extends string>(
@@ -874,6 +876,8 @@ function pagedDateParams<TFilter extends string>(
   });
   if (options.from) params.set("from", options.from);
   if (options.to) params.set("to", options.to);
+  if (options.search) params.set("q", options.search);
+  if (options.includeFollowUps) params.set("includeFollowUps", "1");
   return params;
 }
 

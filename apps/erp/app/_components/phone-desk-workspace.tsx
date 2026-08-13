@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   ListPageSize,
@@ -11,18 +11,20 @@ import type {
   PhoneDeskListFilter,
 } from "../../lib/gateway";
 import {
-  ListDateControls,
   ListPagination,
-  listDateQuery,
-  type ListDateFilter,
 } from "./list-navigation";
 import { ClickToCallButton } from "./click-to-call-button";
 import { MessageComposeButton } from "./message-compose-button";
 
 type SourceFilter = PhoneDeskListFilter;
-type ConnectionState = "connecting" | "connected" | "disconnected";
 type FollowUpAssignee = { staffUserId: string; displayName: string };
 type CallAssignee = { staffUserId: string; displayName: string };
+type SearchCriteria = {
+  query: string;
+  filter: SourceFilter;
+  startDate: string;
+  endDate: string;
+};
 
 const UPLUS_HISTORY_DELAY_MS = 2 * 60 * 1_000;
 const allFollowUpAssignees: FollowUpAssignee = {
@@ -158,25 +160,6 @@ function caseTypeLabel(caseType: number) {
       : "기타사건";
 }
 
-function customerSearchText(call: PhoneDeskCall) {
-  if (call.scope === "internal") {
-    return call.participants
-      .flatMap((item) => [item.displayName ?? "", item.extension])
-      .join(" ");
-  }
-  const names = [
-    call.clickToCall?.consultation?.displayName,
-    call.clickToCall?.directoryClient?.displayName,
-  ];
-  const match = call.customerMatch;
-  if (match?.source === "consultation") {
-    names.push(match.consultation.displayName);
-  } else if (match?.source === "legal_friends") {
-    names.push(match.clientName);
-  }
-  return names.filter(Boolean).join(" ");
-}
-
 function callAssignees(call: PhoneDeskCall): CallAssignee[] {
   if (call.scope === "internal") {
     const seen = new Set<string>();
@@ -199,23 +182,6 @@ function callAssignees(call: PhoneDeskCall): CallAssignee[] {
   }
   if (call.clickToCall) return [call.clickToCall.requestedBy];
   return call.endpointOwners;
-}
-
-function matchesSourceFilter(call: PhoneDeskCall, filter: SourceFilter) {
-  if (filter === "all") return true;
-  if (filter === "active") {
-    return ["pending", "ringing", "connected"].includes(call.state);
-  }
-  return call.source === filter;
-}
-
-function matchesCustomerQuery(call: PhoneDeskCall, query: string) {
-  const normalizedQuery = query.replace(/\s/g, "").toLowerCase();
-  if (!normalizedQuery) return true;
-  const haystack = `${call.remotePhone} ${formatPhone(call.remotePhone)} ${customerSearchText(call)}`
-    .replace(/\s/g, "")
-    .toLowerCase();
-  return haystack.includes(normalizedQuery);
 }
 
 function CustomerSummary({ call }: { call: PhoneDeskCall }) {
@@ -344,12 +310,14 @@ export function PhoneDeskWorkspace({
 }) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [filter, setFilter] = useState<SourceFilter>("all");
-  const [page, setPage] = useState(initialSnapshot.page);
   const [pageSize, setPageSize] = useState<ListPageSize>(
     initialSnapshot.pageSize,
   );
-  const [dateFilter, setDateFilter] = useState<ListDateFilter>({ kind: "all" });
+  const [startDate, setStartDate] = useState(todayKey);
+  const [endDate, setEndDate] = useState(todayKey);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [hasSearched, setHasSearched] = useState(false);
   const [followUpAssigneeFilter, setFollowUpAssigneeFilter] = useState(
     currentStaff,
   );
@@ -357,8 +325,9 @@ export function PhoneDeskWorkspace({
     allCallAssignees,
   );
   const [query, setQuery] = useState("");
-  const [connection, setConnection] =
-    useState<ConnectionState>("connecting");
+  const [appliedCriteria, setAppliedCriteria] = useState<SearchCriteria | null>(
+    null,
+  );
   const [currentTime, setCurrentTime] = useState<number | null>(null);
   const [completingTaskIds, setCompletingTaskIds] = useState<Set<string>>(
     () => new Set(),
@@ -374,17 +343,25 @@ export function PhoneDeskWorkspace({
     };
   }, []);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (
+    criteria: SearchCriteria,
+    nextPage: number,
+    nextPageSize: ListPageSize,
+  ) => {
     await Promise.resolve();
     const sequence = ++requestSequence.current;
     setLoading(true);
+    setLoadError("");
     try {
       const params = new URLSearchParams({
-        page: String(page),
-        pageSize: String(pageSize),
-        filter,
-        ...listDateQuery(dateFilter),
+        page: String(nextPage),
+        pageSize: String(nextPageSize),
+        filter: criteria.filter,
+        includeFollowUps: "1",
+        from: `${criteria.startDate}T00:00:00+09:00`,
+        to: `${criteria.endDate}T23:59:59.999+09:00`,
       });
+      if (criteria.query) params.set("q", criteria.query);
       const response = await fetch(`/api/phone-desk/calls?${params}`, {
         cache: "no-store",
         headers: { accept: "application/json" },
@@ -403,42 +380,61 @@ export function PhoneDeskWorkspace({
         return;
       }
       setSnapshot(next);
-      if (next.page !== page) setPage(next.page);
+      setPageSize(next.pageSize);
+      setAppliedCriteria(criteria);
+      setCallAssigneeFilter(allCallAssignees);
+      setHasSearched(true);
+    } catch (error) {
+      setLoadError(
+        error instanceof Error && error.message === "phone_desk_sync_failed"
+          ? "전화 내역을 조회하지 못했습니다. 잠시 후 다시 시도해 주세요."
+          : "검색 조건을 확인해 주세요.",
+      );
     } finally {
       if (sequence === requestSequence.current) setLoading(false);
     }
-  }, [dateFilter, filter, page, pageSize]);
+  }, []);
 
-  useEffect(() => {
-    let disposed = false;
-    const initialSyncTimer = window.setTimeout(() => {
-      void refresh().catch(() => {
-        if (!disposed) setConnection("disconnected");
-      });
-    }, 0);
-    const stream = new EventSource("/api/phone-desk/stream");
-    const handleChange = () => {
-      void refresh().catch(() => {
-        if (!disposed) setConnection("disconnected");
-      });
-    };
-    stream.addEventListener("telephony.desk.sync", handleChange);
-    stream.addEventListener("telephony.desk.changed", handleChange);
-    stream.onopen = () => {
-      if (!disposed) setConnection("connected");
-    };
-    stream.onerror = () => {
-      if (!disposed) setConnection("disconnected");
-    };
-    return () => {
-      disposed = true;
-      window.clearTimeout(initialSyncTimer);
-      requestSequence.current += 1;
-      stream.removeEventListener("telephony.desk.sync", handleChange);
-      stream.removeEventListener("telephony.desk.changed", handleChange);
-      stream.close();
-    };
-  }, [refresh]);
+  const submitSearch = useCallback((event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const normalizedQuery = query.trim();
+    const isPhoneQuery = Boolean(normalizedQuery) &&
+      /^[0-9() +.-]+$/.test(normalizedQuery);
+    const phoneDigits = normalizedQuery.replace(/[^0-9]/g, "");
+    const compactName = normalizedQuery.replace(/\s/g, "");
+    if (
+      normalizedQuery &&
+      ((isPhoneQuery && (phoneDigits.length < 4 || phoneDigits.length > 15)) ||
+        (!isPhoneQuery && (compactName.length < 2 || compactName.length > 30)))
+    ) {
+      setLoadError(
+        isPhoneQuery
+          ? "전화번호는 숫자 4자리 이상 입력해 주세요."
+          : "고객명은 두 글자 이상 입력해 주세요.",
+      );
+      return;
+    }
+    if (!startDate || !endDate || startDate > endDate) {
+      setLoadError("조회 기간을 확인해 주세요.");
+      return;
+    }
+    const maximumEnd = new Date(`${startDate}T00:00:00Z`);
+    maximumEnd.setUTCDate(maximumEnd.getUTCDate() + 31);
+    if (new Date(`${endDate}T00:00:00Z`) >= maximumEnd) {
+      setLoadError("한 번에 최대 31일까지만 조회할 수 있습니다.");
+      return;
+    }
+    void refresh(
+      {
+        query: normalizedQuery,
+        filter,
+        startDate,
+        endDate,
+      },
+      1,
+      pageSize,
+    );
+  }, [endDate, filter, pageSize, query, refresh, startDate]);
 
   const completeFollowUp = useCallback(async (taskId: string) => {
     setCompletingTaskIds((current) => new Set(current).add(taskId));
@@ -453,7 +449,9 @@ export function PhoneDeskWorkspace({
       if (!response.ok) {
         throw new Error(body?.message ?? "재통화 업무를 완료하지 못했습니다.");
       }
-      await refresh();
+      if (appliedCriteria) {
+        await refresh(appliedCriteria, 1, pageSize);
+      }
     } catch (error) {
       window.alert(
         error instanceof Error
@@ -467,11 +465,10 @@ export function PhoneDeskWorkspace({
         return next;
       });
     }
-  }, [refresh]);
+  }, [appliedCriteria, pageSize, refresh]);
 
   const visibleItems = useMemo(() => {
     return snapshot.items.filter((call) => {
-      if (!matchesSourceFilter(call, filter)) return false;
       if (
         callAssigneeFilter.staffUserId !== "all" &&
         !callAssignees(call).some(
@@ -481,9 +478,9 @@ export function PhoneDeskWorkspace({
       ) {
         return false;
       }
-      return matchesCustomerQuery(call, query);
+      return true;
     });
-  }, [callAssigneeFilter.staffUserId, filter, query, snapshot.items]);
+  }, [callAssigneeFilter.staffUserId, snapshot.items]);
 
   const callAssigneeOptions = useMemo(() => {
     const assignees: CallAssignee[] = [];
@@ -535,41 +532,71 @@ export function PhoneDeskWorkspace({
 
   return (
     <section className="phone-desk-workspace">
-      <div className="phone-desk-metrics" aria-label="전화 원장 요약">
-        {([
-          ["all", "전체", snapshot.summary.all],
-          ["inbound", "수신", snapshot.summary.inbound],
-          ["click_to_call", "ERP 발신", snapshot.summary.clickToCall],
-          ["centrex_direct", "직접 발신", snapshot.summary.centrexDirect],
-          ["internal", "내선", snapshot.summary.internal],
-          ["active", "진행 중", snapshot.summary.active],
-        ] as const).map(([key, label, value]) => (
-          <button
-            aria-pressed={filter === key}
-            className={key === "active" && value ? "is-active" : undefined}
-            disabled={loading}
-            key={key}
-            onClick={() => {
-              setFilter(key);
-              setPage(1);
-            }}
-            type="button"
-          >
-            <span>{label}</span><strong>{value}</strong>
-          </button>
-        ))}
-      </div>
+      <form className="phone-desk-query" onSubmit={submitSearch}>
+        <div className="phone-desk-query-heading">
+          <div>
+            <p className="eyebrow">CALL SEARCH</p>
+            <h2>전화 내역 찾기</h2>
+          </div>
+          <span>검색하기 전에는 과거 전화 원장을 읽지 않습니다.</span>
+        </div>
+        <label className="phone-desk-search">
+          <span className="sr-only">리걸프렌즈 고객명 또는 전화번호 검색</span>
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <circle cx="11" cy="11" r="6.5" />
+            <path d="m16 16 4 4" />
+          </svg>
+          <input
+            autoComplete="off"
+            maxLength={30}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="리걸프렌즈 고객명 또는 전화번호"
+            type="search"
+            value={query}
+          />
+        </label>
+        <div className="phone-desk-query-dates">
+          <label>
+            <span>시작일</span>
+            <input
+              max={todayKey}
+              onChange={(event) => setStartDate(event.target.value)}
+              type="date"
+              value={startDate}
+            />
+          </label>
+          <label>
+            <span>종료일</span>
+            <input
+              max={todayKey}
+              min={startDate}
+              onChange={(event) => setEndDate(event.target.value)}
+              type="date"
+              value={endDate}
+            />
+          </label>
+        </div>
+        <div className="phone-desk-filters" role="group" aria-label="통화 구분">
+          {filters.filter((item) => item.key !== "active").map((item) => (
+            <button
+              aria-pressed={filter === item.key}
+              className={filter === item.key ? "is-active" : undefined}
+              key={item.key}
+              onClick={() => setFilter(item.key)}
+              type="button"
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+        <button className="primary-button phone-desk-query-submit" disabled={loading} type="submit">
+          {loading ? "찾는 중…" : "전화 내역 검색"}
+        </button>
+      </form>
 
-      <ListDateControls
-        disabled={loading}
-        onChange={(value) => {
-          setDateFilter(value);
-          setPage(1);
-        }}
-        todayKey={todayKey}
-        value={dateFilter}
-      />
+      {loadError ? <p className="error-banner" role="alert">{loadError}</p> : null}
 
+      {hasSearched ? <>
       <section className="phone-follow-up-queue" aria-label="재통화 업무 큐">
         <div className="phone-follow-up-heading">
           <div>
@@ -697,24 +724,15 @@ export function PhoneDeskWorkspace({
           </div>
         )}
       </section>
-
       <div className="phone-desk-panel">
         <div className="phone-desk-toolbar">
-          <label className="phone-desk-search">
-            <span className="sr-only">현재 페이지의 전화번호 또는 고객명 검색</span>
-            <svg aria-hidden="true" viewBox="0 0 24 24">
-              <circle cx="11" cy="11" r="6.5" />
-              <path d="m16 16 4 4" />
-            </svg>
-            <input
-              onChange={(event) => {
-                setQuery(event.target.value);
-              }}
-              placeholder="현재 페이지에서 전화번호 또는 고객명 검색"
-              type="search"
-              value={query}
-            />
-          </label>
+          <div className="phone-desk-result-copy">
+            <strong>검색 결과</strong>
+            <span>
+              {appliedCriteria?.query ||
+                `${appliedCriteria?.startDate} ~ ${appliedCriteria?.endDate}`} · {snapshot.total}건
+            </span>
+          </div>
           <label className="phone-desk-assignee-filter">
             <span>담당자</span>
             <select
@@ -742,26 +760,6 @@ export function PhoneDeskWorkspace({
               ))}
             </select>
           </label>
-          <div className="phone-desk-filters" role="group" aria-label="통화 구분">
-            {filters.map((item) => (
-              <button
-                aria-pressed={filter === item.key}
-                className={filter === item.key ? "is-active" : undefined}
-                key={item.key}
-                onClick={() => {
-                  setFilter(item.key);
-                  setPage(1);
-                }}
-                type="button"
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-          <span className={`phone-desk-realtime is-${connection}`}>
-            <i aria-hidden="true" />
-            {connection === "connected" ? "실시간 연결됨" : "재연결 중"}
-          </span>
         </div>
 
         <div className="phone-desk-list">
@@ -847,10 +845,11 @@ export function PhoneDeskWorkspace({
         </div>
         <ListPagination
           disabled={loading}
-          onPageChange={setPage}
+          onPageChange={(value) => {
+            if (appliedCriteria) void refresh(appliedCriteria, value, pageSize);
+          }}
           onPageSizeChange={(value) => {
-            setPageSize(value);
-            setPage(1);
+            if (appliedCriteria) void refresh(appliedCriteria, 1, value);
           }}
           page={snapshot.page}
           pageCount={snapshot.pageCount}
@@ -858,6 +857,12 @@ export function PhoneDeskWorkspace({
           total={snapshot.total}
         />
       </div>
+      </> : (
+        <section className="phone-desk-search-intro">
+          <strong>확인할 때만 검색하세요</strong>
+          <p>평소에는 현재 통화 상태만 위에 표시하며, 과거 원장은 검색 버튼을 누를 때만 조회합니다.</p>
+        </section>
+      )}
     </section>
   );
 }

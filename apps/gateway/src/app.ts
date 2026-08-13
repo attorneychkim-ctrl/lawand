@@ -1499,8 +1499,22 @@ export function createGatewayServer(options?: {
         ]);
         const query = pagedDateQuery(url.searchParams);
         const filter = url.searchParams.get("filter") ?? "all";
+        const includeFollowUps = url.searchParams.get("includeFollowUps") === "1";
+        const search = url.searchParams.get("q")?.trim() ?? "";
+        const isPhoneSearch = Boolean(search) && /^[0-9() +.-]+$/.test(search);
+        const searchDigits = search.replace(/[^0-9]/g, "");
+        const compactSearchName = search.replace(/\s/g, "");
         if (
           !query ||
+          (query.from && query.to &&
+            query.to.getTime() - query.from.getTime() >
+              31 * 24 * 60 * 60_000) ||
+          (search && (
+            (isPhoneSearch &&
+              (searchDigits.length < 4 || searchDigits.length > 15)) ||
+            (!isPhoneSearch &&
+              (compactSearchName.length < 2 || compactSearchName.length > 30))
+          )) ||
           ![
             "all",
             "inbound",
@@ -1518,6 +1532,8 @@ export function createGatewayServer(options?: {
           200,
           await options.telephonyService.getPhoneDeskCalls({
             ...query,
+            ...(search ? { search } : {}),
+            ...(includeFollowUps ? { includeFollowUps: true } : {}),
             filter: filter as
               | "all"
               | "inbound"
