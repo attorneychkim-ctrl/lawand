@@ -1499,6 +1499,8 @@ export function createGatewayServer(options?: {
         ]);
         const query = pagedDateQuery(url.searchParams);
         const filter = url.searchParams.get("filter") ?? "all";
+        const assigneeUserId =
+          url.searchParams.get("assigneeUserId") ?? undefined;
         if (
           !query ||
           ![
@@ -1508,7 +1510,8 @@ export function createGatewayServer(options?: {
             "centrex_direct",
             "internal",
             "active",
-          ].includes(filter)
+          ].includes(filter) ||
+          (assigneeUserId !== undefined && !validUuid(assigneeUserId))
         ) {
           sendJson(response, 400, { error: "invalid_list_query" });
           return;
@@ -1518,6 +1521,7 @@ export function createGatewayServer(options?: {
           200,
           await options.telephonyService.getPhoneDeskCalls({
             ...query,
+            ...(assigneeUserId ? { assigneeUserId } : {}),
             filter: filter as
               | "all"
               | "inbound"

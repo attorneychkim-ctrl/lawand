@@ -385,6 +385,9 @@ export function PhoneDeskWorkspace({
         filter,
         ...listDateQuery(dateFilter),
       });
+      if (callAssigneeFilter.staffUserId !== "all") {
+        params.set("assigneeUserId", callAssigneeFilter.staffUserId);
+      }
       const response = await fetch(`/api/phone-desk/calls?${params}`, {
         cache: "no-store",
         headers: { accept: "application/json" },
@@ -407,7 +410,7 @@ export function PhoneDeskWorkspace({
     } finally {
       if (sequence === requestSequence.current) setLoading(false);
     }
-  }, [dateFilter, filter, page, pageSize]);
+  }, [callAssigneeFilter.staffUserId, dateFilter, filter, page, pageSize]);
 
   useEffect(() => {
     let disposed = false;
@@ -486,15 +489,8 @@ export function PhoneDeskWorkspace({
   }, [callAssigneeFilter.staffUserId, filter, query, snapshot.items]);
 
   const callAssigneeOptions = useMemo(() => {
-    const assignees: CallAssignee[] = [];
-    const seen = new Set<string>();
-    for (const call of snapshot.items) {
-      for (const assignee of callAssignees(call)) {
-        if (seen.has(assignee.staffUserId)) continue;
-        seen.add(assignee.staffUserId);
-        assignees.push(assignee);
-      }
-    }
+    const assignees = [...snapshot.assigneeOptions];
+    const seen = new Set(assignees.map((assignee) => assignee.staffUserId));
     if (
       callAssigneeFilter.staffUserId !== "all" &&
       !seen.has(callAssigneeFilter.staffUserId)
@@ -502,7 +498,7 @@ export function PhoneDeskWorkspace({
       assignees.push(callAssigneeFilter);
     }
     return assignees;
-  }, [callAssigneeFilter, snapshot.items]);
+  }, [callAssigneeFilter, snapshot.assigneeOptions]);
 
   const followUpAssignees = useMemo(() => {
     const assignees = [currentStaff];
@@ -728,6 +724,7 @@ export function PhoneDeskWorkspace({
                           assignee.staffUserId === staffUserId,
                       ) ?? allCallAssignees,
                 );
+                setPage(1);
               }}
               value={callAssigneeFilter.staffUserId}
             >

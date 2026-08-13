@@ -1379,18 +1379,24 @@ test("목록 조회는 허용하지 않은 페이지 크기와 필터를 거부�
     "x-lawand-internal-key": "test-internal-key",
     "x-lawand-staff-session": "test-session",
   };
-  const [consultationsResponse, callsResponse] = await Promise.all([
-    fetch(
-      `http://127.0.0.1:${address.port}/v1/consultations?pageSize=25`,
-      { headers },
-    ),
-    fetch(
-      `http://127.0.0.1:${address.port}/v1/phone-desk/calls?filter=unknown`,
-      { headers },
-    ),
-  ]);
+  const [consultationsResponse, callsResponse, assigneeResponse] =
+    await Promise.all([
+      fetch(
+        `http://127.0.0.1:${address.port}/v1/consultations?pageSize=25`,
+        { headers },
+      ),
+      fetch(
+        `http://127.0.0.1:${address.port}/v1/phone-desk/calls?filter=unknown`,
+        { headers },
+      ),
+      fetch(
+        `http://127.0.0.1:${address.port}/v1/phone-desk/calls?assigneeUserId=not-a-uuid`,
+        { headers },
+      ),
+    ]);
   assert.equal(consultationsResponse.status, 400);
   assert.equal(callsResponse.status, 400);
+  assert.equal(assigneeResponse.status, 400);
 });
 
 test("직원 전화데스크 목록은 권한 확인 뒤 통합 원장을 반환한다", async (context) => {
@@ -1399,6 +1405,7 @@ test("직원 전화데스크 목록은 권한 확인 뒤 통합 원장을 반환
         page: number;
         pageSize: number;
         filter?: string;
+        assigneeUserId?: string;
         from?: Date;
         to?: Date;
       }
@@ -1440,7 +1447,7 @@ test("직원 전화데스크 목록은 권한 확인 뒤 통합 원장을 반환
   );
   assert.equal(denied.status, 401);
   const accepted = await fetch(
-    `http://127.0.0.1:${address.port}/v1/phone-desk/calls?page=3&pageSize=50&filter=active&from=2026-08-01T00%3A00%3A00%2B09%3A00&to=2026-08-08T00%3A00%3A00%2B09%3A00`,
+    `http://127.0.0.1:${address.port}/v1/phone-desk/calls?page=3&pageSize=50&filter=active&assigneeUserId=019fa6a4-6834-7782-aa0b-4e71ffb8a2f1&from=2026-08-01T00%3A00%3A00%2B09%3A00&to=2026-08-08T00%3A00%3A00%2B09%3A00`,
     {
       headers: {
         "x-lawand-internal-key": "test-internal-key",
@@ -1452,6 +1459,10 @@ test("직원 전화데스크 목록은 권한 확인 뒤 통합 원장을 반환
   assert.equal(receivedQuery?.page, 3);
   assert.equal(receivedQuery?.pageSize, 50);
   assert.equal(receivedQuery?.filter, "active");
+  assert.equal(
+    receivedQuery?.assigneeUserId,
+    "019fa6a4-6834-7782-aa0b-4e71ffb8a2f1",
+  );
   assert.equal(receivedQuery?.from?.toISOString(), "2026-07-31T15:00:00.000Z");
   assert.equal(receivedQuery?.to?.toISOString(), "2026-08-07T15:00:00.000Z");
   const body = await accepted.text();

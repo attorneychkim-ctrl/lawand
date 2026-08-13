@@ -489,6 +489,7 @@ export type PhoneDeskFollowUp = {
 export type PhoneDeskCallSnapshot = {
   snapshotAt: string;
   items: PhoneDeskCall[];
+  assigneeOptions: Array<{ staffUserId: string; displayName: string }>;
   total: number;
   page: number;
   pageSize: ListPageSize;
@@ -862,6 +863,7 @@ type PagedDateOptions<TFilter extends string> = {
   page?: number;
   pageSize?: ListPageSize;
   filter?: TFilter;
+  assigneeUserId?: string;
   from?: string;
   to?: string;
 };
@@ -874,6 +876,9 @@ function pagedDateParams<TFilter extends string>(
     pageSize: String(options.pageSize ?? 20),
     filter: options.filter ?? "all",
   });
+  if (options.assigneeUserId) {
+    params.set("assigneeUserId", options.assigneeUserId);
+  }
   if (options.from) params.set("from", options.from);
   if (options.to) params.set("to", options.to);
   return params;
