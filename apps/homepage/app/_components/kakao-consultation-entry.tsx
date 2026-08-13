@@ -13,7 +13,7 @@ import type { ResidenceRegion } from "@lawand/core";
 
 import { getConsultationAttributionForCta } from "./journey-tracker";
 
-const KAKAO_ENTRY_STORAGE_KEY = "lawand.bank.kakao-entry.v3";
+const KAKAO_ENTRY_STORAGE_KEY = "lawand.bank.kakao-entry.v4";
 const KAKAO_ENTRY_REUSE_MS = 30 * 60 * 1_000;
 
 const RESIDENCE_REGION_OPTIONS: Array<{
@@ -39,6 +39,15 @@ const RESIDENCE_REGION_OPTIONS: Array<{
   { value: "jeju", label: "제주" },
   { value: "overseas_or_other", label: "해외·기타" },
 ];
+
+function formatPhone(value: string) {
+  const digits = value.replace(/\D/g, "").slice(0, 11);
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 7) {
+    return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+  }
+  return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
+}
 
 function entryIdempotencyKey(): string {
   try {
@@ -85,10 +94,12 @@ export function KakaoConsultationEntry({
   const [residenceRegion, setResidenceRegion] = useState<
     ResidenceRegion | ""
   >("");
+  const [phone, setPhone] = useState("");
   const dialogTitleId = useId();
   const dialogDescriptionId = useId();
   const displayNameId = useId();
   const residenceRegionId = useId();
+  const phoneId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const displayNameRef = useRef<HTMLInputElement>(null);
@@ -246,13 +257,33 @@ export function KakaoConsultationEntry({
               </option>
             ))}
           </select>
+          <label htmlFor={phoneId}>
+            휴대전화 번호
+            <span className="is-optional">선택 · 입력하지 않으셔도 돼요</span>
+          </label>
+          <input
+            autoComplete="tel"
+            id={phoneId}
+            inputMode="numeric"
+            maxLength={13}
+            name="phone"
+            onChange={(event) =>
+              setPhone(event.target.value.replace(/\D/g, "").slice(0, 11))
+            }
+            pattern="010-[0-9]{4}-[0-9]{4}"
+            placeholder="010-0000-0000"
+            type="tel"
+            value={formatPhone(phone)}
+          />
           <p className="kakao-entry-modal-help">
             확인을 누르면 이 이름과 거주 지역으로 상담이 접수되고 카카오톡
-            채팅방이 새로 열립니다. 전화번호와 카카오 사용자 ID는 홈페이지에서
-            수집하지 않습니다.
+            채팅방이 새로 열립니다. 전화번호를 남기면 상담원이 더 빠르게 고객을
+            확인할 수 있지만, 입력하지 않으셔도 카카오 상담을 이용할 수 있어요.
           </p>
           <p className="kakao-entry-modal-privacy">
-            입력한 이름과 거주 지역은 상담 확인을 위해 암호화해 보관합니다. 자세한 내용은{" "}
+            입력한 이름·거주 지역과 선택 입력한 전화번호는 상담 확인을 위해
+            암호화해 보관합니다. 카카오 사용자 ID와 메시지 원문은 홈페이지에서
+            받지 않습니다. 자세한 내용은{" "}
             <a href="/privacy" rel="noopener noreferrer" target="_blank">
               개인정보처리방침
             </a>

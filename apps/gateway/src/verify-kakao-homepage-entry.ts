@@ -8,6 +8,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import {
   consultationAssignments,
   consultationAttributions,
+  consultationLegalFriendsHandlings,
   consultationRequests,
   consultationStatusHistory,
   consultations,
@@ -29,7 +30,10 @@ import { readGatewayConfig } from "./config.js";
 import { createDataProtection } from "./crypto.js";
 import type { LegalFriendsCasePayload } from "./legalfriends.js";
 import { createOutboxWorker } from "./outbox-worker.js";
-import { createConsultationService } from "./service.js";
+import {
+  ConsultationAssignmentError,
+  createConsultationService,
+} from "./service.js";
 
 const localEnvPath = resolve(process.cwd(), ".env.local");
 if (existsSync(localEnvPath)) {
@@ -79,6 +83,14 @@ async function cleanup() {
       .delete(consultationAssignments)
       .where(
         inArray(consultationAssignments.consultationId, consultationIds),
+      );
+    await tx
+      .delete(consultationLegalFriendsHandlings)
+      .where(
+        inArray(
+          consultationLegalFriendsHandlings.consultationId,
+          consultationIds,
+        ),
       );
     await tx
       .delete(consultationStatusHistory)
@@ -214,6 +226,7 @@ try {
     idempotencyKey,
     displayName: "김민수",
     residenceRegion: "seoul",
+    phone: "01012345678",
   });
   assert.equal(first.status, "pending");
   assert.equal(first.replayed, false);
@@ -223,6 +236,7 @@ try {
     idempotencyKey,
     displayName: "김민수",
     residenceRegion: "seoul",
+    phone: "01012345678",
   });
   assert.equal(replay.publicReceiptCode, first.publicReceiptCode);
   assert.equal(replay.status, "pending");
@@ -230,7 +244,7 @@ try {
 
   const consultation = await consultationByReceipt(first.publicReceiptCode);
   assert.equal(consultation.contactChannel, "kakao_channel");
-  assert.equal(consultation.phoneFingerprint, null);
+  assert.ok(consultation.phoneFingerprint);
   assert.match(
     consultation.anonymousLabel,
     /^카카오_[23456789A-HJ-NP-Z]{8}_플친$/,
@@ -243,7 +257,19 @@ try {
   assert.ok(request);
   assert.equal(request.source, "homepage_kakao");
   assert.equal(request.contactChannel, "kakao_channel");
-  assert.equal(request.phoneCiphertext, null);
+  assert.ok(request.phoneCiphertext);
+  assert.ok(request.phoneNonce);
+  assert.equal(
+    protection.decrypt(
+      {
+        ciphertext: request.phoneCiphertext,
+        nonce: request.phoneNonce!,
+        keyVersion: request.phoneKeyVersion!,
+      },
+      `consultation_requests.phone:${request.id}`,
+    ),
+    "01012345678",
+  );
   assert.equal(request.hasProvidedName, true);
   assert.ok(request.nameCiphertext);
   assert.ok(request.nameNonce);
@@ -279,7 +305,7 @@ try {
     /^김민수_[23456789A-HJ-NP-Z]{8}_플친$/,
   );
   assert.equal(pendingDetail.requests[0]?.name, "김민수");
-  assert.equal(pendingDetail.requests[0]?.phone, null);
+  assert.equal(pendingDetail.requests[0]?.phone, "01012345678");
 
   const [encryptedConsultation] = await database.db
     .select({
@@ -295,7 +321,20 @@ try {
     false,
   );
 
-  const assignment = await service.assignToSelf(consultation.id, actor);
+  let assignment;
+  if (pendingDetail.requiresLegalFriendsReview) {
+    await assert.rejects(
+      service.assignToSelf(consultation.id, actor),
+      (error: unknown) =>
+        error instanceof ConsultationAssignmentError &&
+        error.code === "legalfriends_review_required",
+    );
+    assignment = await service.assignToSelf(consultation.id, actor, {
+      mode: "new_matter",
+    });
+  } else {
+    assignment = await service.assignToSelf(consultation.id, actor);
+  }
   assert.deepEqual(assignment.queuedEventTypes, [
     "consultation.kakao_chat.confirmed",
     "consultation.assigned",
@@ -348,7 +387,7 @@ try {
     case_type: 1,
     member_idx: 138,
     name: assignedDetail.displayName,
-    phone: "010-0000-0000",
+    phone: "010-1234-5678",
     living_place: "서울특별시",
     memo: "접수 방식: 빠른 상담\n남긴 내용: 카카오 채팅방에서 상담 내용을 확인",
   });
@@ -438,7 +477,7 @@ try {
   });
 
   console.log(
-    "홈페이지 카카오 진입 검증 완료: 이름·거주지역 암호화·중복 클릭 1건 유지·가상번호/실제 광역지역 신건 등록·배정 후 무효 담당자 변경·배정 전 무효 담당자 신건 등록·알림톡 차단",
+    "홈페이지 카카오 진입 검증 완료: 이름·거주지역·선택 전화 암호화·중복 클릭 1건 유지·실제 번호 또는 가상번호/실제 광역지역 신건 등록·배정 후 무효 담당자 변경·배정 전 무효 담당자 신건 등록·알림톡 차단",
   );
 } finally {
   await cleanup();

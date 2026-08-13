@@ -1778,6 +1778,7 @@ test("홈페이지 카카오 진입은 접수 전용 키와 별도 익명 한도
         idempotencyKey: string;
         displayName: string;
         residenceRegion: string;
+        phone?: string;
       }
     | undefined;
   let protectionChecked = false;
@@ -1787,6 +1788,7 @@ test("홈페이지 카카오 진입은 접수 전용 키와 별도 익명 한도
       idempotencyKey: string;
       displayName: string;
       residenceRegion: string;
+      phone?: string;
     }) => {
       received = input;
       return {
@@ -1821,6 +1823,7 @@ test("홈페이지 카카오 진입은 접수 전용 키와 별도 익명 한도
     idempotencyKey: "01984c7d-8500-7000-8000-000000000001",
     displayName: "김민수",
     residenceRegion: "seoul",
+    phone: "010-1234-5678",
   });
 
   const denied = await fetch(endpoint, {
@@ -1857,6 +1860,22 @@ test("홈페이지 카카오 진입은 접수 전용 키와 별도 익명 한도
   });
   assert.equal(missingResidenceRegion.status, 400);
 
+  const invalidOptionalPhone = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-lawand-public-intake-key": "test-public-intake-key",
+    },
+    body: JSON.stringify({
+      source: "homepage_kakao",
+      idempotencyKey: "01984c7d-8500-7000-8000-000000000004",
+      displayName: "김민수",
+      residenceRegion: "seoul",
+      phone: "02-555-7455",
+    }),
+  });
+  assert.equal(invalidOptionalPhone.status, 400);
+
   const accepted = await fetch(endpoint, {
     method: "POST",
     headers: {
@@ -1865,7 +1884,8 @@ test("홈페이지 카카오 진입은 접수 전용 키와 별도 익명 한도
     },
     body,
   });
-  assert.equal(accepted.status, 201);
+  const acceptedBody = (await accepted.json()) as { status?: string };
+  assert.equal(accepted.status, 201, JSON.stringify(acceptedBody));
   assert.equal(protectionChecked, true);
   assert.equal(
     received?.idempotencyKey,
@@ -1873,10 +1893,8 @@ test("홈페이지 카카오 진입은 접수 전용 키와 별도 익명 한도
   );
   assert.equal(received?.displayName, "김민수");
   assert.equal(received?.residenceRegion, "seoul");
-  assert.equal(
-    ((await accepted.json()) as { status: string }).status,
-    "pending",
-  );
+  assert.equal(received?.phone, "01012345678");
+  assert.equal(acceptedBody.status, "pending");
 });
 
 test("직원은 카카오 채팅 표시명을 확정하고 미진입 건을 무효 처리한다", async (context) => {

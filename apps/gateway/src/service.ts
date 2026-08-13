@@ -259,7 +259,11 @@ function normalizeConsultationName(value: string) {
 }
 
 function requiresLegalFriendsHandling(source: string | null | undefined) {
-  return source === "homepage" || source === "erp_staff";
+  return (
+    source === "homepage" ||
+    source === "homepage_kakao" ||
+    source === "erp_staff"
+  );
 }
 
 function directorySnapshot(
@@ -1301,6 +1305,15 @@ export function createConsultationService(options: {
         submittedDisplayName,
         `consultation_requests.name:${requestId}`,
       );
+      const phoneFingerprint = input.phone
+        ? protection.fingerprint(input.phone)
+        : null;
+      const requestPhoneEncrypted = input.phone
+        ? protection.encrypt(
+            input.phone,
+            `consultation_requests.phone:${requestId}`,
+          )
+        : null;
       const intakeEncrypted = protection.encrypt(
         JSON.stringify({
           residenceRegion: input.residenceRegion,
@@ -1316,6 +1329,7 @@ export function createConsultationService(options: {
         idempotencyKey: input.idempotencyKey,
         displayName: submittedDisplayName,
         residenceRegion: input.residenceRegion,
+        phone: input.phone,
       });
 
       let journeySessionId: string | null = null;
@@ -1441,7 +1455,7 @@ export function createConsultationService(options: {
         id: consultationId,
         publicReceiptCode,
         contactChannel: "kakao_channel",
-        phoneFingerprint: null,
+        phoneFingerprint,
         anonymousLabel: internalAlias,
         preferredNameCiphertext: preferredNameEncrypted.ciphertext,
         preferredNameNonce: preferredNameEncrypted.nonce,
@@ -1458,10 +1472,10 @@ export function createConsultationService(options: {
         idempotencyKey: input.idempotencyKey,
         mode: "quick",
         contactChannel: "kakao_channel",
-        phoneFingerprint: null,
-        phoneCiphertext: null,
-        phoneNonce: null,
-        phoneKeyVersion: null,
+        phoneFingerprint,
+        phoneCiphertext: requestPhoneEncrypted?.ciphertext ?? null,
+        phoneNonce: requestPhoneEncrypted?.nonce ?? null,
+        phoneKeyVersion: requestPhoneEncrypted?.keyVersion ?? null,
         hasProvidedName: true,
         nameCiphertext: requestNameEncrypted.ciphertext,
         nameNonce: requestNameEncrypted.nonce,

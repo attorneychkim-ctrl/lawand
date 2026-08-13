@@ -1513,7 +1513,8 @@ export const consultations = pgTable(
     check(
       "consultations_contact_channel_identity",
       sql`(${table.contactChannel} = 'phone' AND ${table.phoneFingerprint} IS NOT NULL)
-        OR (${table.contactChannel} IN ('kakao_channel', 'naver_booking') AND ${table.phoneFingerprint} IS NULL)`,
+        OR ${table.contactChannel} = 'kakao_channel'
+        OR (${table.contactChannel} = 'naver_booking' AND ${table.phoneFingerprint} IS NULL)`,
     ),
     check(
       "consultations_name_nonce_length",
@@ -1676,18 +1677,20 @@ export const consultationRequests = pgTable(
     check(
       "consultation_requests_phone_crypto_complete",
       sql`(
-        ${table.contactChannel} = 'phone'
-        AND ${table.phoneFingerprint} IS NOT NULL
-        AND ${table.phoneCiphertext} IS NOT NULL
-        AND ${table.phoneNonce} IS NOT NULL
-        AND ${table.phoneKeyVersion} IS NOT NULL
-      ) OR (
-        ${table.contactChannel} IN ('kakao_channel', 'naver_booking')
-        AND ${table.phoneFingerprint} IS NULL
-        AND ${table.phoneCiphertext} IS NULL
-        AND ${table.phoneNonce} IS NULL
-        AND ${table.phoneKeyVersion} IS NULL
-      )`,
+        (
+          ${table.phoneFingerprint} IS NOT NULL
+          AND ${table.phoneCiphertext} IS NOT NULL
+          AND ${table.phoneNonce} IS NOT NULL
+          AND ${table.phoneKeyVersion} IS NOT NULL
+        ) OR (
+          ${table.phoneFingerprint} IS NULL
+          AND ${table.phoneCiphertext} IS NULL
+          AND ${table.phoneNonce} IS NULL
+          AND ${table.phoneKeyVersion} IS NULL
+        )
+      )
+        AND (${table.contactChannel} <> 'phone' OR ${table.phoneFingerprint} IS NOT NULL)
+        AND (${table.contactChannel} <> 'naver_booking' OR ${table.phoneFingerprint} IS NULL)`,
     ),
     check(
       "consultation_requests_privacy_basis_consistent",

@@ -39,7 +39,16 @@ test("고객 입력 이름이 있는 대기 접수만 상담하기에서 확인�
   );
 });
 
-test("홈페이지 카카오 진입은 표시명·거주지역과 UUID 멱등키를 받는다", () => {
+test("홈페이지 카카오 진입은 표시명·거주지역과 선택 전화번호를 받는다", () => {
+  const withPhone = kakaoHomepageEntrySubmissionSchema.safeParse({
+    source: "homepage_kakao",
+    idempotencyKey: "01984c7d-8500-7000-8000-000000000001",
+    displayName: "김민수",
+    residenceRegion: "seoul",
+    phone: "010-1234-5678",
+  });
+  assert.equal(withPhone.success, true);
+  if (withPhone.success) assert.equal(withPhone.data.phone, "01012345678");
   assert.equal(
     kakaoHomepageEntrySubmissionSchema.safeParse({
       source: "homepage_kakao",
@@ -48,6 +57,16 @@ test("홈페이지 카카오 진입은 표시명·거주지역과 UUID 멱등키
       residenceRegion: "seoul",
     }).success,
     true,
+  );
+  assert.equal(
+    kakaoHomepageEntrySubmissionSchema.safeParse({
+      source: "homepage_kakao",
+      idempotencyKey: "01984c7d-8500-7000-8000-000000000001",
+      displayName: "김민수",
+      residenceRegion: "seoul",
+      phone: "02-555-7455",
+    }).success,
+    false,
   );
   assert.equal(
     kakaoHomepageEntrySubmissionSchema.safeParse({

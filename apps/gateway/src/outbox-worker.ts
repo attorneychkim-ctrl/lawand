@@ -340,16 +340,17 @@ export function createOutboxWorker(options: {
       throw new LegalFriendsPayloadError("consultation_phone_not_collected");
     }
 
-    const phone = isKakaoConsultation
-      ? KAKAO_LEGALFRIENDS_PLACEHOLDER_PHONE
-      : protection.decrypt(
-          {
-            ciphertext: request.phoneCiphertext!,
-            nonce: request.phoneNonce!,
-            keyVersion: request.phoneKeyVersion!,
-          },
-          `consultation_requests.phone:${request.id}`,
-        );
+    const phone =
+      request.phoneCiphertext && request.phoneNonce && request.phoneKeyVersion
+        ? protection.decrypt(
+            {
+              ciphertext: request.phoneCiphertext,
+              nonce: request.phoneNonce,
+              keyVersion: request.phoneKeyVersion,
+            },
+            `consultation_requests.phone:${request.id}`,
+          )
+        : KAKAO_LEGALFRIENDS_PLACEHOLDER_PHONE;
     const storedIntake = JSON.parse(
       protection.decrypt(
         {
