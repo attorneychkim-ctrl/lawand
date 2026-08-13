@@ -47,6 +47,45 @@ test("gateway health endpoint", async (context) => {
   });
 });
 
+test("gateway health endpoint는 요청·LISTEN 풀 상태를 노출한다", async (context) => {
+  const pool = {
+    total: 20,
+    idle: 5,
+    used: 15,
+    waiting: 2,
+    max: 20,
+    utilizationPercent: 75,
+  };
+  const server = createGatewayServer({
+    databasePoolHealth: () => ({
+      request: pool,
+      listener: {
+        total: 3,
+        idle: 0,
+        used: 3,
+        waiting: 0,
+        max: 4,
+        utilizationPercent: 75,
+      },
+    }),
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const response = await fetch(`http://127.0.0.1:${address.port}/health`);
+  const body = await response.json() as {
+    databasePools: {
+      request: { waiting: number };
+      listener: { max: number };
+    };
+  };
+  assert.equal(body.databasePools.request.waiting, 2);
+  assert.equal(body.databasePools.listener.max, 4);
+});
+
 test("U+ 수신 콜백은 비밀 HTML 경로만 허용하고 원문을 응답하지 않는다", async (context) => {
   const callbackPath = "/v1/centrex-ring/test_secret_value_1234567890ab.html";
   let receivedSender = "";

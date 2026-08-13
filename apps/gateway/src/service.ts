@@ -79,6 +79,7 @@ import type { createDatabaseClient } from "@lawand/db";
 
 import type { DataProtection } from "./crypto.js";
 import type { StaffPrincipal } from "./auth.js";
+import { existingPhoneDirectoryCustomersQuery } from "./phone-directory.js";
 import { legalFriendsResidenceRegion } from "./telephony-service.js";
 import {
   CURRENT_NAVER_BOOKING_BASIS_VERSION,
@@ -321,17 +322,12 @@ export function createConsultationService(options: {
 
     try {
       const result = await db.execute(
-        sql<{ phone: string }>`
-          select candidate.phone
-          from unnest(${normalizedPhones}::text[]) as candidate(phone)
-          where exists (
-            select 1
-            from public.resolve_inbound_phone_directory(candidate.phone)
-          )
-        `,
+        existingPhoneDirectoryCustomersQuery(normalizedPhones),
       );
       return new Set(
-        (result.rows as Array<{ phone: string }>).map((row) => row.phone),
+        (result.rows as Array<{ candidate_phone: string }>).map(
+          (row) => row.candidate_phone,
+        ),
       );
     } catch {
       console.error(

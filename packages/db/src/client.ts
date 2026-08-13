@@ -3,12 +3,27 @@ import { Pool, type Notification, type PoolClient } from "pg";
 
 import * as schema from "./schema.js";
 
-export function createDatabaseClient(connectionString: string) {
-  const pool = new Pool({
+export type DatabasePoolOptions = {
+  applicationName?: string;
+  maxConnections?: number;
+};
+
+export function createDatabasePool(
+  connectionString: string,
+  options: DatabasePoolOptions = {},
+) {
+  return new Pool({
     connectionString,
-    application_name: "lawand-platform",
-    max: 10,
+    application_name: options.applicationName ?? "lawand-platform",
+    max: options.maxConnections ?? 10,
   });
+}
+
+export function createDatabaseClient(
+  connectionString: string,
+  options: DatabasePoolOptions = {},
+) {
+  const pool = createDatabasePool(connectionString, options);
 
   return {
     db: drizzle(pool, { schema }),

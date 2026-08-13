@@ -8,5 +8,6 @@ export * from "./kakao-homepage.js";
 export * from "./privacy.js";
 export * from "./review.js";
 export * from "./self-diagnosis.js";
+export * from "./single-flight.js";
 export * from "./staff.js";
 export * from "./telephony.js";

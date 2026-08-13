@@ -253,6 +253,17 @@ export function createGatewayServer(options?: {
   consultationEvents?: ConsultationEventSource;
   telephonyInboundEvents?: TelephonyInboundEventSource;
   telephonyDeskEvents?: TelephonyDeskEventSource;
+  databasePoolHealth?: () => Record<
+    "request" | "listener",
+    {
+      total: number;
+      idle: number;
+      used: number;
+      waiting: number;
+      max: number;
+      utilizationPercent: number;
+    }
+  >;
   kakaoSkill?: {
     botId: string;
     secret: string;
@@ -285,6 +296,9 @@ export function createGatewayServer(options?: {
         sendJson(response, 200, {
           service: "lawand-gateway",
           status: "ok",
+          ...(options?.databasePoolHealth
+            ? { databasePools: options.databasePoolHealth() }
+            : {}),
         });
         return;
       }

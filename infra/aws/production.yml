@@ -650,6 +650,24 @@ Resources:
       Threshold: 1
       TreatMissingData: missing
 
+  GatewayDatabasePoolWaitAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Lawand gateway request database pool has queued waiters
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: Service
+          Value: lawand-gateway
+        - Name: Pool
+          Value: request
+      EvaluationPeriods: 1
+      MetricName: DatabasePoolWaitingCount
+      Namespace: Lawand/Gateway
+      Period: 60
+      Statistic: Maximum
+      Threshold: 0
+      TreatMissingData: notBreaching
+
   DatabaseCpuAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:

@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { createDatabaseClient } from "@lawand/db";
+import { createDatabaseClient, createDatabasePool } from "@lawand/db";
 
 import { createGatewayServer } from "./app.js";
 import { createAlimtalkOutboxWorker } from "./alimtalk-outbox-worker.js";
@@ -16,6 +16,7 @@ import { createCentrexWorker } from "./centrex-worker.js";
 import { readGatewayConfig } from "./config.js";
 import { createPostgresConsultationEventSource } from "./consultation-events.js";
 import { createDataProtection } from "./crypto.js";
+import { createDatabasePoolMonitor } from "./database-pool-monitor.js";
 import { createPublicIntakeProtection } from "./intake-protection.js";
 import { createLegalFriendsClient } from "./legalfriends.js";
 import { createNaverBookingImapWorker } from "./naver-booking-imap-worker.js";
@@ -45,7 +46,30 @@ function readPort(value: string | undefined): number {
 }
 
 const config = readGatewayConfig();
-const database = createDatabaseClient(config.databaseUrl);
+const database = createDatabaseClient(config.databaseUrl, {
+  applicationName: "lawand-gateway-request",
+  maxConnections: config.databaseRequestPoolMax,
+});
+const listenerPool = createDatabasePool(config.databaseUrl, {
+  applicationName: "lawand-gateway-listener",
+  maxConnections: config.databaseListenerPoolMax,
+});
+const databasePoolMonitor = createDatabasePoolMonitor({
+  pools: [
+    {
+      name: "request",
+      pool: database.pool,
+      maxConnections: config.databaseRequestPoolMax,
+    },
+    {
+      name: "listener",
+      pool: listenerPool,
+      maxConnections: config.databaseListenerPoolMax,
+    },
+  ],
+  metricsEnabled: config.cloudWatchMetricsEnabled,
+  region: config.awsRegion,
+});
 const protection = createDataProtection(config);
 const centrexClient = createCentrexClient();
 const solapiClient = config.solapiApiCredentials
@@ -109,19 +133,19 @@ const centrexInboundObserver = config.centrexRingCallback
     })
   : null;
 const consultationEvents = createPostgresConsultationEventSource({
-  pool: database.pool,
+  pool: listenerPool,
   onError: (error) => {
     console.error("lawand consultation realtime source error", error);
   },
 });
 const telephonyInboundEvents = createPostgresTelephonyInboundEventSource({
-  pool: database.pool,
+  pool: listenerPool,
   onError: (error) => {
     console.error("lawand telephony inbound realtime source error", error);
   },
 });
 const telephonyDeskEvents = createPostgresTelephonyDeskEventSource({
-  pool: database.pool,
+  pool: listenerPool,
   onError: (error) => {
     console.error("lawand telephony desk realtime source error", error);
   },
@@ -147,6 +171,7 @@ const server = createGatewayServer({
   consultationEvents,
   telephonyInboundEvents,
   telephonyDeskEvents,
+  databasePoolHealth: databasePoolMonitor.snapshot,
   service,
   telephonyService,
   centrexBridgeIngress,
@@ -221,6 +246,7 @@ await Promise.all([
   telephonyInboundEvents.start(),
   telephonyDeskEvents.start(),
 ]);
+databasePoolMonitor.start();
 
 server.listen(port, host, () => {
   console.log(`lawand-gateway listening on http://${host}:${port}`);
@@ -286,7 +312,8 @@ function shutdown(signal: string) {
         centrexInboundObserver?.stop(),
       ]);
       centrexBridgeProvisioning?.stop();
-      await database.pool.end();
+      await databasePoolMonitor.stop();
+      await Promise.all([database.pool.end(), listenerPool.end()]);
       if (error) {
         console.error(error);
         process.exitCode = 1;
