@@ -71,6 +71,32 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-13 — gateway DB 풀 적체·센트릭스 받기 지연 안정화 main 통합
+- 간헐적 ERP 5xx와 약 1분 뒤 통화 종료만 보인 현상을 읽기 진단해 CPU·메모리·디스크나
+  PostgreSQL lock이 아니라 gateway 단일 DB 풀의 대기열을 공통 원인으로 확인했다. 세
+  `LISTEN` 연결이 기본 10개 풀을 계속 점유한 상태에서 24개 bridge의 750ms 빈 명령 폴링,
+  ERP 다중 탭의 동시 스냅샷, 전화 고객 행별 조회가 요청 연결을 소진했다. 리걸프렌즈
+  후보 조회에는 `unnest` 인자가 record로 컴파일돼 `text[]` 캐스팅에 실패하는 별도 결함도
+  있었다.
+- 요청 풀을 기본 20개, 세 실시간 source 전용 LISTEN 풀을 기본 4개로 분리했다. 1초 표본의
+  사용·대기 최고값을 `Lawand/Gateway` CloudWatch 사용자 지표로 발행하고 요청 풀 대기가
+  1분 안에 한 번이라도 생기면 울리는 경보 후보를 추가했다. `/health`에도 두 풀 상태를
+  포함한다. 운영 secret 생성기는 `AWS_REGION`, 두 풀 크기와 metric 활성값을 준비하지만
+  이번 세션에서 Secrets Manager·CloudFormation·운영 프로세스는 변경하지 않았다.
+- bridge의 명령 없음 DB 확인은 bridge별 10초 복구 점검으로 제한하고 실제 받기 명령 커밋
+  직후 다음 poll을 즉시 깨우도록 했다. ERP의 같은 직원 세션·같은 목록/스냅샷 동시 읽기는
+  진행 중 요청 하나만 공유하고 완료 응답은 캐시하지 않는다. 전화데스크·수신 카드 고객
+  해석과 최신 받기 명령은 일괄 조회하며, 전화번호 후보 SQL은 개별 파라미터 `VALUES`로
+  교체했다.
+- 전체 5패키지 typecheck·lint·production build, core 78개·gateway 130개 테스트, DB schema
+  check, 로컬 PostgreSQL 실제 함수의 parameterized batch SQL, AWS CloudFormation 공식
+  template validation과 `git diff --check`를 통과했다. 24 bridge×80 poll 회귀 테스트에서
+  빈 DB 확인은 기존 1,920회 대신 최대 144회 이하이고 명령 힌트는 즉시 확인된다. 구현
+  커밋은 `1fab5d3`, main merge commit은 `bc92430`이며 `PROJECT_PLAN.md`는 v1.26이다.
+- 사용자 요청에 따라 코드 commit·origin push까지만 수행했다. 운영 배포·migration·서버
+  재시작·운영 통화/데이터 변경은 하지 않았다. 진행 중인 별도 카카오 작업
+  `worktree/brave-valley-d3b8`은 이번 main 통합에서 제외했다.
+
 ### 2026-08-13 — 상담 재요청·리걸프렌즈 연락처 처리 gateway/ERP 운영 배포
 - `HERDR_ENV=1`에서 main과 HERDR worktree 8개, 원격 `origin/worktree/*` 26개를 전수
   대조했다. 모든 원격 HEAD가 이미 `main`의 ancestor였고, 배포 소스
