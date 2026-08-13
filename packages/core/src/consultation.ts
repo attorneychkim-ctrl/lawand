@@ -57,6 +57,19 @@ export type DedupeSubmission = {
   submittedAt: Date;
 };
 
+export const consultationGroupLinkSchema = z
+  .object({
+    targetReceiptCode: z
+      .string()
+      .trim()
+      .regex(/^LA-\d{6}-[23456789A-HJ-NP-Z]{8}$/),
+  })
+  .strict();
+
+export type ConsultationGroupLink = z.infer<
+  typeof consultationGroupLinkSchema
+>;
+
 export type DedupeDecision =
   | {
       action: "idempotent_replay";
@@ -184,11 +197,8 @@ export function classifyConsultationSubmission(
 
   const repeatRequest = activePhoneMatches.find(
     (candidate) =>
-      submission.nameFingerprint !== null &&
-      candidate.nameFingerprint !== null &&
-      candidate.nameFingerprint === submission.nameFingerprint &&
       elapsedMs(submission.submittedAt, candidate.latestRequestAt) <=
-        DEDUPE_WINDOWS.suspectedDuplicateMs,
+      DEDUPE_WINDOWS.suspectedDuplicateMs,
   );
 
   if (repeatRequest) {
@@ -203,25 +213,6 @@ export function classifyConsultationSubmission(
       createConsultation: false,
       createRequest: true,
       eventTypes: ["consultation.request.updated"],
-    };
-  }
-
-  const suspectedDuplicate = activePhoneMatches.find(
-    (candidate) =>
-      elapsedMs(submission.submittedAt, candidate.latestRequestAt) <=
-      DEDUPE_WINDOWS.suspectedDuplicateMs,
-  );
-
-  if (suspectedDuplicate) {
-    return {
-      action: "create_suspected_duplicate",
-      candidateConsultationId: suspectedDuplicate.consultationId,
-      createConsultation: true,
-      createRequest: true,
-      eventTypes: [
-        "consultation.requested",
-        "consultation.duplicate_suspected",
-      ],
     };
   }
 

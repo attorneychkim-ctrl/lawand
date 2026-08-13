@@ -36,6 +36,7 @@ export type ConsultationListItem = {
   softDeletedByUserId: string | null;
   staffCreated: boolean;
   existingCustomer: boolean;
+  nameMismatch: boolean;
   requiresLegalFriendsReview: boolean;
   residenceRegion: string | null;
   mode: "quick" | "detailed" | "self_diagnosis";
@@ -47,6 +48,12 @@ export type ConsultationListItem = {
     | "repeat_assigned"
     | "suspected_duplicate";
   requestCount: number;
+  groupMemberCount: number;
+  channelCounts: {
+    phone: number;
+    kakao_channel: number;
+    naver_booking: number;
+  };
   assigneeUserId: string | null;
   assigneeDisplayName: string | null;
   kakaoEntry: {
@@ -580,10 +587,12 @@ export type ConsultationDetail = {
   state: string;
   displayName: string;
   contactChannel: "phone" | "kakao_channel" | "naver_booking";
+  phone: string | null;
   softDeletedAt: string | null;
   softDeletedByUserId: string | null;
   staffCreated: boolean;
   existingCustomer: boolean;
+  nameMismatch: boolean;
   requiresLegalFriendsReview: boolean;
   legalFriendsMatches: Array<{
     clientIdx: number;
@@ -607,8 +616,39 @@ export type ConsultationDetail = {
     decidedByUserId: string;
     decidedAt: string;
   } | null;
+  group: {
+    id: string;
+    canonicalConsultationId: string;
+    createdReason: "automatic_phone_7d" | "manual_link" | "manual_split";
+    createdAt: string;
+    memberCount: number;
+    nameMismatch: boolean;
+    members: Array<{
+      id: string;
+      publicReceiptCode: string;
+      canonical: boolean;
+      state: string;
+      displayName: string;
+      contactChannel: "phone" | "kakao_channel" | "naver_booking";
+      phone: string | null;
+      requestCount: number;
+      firstRequestedAt: string;
+      lastRequestedAt: string;
+      kakaoStatus: "pending" | "confirmed" | "invalid" | null;
+    }>;
+    events: Array<{
+      id: string;
+      consultationId: string;
+      eventType: string;
+      actorUserId: string | null;
+      actorDisplayName: string | null;
+      metadata: Record<string, unknown>;
+      occurredAt: string;
+    }>;
+  } | null;
   kakaoEntry: {
     id: string;
+    consultationId: string;
     status: "pending" | "confirmed" | "invalid";
     nameProvided: boolean;
     clickCount: number;
@@ -756,6 +796,8 @@ export type ConsultationDetail = {
   lastRequestedAt: string;
   requests: Array<{
     id: string;
+    consultationId: string;
+    consultationReceiptCode: string;
     mode: "quick" | "detailed" | "self_diagnosis";
     source:
       | "homepage"
@@ -1079,6 +1121,37 @@ export async function softDeleteStaffConsultation(id: string): Promise<{
   return phoneDeskResponse(
     await gatewayFetch(`/v1/consultations/${id}`, {
       method: "DELETE",
+    }),
+  );
+}
+
+export async function linkConsultationGroup(
+  id: string,
+  targetReceiptCode: string,
+): Promise<{
+  groupId: string;
+  canonicalConsultationId: string;
+  memberCount: number;
+  replayed: boolean;
+}> {
+  return phoneDeskResponse(
+    await gatewayFetch(`/v1/consultations/${id}/group/link`, {
+      method: "POST",
+      body: { targetReceiptCode },
+    }),
+  );
+}
+
+export async function splitConsultationGroup(id: string): Promise<{
+  previousGroupId: string;
+  newGroupId: string;
+  consultationId: string;
+  previousGroupCanonicalConsultationId: string;
+}> {
+  return phoneDeskResponse(
+    await gatewayFetch(`/v1/consultations/${id}/group/split`, {
+      method: "POST",
+      body: {},
     }),
   );
 }

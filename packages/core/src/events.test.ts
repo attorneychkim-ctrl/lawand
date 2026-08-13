@@ -7,6 +7,7 @@ import {
   alimtalkRequestNotificationRequestedEventSchema,
   consultationAssignedEventSchema,
   consultationAssignmentTransferredEventSchema,
+  consultationGroupUpdatedEventSchema,
   consultationRequestUpdatedEventSchema,
   consultationRequestedEventSchema,
   consultationSoftDeletedEventSchema,
@@ -100,6 +101,32 @@ test("직원 직접등록 소프트삭제 이벤트는 상담·관리자 식별�
   assert.deepEqual(consultationSoftDeletedEventSchema.parse(event), event);
   assert.equal(
     consultationSoftDeletedEventSchema.safeParse({
+      ...event,
+      data: { ...event.data, phone: "01012345678" },
+    }).success,
+    false,
+  );
+});
+
+test("상담 묶음 변경 이벤트는 개인정보 없이 묶음 갱신 신호만 남긴다", () => {
+  const event = {
+    eventId: "01984c7d-8500-7000-8000-000000000020",
+    eventType: "consultation.group.updated",
+    eventVersion: 1,
+    occurredAt: "2026-08-13T09:00:00+09:00",
+    producer: "lawand.gateway",
+    correlationId: requestedEvent.data.consultationId,
+    data: {
+      consultationId: requestedEvent.data.consultationId,
+      groupId: "01984c7d-8500-7000-8000-000000000021",
+      action: "linked",
+      actorUserId: "01984c7d-8500-7000-8000-000000000006",
+    },
+  } as const;
+
+  assert.deepEqual(consultationGroupUpdatedEventSchema.parse(event), event);
+  assert.equal(
+    consultationGroupUpdatedEventSchema.safeParse({
       ...event,
       data: { ...event.data, phone: "01012345678" },
     }).success,

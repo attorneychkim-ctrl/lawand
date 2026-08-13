@@ -102,6 +102,15 @@ const softDeletedDataSchema = z
   })
   .strict();
 
+const groupUpdatedDataSchema = z
+  .object({
+    consultationId: z.uuid(),
+    groupId: z.uuid(),
+    action: z.enum(["linked", "split"]),
+    actorUserId: z.uuid(),
+  })
+  .strict();
+
 const assignmentReferenceDataSchema = z
   .object({
     consultationId: z.uuid(),
@@ -318,6 +327,13 @@ export const consultationSoftDeletedEventSchema = eventEnvelopeSchema
   })
   .strict();
 
+export const consultationGroupUpdatedEventSchema = eventEnvelopeSchema
+  .extend({
+    eventType: z.literal("consultation.group.updated"),
+    data: groupUpdatedDataSchema,
+  })
+  .strict();
+
 export const consultationAssignedEventSchema = eventEnvelopeSchema
   .extend({
     eventType: z.literal("consultation.assigned"),
@@ -425,6 +441,7 @@ export const platformEventSchema = z.discriminatedUnion("eventType", [
   consultationRequestUpdatedEventSchema,
   consultationDuplicateSuspectedEventSchema,
   consultationSoftDeletedEventSchema,
+  consultationGroupUpdatedEventSchema,
   consultationAssignedEventSchema,
   consultationAssignmentTransferredEventSchema,
   consultationKakaoChatConfirmedEventSchema,
@@ -449,6 +466,9 @@ export type ConsultationDuplicateSuspectedEvent = z.infer<
 >;
 export type ConsultationSoftDeletedEvent = z.infer<
   typeof consultationSoftDeletedEventSchema
+>;
+export type ConsultationGroupUpdatedEvent = z.infer<
+  typeof consultationGroupUpdatedEventSchema
 >;
 export type ConsultationAssignedEvent = z.infer<
   typeof consultationAssignedEventSchema

@@ -8,6 +8,8 @@ import {
   isNull,
   lt,
   lte,
+  or,
+  sql,
 } from "drizzle-orm";
 
 import {
@@ -24,6 +26,8 @@ import {
 import {
   consultationAssignmentTransfers,
   consultationAssignments,
+  consultationGroupMembers,
+  consultationGroups,
   consultationRequests,
   consultations,
   legalFriendsCaseLinks,
@@ -412,7 +416,18 @@ export function createOutboxWorker(options: {
       .where(
         and(
           eq(consultationRequests.id, envelope.data.requestId),
-          eq(consultationRequests.consultationId, event.aggregateId),
+          or(
+            eq(consultationRequests.consultationId, event.aggregateId),
+            sql<boolean>`exists (
+              select 1
+              from ${consultationGroupMembers}
+              inner join ${consultationGroups}
+                on ${consultationGroups.id} = ${consultationGroupMembers.groupId}
+              where ${consultationGroupMembers.consultationId} = ${consultationRequests.consultationId}
+                and ${consultationGroups.status} = 'active'
+                and ${consultationGroups.canonicalConsultationId} = ${event.aggregateId}
+            )`,
+          ),
         ),
       )
       .limit(1);

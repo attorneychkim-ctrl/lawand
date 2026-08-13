@@ -22,6 +22,7 @@ import { ClaimConsultationButton } from "../../_components/claim-consultation-bu
 import { ConsultationAssigneeTransfer } from "../../_components/consultation-assignee-transfer";
 import { ClickToCallButton } from "../../_components/click-to-call-button";
 import { ConsultationSoftDeleteButton } from "../../_components/consultation-soft-delete-button";
+import { ConsultationGroupPanel } from "../../_components/consultation-group-panel";
 import { CopyButton } from "../../_components/copy-button";
 import { KakaoEntryInvalidationButton } from "../../_components/kakao-entry-invalidation-button";
 import { KakaoEntryPanel } from "../../_components/kakao-entry-panel";
@@ -698,7 +699,7 @@ export default async function ConsultationDetailPage({
 
   const latestRequest = consultation.requests[0];
   const isSoftDeleted = Boolean(consultation.softDeletedAt);
-  const latestPhone = latestRequest?.phone ?? null;
+  const latestPhone = consultation.phone;
   const latestRegion = latestRequest?.intake.residenceRegion;
   const action = nextAction(consultation);
   const canClaim =
@@ -821,7 +822,7 @@ export default async function ConsultationDetailPage({
             ) : null}
             {!isSoftDeleted && consultation.kakaoEntry?.status === "pending" ? (
               <KakaoEntryInvalidationButton
-                consultationId={consultation.id}
+                consultationId={consultation.kakaoEntry.consultationId}
               />
             ) : null}
             {canClaim ? (
@@ -1092,7 +1093,7 @@ export default async function ConsultationDetailPage({
 
         {consultation.kakaoEntry ? (
           <KakaoEntryPanel
-            consultationId={consultation.id}
+            consultationId={consultation.kakaoEntry.consultationId}
             displayName={consultation.displayName.replace(
               /_[23456789A-HJ-NP-Z]{8}_플친$/u,
               "",
@@ -1101,6 +1102,13 @@ export default async function ConsultationDetailPage({
             nameProvided={consultation.kakaoEntry.nameProvided}
           />
         ) : null}
+
+        <ConsultationGroupPanel
+          consultationId={consultation.id}
+          group={consultation.group}
+          nameMismatch={consultation.nameMismatch}
+          requestCount={consultation.requests.length}
+        />
 
         {consultation.naverBooking ? (
           <section className="channel-action-panel is-naver" aria-labelledby="naver-title">
@@ -1146,7 +1154,7 @@ export default async function ConsultationDetailPage({
                     <span className="request-number">요청 {consultation.requests.length - index}</span>
                     <span className="request-summary-main">
                       <strong>{modeLabel(request)}</strong>
-                      <small>{sourceLabel(request)} · {dedupeLabels[request.dedupeOutcome]}</small>
+                      <small>{sourceLabel(request)} · {request.consultationReceiptCode} · {dedupeLabels[request.dedupeOutcome]}</small>
                     </span>
                     <time dateTime={request.submittedAt}>{formatDate(request.submittedAt)}</time>
                     <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m7 9 5 5 5-5" /></svg>

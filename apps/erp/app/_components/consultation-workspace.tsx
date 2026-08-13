@@ -191,6 +191,31 @@ function ChannelIcon({ tone }: { tone: ReturnType<typeof channelTone> }) {
 function StatusBadges({ item }: { item: ConsultationListItem }) {
   return (
     <div className="consultation-flags">
+      {item.groupMemberCount > 1 ? (
+        <span className="flag-badge is-positive">
+          상담 묶음 {item.groupMemberCount}건
+        </span>
+      ) : null}
+      {item.groupMemberCount > 1 ? (
+        <span className="flag-badge is-neutral">
+          {[
+            item.channelCounts.kakao_channel > 0
+              ? `플친 ${item.channelCounts.kakao_channel}`
+              : null,
+            item.channelCounts.phone > 0
+              ? `홈페이지·전화 ${item.channelCounts.phone}`
+              : null,
+            item.channelCounts.naver_booking > 0
+              ? `네이버 ${item.channelCounts.naver_booking}`
+              : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </span>
+      ) : null}
+      {item.nameMismatch ? (
+        <span className="flag-badge is-attention">입력 이름 불일치</span>
+      ) : null}
       {item.softDeletedAt ? (
         <span className="flag-badge is-danger">삭제됨</span>
       ) : null}
