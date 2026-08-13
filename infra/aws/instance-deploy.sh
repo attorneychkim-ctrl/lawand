@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
 if [ "$#" -lt 7 ] || [ "$#" -gt 8 ]; then
   echo "usage: $0 <app> <secret-id> <eip> <artifact-bucket> <artifact-key> <release-id> <aws-region> [centrex-bridge-secret-ids-csv]" >&2
   exit 64
@@ -14,6 +16,7 @@ ARTIFACT_KEY="$5"
 RELEASE_ID="$6"
 AWS_REGION="$7"
 CENTREX_BRIDGE_SECRET_IDS="${8:-}"
+IMMUTABLE_IMAGE_REF="${LAWAND_IMMUTABLE_IMAGE_REF:-}"
 
 case "$APP" in
   homepage)
@@ -36,7 +39,7 @@ esac
 
 RELEASE_DIR="/opt/lawand/releases/${RELEASE_ID}"
 ARCHIVE_PATH="/opt/lawand/${RELEASE_ID}.tar.gz"
-IMAGE_NAME="lawand-${APP}:${RELEASE_ID}"
+IMAGE_NAME="${IMMUTABLE_IMAGE_REF:-lawand-${APP}:${RELEASE_ID}}"
 ENV_PATH="/etc/lawand/${APP}.env"
 TEMPORARY_HOST="${ELASTIC_IP//./-}.sslip.io"
 HOMEPAGE_PUBLIC_HOST='lawandfirm.com'
@@ -44,11 +47,22 @@ HOMEPAGE_LEGACY_ORIGIN='222.239.248.41'
 ERP_PUBLIC_HOST='erp.lawandfirm.com'
 GATEWAY_PUBLIC_HOST='api.lawandfirm.com'
 
-mkdir -p "$RELEASE_DIR" /etc/lawand /var/lib/lawand-caddy/data /var/lib/lawand-caddy/config
+mkdir -p /etc/lawand /var/lib/lawand-caddy/data /var/lib/lawand-caddy/config /var/log/lawand
 chmod 700 /etc/lawand
 
-aws s3 cp "s3://${ARTIFACT_BUCKET}/${ARTIFACT_KEY}" "$ARCHIVE_PATH" --region "$AWS_REGION" --only-show-errors
-tar -xzf "$ARCHIVE_PATH" -C "$RELEASE_DIR"
+PREVIOUS_IMAGE_ID="$(docker inspect --format '{{.Image}}' "lawand-${APP}" 2>/dev/null || true)"
+
+if [ -n "$IMMUTABLE_IMAGE_REF" ]; then
+  if ! [[ "$IMMUTABLE_IMAGE_REF" =~ ^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/lawand-prod/${APP}@sha256:[0-9a-f]{64}$ ]]; then
+    echo "앱과 일치하는 immutable ECR digest 참조가 필요합니다." >&2
+    exit 64
+  fi
+  docker pull "$IMAGE_NAME"
+else
+  mkdir -p "$RELEASE_DIR"
+  aws s3 cp "s3://${ARTIFACT_BUCKET}/${ARTIFACT_KEY}" "$ARCHIVE_PATH" --region "$AWS_REGION" --only-show-errors
+  tar -xzf "$ARCHIVE_PATH" -C "$RELEASE_DIR"
+fi
 
 SECRET_JSON="$(aws secretsmanager get-secret-value \
   --secret-id "$SECRET_ID" \
@@ -117,11 +131,20 @@ fi
 printf 'NODE_ENV=production\nPORT=%s\nHOST=0.0.0.0\n' "$APP_PORT" >> "$ENV_PATH"
 chmod 600 "$ENV_PATH"
 
-docker build \
-  --build-arg "LAWAND_APP=${APP}" \
-  --file "$RELEASE_DIR/infra/docker/Dockerfile" \
-  --tag "$IMAGE_NAME" \
-  "$RELEASE_DIR"
+if [ -z "$IMMUTABLE_IMAGE_REF" ]; then
+  docker build \
+    --build-arg "LAWAND_APP=${APP}" \
+    --build-arg "LAWAND_REVISION=${RELEASE_ID}" \
+    --file "$RELEASE_DIR/infra/docker/Dockerfile" \
+    --tag "$IMAGE_NAME" \
+    "$RELEASE_DIR"
+fi
+
+IMAGE_ARCHITECTURE="$(docker image inspect --format '{{.Architecture}}' "$IMAGE_NAME")"
+if [ "$IMAGE_ARCHITECTURE" != "arm64" ]; then
+  echo "운영 이미지는 arm64여야 합니다: ${IMAGE_ARCHITECTURE}" >&2
+  exit 65
+fi
 
 install -d -m 0755 /etc/lawand/caddy
 if [ "$APP" = "gateway" ]; then
@@ -210,6 +233,14 @@ for attempt in $(seq 1 30); do
   sleep 2
 done
 
-rm -f -- "$ARCHIVE_PATH"
+if [ -z "$IMMUTABLE_IMAGE_REF" ]; then
+  rm -f -- "$ARCHIVE_PATH"
+fi
 
-echo "deployed app=${APP} release=${RELEASE_ID} https_host=${TEMPORARY_HOST}"
+"${SCRIPT_DIR}/post-deploy-cleanup.sh" \
+  "$APP" \
+  "$RELEASE_ID" \
+  "$IMAGE_NAME" \
+  "$PREVIOUS_IMAGE_ID"
+
+echo "deployed app=${APP} release=${RELEASE_ID} image=${IMAGE_NAME} https_host=${TEMPORARY_HOST}"

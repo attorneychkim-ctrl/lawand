@@ -188,10 +188,35 @@ null 0건, 사건-고객 누락·타 사무소·전화 정규화 위반 0건을 
 ## 배포와 재배포
 
 인프라 단일 진실원천은 [`infra/aws/production.yml`](../infra/aws/production.yml)이다.
-애플리케이션 이미지는 [`infra/docker/Dockerfile`](../infra/docker/Dockerfile)로 각
-EC2에서 ARM64 네이티브 빌드한다. 서버 배포는
-[`infra/aws/instance-deploy.sh`](../infra/aws/instance-deploy.sh), 최초 DB 구성은
-[`infra/aws/configure-database.sh`](../infra/aws/configure-database.sh)를 사용한다.
+표준 애플리케이션 배포 흐름은 다음과 같다.
+
+```text
+검증된 main commit
+  → GitHub Actions (OIDC, Buildx)
+  → linux/arm64 앱 이미지 3개
+  → private ECR (immutable commit tag + digest)
+  → 운영 EC2가 repository@sha256:digest pull
+  → systemd 앱 전환
+  → 내부·외부 health
+  → rollback 2개/캐시/release 정리와 용량·이미지 원장
+```
+
+이미지는 [`infra/docker/Dockerfile`](../infra/docker/Dockerfile)과
+[`build-production-images.yml`](../.github/workflows/build-production-images.yml)로 CI에서
+만든다. GitHub는 `main` ref만 신뢰하는 AWS OIDC 역할을 사용하고 장기 access key를 저장하지
+않는다. ECR의 commit SHA tag는 추적용 불변값이며 실제 배포 입력은 반드시 workflow가 기록한
+`repository@sha256:digest`여야 한다. 서버는
+[`infra/aws/instance-deploy-ecr.sh`](../infra/aws/instance-deploy-ecr.sh)로 이미지를 pull하고
+기존 systemd/Caddy 경계를 전환한다. Docker Compose 도입 여부와 무관하게 운영 서버에서
+애플리케이션 소스를 빌드하지 않는 것이 이 계약의 핵심이다.
+
+S3 source tar와 [`infra/aws/instance-deploy.sh`](../infra/aws/instance-deploy.sh)의 EC2 빌드는
+CI/ECR 장애 때 명시적으로 선택하는 긴급 fallback으로만 남긴다. 표준·fallback 모두 앱과
+외부 health가 성공한 뒤에만
+[`post-deploy-cleanup.sh`](../infra/aws/post-deploy-cleanup.sh)를 실행한다. 현재 이미지와
+이전 rollback 이미지 2개만 보존하고, BuildKit cache는 4 GiB 이하, source release directory는
+최신 2개만 남긴다. `/var/log/lawand/deployments.log`에 정리 전후 가용 바이트·회수 바이트·
+현재/rollback 이미지 ID를 기록한다.
 
 운영 시크릿은 다음 네 경계로 분리한다.
 
@@ -203,13 +228,18 @@ EC2에서 ARM64 네이티브 빌드한다. 서버 배포는
 값은 Secrets Manager와 서버의 권한 600 환경파일에만 둔다. 배포 로그·문서·Git에는
 복사하지 않는다. 일반적인 갱신 순서는 아래와 같다.
 
-1. 전체 typecheck·lint·test·build와 migration 검사를 통과한다.
-2. Git 추적 파일과 의도한 미추적 소스만 tar로 묶어 private artifact bucket에 올린다.
-3. gateway 이미지를 먼저 빌드하고 필요한 DB migration을 적용한다.
-4. gateway를 재기동해 health와 세 worker 시작을 확인한다.
-5. 홈페이지·ERP를 병렬 배포한다.
-6. 내부 health, EIP HTTP의 HTTPS 전환, 외부 HTTPS, 실제 브라우저와 systemd 재기동을
+1. 전체 typecheck·lint·test·build와 migration 검사를 통과하고 모든 worktree HEAD가
+   `main` ancestor인지 확인한다.
+2. 검증한 `main`을 push해 CI가 세 앱의 ARM64 이미지를 ECR에 올리게 하고, commit·digest·
+   platform이 일치하는지 확인한다.
+3. migration이 있으면 암호화 RDS snapshot을 확보하고 gateway digest를 EC2에 먼저 pull해
+   같은 이미지로 migration을 적용한다.
+4. 통화·명령 안전 상태를 확인한 뒤 gateway digest를 전환하고 health와 worker 시작을
    확인한다.
+5. 영향받는 ERP·홈페이지 digest를 전환한다.
+6. 내부 health, EIP HTTP의 HTTPS 전환, 정식 외부 HTTPS, systemd/Docker restart와 error
+   journal을 확인한다.
+7. health 뒤 자동 정리 결과의 현재/rollback 이미지 ID와 회수 용량을 릴리스 원장에 남긴다.
 
 systemd 앱 단위와 Caddy edge 단위는 부팅 시 자동 시작한다. 최종 검증에서 홈페이지·ERP는
 재기동 후 약 1초, gateway는 약 2초 안에 health를 회복했고 실패한 systemd unit과

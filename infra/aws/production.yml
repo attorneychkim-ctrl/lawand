@@ -24,6 +24,11 @@ Parameters:
     Type: AWS::EC2::Image::Id
     Default: ami-0a1231e819ae021a0
     Description: Explicitly pinned production ARM64 AMI; update only through a reviewed replacement release.
+  GitHubRepository:
+    Type: String
+    Default: attorneychkim-ctrl/lawand
+    AllowedPattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    Description: GitHub owner/repository allowed to publish production images from main.
 
 Resources:
   Vpc:
@@ -307,6 +312,164 @@ Resources:
               Bool:
                 aws:SecureTransport: false
 
+  HomepageRepository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      ImageTagMutability: IMMUTABLE
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep the ten newest production images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": { "type": "expire" }
+              }
+            ]
+          }
+      RepositoryName: !Sub ${EnvironmentName}/homepage
+      Tags:
+        - Key: Project
+          Value: lawand
+        - Key: Environment
+          Value: production
+
+  ErpRepository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      ImageTagMutability: IMMUTABLE
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep the ten newest production images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": { "type": "expire" }
+              }
+            ]
+          }
+      RepositoryName: !Sub ${EnvironmentName}/erp
+      Tags:
+        - Key: Project
+          Value: lawand
+        - Key: Environment
+          Value: production
+
+  GatewayRepository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      ImageTagMutability: IMMUTABLE
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep the ten newest production images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": { "type": "expire" }
+              }
+            ]
+          }
+      RepositoryName: !Sub ${EnvironmentName}/gateway
+      Tags:
+        - Key: Project
+          Value: lawand
+        - Key: Environment
+          Value: production
+
+  GitHubActionsOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      ClientIdList:
+        - sts.amazonaws.com
+      Tags:
+        - Key: Project
+          Value: lawand
+        - Key: Environment
+          Value: production
+      Url: https://token.actions.githubusercontent.com
+
+  GitHubEcrBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubActionsOidcProvider
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepository}:ref:refs/heads/main
+      Description: Main-only GitHub Actions role for publishing Lawand ARM64 images to ECR
+      MaxSessionDuration: 3600
+      Policies:
+        - PolicyName: PublishLawandProductionImages
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:CompleteLayerUpload
+                  - ecr:DescribeImages
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                Resource:
+                  - !GetAtt HomepageRepository.Arn
+                  - !GetAtt ErpRepository.Arn
+                  - !GetAtt GatewayRepository.Arn
+      Tags:
+        - Key: Project
+          Value: lawand
+        - Key: Environment
+          Value: production
+
   ApplicationRole:
     Type: AWS::IAM::Role
     Properties:
@@ -339,6 +502,19 @@ Resources:
                 Action:
                   - s3:ListBucket
                 Resource: !GetAtt ArtifactBucket.Arn
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource:
+                  - !GetAtt HomepageRepository.Arn
+                  - !GetAtt ErpRepository.Arn
+                  - !GetAtt GatewayRepository.Arn
       Tags:
         - Key: Project
           Value: lawand
@@ -708,6 +884,8 @@ Outputs:
     Value: !GetAtt Database.Endpoint.Address
   DatabaseMasterSecretArn:
     Value: !GetAtt Database.MasterUserSecret.SecretArn
+  ErpRepositoryUri:
+    Value: !GetAtt ErpRepository.RepositoryUri
   ErpElasticIp:
     Value: !Ref ErpElasticIp
   ErpInstanceId:
@@ -720,11 +898,17 @@ Outputs:
     Value: !Ref GatewayInstance
   GatewayPrivateIp:
     Value: !GetAtt GatewayInstance.PrivateIp
+  GatewayRepositoryUri:
+    Value: !GetAtt GatewayRepository.RepositoryUri
+  GitHubEcrBuildRoleArn:
+    Value: !GetAtt GitHubEcrBuildRole.Arn
   HomepageElasticIp:
     Value: !Ref HomepageElasticIp
   HomepageInstanceId:
     Value: !Ref HomepageInstance
   HomepagePrivateIp:
     Value: !GetAtt HomepageInstance.PrivateIp
+  HomepageRepositoryUri:
+    Value: !GetAtt HomepageRepository.RepositoryUri
   VpcId:
     Value: !Ref Vpc

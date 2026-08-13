@@ -32,6 +32,11 @@ RUN if [ "$LAWAND_APP" = "gateway" ]; then \
 FROM node:22-bookworm-slim AS runtime
 
 ARG LAWAND_APP
+ARG LAWAND_REVISION=unknown
+
+LABEL com.lawand.app="${LAWAND_APP}" \
+      org.opencontainers.image.revision="${LAWAND_REVISION}" \
+      org.opencontainers.image.source="https://github.com/attorneychkim-ctrl/lawand"
 
 ENV LAWAND_APP=${LAWAND_APP} \
     NODE_ENV=production \

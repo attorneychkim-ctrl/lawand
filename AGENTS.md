@@ -31,6 +31,19 @@
   릴리스 ID로 함께 적용한다. 이미 별도 긴급 배포된 작업이나 이번 배포에서 제외할 작업은
   인수인계 로그에 명시해 중복·누락 배포를 막으며, `main` 푸시만으로 배포 완료로 간주하지
   않는다.
+- Linux 운영 앱의 표준 배포는 **GitHub Actions가 검증된 `main` commit으로 `linux/arm64`
+  이미지를 빌드해 앱별 private ECR에 올리고, EC2는 tag가 아닌 `repository@sha256:digest`를
+  pull해 실행하는 방식**이다. 운영 EC2에서 소스를 내려받아 `docker build`하지 않으며,
+  GitHub OIDC 역할은 해당 저장소의 `main` ref만 신뢰하고 장기 AWS access key를 두지 않는다.
+  migration이 있으면 같은 gateway digest를 먼저 pull해 스냅샷 뒤 migration을 적용하고,
+  gateway와 영향 앱을 같은 릴리스 ID로 전환한다. ECR tag는 commit SHA의 불변 추적값일 뿐
+  배포 입력으로 사용하지 않는다.
+- S3 소스 아티팩트와 EC2 네이티브 빌드는 CI/ECR 장애 때 메인 세션이 명시적으로 선택하는
+  긴급 fallback으로만 유지한다. 어느 방식이든 새 앱과 외부 health가 모두 성공한 뒤 현재
+  이미지와 이전 rollback 이미지 2개만 보존하고, BuildKit 캐시는 4 GiB 이하로 prune하며,
+  오래된 앱 이미지와 `/opt/lawand/releases`(최신 2개 제외)를 정리한다. 정리 전후 가용
+  바이트·회수 바이트·현재/rollback 이미지 ID를 `/var/log/lawand/deployments.log`와
+  인수인계 로그에 기록한다. health 실패 전에는 이 정리를 실행하지 않는다.
 - 메인 통합 배포 직전에는 HERDR 워크트리 목록과 `origin/worktree/*` 원격 브랜치를 모두
   열거하고, 각 HEAD가 `main`의 ancestor인지 확인한다. 미반영 브랜치는 `병합/명시적 제외/
   진행 중` 중 하나로 기록하기 전에는 아티팩트 생성과 운영 배포를 시작하지 않는다.

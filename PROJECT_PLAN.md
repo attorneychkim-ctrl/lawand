@@ -1863,6 +1863,17 @@ e-Post 적용 사건의 1회 기준금액 5,640원을 사용한다. 예시 합�
 이상이다. 각 앱은 독립 Docker 이미지·CI/CD 배포 단위를 유지하며, EC2 디스크나 다른 앱의
 로컬 포트/파일시스템에 의존하지 않는다.
 
+Linux 앱의 운영 배포 단일 경로는 `main` 검증 → GitHub Actions/Buildx `linux/arm64` 빌드 →
+앱별 private ECR → EC2의 immutable digest pull이다. GitHub는 장기 AWS 키 대신
+`repo:attorneychkim-ctrl/lawand:ref:refs/heads/main`으로 제한한 OIDC 역할을 사용하고, ECR은
+tag 변경을 막고 push scan과 최근 10개 lifecycle을 적용한다. EC2 systemd는
+`repository@sha256:digest`를 직접 실행하므로 commit tag 재지정이 운영 바이너리를 바꾸지
+못한다. migration이 있는 릴리스는 gateway digest로 migration을 먼저 적용한 뒤 gateway와
+영향 앱을 같은 릴리스 ID로 전환한다. 기존 S3 소스 전송·EC2 네이티브 빌드는 CI/ECR 장애의
+명시적 긴급 fallback일 뿐이다. 모든 배포는 내부·외부 health 성공 뒤 현재+rollback 2개
+이미지만 남기고 BuildKit cache 4 GiB 상한, 오래된 source release 정리, 정리 전후 가용 용량과
+이미지 ID 기록을 수행한다.
+
 2026-08-04 이 토폴로지를 서울 리전 `lawand-prod` 스택으로 실제 구성했다. 세 EC2는
 각각 EIP와 암호화 gp3를 사용하고 SSH 대신 SSM으로 관리한다. RDS는 두 private DB
 subnet 안의 단일 AZ `db.t4g.xlarge`를 사용하며 public access를 차단했다. 최초에는
@@ -1916,6 +1927,8 @@ Manager와 별도 역할·보안그룹·TLS 기준을 적용한다.
 
 - [x] 배포 토폴로지: homepage·ERP·gateway 앱별 EC2 분리, RDS·배포 S3 관리형 분리,
   ElastiCache는 실제 큐 부하 전까지 보류
+- [x] GitHub Actions OIDC → ARM64 앱별 immutable ECR → EC2 digest pull 배포 기준선,
+  health 후 rollback 2개·BuildKit 4 GiB·source release 정리와 용량/이미지 원장
 - [x] GitHub origin 연결: `https://github.com/attorneychkim-ctrl/lawand.git`
 - [x] 개인회생·파산 홈페이지 제품·UX·통합 설계 v1 작성
 - [x] VPC/2AZ 서브넷·보안 그룹·EC2 3대·EIP 3개·비공개 RDS·배포 S3·임시 HTTPS 준비

@@ -1,0 +1,124 @@
+name: Build production ARM64 images
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "infra/docker/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "package.json"
+      - "turbo.json"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-images-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.17.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.2
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Verify source
+        run: |
+          pnpm typecheck
+          pnpm lint
+          pnpm build
+          pnpm test
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        app:
+          - homepage
+          - erp
+          - gateway
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ap-northeast-2
+          role-to-assume: ${{ vars.AWS_ECR_BUILD_ROLE_ARN }}
+      - id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - id: existing
+        name: Reuse an existing immutable commit image
+        env:
+          APP: ${{ matrix.app }}
+        run: |
+          digest="$(aws ecr describe-images \
+            --repository-name "lawand-prod/$APP" \
+            --image-ids "imageTag=$GITHUB_SHA" \
+            --query 'imageDetails[0].imageDigest' \
+            --output text 2>/dev/null || true)"
+          if [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: docker/setup-qemu-action@v3
+        if: steps.existing.outputs.exists != 'true'
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@v3
+        if: steps.existing.outputs.exists != 'true'
+      - id: build
+        if: steps.existing.outputs.exists != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.login-ecr.outputs.registry }}/lawand-prod/${{ matrix.app }}:${{ github.sha }}
+          build-args: |
+            LAWAND_APP=${{ matrix.app }}
+            LAWAND_REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=lawand-${{ matrix.app }}-arm64
+          cache-to: type=gha,mode=max,scope=lawand-${{ matrix.app }}-arm64
+          provenance: mode=max
+      - name: Record immutable image
+        env:
+          APP: ${{ matrix.app }}
+          DIGEST: ${{ steps.existing.outputs.digest || steps.build.outputs.digest }}
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          mkdir -p image-manifest
+          jq -n \
+            --arg app "$APP" \
+            --arg commit "$GITHUB_SHA" \
+            --arg image "$REGISTRY/lawand-prod/$APP@$DIGEST" \
+            --arg digest "$DIGEST" \
+            '{app: $app, commit: $commit, image: $image, digest: $digest, platform: "linux/arm64"}' \
+            > "image-manifest/$APP.json"
+          printf '### %s\n\n`%s`\n' "$APP" "$REGISTRY/lawand-prod/$APP@$DIGEST" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-image-${{ matrix.app }}-${{ github.sha }}
+          path: image-manifest/${{ matrix.app }}.json
+          if-no-files-found: error
+          retention-days: 30
