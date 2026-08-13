@@ -771,6 +771,9 @@ export default async function ConsultationDetailPage({
               {consultation.existingCustomer ? (
                 <span className="flag-badge is-existing">기존고객</span>
               ) : null}
+              {consultation.legalFriendsRegistered ? (
+                <span className="flag-badge is-positive">리걸프렌즈 등록 완료</span>
+              ) : null}
               {consultation.requiresLegalFriendsReview ? (
                 <span className="flag-badge is-attention">기존 사건 확인</span>
               ) : null}

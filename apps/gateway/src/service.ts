@@ -85,7 +85,11 @@ import type { createDatabaseClient } from "@lawand/db";
 
 import type { DataProtection } from "./crypto.js";
 import type { StaffPrincipal } from "./auth.js";
-import { existingPhoneDirectoryCustomersQuery } from "./phone-directory.js";
+import {
+  excludeOwnLegalFriendsCase,
+  existingConsultationPhoneDirectoryCustomersQuery,
+  type ConsultationPhoneDirectoryCandidate,
+} from "./phone-directory.js";
 import { legalFriendsResidenceRegion } from "./telephony-service.js";
 import {
   CURRENT_NAVER_BOOKING_BASIS_VERSION,
@@ -356,30 +360,37 @@ export function createConsultationService(options: {
 }) {
   const { db, protection } = options;
 
-  async function existingLegalFriendsCustomerPhones(phones: string[]) {
-    const normalizedPhones = [
-      ...new Set(
-        phones
-          .map((phone) => phone.replace(/[^0-9]/g, ""))
-          .filter((phone) => phone.length >= 9 && phone.length <= 15),
-      ),
-    ];
-    if (normalizedPhones.length === 0) return new Set<string>();
+  async function existingLegalFriendsCustomerConsultationIds(
+    candidates: readonly ConsultationPhoneDirectoryCandidate[],
+  ) {
+    const normalizedCandidates = candidates
+      .map((candidate) => ({
+        ...candidate,
+        phone: candidate.phone.replace(/[^0-9]/g, ""),
+        ownCaseIdx: candidate.ownCaseIdx?.trim() || null,
+      }))
+      .filter(
+        (candidate) =>
+          candidate.phone.length >= 9 && candidate.phone.length <= 15,
+      );
+    if (normalizedCandidates.length === 0) return new Set<string>();
 
     try {
       const result = await db.execute(
-        existingPhoneDirectoryCustomersQuery(normalizedPhones),
+        existingConsultationPhoneDirectoryCustomersQuery(
+          normalizedCandidates,
+        ),
       );
       return new Set(
-        (result.rows as Array<{ candidate_phone: string }>).map(
-          (row) => row.candidate_phone,
+        (result.rows as Array<{ consultation_id: string }>).map(
+          (row) => row.consultation_id,
         ),
       );
     } catch {
       console.error(
         JSON.stringify({
           event: "consultation_existing_customer_lookup_failed",
-          phoneCount: normalizedPhones.length,
+          consultationCount: normalizedCandidates.length,
           occurredAt: new Date().toISOString(),
         }),
       );
@@ -3329,6 +3340,16 @@ export function createConsultationService(options: {
     const handlingIds = new Set(
       handlingRows.map((row) => row.consultationId),
     );
+    const legalFriendsCaseRows = await db
+      .select({
+        consultationId: legalFriendsCaseLinks.consultationId,
+        caseIdx: legalFriendsCaseLinks.caseIdx,
+      })
+      .from(legalFriendsCaseLinks)
+      .where(inArray(legalFriendsCaseLinks.consultationId, ids));
+    const legalFriendsCaseByConsultation = new Map(
+      legalFriendsCaseRows.map((row) => [row.consultationId, row]),
+    );
     const homepageEntryRows = await db
       .select({
         consultationId: kakaoHomepageEntries.consultationId,
@@ -3516,19 +3537,36 @@ export function createConsultationService(options: {
           lastRequestedAt: consultation.lastRequestedAt.toISOString(),
         };
       });
-    const existingCustomerPhones = await existingLegalFriendsCustomerPhones(
-      items.flatMap((item) => (item.phone ? [item.phone] : [])),
-    );
+    const existingCustomerConsultationIds =
+      await existingLegalFriendsCustomerConsultationIds(
+        items.flatMap((item) =>
+          item.phone
+            ? [
+                {
+                  consultationId: item.id,
+                  phone: item.phone,
+                  ownCaseIdx:
+                    legalFriendsCaseByConsultation.get(item.id)?.caseIdx ??
+                    null,
+                },
+              ]
+            : [],
+        ),
+      );
 
     return {
       items: items.map((item) => {
         const { latestSource, ...publicItem } = item;
+        const legalFriendsRegistered = legalFriendsCaseByConsultation.has(
+          item.id,
+        );
         const existingCustomer =
           item.phone !== null &&
-          existingCustomerPhones.has(item.phone.replace(/[^0-9]/g, ""));
+          existingCustomerConsultationIds.has(item.id);
         return {
           ...publicItem,
           existingCustomer,
+          legalFriendsRegistered,
           requiresLegalFriendsReview:
             existingCustomer &&
             item.softDeletedAt === null &&
@@ -4000,9 +4038,13 @@ export function createConsultationService(options: {
     const latestPhone = requestRows[0]
       ? phoneByRequest.get(requestRows[0].id) ?? null
       : null;
-    const legalFriendsMatches = latestPhone
+    const unfilteredLegalFriendsMatches = latestPhone
       ? await legalFriendsCustomerMatches(latestPhone)
       : [];
+    const legalFriendsMatches = excludeOwnLegalFriendsCase(
+      unfilteredLegalFriendsMatches,
+      legalFriendsCase?.caseIdx ?? null,
+    );
     const latestRequestSource = requestRows[0]?.source ?? null;
     const firstRequestSource = requestRows.at(-1)?.source ?? null;
 
@@ -4018,6 +4060,7 @@ export function createConsultationService(options: {
         firstRequestSource ?? "",
       ),
       existingCustomer: legalFriendsMatches.length > 0,
+      legalFriendsRegistered: Boolean(legalFriendsCase),
       requiresLegalFriendsReview:
         legalFriendsMatches.length > 0 &&
         consultation.softDeletedAt === null &&

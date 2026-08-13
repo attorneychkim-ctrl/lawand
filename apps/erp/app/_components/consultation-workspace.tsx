@@ -97,6 +97,7 @@ function searchText(item: ConsultationListItem) {
     item.publicReceiptCode,
     item.assigneeDisplayName,
     item.existingCustomer ? "기존고객" : null,
+    item.legalFriendsRegistered ? "리걸프렌즈 등록 완료" : null,
     residenceRegionLabels[item.residenceRegion ?? ""],
     modeLabel(item),
     item.latestTelephony?.disposition === "no_answer" ? "부재" : null,
@@ -196,6 +197,9 @@ function StatusBadges({ item }: { item: ConsultationListItem }) {
       ) : null}
       {item.existingCustomer ? (
         <span className="flag-badge is-existing">기존고객</span>
+      ) : null}
+      {item.legalFriendsRegistered ? (
+        <span className="flag-badge is-positive">리걸프렌즈 등록 완료</span>
       ) : null}
       {item.requiresLegalFriendsReview ? (
         <span className="flag-badge is-attention">기존 사건 확인</span>
