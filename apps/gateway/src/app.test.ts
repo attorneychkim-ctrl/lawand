@@ -1379,7 +1379,13 @@ test("목록 조회는 허용하지 않은 페이지 크기와 필터를 거부�
     "x-lawand-internal-key": "test-internal-key",
     "x-lawand-staff-session": "test-session",
   };
-  const [consultationsResponse, callsResponse, assigneeResponse] =
+  const [
+    consultationsResponse,
+    callsResponse,
+    assigneeResponse,
+    longRangeResponse,
+    shortSearchResponse,
+  ] =
     await Promise.all([
       fetch(
         `http://127.0.0.1:${address.port}/v1/consultations?pageSize=25`,
@@ -1393,10 +1399,20 @@ test("목록 조회는 허용하지 않은 페이지 크기와 필터를 거부�
         `http://127.0.0.1:${address.port}/v1/phone-desk/calls?assigneeUserId=not-a-uuid`,
         { headers },
       ),
-    ]);
+      fetch(
+        `http://127.0.0.1:${address.port}/v1/phone-desk/calls?from=2026-07-01T00%3A00%3A00Z&to=2026-08-08T00%3A00%3A00Z`,
+      { headers },
+    ),
+    fetch(
+      `http://127.0.0.1:${address.port}/v1/phone-desk/calls?q=1`,
+      { headers },
+    ),
+  ]);
   assert.equal(consultationsResponse.status, 400);
   assert.equal(callsResponse.status, 400);
   assert.equal(assigneeResponse.status, 400);
+  assert.equal(longRangeResponse.status, 400);
+  assert.equal(shortSearchResponse.status, 400);
 });
 
 test("직원 전화데스크 목록은 권한 확인 뒤 통합 원장을 반환한다", async (context) => {
@@ -1408,6 +1424,8 @@ test("직원 전화데스크 목록은 권한 확인 뒤 통합 원장을 반환
         assigneeUserId?: string;
         from?: Date;
         to?: Date;
+        search?: string;
+        includeFollowUps?: boolean;
       }
     | undefined;
   const telephonyService = {
@@ -1447,7 +1465,7 @@ test("직원 전화데스크 목록은 권한 확인 뒤 통합 원장을 반환
   );
   assert.equal(denied.status, 401);
   const accepted = await fetch(
-    `http://127.0.0.1:${address.port}/v1/phone-desk/calls?page=3&pageSize=50&filter=active&assigneeUserId=019fa6a4-6834-7782-aa0b-4e71ffb8a2f1&from=2026-08-01T00%3A00%3A00%2B09%3A00&to=2026-08-08T00%3A00%3A00%2B09%3A00`,
+    `http://127.0.0.1:${address.port}/v1/phone-desk/calls?page=3&pageSize=50&filter=active&assigneeUserId=019fa6a4-6834-7782-aa0b-4e71ffb8a2f1&from=2026-08-01T00%3A00%3A00%2B09%3A00&to=2026-08-08T00%3A00%3A00%2B09%3A00&q=${encodeURIComponent("홍길동")}&includeFollowUps=1`,
     {
       headers: {
         "x-lawand-internal-key": "test-internal-key",
@@ -1465,6 +1483,8 @@ test("직원 전화데스크 목록은 권한 확인 뒤 통합 원장을 반환
   );
   assert.equal(receivedQuery?.from?.toISOString(), "2026-07-31T15:00:00.000Z");
   assert.equal(receivedQuery?.to?.toISOString(), "2026-08-07T15:00:00.000Z");
+  assert.equal(receivedQuery?.search, "홍길동");
+  assert.equal(receivedQuery?.includeFollowUps, true);
   const body = await accepted.text();
   assert.match(body, /click_to_call/);
   assert.match(body, /01012345678/);

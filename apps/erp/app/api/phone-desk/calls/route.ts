@@ -19,6 +19,11 @@ export async function GET(request: Request) {
   const assigneeUserId = searchParams.get("assigneeUserId") ?? undefined;
   const fromValue = searchParams.get("from");
   const toValue = searchParams.get("to");
+  const search = searchParams.get("q")?.trim() ?? "";
+  const includeFollowUps = searchParams.get("includeFollowUps") === "1";
+  const isPhoneSearch = Boolean(search) && /^[0-9() +.-]+$/.test(search);
+  const searchDigits = search.replace(/[^0-9]/g, "");
+  const compactSearchName = search.replace(/\s/g, "");
   const from = fromValue ? new Date(fromValue) : undefined;
   const to = toValue ? new Date(toValue) : undefined;
   if (
@@ -37,6 +42,11 @@ export async function GET(request: Request) {
     (from && Number.isNaN(from.getTime())) ||
     (to && Number.isNaN(to.getTime())) ||
     (from && to && from >= to)
+    || (from && to && to.getTime() - from.getTime() > 31 * 24 * 60 * 60_000)
+    || (search && (
+      (isPhoneSearch && (searchDigits.length < 4 || searchDigits.length > 15))
+      || (!isPhoneSearch && (compactSearchName.length < 2 || compactSearchName.length > 30))
+    ))
   ) {
     return NextResponse.json(
       { error: "invalid_list_query" },
@@ -52,6 +62,8 @@ export async function GET(request: Request) {
         ...(assigneeUserId ? { assigneeUserId } : {}),
         from: fromValue ?? undefined,
         to: toValue ?? undefined,
+        ...(search ? { search } : {}),
+        includeFollowUps,
       }),
     );
   } catch {

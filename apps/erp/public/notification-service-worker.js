@@ -46,7 +46,7 @@ async function focusOrOpen(targetUrl) {
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const data = event.notification.data ?? {};
-  const target = event.action === "consultation-desk"
+  const target = event.action === "consultation-desk" || event.action === "erp-desk"
     ? sameOriginUrl(data.deskHref, "/")
     : sameOriginUrl(data.href, "/");
   event.waitUntil(focusOrOpen(target));

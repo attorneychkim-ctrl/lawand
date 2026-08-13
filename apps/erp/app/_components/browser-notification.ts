@@ -27,6 +27,28 @@ type ConsultationBrowserNotification = {
   occurredAt: string;
 };
 
+type TelephonyBrowserNotification = {
+  title: string;
+  body: string;
+  notificationId: string;
+  callId: string;
+  href: string;
+  occurredAt: string;
+};
+
+type ErpBrowserNotification = {
+  title: string;
+  body: string;
+  notificationId: string;
+  resourceKind: "consultation" | "telephony";
+  resourceId: string;
+  href: string;
+  deskHref: string;
+  occurredAt: string;
+  detailActionTitle: string;
+  deskActionTitle: string;
+};
+
 let serviceWorkerRegistration: Promise<ServiceWorkerRegistration> | null =
   null;
 
@@ -84,7 +106,7 @@ function closePersistentNotification(
 }
 
 function showPageNotification(
-  input: ConsultationBrowserNotification,
+  input: ErpBrowserNotification,
   options: NotificationOptions,
 ) {
   const notification = new Notification(input.title, options);
@@ -100,23 +122,21 @@ function showPageNotification(
   };
 }
 
-export async function showConsultationBrowserNotification(
-  input: ConsultationBrowserNotification,
-) {
+async function showErpBrowserNotification(input: ErpBrowserNotification) {
   if (!("Notification" in window) || Notification.permission !== "granted") {
     return false;
   }
 
-  const tag = `lawand-consultation:${input.consultationId}`;
+  const tag = `lawand-${input.resourceKind}:${input.resourceId}`;
   const occurredAt = Date.parse(input.occurredAt);
   const sharedOptions: NotificationOptions = {
     badge: NOTIFICATION_BADGE_PATH,
     body: input.body,
     data: {
-      kind: "consultation",
-      eventId: input.eventId,
+      kind: input.resourceKind,
+      eventId: input.notificationId,
       href: input.href,
-      deskHref: "/",
+      deskHref: input.deskHref,
     },
     dir: "auto",
     icon: NOTIFICATION_ICON_PATH,
@@ -131,8 +151,8 @@ export async function showConsultationBrowserNotification(
       const richOptions: RichNotificationOptions = {
         ...sharedOptions,
         actions: [
-          { action: "consultation-detail", title: "상담 보기" },
-          { action: "consultation-desk", title: "상담데스크" },
+          { action: "erp-detail", title: input.detailActionTitle },
+          { action: "erp-desk", title: input.deskActionTitle },
         ],
         renotify: true,
         ...(Number.isFinite(occurredAt) ? { timestamp: occurredAt } : {}),
@@ -141,7 +161,7 @@ export async function showConsultationBrowserNotification(
         input.title,
         richOptions as NotificationOptions,
       );
-      closePersistentNotification(registration, tag, input.eventId);
+      closePersistentNotification(registration, tag, input.notificationId);
       return true;
     }
   } catch {
@@ -154,4 +174,38 @@ export async function showConsultationBrowserNotification(
   } catch {
     return false;
   }
+}
+
+export function showConsultationBrowserNotification(
+  input: ConsultationBrowserNotification,
+) {
+  return showErpBrowserNotification({
+    title: input.title,
+    body: input.body,
+    notificationId: input.eventId,
+    resourceKind: "consultation",
+    resourceId: input.consultationId,
+    href: input.href,
+    deskHref: "/",
+    occurredAt: input.occurredAt,
+    detailActionTitle: "상담 보기",
+    deskActionTitle: "상담데스크",
+  });
+}
+
+export function showTelephonyBrowserNotification(
+  input: TelephonyBrowserNotification,
+) {
+  return showErpBrowserNotification({
+    title: input.title,
+    body: input.body,
+    notificationId: input.notificationId,
+    resourceKind: "telephony",
+    resourceId: input.callId,
+    href: input.href,
+    deskHref: "/phone-desk",
+    occurredAt: input.occurredAt,
+    detailActionTitle: "전화 보기",
+    deskActionTitle: "전화데스크",
+  });
 }

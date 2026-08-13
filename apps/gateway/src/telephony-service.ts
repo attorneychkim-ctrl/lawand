@@ -98,6 +98,8 @@ const INBOUND_ANSWER_EVENT_MAX_DELIVERY_DELAY_MS = 15_000;
 const INBOUND_ANSWER_DISPATCH_TIMEOUT_MS = 3 * 60_000;
 const PHONE_DESK_DEFAULT_LIMIT = 20;
 const PHONE_DESK_MAX_LIMIT = 100;
+const PHONE_CUSTOMER_CACHE_TTL_MS = 15_000;
+const PHONE_CUSTOMER_CACHE_MAX_ENTRIES = 500;
 const callRootCurrentEndpoint = alias(
   telephonyEndpoints,
   "call_root_current_endpoint",
@@ -157,6 +159,8 @@ export type PhoneDeskListQuery = {
   assigneeUserId?: string;
   from?: Date;
   to?: Date;
+  search?: string;
+  includeFollowUps?: boolean;
 };
 
 type PhoneDeskAssigneeItem = {
@@ -291,6 +295,12 @@ export function messagePhoneDisplay(value: string): string {
     return "발신번호 확인 필요";
   }
   return value;
+}
+
+export function externalInboundNotificationTargetUserIds(
+  activeStaff: readonly { staffUserId: string }[],
+): string[] {
+  return [...new Set(activeStaff.map((staff) => staff.staffUserId))];
 }
 
 export type PhoneCustomerMatch =
@@ -659,6 +669,10 @@ export function createTelephonyService(options: {
       : { idlePollIntervalMs: idleCommandPollIntervalMs }),
     now: () => now().getTime(),
   });
+  const phoneCustomerCache = new Map<
+    string,
+    { expiresAt: number; value: Promise<PhoneCustomerMatch> }
+  >();
 
   async function resolveLegalFriendsPhones(phones: readonly string[]) {
     const normalizedPhones = [
@@ -847,8 +861,9 @@ export function createTelephonyService(options: {
       },
       occurredAt: searchedAt,
       createdAt: searchedAt,
-    });
-    return {
+      });
+
+      return {
       queryType: isPhoneQuery ? ("phone" as const) : ("name" as const),
       items,
     };
@@ -1305,9 +1320,8 @@ export function createTelephonyService(options: {
         },
         occurredAt: acceptedAt,
         createdAt: acceptedAt,
-      });
-
-      return {
+    });
+    return {
         consultationId,
         publicReceiptCode,
         acceptedAt: acceptedAt.toISOString(),
@@ -1338,7 +1352,7 @@ export function createTelephonyService(options: {
     );
   }
 
-  async function resolvePhoneCustomers(phones: readonly string[]) {
+  async function resolvePhoneCustomersUncached(phones: readonly string[]) {
     const uniquePhones = [...new Set(phones.filter(Boolean))];
     const matches = new Map<string, PhoneCustomerMatch>(
       uniquePhones.map((phone) => [phone, null]),
@@ -1437,6 +1451,59 @@ export function createTelephonyService(options: {
         legalFriendsMatches.get(phone.replace(/[^0-9]/g, "")) ?? null,
       );
     }
+    return matches;
+  }
+
+  async function resolvePhoneCustomers(phones: readonly string[]) {
+    const uniquePhones = [...new Set(phones.filter(Boolean))];
+    const matches = new Map<string, PhoneCustomerMatch>(
+      uniquePhones.map((phone) => [phone, null]),
+    );
+    if (uniquePhones.length === 0) return matches;
+
+    const current = now().getTime();
+    const pendingByPhone = new Map<string, Promise<PhoneCustomerMatch>>();
+    const missingPhones: string[] = [];
+    for (const phone of uniquePhones) {
+      const key = protection.fingerprint(phone).toString("hex");
+      const cached = phoneCustomerCache.get(key);
+      if (cached && cached.expiresAt > current) {
+        pendingByPhone.set(phone, cached.value);
+        continue;
+      }
+      if (cached) phoneCustomerCache.delete(key);
+      missingPhones.push(phone);
+    }
+
+    if (missingPhones.length > 0) {
+      const batch = resolvePhoneCustomersUncached(missingPhones);
+      for (const phone of missingPhones) {
+        const key = protection.fingerprint(phone).toString("hex");
+        const value = batch.then((resolved) => resolved.get(phone) ?? null);
+        phoneCustomerCache.set(key, {
+          expiresAt: current + PHONE_CUSTOMER_CACHE_TTL_MS,
+          value,
+        });
+        void value.catch(() => {
+          const cached = phoneCustomerCache.get(key);
+          if (cached?.value === value) phoneCustomerCache.delete(key);
+        });
+        pendingByPhone.set(phone, value);
+      }
+      while (phoneCustomerCache.size > PHONE_CUSTOMER_CACHE_MAX_ENTRIES) {
+        const oldestKey = phoneCustomerCache.keys().next().value as
+          | string
+          | undefined;
+        if (!oldestKey) break;
+        phoneCustomerCache.delete(oldestKey);
+      }
+    }
+
+    await Promise.all(
+      [...pendingByPhone].map(async ([phone, pending]) => {
+        matches.set(phone, await pending);
+      }),
+    );
     return matches;
   }
 
@@ -1751,21 +1818,9 @@ export function createTelephonyService(options: {
         );
       } else if (root.direction === "inbound") {
         notificationKind = "external_inbound";
-        notificationTargetUserIds = [
-          ...new Set(
-            rootRows.flatMap((row) =>
-              ownersByActivityEndpoint.get(row.legEndpointId ?? "") ?? [],
-            ),
-          ),
-        ];
-        if (customerMatch?.source === "consultation") {
-          const assignee = customerMatch.consultation.assigneeUserId;
-          if (assignee) notificationTargetUserIds.push(assignee);
-        } else if (customerMatch?.source === "legal_friends") {
-          notificationTargetUserIds.push(
-            ...customerMatch.cases.flatMap((item) => item.staffUserIds),
-          );
-        }
+        notificationTargetUserIds = externalInboundNotificationTargetUserIds(
+          allActiveStaff,
+        );
       }
       notificationTargetUserIds = [...new Set(notificationTargetUserIds)];
       if (notificationKind && notificationTargetUserIds.length === 0) {
@@ -2056,18 +2111,79 @@ export function createTelephonyService(options: {
       ? undefined
       : queryOrLimit.from;
     const to = typeof queryOrLimit === "number" ? undefined : queryOrLimit.to;
+    const search = typeof queryOrLimit === "number"
+      ? ""
+      : queryOrLimit.search?.trim() ?? "";
+    const includeFollowUps = typeof queryOrLimit === "number"
+      ? true
+      : queryOrLimit.includeFollowUps ?? false;
     const snapshotAt = now();
+    const normalizedSearchPhone = search.replace(/[^0-9]/g, "");
+    const isPhoneSearch = Boolean(search) && /^[0-9() +.-]+$/.test(search);
+    let searchPhones: string[] = [];
+    if (search) {
+      if (isPhoneSearch && normalizedSearchPhone.length >= 9) {
+        searchPhones = [normalizedSearchPhone];
+      } else {
+        const directoryResult = await db.execute(
+          sql<LegalFriendsClientSearchRow>`SELECT * FROM public.search_legalfriends_client_directory(${search}, ${50})`,
+        );
+        searchPhones = [
+          ...new Set(
+            (directoryResult.rows as LegalFriendsClientSearchRow[])
+              .flatMap((row) => row.phone ? [row.phone.replace(/[^0-9]/g, "")] : [])
+              .filter((phone) => phone.length >= 9 && phone.length <= 15),
+          ),
+        ];
+      }
+    }
+    const searchFingerprints = searchPhones.map((phone) =>
+      protection.fingerprint(phone)
+    );
+    const lastFourSearch = isPhoneSearch && normalizedSearchPhone.length === 4
+      ? `***${normalizedSearchPhone}`
+      : null;
+    const observedSearchCondition = search
+      ? or(
+          searchFingerprints.length
+            ? inArray(
+                telephonyInboundCalls.remotePhoneFingerprint,
+                searchFingerprints,
+              )
+            : undefined,
+          searchFingerprints.length
+            ? inArray(
+                telephonyCallRoots.remotePhoneFingerprint,
+                searchFingerprints,
+              )
+            : undefined,
+          lastFourSearch
+            ? eq(telephonyInboundCalls.remotePhoneMasked, lastFourSearch)
+            : undefined,
+          lastFourSearch
+            ? eq(telephonyCallRoots.remotePhoneMasked, lastFourSearch)
+            : undefined,
+        ) ?? sql<boolean>`false`
+      : undefined;
+    const standaloneSearchCondition = search
+      ? searchFingerprints.length
+        ? inArray(telephonyCalls.remotePhoneFingerprint, searchFingerprints)
+        : sql<boolean>`false`
+      : undefined;
     const observedDateCondition = and(
       from ? gte(telephonyInboundCalls.ringingAt, from) : undefined,
       to ? lt(telephonyInboundCalls.ringingAt, to) : undefined,
+      observedSearchCondition,
     );
     const standaloneDateCondition = and(
       from ? gte(telephonyCalls.requestedAt, from) : undefined,
       to ? lt(telephonyCalls.requestedAt, to) : undefined,
+      standaloneSearchCondition,
     );
     const rootDateCondition = and(
       from ? gte(telephonyCallRoots.startedAt, from) : undefined,
       to ? lt(telephonyCallRoots.startedAt, to) : undefined,
+      search ? sql<boolean>`false` : undefined,
     );
     const observedActiveCondition = sql<boolean>`case
       when ${telephonyCallRoots.id} is not null then ${telephonyCallRoots.state} in ('ringing', 'connected', 'transferring')
@@ -2081,88 +2197,6 @@ export function createTelephonyService(options: {
       internal: 0,
       active: 0,
     };
-    let summary = emptySummary;
-    if (!callId) {
-      const [[observedSummary], [standaloneSummary], [internalSummary]] =
-        await Promise.all([
-        db
-          .select({
-            all: sql<number>`count(distinct coalesce(${telephonyInboundCalls.callRootId}, ${telephonyInboundCalls.id}))::int`,
-            inbound: sql<number>`count(distinct coalesce(${telephonyInboundCalls.callRootId}, ${telephonyInboundCalls.id})) filter (where ${telephonyInboundCalls.direction} = 'inbound')::int`,
-            clickToCall: sql<number>`count(distinct coalesce(${telephonyInboundCalls.callRootId}, ${telephonyInboundCalls.id})) filter (where ${telephonyInboundCalls.direction} = 'outbound' and ${telephonyCallObservationLinks.observedCallId} is not null)::int`,
-            centrexDirect: sql<number>`count(distinct coalesce(${telephonyInboundCalls.callRootId}, ${telephonyInboundCalls.id})) filter (where ${telephonyInboundCalls.direction} = 'outbound' and ${telephonyCallObservationLinks.observedCallId} is null)::int`,
-            active: sql<number>`count(distinct coalesce(${telephonyInboundCalls.callRootId}, ${telephonyInboundCalls.id})) filter (where ${observedActiveCondition})::int`,
-          })
-          .from(telephonyInboundCalls)
-          .leftJoin(
-            telephonyCallRoots,
-            eq(telephonyCallRoots.id, telephonyInboundCalls.callRootId),
-          )
-          .leftJoin(
-            telephonyCallObservationLinks,
-            eq(
-              telephonyCallObservationLinks.observedCallId,
-              telephonyInboundCalls.id,
-            ),
-          )
-          .where(observedDateCondition),
-        db
-          .select({
-            all: count(),
-            active: sql<number>`count(*) filter (where ${telephonyCalls.commandStatus} in ('queued', 'dispatching', 'succeeded') and ${telephonyCalls.reconciledAt} is null)::int`,
-          })
-          .from(telephonyCalls)
-          .leftJoin(
-            telephonyCallObservationLinks,
-            eq(
-              telephonyCallObservationLinks.telephonyCallId,
-              telephonyCalls.id,
-            ),
-          )
-          .where(
-            and(
-              isNull(telephonyCallObservationLinks.observedCallId),
-              standaloneDateCondition,
-            ),
-          ),
-        db
-          .select({
-            all: count(),
-            active: sql<number>`count(*) filter (where ${telephonyCallRoots.state} <> 'ended')::int`,
-          })
-          .from(telephonyCallRoots)
-          .where(
-            and(
-              eq(telephonyCallRoots.scope, "internal"),
-              rootDateCondition,
-            ),
-          ),
-      ]);
-      const observedAll = Number(observedSummary?.all ?? 0);
-      const standaloneAll = Number(standaloneSummary?.all ?? 0);
-      const internalAll = Number(internalSummary?.all ?? 0);
-      summary = {
-        all: observedAll + standaloneAll + internalAll,
-        inbound: Number(observedSummary?.inbound ?? 0),
-        clickToCall:
-          Number(observedSummary?.clickToCall ?? 0) + standaloneAll,
-        centrexDirect: Number(observedSummary?.centrexDirect ?? 0),
-        internal: internalAll,
-        active:
-          Number(observedSummary?.active ?? 0) +
-          Number(standaloneSummary?.active ?? 0) +
-          Number(internalSummary?.active ?? 0),
-      };
-    }
-    const unfilteredTotal = callId
-      ? 0
-      : selectedFilter === "click_to_call"
-        ? summary.clickToCall
-        : selectedFilter === "centrex_direct"
-          ? summary.centrexDirect
-          : selectedFilter === "internal"
-            ? summary.internal
-          : summary[selectedFilter];
     const observedFilterCondition = selectedFilter === "inbound"
       ? eq(telephonyInboundCalls.direction, "inbound")
       : selectedFilter === "click_to_call"
@@ -2186,6 +2220,211 @@ export function createTelephonyService(options: {
         : selectedFilter === "active"
           ? sql<boolean>`${telephonyCalls.commandStatus} in ('queued', 'dispatching', 'succeeded') and ${telephonyCalls.reconciledAt} is null`
           : sql<boolean>`false`;
+    const internalFilterCondition =
+      selectedFilter === "all" || selectedFilter === "internal"
+        ? undefined
+        : selectedFilter === "active"
+          ? ne(telephonyCallRoots.state, "ended")
+          : sql<boolean>`false`;
+    const observedAssigneeCondition = selectedAssigneeUserId
+      ? sql<boolean>`case
+          when ${telephonyCallObservationLinks.telephonyCallId} is not null then exists (
+            select 1
+            from ${telephonyCalls}
+            where ${telephonyCalls.id} = ${telephonyCallObservationLinks.telephonyCallId}
+              and ${telephonyCalls.staffUserId} = ${selectedAssigneeUserId}
+          )
+          else exists (
+            select 1
+            from ${staffTelephonyBindings}
+            where ${staffTelephonyBindings.endpointId} = coalesce(
+              ${telephonyCallRoots.currentEndpointId},
+              ${telephonyInboundCalls.endpointId}
+            )
+              and ${staffTelephonyBindings.staffUserId} = ${selectedAssigneeUserId}
+              and ${staffTelephonyBindings.isActive} = true
+          )
+        end`
+      : undefined;
+    const standaloneAssigneeCondition = selectedAssigneeUserId
+      ? eq(telephonyCalls.staffUserId, selectedAssigneeUserId)
+      : undefined;
+    const internalAssigneeCondition = selectedAssigneeUserId
+      ? sql<boolean>`exists (
+          select 1
+          from ${telephonyCallLegs}
+          where ${telephonyCallLegs.rootId} = ${telephonyCallRoots.id}
+            and ${telephonyCallLegs.staffUserId} = ${selectedAssigneeUserId}
+        )`
+      : undefined;
+
+    let summary = emptySummary;
+    let total = 0;
+    let page = 1;
+    let pageCount = 1;
+    let offset = 0;
+    let selectedObservedIds: string[] = [];
+    let selectedStandaloneIds: string[] = [];
+    let selectedInternalIds: string[] = [];
+    if (!callId) {
+      const [[observedCount], [standaloneCount], [internalCount]] =
+        await Promise.all([
+        db
+          .select({
+            value: sql<number>`count(distinct coalesce(${telephonyInboundCalls.callRootId}, ${telephonyInboundCalls.id}))::int`,
+          })
+          .from(telephonyInboundCalls)
+          .leftJoin(
+            telephonyCallRoots,
+            eq(telephonyCallRoots.id, telephonyInboundCalls.callRootId),
+          )
+          .leftJoin(
+            telephonyCallObservationLinks,
+            eq(
+              telephonyCallObservationLinks.observedCallId,
+              telephonyInboundCalls.id,
+            ),
+          )
+          .where(
+            and(
+              observedDateCondition,
+              observedFilterCondition,
+              observedAssigneeCondition,
+            ),
+          ),
+        db
+          .select({
+            value: count(),
+          })
+          .from(telephonyCalls)
+          .leftJoin(
+            telephonyCallObservationLinks,
+            eq(
+              telephonyCallObservationLinks.telephonyCallId,
+              telephonyCalls.id,
+            ),
+          )
+          .where(
+            and(
+              isNull(telephonyCallObservationLinks.observedCallId),
+              standaloneDateCondition,
+              standaloneFilterCondition,
+              standaloneAssigneeCondition,
+            ),
+          ),
+        db
+          .select({
+            value: count(),
+          })
+          .from(telephonyCallRoots)
+          .where(
+            and(
+              eq(telephonyCallRoots.scope, "internal"),
+              rootDateCondition,
+              internalFilterCondition,
+              internalAssigneeCondition,
+            ),
+          ),
+      ]);
+      total = Number(observedCount?.value ?? 0) +
+        Number(standaloneCount?.value ?? 0) +
+        Number(internalCount?.value ?? 0);
+      pageCount = Math.max(1, Math.ceil(total / normalizedLimit));
+      page = Math.min(requestedPage, pageCount);
+      offset = (page - 1) * normalizedLimit;
+      const candidateLimit = offset + normalizedLimit;
+      const observedCandidateId = sql<string>`coalesce(${telephonyInboundCalls.callRootId}, ${telephonyInboundCalls.id})`;
+      const observedCandidateTime = sql<Date>`max(coalesce(${telephonyCallRoots.startedAt}, ${telephonyInboundCalls.ringingAt}))`;
+      const [observedCandidates, standaloneCandidates, internalCandidates] =
+        await Promise.all([
+          db
+            .select({ id: observedCandidateId, occurredAt: observedCandidateTime })
+            .from(telephonyInboundCalls)
+            .leftJoin(
+              telephonyCallRoots,
+              eq(telephonyCallRoots.id, telephonyInboundCalls.callRootId),
+            )
+            .leftJoin(
+              telephonyCallObservationLinks,
+              eq(
+                telephonyCallObservationLinks.observedCallId,
+                telephonyInboundCalls.id,
+              ),
+            )
+            .where(
+              and(
+                observedDateCondition,
+                observedFilterCondition,
+                observedAssigneeCondition,
+              ),
+            )
+            .groupBy(observedCandidateId)
+            .orderBy(desc(observedCandidateTime))
+            .limit(candidateLimit),
+          db
+            .select({ id: telephonyCalls.id, occurredAt: telephonyCalls.requestedAt })
+            .from(telephonyCalls)
+            .leftJoin(
+              telephonyCallObservationLinks,
+              eq(
+                telephonyCallObservationLinks.telephonyCallId,
+                telephonyCalls.id,
+              ),
+            )
+            .where(
+              and(
+                isNull(telephonyCallObservationLinks.observedCallId),
+                standaloneDateCondition,
+                standaloneFilterCondition,
+                standaloneAssigneeCondition,
+              ),
+            )
+            .orderBy(desc(telephonyCalls.requestedAt))
+            .limit(candidateLimit),
+          db
+            .select({ id: telephonyCallRoots.id, occurredAt: telephonyCallRoots.startedAt })
+            .from(telephonyCallRoots)
+            .where(
+              and(
+                eq(telephonyCallRoots.scope, "internal"),
+                rootDateCondition,
+                internalFilterCondition,
+                internalAssigneeCondition,
+              ),
+            )
+            .orderBy(desc(telephonyCallRoots.startedAt))
+            .limit(candidateLimit),
+        ]);
+      const selectedCandidates = [
+        ...observedCandidates.map((candidate) => ({ ...candidate, kind: "observed" as const })),
+        ...standaloneCandidates.map((candidate) => ({ ...candidate, kind: "standalone" as const })),
+        ...internalCandidates.map((candidate) => ({ ...candidate, kind: "internal" as const })),
+      ]
+        .sort(
+          (left, right) =>
+            new Date(right.occurredAt).getTime() -
+            new Date(left.occurredAt).getTime(),
+        )
+        .slice(offset, offset + normalizedLimit);
+      selectedObservedIds = selectedCandidates.flatMap((candidate) =>
+        candidate.kind === "observed" ? [candidate.id] : [],
+      );
+      selectedStandaloneIds = selectedCandidates.flatMap((candidate) =>
+        candidate.kind === "standalone" ? [candidate.id] : [],
+      );
+      selectedInternalIds = selectedCandidates.flatMap((candidate) =>
+        candidate.kind === "internal" ? [candidate.id] : [],
+      );
+      summary = {
+        ...emptySummary,
+        all: total,
+        [selectedFilter === "all" ? "all" : selectedFilter === "click_to_call"
+          ? "clickToCall"
+          : selectedFilter === "centrex_direct"
+            ? "centrexDirect"
+            : selectedFilter]: total,
+      };
+    }
     const observedRows = await db
       .select({
         id: telephonyInboundCalls.id,
@@ -2287,7 +2526,12 @@ export function createTelephonyService(options: {
               eq(telephonyInboundCalls.callRootId, callId),
               eq(telephonyCallObservationLinks.telephonyCallId, callId),
             )
-          : and(observedDateCondition, observedFilterCondition),
+          : selectedObservedIds.length
+            ? or(
+                inArray(telephonyInboundCalls.id, selectedObservedIds),
+                inArray(telephonyInboundCalls.callRootId, selectedObservedIds),
+              )
+            : sql<boolean>`false`,
       )
       .orderBy(desc(telephonyInboundCalls.ringingAt));
 
@@ -2368,7 +2612,9 @@ export function createTelephonyService(options: {
           isNull(telephonyCallObservationLinks.observedCallId),
           callId
             ? eq(telephonyCalls.id, callId)
-            : and(standaloneDateCondition, standaloneFilterCondition),
+            : selectedStandaloneIds.length
+              ? inArray(telephonyCalls.id, selectedStandaloneIds)
+              : sql<boolean>`false`,
         ),
       )
       .orderBy(desc(telephonyCalls.requestedAt));
@@ -2415,11 +2661,10 @@ export function createTelephonyService(options: {
       .where(
         and(
           eq(telephonyCallRoots.scope, "internal"),
-          callId ? eq(telephonyCallRoots.id, callId) : rootDateCondition,
-          selectedFilter === "all" || selectedFilter === "internal"
-            ? undefined
-            : selectedFilter === "active"
-              ? ne(telephonyCallRoots.state, "ended")
+          callId
+            ? eq(telephonyCallRoots.id, callId)
+            : selectedInternalIds.length
+              ? inArray(telephonyCallRoots.id, selectedInternalIds)
               : sql<boolean>`false`,
         ),
       )
@@ -2892,7 +3137,7 @@ export function createTelephonyService(options: {
       }];
     });
 
-    const allBaseItems = [
+    const baseItems = [
       ...canonicalObservedItems,
       ...standaloneClickItems,
       ...internalItems,
@@ -2901,32 +3146,13 @@ export function createTelephonyService(options: {
         (left, right) =>
           new Date(right.occurredAt).getTime() -
           new Date(left.occurredAt).getTime(),
-      )
-      .filter((item) => phoneDeskItemMatchesFilter(item, selectedFilter));
-    const assigneeOptions = [
-      ...new Map(
-        allBaseItems
-          .flatMap(phoneDeskItemAssignees)
-          .map((assignee) => [assignee.staffUserId, assignee] as const),
-      ).values(),
-    ].sort((left, right) =>
-      left.displayName.localeCompare(right.displayName, "ko-KR"),
-    );
-    const assigneeFilteredItems = allBaseItems.filter((item) =>
-      phoneDeskItemMatchesAssignee(item, selectedAssigneeUserId),
-    );
-    const total = callId
-      ? assigneeFilteredItems.length
-      : selectedAssigneeUserId
-        ? assigneeFilteredItems.length
-        : unfilteredTotal;
-    const pageCount = Math.max(1, Math.ceil(total / normalizedLimit));
-    const page = callId ? 1 : Math.min(requestedPage, pageCount);
-    const offset = callId ? 0 : (page - 1) * normalizedLimit;
-    const baseItems = assigneeFilteredItems.slice(
-      offset,
-      offset + normalizedLimit,
-    );
+      );
+    const assigneeOptions = callId
+      ? []
+      : (await activePhoneDeskStaff()).map((staff) => ({
+          staffUserId: staff.staffUserId,
+          displayName: staff.displayName,
+        }));
     const observedIds = baseItems.flatMap((item) =>
       item.observedCallId ? [item.observedCallId] : [],
     );
@@ -3171,7 +3397,7 @@ export function createTelephonyService(options: {
         aftercare: row ? aftercareResponse(row) : null,
       };
     });
-    const openFollowUps = callId
+    const openFollowUps = callId || !includeFollowUps
       ? []
       : await db
           .select({
@@ -3437,6 +3663,7 @@ export function createTelephonyService(options: {
         };
       }),
     );
+
     return {
       snapshotAt: snapshotAt.toISOString(),
       items,

@@ -3,12 +3,25 @@ import test from "node:test";
 
 import {
   canonicalizePhoneDeskObservedCalls,
+  externalInboundNotificationTargetUserIds,
   isCentrexInboundAnswerDeliveryDelayed,
   legalFriendsResidenceRegion,
   phoneDeskItemAssignees,
   phoneDeskItemMatchesAssignee,
   phoneDeskItemMatchesFilter,
 } from "./telephony-service.js";
+
+test("외부 수신전화 알림은 담당 여부와 무관하게 활성 직원 전체를 대상으로 한다", () => {
+  assert.deepEqual(
+    externalInboundNotificationTargetUserIds([
+      { staffUserId: "staff-line-owner" },
+      { staffUserId: "staff-customer-owner" },
+      { staffUserId: "staff-unrelated" },
+      { staffUserId: "staff-unrelated" },
+    ]),
+    ["staff-line-owner", "staff-customer-owner", "staff-unrelated"],
+  );
+});
 
 test("같은 root의 U+ 연결 이력과 bridge 장시간 울림은 원장 한 건으로 접는다", () => {
   const items = canonicalizePhoneDeskObservedCalls([
