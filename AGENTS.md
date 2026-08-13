@@ -71,6 +71,29 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-13 — 모든 완료 워크트리 main 통합·운영 배포 준비
+- `HERDR_ENV=1`에서 main과 HERDR worktree 5개, 원격 `origin/worktree/*` 31개를 전수
+  대조했다. 미반영이던 `rapid-forest-745e`의 상담 담당자 변경, `green-river-7a83`의
+  상담 브라우저 알림, `green-harbor-4f23`의 Cafe24 구 홈페이지 별칭 문서,
+  `brave-valley-d3b8`의 직원 상담 후속 처리·카카오 선택 전화와 안내를 모두 main에
+  병합했다. 최종 모든 원격 worktree HEAD는 main ancestor이며 명시적 제외·진행 중 브랜치는
+  없다.
+- 브랜치별 migration `0055` 번호 충돌은 담당자 변경을 `0055_icy_harrier.sql`로 유지하고,
+  직원 신규상담 소프트삭제와 카카오 선택 전화 제약을 최종 스키마 기준
+  `0056_staff_consultation_kakao.sql`로 합쳐 Drizzle snapshot·journal 체인을 다시 생성했다.
+  담당자 변경 대기 중 소프트삭제를 거부하는 상호 잠금과 새 담당자 전용
+  `assignment_transferred` 알림 표시도 통합 경계에서 보강했다. `PROJECT_PLAN.md`는 v1.30이다.
+- 전체 5패키지 typecheck·lint·production build, core 83개·gateway 133개 테스트, DB schema
+  check, ERP 서비스 워커 syntax와 `git diff --check`를 통과했다. 합성 `CB` 원천을 둔 빈
+  PostgreSQL에 migration `0000..0056` 57개를 두 번 적용해 원장·새 enum·제약·앱/viewer
+  권한과 PUBLIC 차단을 확인한 뒤 임시 DB를 삭제했다. `0055` SHA-256은
+  `7d9347f4bd092fbb33ca4216e6f191473e4a1d0cd069484cdd382342f0ea2d02`, `0056`은
+  `0a5e62638aa7a8ec5f733e1189dcf3478607edd96029c4fd6d8470419f00ff1b`다.
+- 이 항목 작성 시점에는 main 원격 push·운영 migration·AWS 앱/인프라 배포·운영 데이터
+  변경이나 실제 상담·카카오·리걸프렌즈 canary를 수행하지 않았다. 운영 반영은 암호화 RDS
+  스냅샷 뒤 `0055`·`0056`을 먼저 적용하고 gateway·홈페이지·ERP와 DB 풀 CloudWatch 경보를
+  같은 릴리스로 전환하며, Cafe24 별칭은 이미 별도 운영 반영됐으므로 중복 변경하지 않는다.
+
 ### 2026-08-13 — ERP·리걸프렌즈 상담 담당자 동시 변경 후보
 - ERP 상담 상세 담당자 카드에 `변경` 모달을 추가했다. 현재 담당자 또는 관리자만 활성
   리걸프렌즈 ID·`member_idx`가 연결된 다른 직원을 이름·부서·직책으로 찾아 선택하고
