@@ -4,15 +4,15 @@
 CloudFormation 스택: `lawand-prod`
 리전: 서울(`ap-northeast-2`)
 최초 배포 릴리스: `20260804T085006Z-84e8708`
-현재 홈페이지 릴리스: `20260812T115219Z-integrated-all-worktrees-v2`
-현재 ERP 릴리스: `20260813T002157Z-repeat-consultation-handling-v1`
-현재 gateway 릴리스: `20260813T002157Z-repeat-consultation-handling-v1`
+현재 홈페이지 릴리스: `20260813T041933Z-integrated-consultation-kakao-v1`
+현재 ERP 릴리스: `20260813T041933Z-integrated-consultation-kakao-v1`
+현재 gateway 릴리스: `20260813T041933Z-integrated-consultation-kakao-v1`
 현재 Windows bridge: `v0.8.3.0`
 
-완료된 모든 worktree를 main에 통합한 기준선 위에 migration `0054`와 gateway·ERP를
-같은 릴리스로 운영 반영했다. 같은 고객의 배정 전후 재요청을 기존 상담에 묶고, 리걸프렌즈에만
-일치하는 연락처는 기존 사건·새 사건·공유 연락처 중 하나를 직원이 명시적으로 결정한다.
-홈페이지와 bridge 코드는 바뀌지 않아 각각 직전 릴리스와 `v0.8.3.0`을 유지했다.
+완료된 모든 worktree를 main에 통합한 기준선 위에 migration `0055`·`0056`, 홈페이지·ERP·
+gateway와 DB 풀 경보를 같은 릴리스로 운영 반영했다. 상담 담당자 변경과 직원 신규 상담
+후속 처리, 카카오 선택 전화·강한 첫 메시지 안내, 상담 브라우저 알림과 gateway DB 풀
+안정화가 포함됐다. Windows bridge는 코드 영향이 없어 `v0.8.3.0`을 유지했다.
 
 이 문서는 정식 도메인 전환 이후를 포함한 실제 AWS 구성, 접속점, 데이터 이관 범위와
 운영 체크리스트를 기록한다. 비밀번호·API 키·AWS 계정 ID·RDS 마스터 시크릿 ARN은
@@ -118,7 +118,7 @@ Route 53·AWS 설정은 이 rollback의 대상이 아니다. 구 WordPress는 4.
 - migration `0022_consultation_sse_notifications.sql`은 상담 outbox INSERT가 커밋될 때
   개인정보 없이 이벤트 ID·유형·상담 ID·발생시각만 PostgreSQL 채널로 알린다. gateway의
   전용 연결만 이 채널을 `LISTEN`하며 RDS를 인터넷에 노출하지 않는다.
-- 2026-08-13 기준 migration `0054`까지 55개가 모두 적용됐고 최근 `0042..0054` 파일 해시는
+- 2026-08-13 기준 migration `0056`까지 57개가 모두 적용됐고 최근 `0042..0056` 파일 해시는
   현재 Git과 일치한다.
   역사적으로 운영에 적용된 `0028_inbound_phone_directory_resolver.sql` 한 개만 현재 파일과
   해시가 다르다. 후속 `0037_phone_desk_directory_context.sql`이 같은 함수 계약을 대체했고
@@ -204,6 +204,47 @@ EC2에서 ARM64 네이티브 빌드한다. 서버 배포는
 systemd 앱 단위와 Caddy edge 단위는 부팅 시 자동 시작한다. 최종 검증에서 홈페이지·ERP는
 재기동 후 약 1초, gateway는 약 2초 안에 health를 회복했고 실패한 systemd unit과
 최근 error priority journal은 없었다.
+
+## 상담·카카오 후속 기능과 DB 풀 안정화 통합 배포
+
+2026-08-13 HERDR의 완료 worktree 5개와 원격 `origin/worktree/*` 31개를 전수 대조해 모든
+원격 HEAD를 main ancestor로 만든 뒤 릴리스
+`20260813T041933Z-integrated-consultation-kakao-v1`로 migration `0055`·`0056`, 홈페이지·
+ERP·gateway와 CloudWatch DB 풀 대기 경보를 함께 운영 반영했다. Cafe24 구 홈페이지 별칭은
+이미 별도 운영 반영된 상태라 중복 변경하지 않았고 Windows bridge도 재배포하지 않았다.
+
+- 배포 소스는 `d9be048d7a7bf35d8e4a98d10bef32cfa97299c2`이며 `origin/main`과 일치한다.
+  전체 5패키지 typecheck·lint·production build, core 83개·gateway 133개 테스트, DB schema
+  check, ERP 서비스 워커 syntax와 `git diff --check`를 통과했다. 합성 `CB` 원천을 둔 빈
+  PostgreSQL에서 migration `0000..0056` 57개를 두 번 적용했다.
+- 변경 전 암호화 스냅샷
+  `lawand-prod-pre-integrated-consultation-kakao-20260813t041933z`은 available이다. private
+  S3 AES256 아티팩트는 6,808,635 bytes, SHA-256
+  `c555d9ab85ae60ba2d0023b4f5c17f4d0d88e4d8311d919398ce2d1e3a01a003`이며 commit
+  metadata도 배포 소스와 일치한다.
+- 운영 migration 원장은 57개다. `0055_icy_harrier.sql` 해시는
+  `7d9347f4bd092fbb33ca4216e6f191473e4a1d0cd069484cdd382342f0ea2d02`,
+  `0056_staff_consultation_kakao.sql`은
+  `0a5e62638aa7a8ec5f733e1189dcf3478607edd96029c4fd6d8470419f00ff1b`로 Git과 일치한다.
+  담당자 변경 enum·원장, 소프트삭제 제약·인덱스, app/viewer 권한과 PUBLIC 차단을 확인했다.
+- 첫 CloudFormation 변경 세트는 최신 AMI SSM 별칭 재해석 때문에 새 경보 외에 세 EC2를
+  교체하려는 것을 발견해 실행하지 않고 폐기했다. 현재 검증된 ARM64 AMI를 명시적으로
+  고정한 새 변경 세트는 DB 풀 대기 경보 하나만 추가했고 스택은 `UPDATE_COMPLETE`다.
+  gateway secret과 권한 600 환경파일에는 요청 풀 20·LISTEN 풀 4·metric 활성값을 적용했다.
+- 이미지 ID는 gateway
+  `sha256:b00da4f6ded78d8747a7bedd8cc54f1cce83cdd1e0d154cd73f75ff8f0e5bf1b`, 홈페이지
+  `sha256:d88958347f469b7580fcc7d80d448bed7821468962249dfd13a7127bf2d8f89e`, ERP
+  `sha256:ad228da490f8bbf04049d9e76530264c3106e592899741c91cdbecaed716e5c4`다. 세 앱과 Caddy는
+  active, 컨테이너 restart 0, 최근 error journal 0이고 bridge key는 `registry-v1`의
+  51개다. gateway health는 요청 풀 waiting 0·max 20, LISTEN 사용 3·max 4를 반환한다.
+- 정식 도메인과 EIP 고정 HTTPS에서 홈페이지 `/bank`·자가진단·상담·약관, ERP login·서비스
+  워커·icon/badge, gateway health가 모두 200이다. 임시 5분 직원 세션으로 상담 목록·상세,
+  전화데스크·고객찾기와 두 목록 API를 200 및 페이지 계약까지 확인하고 세션을 0건으로
+  삭제했다. DB 풀 대기 metric 최대값과 metric·composite ALARM은 모두 0이다.
+- 전환 직전 실제 외부 수·발신 통화가 유입됐으나 사용자가 통화 중 배포를 명시 승인해 차단
+  조건에서 제외했다. 통화·원장을 강제 종료하거나 보정하지 않았고 최종 활성 root/leg/수신,
+  전화·문자·받기 명령은 모두 0이다. 실제 상담·카카오·리걸프렌즈·알림톡·문자 canary는
+  만들지 않았으며 담당자 변경 원장과 배포 후 dead outbox도 0이다.
 
 ## 상담 재요청 묶음·리걸프렌즈 연락처 처리 배포
 

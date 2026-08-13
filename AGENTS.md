@@ -71,6 +71,39 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-13 — 모든 완료 워크트리 main 통합·세 앱/0055·0056 운영 배포
+- main과 HERDR worktree 5개, 원격 `origin/worktree/*` 31개를 전수 대조해 미반영 4개를 모두
+  병합했고 최종 모든 원격 HEAD가 main ancestor임을 확인했다. 배포 소스
+  `d9be048d7a7bf35d8e4a98d10bef32cfa97299c2`는 `origin/main`과 일치한다. 상담 담당자 변경,
+  직원 신규상담 중복·알림톡·소프트삭제, 카카오 선택 전화·지역/첫 메시지 안내, 서비스 워커
+  상담 알림과 gateway DB 풀 안정화가 포함됐다. Cafe24 별칭은 이미 운영 반영돼 중복 변경하지
+  않았고 Windows bridge는 v0.8.3.0을 유지했다.
+- 전체 5패키지 typecheck·lint·production build, core 83개·gateway 133개 테스트, DB schema
+  check, 서비스 워커 syntax, 빈 운영형 PostgreSQL의 migration `0000..0056` 2회 적용과
+  `git diff --check`를 통과했다. migration 충돌은 담당자 변경 `0055_icy_harrier.sql` 뒤에
+  직원 소프트삭제·카카오 선택 전화를 `0056_staff_consultation_kakao.sql`로 합쳐 해결했다.
+- 릴리스 `20260813T041933Z-integrated-consultation-kakao-v1`을 운영 반영했다. 변경 전 암호화
+  RDS 스냅샷 `lawand-prod-pre-integrated-consultation-kakao-20260813t041933z`은 available이다.
+  private S3 AES256 아티팩트는 6,808,635 bytes, SHA-256
+  `c555d9ab85ae60ba2d0023b4f5c17f4d0d88e4d8311d919398ce2d1e3a01a003`다. 운영 migration
+  원장은 57개이고 `0055` 해시
+  `7d9347f4bd092fbb33ca4216e6f191473e4a1d0cd069484cdd382342f0ea2d02`, `0056` 해시
+  `0a5e62638aa7a8ec5f733e1189dcf3478607edd96029c4fd6d8470419f00ff1b`는 Git과 일치한다.
+- 첫 CloudFormation 변경 세트는 최신 AMI 별칭 재해석으로 세 EC2 교체가 잡혀 실행하지 않고
+  폐기했다. 현재 검증 AMI를 명시 고정한 새 변경 세트는 DB 풀 대기 경보 하나만 추가했고
+  `UPDATE_COMPLETE`다. gateway 요청 풀 20·LISTEN 풀 4·metric을 활성화했다. health의
+  waiting은 0, LISTEN 사용은 3/4이고 DB 풀 대기 metric 최대값과 전체 CloudWatch ALARM은 0이다.
+- 이미지 ID는 gateway `sha256:b00da4f6ded78d8747a7bedd8cc54f1cce83cdd1e0d154cd73f75ff8f0e5bf1b`,
+  홈페이지 `sha256:d88958347f469b7580fcc7d80d448bed7821468962249dfd13a7127bf2d8f89e`,
+  ERP `sha256:ad228da490f8bbf04049d9e76530264c3106e592899741c91cdbecaed716e5c4`다. 세 앱과 Caddy는
+  active, restart 0, 환경파일 600, 최근 error journal 0이며 gateway bridge key는 51개다.
+  정식 도메인·EIP 고정 HTTPS와 임시 5분 인증 세션의 상담 목록·상세/전화데스크/고객찾기·
+  두 목록 API가 모두 200이고 임시 세션은 0건으로 삭제했다.
+- 전환 직전 실제 외부 수·발신 통화가 유입됐으나 사용자가 통화 중 진행을 명시 승인해 차단
+  조건에서 제외했다. 통화 원장을 강제 종료·보정하지 않았고 최종 활성 root/leg/수신과
+  전화·문자·받기 명령은 0이다. 실제 상담·카카오·리걸프렌즈·알림톡·문자 canary는 만들지
+  않았고 담당자 변경 원장·배포 후 dead outbox도 0이다. `PROJECT_PLAN.md`는 v1.32다.
+
 ### 2026-08-13 — 모든 완료 워크트리 main 통합·운영 배포 준비
 - `HERDR_ENV=1`에서 main과 HERDR worktree 5개, 원격 `origin/worktree/*` 31개를 전수
   대조했다. 미반영이던 `rapid-forest-745e`의 상담 담당자 변경, `green-river-7a83`의
