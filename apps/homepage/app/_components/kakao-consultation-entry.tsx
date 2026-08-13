@@ -276,7 +276,7 @@ export function KakaoConsultationEntry({
             value={formatPhone(phone)}
           />
           <p className="kakao-entry-modal-help">
-            확인을 누르면 이 이름과 거주 지역으로 상담이 접수되고 카카오톡
+            버튼을 누르면 이 이름과 거주 지역으로 상담이 접수되고 카카오톡
             채팅방이 새로 열립니다. 전화번호를 남기면 상담원이 더 빠르게 고객을
             확인할 수 있지만, 입력하지 않으셔도 카카오 상담을 이용할 수 있어요.
           </p>
@@ -289,6 +289,21 @@ export function KakaoConsultationEntry({
             </a>
             에서 확인할 수 있습니다.
           </p>
+
+          <aside
+            aria-label="카카오톡 상담 접수 안내"
+            className="kakao-entry-modal-message-guide"
+          >
+            <strong>꼭 확인해 주세요</strong>
+            <p>
+              카카오톡 채팅방이 열리기만 하면 상담원에게 접수되지 않아요.
+            </p>
+            <p>
+              카카오톡으로 이동한 뒤 <strong>“상담 신청합니다”라고 메시지를 한 번
+              보내주세요.</strong>
+            </p>
+            <p>메시지를 보내야 상담원이 고객님의 상담 요청을 확인할 수 있어요.</p>
+          </aside>
 
           <div className="kakao-entry-modal-actions">
             <button
@@ -303,9 +318,12 @@ export function KakaoConsultationEntry({
               disabled={!displayName.trim() || !residenceRegion}
               type="submit"
             >
-              확인하고 카카오톡 열기
+              카카오톡 열고 상담 메시지 보내기
             </button>
           </div>
+          <p className="kakao-entry-modal-submit-note">
+            카카오톡이 열리면 채팅방에서 메시지를 꼭 보내주세요.
+          </p>
         </form>
       </section>
     </div>

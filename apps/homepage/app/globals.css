@@ -1114,6 +1114,33 @@ summary:focus-visible {
   text-underline-offset: 2px;
 }
 
+.kakao-entry-modal-message-guide {
+  display: grid;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 15px 16px;
+  border: 1px solid #dfbd00;
+  border-left-width: 5px;
+  border-radius: 12px;
+  background: #fff7bf;
+  color: #2b2512;
+}
+
+.kakao-entry-modal-message-guide > strong {
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.kakao-entry-modal-message-guide p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.kakao-entry-modal-message-guide p strong {
+  font-weight: 900;
+}
+
 .kakao-entry-modal-actions {
   display: grid;
   margin-top: 8px;
@@ -1145,6 +1172,15 @@ summary:focus-visible {
 .kakao-entry-modal-submit:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+.kakao-entry-modal-submit-note {
+  margin: -2px 0 0;
+  color: var(--slate-700);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.5;
+  text-align: right;
 }
 
 @media (max-width: 640px) {
@@ -1180,6 +1216,10 @@ summary:focus-visible {
 
   .kakao-entry-modal-submit {
     grid-row: 1;
+  }
+
+  .kakao-entry-modal-submit-note {
+    text-align: center;
   }
 }
 
