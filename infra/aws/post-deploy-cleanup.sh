@@ -13,6 +13,17 @@ PREVIOUS_IMAGE_ID="$4"
 LOG_PATH="/var/log/lawand/deployments.log"
 RELEASE_ROOT="/opt/lawand/releases"
 ROLLBACK_LIMIT=2
+BUILDKIT_CACHE_LIMIT_BYTES=$((4 * 1024 * 1024 * 1024))
+
+buildkit_reclaimable_bytes() {
+  local human_value
+  human_value="$(docker builder du | awk '$1 == "Reclaimable:" { print $2 }')"
+  if [ -z "$human_value" ]; then
+    echo "BuildKit reclaimable 용량을 읽지 못했습니다." >&2
+    return 1
+  fi
+  numfmt --from=si "${human_value%B}"
+}
 
 case "$APP" in
   homepage|erp|gateway) ;;
@@ -25,6 +36,7 @@ esac
 mkdir -p "$(dirname -- "$LOG_PATH")" "$RELEASE_ROOT"
 AVAILABLE_BEFORE_BYTES="$(df --output=avail -B1 / | tail -n 1 | tr -d ' ')"
 CURRENT_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$CURRENT_IMAGE_REF")"
+BUILD_CACHE_BEFORE_BYTES="$(buildkit_reclaimable_bytes)"
 
 declare -a CANDIDATE_IDS=()
 declare -a PRESERVED_IDS=("$CURRENT_IMAGE_ID")
@@ -65,6 +77,17 @@ for image_id in "${CANDIDATE_IDS[@]}"; do
 done
 
 docker builder prune --force --keep-storage 4GB >/dev/null
+BUILD_CACHE_AFTER_SOFT_LIMIT_BYTES="$(buildkit_reclaimable_bytes)"
+if [ "$BUILD_CACHE_AFTER_SOFT_LIMIT_BYTES" -gt "$BUILDKIT_CACHE_LIMIT_BYTES" ]; then
+  # BuildKit은 cache record 단위로 보존해 --keep-storage만으로 상한을 넘길 수 있다.
+  # 운영 서버는 immutable image를 pull하므로 남은 회수 가능 cache를 비워 hard cap을 지킨다.
+  docker builder prune --force >/dev/null
+fi
+BUILD_CACHE_AFTER_BYTES="$(buildkit_reclaimable_bytes)"
+if [ "$BUILD_CACHE_AFTER_BYTES" -gt "$BUILDKIT_CACHE_LIMIT_BYTES" ]; then
+  echo "BuildKit cache가 4 GiB 상한을 초과합니다: ${BUILD_CACHE_AFTER_BYTES}" >&2
+  exit 65
+fi
 docker image prune --force >/dev/null
 
 mapfile -t RELEASE_DIRS < <(
@@ -88,12 +111,14 @@ RECLAIMED_BYTES="$((AVAILABLE_AFTER_BYTES - AVAILABLE_BEFORE_BYTES))"
 ROLLBACK_IMAGE_IDS="$(IFS=,; printf '%s' "${PRESERVED_IDS[*]:1}")"
 RECORDED_AT="$(date --utc +%Y-%m-%dT%H:%M:%SZ)"
 
-printf '%s app=%s release=%s current_image_id=%s rollback_image_ids=%s available_before_bytes=%s available_after_bytes=%s reclaimed_bytes=%s\n' \
+printf '%s app=%s release=%s current_image_id=%s rollback_image_ids=%s build_cache_before_bytes=%s build_cache_after_bytes=%s available_before_bytes=%s available_after_bytes=%s reclaimed_bytes=%s\n' \
   "$RECORDED_AT" \
   "$APP" \
   "$RELEASE_ID" \
   "$CURRENT_IMAGE_ID" \
   "${ROLLBACK_IMAGE_IDS:-none}" \
+  "$BUILD_CACHE_BEFORE_BYTES" \
+  "$BUILD_CACHE_AFTER_BYTES" \
   "$AVAILABLE_BEFORE_BYTES" \
   "$AVAILABLE_AFTER_BYTES" \
   "$RECLAIMED_BYTES" | tee -a "$LOG_PATH"

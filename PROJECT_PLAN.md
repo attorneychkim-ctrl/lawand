@@ -1,4 +1,4 @@
-# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.35)
+# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.36)
 
 > 이 문서는 새 로앤 홈페이지 + 새 ERP + 리걸플로/리걸프렌즈 연동을 하나의 플랫폼으로
 > 묶기 위한 **저장소 구조·아키텍처 설계 초안**이다. 코덱스/클로드코드 세션이 번갈아
@@ -1873,6 +1873,15 @@ tag 변경을 막고 push scan과 최근 10개 lifecycle을 적용한다. EC2 sy
 명시적 긴급 fallback일 뿐이다. 모든 배포는 내부·외부 health 성공 뒤 현재+rollback 2개
 이미지만 남기고 BuildKit cache 4 GiB 상한, 오래된 source release 정리, 정리 전후 가용 용량과
 이미지 ID 기록을 수행한다.
+
+2026-08-13 첫 불변 이미지 운영 릴리스로 이 기준을 실제 전환했다. 완료 worktree 7개와 원격
+`origin/worktree/*` 38개를 모두 `main`에 포함한 commit `133262a`를 GitHub Actions에서 검증하고
+앱별 ARM64 OCI image로 게시했으며, EC2 세 대는 ECR digest를 직접 실행한다. ECR은 tag immutable,
+push scan, 최근 10개 lifecycle이고 GitHub OIDC는 immutable owner/repository 숫자 ID가 포함된
+정확한 `main` subject만 신뢰한다. migration `0057`은 같은 gateway digest와 암호화 snapshot으로
+운영 반영했다. health 뒤 current+rollback 2개와 release directory 2개만 남겼고 BuildKit의
+record 단위 soft limit가 4 GiB를 넘는 경우 남은 회수 가능 cache를 비워 hard cap을 검증한다.
+첫 정리에서 세 서버 합계 73,839,296,512 bytes를 회수하고 최종 cache를 1.381~1.429GB로 낮췄다.
 
 2026-08-04 이 토폴로지를 서울 리전 `lawand-prod` 스택으로 실제 구성했다. 세 EC2는
 각각 EIP와 암호화 gp3를 사용하고 SSH 대신 SSM으로 관리한다. RDS는 두 private DB

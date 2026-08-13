@@ -43,8 +43,10 @@
 - S3 소스 아티팩트와 EC2 네이티브 빌드는 CI/ECR 장애 때 메인 세션이 명시적으로 선택하는
   긴급 fallback으로만 유지한다. 어느 방식이든 새 앱과 외부 health가 모두 성공한 뒤 현재
   이미지와 이전 rollback 이미지 2개만 보존하고, BuildKit 캐시는 4 GiB 이하로 prune하며,
-  오래된 앱 이미지와 `/opt/lawand/releases`(최신 2개 제외)를 정리한다. 정리 전후 가용
-  바이트·회수 바이트·현재/rollback 이미지 ID를 `/var/log/lawand/deployments.log`와
+  오래된 앱 이미지와 `/opt/lawand/releases`(최신 2개 제외)를 정리한다. BuildKit record
+  단위 때문에 soft limit 뒤에도 회수 가능 cache가 4 GiB를 넘으면 남은 cache를 비워 hard
+  cap을 검증한다. 정리 전후 cache·가용 바이트·회수 바이트·현재/rollback 이미지 ID를
+  `/var/log/lawand/deployments.log`와
   인수인계 로그에 기록한다. health 실패 전에는 이 정리를 실행하지 않는다.
 - 메인 통합 배포 직전에는 HERDR 워크트리 목록과 `origin/worktree/*` 원격 브랜치를 모두
   열거하고, 각 HEAD가 `main`의 ancestor인지 확인한다. 미반영 브랜치는 `병합/명시적 제외/
@@ -85,6 +87,53 @@
 ---
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
+
+### 2026-08-13 — 완료 워크트리 전수 통합·ARM64 ECR 불변 이미지 첫 운영 배포
+- 완료 worktree 7개를 `main`에 병합하고 HERDR worktree 9개와 원격 `origin/worktree/*` 38개를
+  전수 대조해 모든 원격 HEAD가 `main` ancestor임을 확인했다. 상담 묶음·직원 설정 접기·
+  리걸프렌즈 자기 생성 사건 제외·전화데스크 담당자 필터와 조회/알림 경량화·RDS xlarge/incident
+  문서가 포함됐다. 배포 소스 `133262acdd780e9ee30a0dda2662c37fd6c2ff26`은 당시
+  `origin/main`과 일치한다. 전체 5패키지 typecheck·lint·production build, core 83개·gateway
+  138개 테스트, DB schema check, ERP 서비스 워커·Bash syntax, CloudFormation validation과
+  `git diff --check`를 통과했다.
+- GitHub Actions/Buildx가 세 `linux/arm64` image를 앱별 private ECR에 게시하고 운영 EC2는
+  digest만 pull하는 표준 경로를 만들었다. ECR은 immutable tag·push scan·최근 10개 lifecycle,
+  GitHub는 장기 key 없는 OIDC, EC2는 최소 pull 권한이다. 첫 CI는 image build 전 OIDC subject
+  불일치로 안전 중단됐고, CloudTrail에 나타난 immutable owner/repository 숫자 ID를 wildcard
+  없이 정확한 `main` subject에 고정해 실행 `31686721265`를 성공시켰다. CloudFormation은
+  ECR/OIDC/IAM만 추가·수정했고 EC2·RDS·네트워크 교체는 없었다.
+- 릴리스 `20260813T094433Z-immutable-consultation-groups-v1` 전에 암호화 RDS snapshot
+  `lawand-prod-pre-consultation-groups-ecr-20260813t093403z`을 available로 확보했다. 같은 gateway
+  digest로 `0057_consultation_groups.sql`을 적용해 운영 migration 원장 58개, 최신 해시
+  `27f360a806bc83ae95884e2352621167dfa04bf869573be287cc91777251640c`, 새 테이블 3개·앱 최소
+  권한·PUBLIC grant 0을 확인했다.
+- ECR digest는 홈페이지
+  `sha256:af6e2f719737afb6bd1fdd479e9085959fbfd164a05930d15c74493f8f2351e9`, ERP
+  `sha256:07f58452ed48f8de9c42c68538c054e5b8f85f62e4d3dee14bb89c294295e7d6`, gateway
+  `sha256:3aa19a7cef9011f4c3616da5948e5726f90865419d880beab9eaa2f1e15b3c95`다. current image ID와
+  rollback 2개는 홈페이지
+  `sha256:00cdfc9f487b95ee977a35e3b430a70540ea5f0e5ceaf1728fbaf1464f853483` →
+  `sha256:d88958347f469b7580fcc7d80d448bed7821468962249dfd13a7127bf2d8f89e`,
+  `sha256:263e1d1cc8a38cfcee704ff8eda2494bcf47b3003f6134e114a5f96bf56f257e`; ERP
+  `sha256:a5de4f57e318fcfce82c7076ff6dd187aa1259ca1977314557f33960df4ec6c7` →
+  `sha256:ad228da490f8bbf04049d9e76530264c3106e592899741c91cdbecaed716e5c4`,
+  `sha256:8f143bcdacc4d009f4461bc8d1ce5b8585a9a555ce5dd27ba4b93a6e86214f2f`; gateway
+  `sha256:873a9123b65a1c69ebf9faa939ec0b4e166446d2210285f9286201964a63d49b` →
+  `sha256:b00da4f6ded78d8747a7bedd8cc54f1cce83cdd1e0d154cd73f75ff8f0e5bf1b`,
+  `sha256:f1941c25281ac4e8b7f4bd83bb19b0c8e30189c1560252f3c52b221e2016b8d3`다. 전체 값은 서버
+  `/var/log/lawand/deployments.log`에도 기록했다.
+- health 뒤 홈페이지 8,142,028,800 bytes, ERP 26,667,577,344 bytes, gateway
+  39,029,690,368 bytes, 합계 73,839,296,512 bytes를 회수했다. source release는 서버마다 2개,
+  BuildKit cache는 1.421GB·1.429GB·1.381GB로 4 GiB hard cap 아래다. 세 앱·Caddy active,
+  restart 0, 환경파일 600, error journal 0이며 정식 HTTPS와 인증 ERP 목록·상세 그룹 패널·
+  전화데스크·고객찾기·직원 페이지가 200이고 임시 세션은 0건으로 삭제했다. gateway 풀 waiting
+  0, LISTEN 3/4, bridge key 51, CloudWatch ALARM·최근 dead outbox 0이다.
+- ECR CRITICAL 3건은 `perl-base` 공통 탐지다. Storable module은 runtime에 없고 정규식 CVE는
+  5.37.10부터라 현재 5.36에 도입되지 않았으며 Socket 건은 Debian이 제한 조건의 minor/postponed로
+  분류한다. 앱은 Node entrypoint만 실행한다. scan 결과는 보존하고 base 갱신 때 재평가한다.
+  전환 전 외부 수신·실행 명령 0과 30분 넘게 새 이벤트 없는 internal leg 3건을 확인했으며
+  Windows bridge·통화 원장은 재시작·강제 종료·보정하지 않았다. 배포 뒤 새 실제 수신이 유입돼
+  최종 표본은 root/leg 5·수신 1·실행 명령 0이다. 실제 상담·외부 발송 canary는 만들지 않았다.
 
 ### 2026-08-13 — 전화번호 기준 7일 상담 묶음·수동 연결/분리 후보
 - 정규화 전화번호가 같고 마지막 요청에서 7일 이내인 활성 상담은 채널·입력 이름과 관계없이

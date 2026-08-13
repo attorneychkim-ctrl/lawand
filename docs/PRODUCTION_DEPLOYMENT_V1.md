@@ -218,7 +218,9 @@ CI/ECR 장애 때 명시적으로 선택하는 긴급 fallback으로만 남긴�
 [`post-deploy-cleanup.sh`](../infra/aws/post-deploy-cleanup.sh)를 실행한다. 현재 이미지와
 이전 rollback 이미지 2개만 보존하고, BuildKit cache는 4 GiB 이하, source release directory는
 최신 2개만 남긴다. `/var/log/lawand/deployments.log`에 정리 전후 가용 바이트·회수 바이트·
-현재/rollback 이미지 ID를 기록한다.
+현재/rollback 이미지 ID와 BuildKit cache 전후 바이트를 기록한다. BuildKit의 record 단위 때문에
+`--keep-storage 4GB` 뒤에도 회수 가능 cache가 4 GiB를 넘으면 남은 cache를 비워 hard cap을
+검증한다.
 
 운영 시크릿은 다음 네 경계로 분리한다.
 
@@ -246,6 +248,53 @@ CI/ECR 장애 때 명시적으로 선택하는 긴급 fallback으로만 남긴�
 systemd 앱 단위와 Caddy edge 단위는 부팅 시 자동 시작한다. 최종 검증에서 홈페이지·ERP는
 재기동 후 약 1초, gateway는 약 2초 안에 health를 회복했고 실패한 systemd unit과
 최근 error priority journal은 없었다.
+
+## 상담 묶음·ARM64 ECR 불변 이미지 첫 운영 배포
+
+2026-08-13 완료 worktree 7개를 모두 병합하고 HERDR worktree 9개와 원격
+`origin/worktree/*` 38개를 대조해 모든 원격 HEAD가 `main`의 ancestor임을 확인했다. 배포 소스
+`133262acdd780e9ee30a0dda2662c37fd6c2ff26`은 당시 `origin/main`과 일치하며, 릴리스
+`20260813T094433Z-immutable-consultation-groups-v1`로 홈페이지·ERP·gateway와 migration
+`0057`을 함께 운영 반영했다.
+
+- GitHub Actions 실행 `31686721265`는 전체 typecheck·lint·production build, core 83개·
+  gateway 138개 테스트를 통과하고 세 앱을 `linux/arm64` OCI image로 게시했다. 최초 실행은
+  GitHub가 owner/repository 숫자 ID를 포함해 발급한 OIDC subject와 이름 기반 trust가 달라
+  image build 전에 중단됐다. CloudTrail과 GitHub API로 실제 ID를 대조해 wildcard 없이 정확한
+  `main` subject로 고친 뒤 재실행했다. CloudFormation 변경은 앱별 ECR 3개·OIDC 게시 역할·
+  EC2 pull 권한뿐이며 기존 EC2·RDS·네트워크 교체는 없었다.
+- ECR digest는 홈페이지
+  `sha256:af6e2f719737afb6bd1fdd479e9085959fbfd164a05930d15c74493f8f2351e9`, ERP
+  `sha256:07f58452ed48f8de9c42c68538c054e5b8f85f62e4d3dee14bb89c294295e7d6`, gateway
+  `sha256:3aa19a7cef9011f4c3616da5948e5726f90865419d880beab9eaa2f1e15b3c95`다. 운영 image ID는
+  각각 `sha256:00cdfc9f487b95ee977a35e3b430a70540ea5f0e5ceaf1728fbaf1464f853483`,
+  `sha256:a5de4f57e318fcfce82c7076ff6dd187aa1259ca1977314557f33960df4ec6c7`,
+  `sha256:873a9123b65a1c69ebf9faa939ec0b4e166446d2210285f9286201964a63d49b`이며 세 이미지의
+  architecture·revision·앱 label이 CI manifest와 일치한다.
+- 변경 전 암호화 RDS snapshot
+  `lawand-prod-pre-consultation-groups-ecr-20260813t093403z`은 available이다. 운영 migration
+  원장은 58개이고 `0057_consultation_groups.sql` 해시는
+  `27f360a806bc83ae95884e2352621167dfa04bf869573be287cc91777251640c`로 Git과 일치한다.
+  상담 묶음·구성원·이벤트 테이블, 앱 최소 권한과 PUBLIC grant 0을 확인했다.
+- health 뒤 홈페이지 8,142,028,800 bytes, ERP 26,667,577,344 bytes, gateway
+  39,029,690,368 bytes, 합계 73,839,296,512 bytes를 회수했다. 각 서버는 current와 rollback
+  2개, source release directory 2개만 남겼고 BuildKit cache는 홈페이지 1.421GB, ERP
+  1.429GB, gateway 1.381GB다. cache 전후 바이트·가용 용량·current/rollback image ID는
+  `/var/log/lawand/deployments.log`에 기록했다.
+- 세 앱·Caddy는 active, container restart 0, 환경파일 600, 릴리스 뒤 error journal 0이다.
+  정식 도메인의 홈페이지 `/bank`·자가진단·privacy, ERP login·서비스 워커·icon/badge,
+  gateway health가 모두 200이고 요청 풀 waiting 0/20, LISTEN 3/4다. 임시 5분 세션으로 ERP
+  루트 상담 목록·상담 상세의 그룹 패널·전화데스크·고객찾기·직원 페이지를 200으로 확인한 뒤
+  세션을 0건으로 삭제했다. bridge key는 51개, CloudWatch ALARM과 최근 dead outbox는 0이다.
+- ECR basic scan의 공통 CRITICAL 3건은 Debian `perl-base`에 매핑된다. Storable CVE는 해당
+  module이 runtime에 없고, 정규식 CVE는 runtime Perl 5.36보다 뒤인 5.37.10부터 도입됐으며,
+  Socket CVE는 Debian이 공격자 입력을 직접 `pack_ip_mreq_source`에 넘기는 제한 조건의
+  minor/postponed로 분류한다. 앱 entrypoint는 Node만 실행하고 Perl을 호출하지 않는다. base
+  image 갱신 때 계속 재평가하며 scan 결과 자체를 숨기거나 삭제하지 않는다.
+- gateway 전환 전 외부 수신과 전화·문자·받기 명령 0을 연속 확인했고 남은 internal leg
+  3건은 30분 넘게 새 이벤트가 없었다. Windows bridge·전화 세션·통화 원장은 재시작·강제 종료·
+  보정하지 않았다. 배포 뒤 실제 새 수신이 자연 유입돼 최종 표본은 active root/leg 5·수신 1,
+  실행 명령 0이었다. 실제 상담·리걸프렌즈·알림톡·문자 canary는 만들지 않았다.
 
 ## 상담·카카오 후속 기능과 DB 풀 안정화 통합 배포
 
