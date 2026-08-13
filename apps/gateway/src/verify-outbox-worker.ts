@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 import {
   createEventId,
@@ -10,17 +10,29 @@ import {
   LEGALFRIENDS_INVALID_MANAGER_MEMBER_IDX,
 } from "@lawand/core";
 import {
+  consultationAssignmentTransfers,
+  consultationAssignments,
   consultationRequests,
   consultations,
   createDatabaseClient,
   legalFriendsCaseLinks,
   outboxDeliveryAttempts,
   outboxEvents,
+  staffAuditLogs,
+  staffExternalAccounts,
+  staffMemberships,
+  staffProfiles,
+  staffUsers,
 } from "@lawand/db";
 
 import { createDataProtection } from "./crypto.js";
-import type { LegalFriendsCasePayload } from "./legalfriends.js";
+import {
+  LegalFriendsDeliveryError,
+  type LegalFriendsCasePayload,
+} from "./legalfriends.js";
 import { createOutboxWorker } from "./outbox-worker.js";
+import { createConsultationService } from "./service.js";
+import type { StaffPrincipal } from "./auth.js";
 
 const envPath = resolve(process.cwd(), ".env.local");
 if (existsSync(envPath)) process.loadEnvFile(envPath);
@@ -43,9 +55,13 @@ const requestId = createEventId();
 const eventId = createEventId();
 const invalidationEventId = createEventId();
 const assignmentId = createEventId();
+const sourceStaffUserId = createEventId();
+const sourceMembershipId = createEventId();
+const targetStaffUserId = createEventId();
+const targetMembershipId = createEventId();
 const idempotencyKey = createEventId();
 const initialTime = new Date("2026-07-29T12:00:00.000Z");
-const currentTime = initialTime;
+const currentTime = new Date("2030-01-01T00:00:00.000Z");
 let createCalls = 0;
 let changeCalls = 0;
 let deliveredPayload: LegalFriendsCasePayload | undefined;
@@ -85,6 +101,82 @@ const payload = {
 };
 
 try {
+  await database.db.insert(staffUsers).values([
+    {
+      id: sourceStaffUserId,
+      email: `transfer-source-${sourceStaffUserId}@verification.invalid`,
+      passwordHash: "verification-only",
+      passwordChangedAt: initialTime,
+      createdAt: initialTime,
+      updatedAt: initialTime,
+    },
+    {
+      id: targetStaffUserId,
+      email: `transfer-target-${targetStaffUserId}@verification.invalid`,
+      passwordHash: "verification-only",
+      passwordChangedAt: initialTime,
+      createdAt: initialTime,
+      updatedAt: initialTime,
+    },
+  ]);
+  await database.db.insert(staffProfiles).values([
+    {
+      userId: sourceStaffUserId,
+      displayName: "변경 전 검증 담당자",
+      createdAt: initialTime,
+      updatedAt: initialTime,
+    },
+    {
+      userId: targetStaffUserId,
+      displayName: "변경 후 검증 담당자",
+      createdAt: initialTime,
+      updatedAt: initialTime,
+    },
+  ]);
+  await database.db.insert(staffMemberships).values([
+    {
+      id: sourceMembershipId,
+      userId: sourceStaffUserId,
+      organizationKey: "lawand",
+      regionKey: "seoul",
+      department: "검증",
+      jobTitle: "변경 전 담당자",
+      role: "full_time",
+      assignedAt: initialTime,
+      assignedByUserId: sourceStaffUserId,
+    },
+    {
+      id: targetMembershipId,
+      userId: targetStaffUserId,
+      organizationKey: "lawand",
+      regionKey: "seoul",
+      department: "검증",
+      jobTitle: "변경 후 담당자",
+      role: "full_time",
+      assignedAt: initialTime,
+      assignedByUserId: sourceStaffUserId,
+    },
+  ]);
+  await database.db.insert(staffExternalAccounts).values([
+    {
+      id: createEventId(),
+      provider: "legalfriends",
+      staffUserId: sourceStaffUserId,
+      externalAccountId: `verification-source-${sourceStaffUserId}`,
+      externalMemberIdx: 2_000_000_001,
+      createdAt: initialTime,
+      updatedAt: initialTime,
+    },
+    {
+      id: createEventId(),
+      provider: "legalfriends",
+      staffUserId: targetStaffUserId,
+      externalAccountId: `verification-target-${targetStaffUserId}`,
+      externalMemberIdx: 2_000_000_002,
+      createdAt: initialTime,
+      updatedAt: initialTime,
+    },
+  ]);
   await database.db.insert(consultations).values({
     id: consultationId,
     publicReceiptCode: "LA-260729-VERIFY01",
@@ -116,6 +208,16 @@ try {
     consentAgreedAt: initialTime,
     dedupeOutcome: "new",
     submittedAt: initialTime,
+    createdAt: initialTime,
+  });
+  await database.db.insert(consultationAssignments).values({
+    id: assignmentId,
+    consultationId,
+    assigneeUserId: sourceStaffUserId,
+    assigneeMembershipId: sourceMembershipId,
+    assignedByUserId: sourceStaffUserId,
+    assignmentMethod: "self_claim",
+    assignedAt: initialTime,
     createdAt: initialTime,
   });
   await database.db.insert(outboxEvents).values({
@@ -170,7 +272,7 @@ try {
   assert.equal(createdLink?.caseIdx, "verification-case-111");
   assert.equal(
     createdLink?.managerAssignedAt?.toISOString(),
-    initialTime.toISOString(),
+    currentTime.toISOString(),
   );
   const attempts = await database.db
     .select()
@@ -183,6 +285,166 @@ try {
   assert.equal(deliveredPayload?.member_idx, 138);
   assert.equal(deliveredPayload?.phone, "010-0000-0000");
   assert.equal(deliveredPayload?.living_place, "대전광역시");
+
+  const sourceMembership = {
+    id: sourceMembershipId,
+    organization: { key: "lawand", name: "법무법인 로앤" },
+    region: { key: "seoul", name: "서울" },
+    department: "검증",
+    jobTitle: "변경 전 담당자",
+    role: "full_time" as const,
+    isPrimary: true,
+  };
+  const sourcePrincipal = {
+    id: sourceStaffUserId,
+    email: `transfer-source-${sourceStaffUserId}@verification.invalid`,
+    displayName: "변경 전 검증 담당자",
+    primaryMembership: sourceMembership,
+    memberships: [sourceMembership],
+    roles: ["full_time"],
+  } satisfies StaffPrincipal;
+  const consultationService = createConsultationService({
+    db: database.db,
+    protection,
+  });
+  const managerChangeRequest =
+    await consultationService.requestAssigneeTransfer(
+      consultationId,
+      { targetStaffUserId, reason: "expertise" },
+      sourcePrincipal,
+    );
+  const replayedManagerChangeRequest =
+    await consultationService.requestAssigneeTransfer(
+      consultationId,
+      { targetStaffUserId, reason: "expertise" },
+      sourcePrincipal,
+    );
+  assert.equal(managerChangeRequest.replayed, false);
+  assert.equal(replayedManagerChangeRequest.replayed, true);
+  assert.equal(
+    replayedManagerChangeRequest.transferId,
+    managerChangeRequest.transferId,
+  );
+  assert.equal(
+    replayedManagerChangeRequest.eventId,
+    managerChangeRequest.eventId,
+  );
+  const [assignmentBeforeExternalSuccess] = await database.db
+    .select()
+    .from(consultationAssignments)
+    .where(eq(consultationAssignments.id, assignmentId));
+  assert.equal(
+    assignmentBeforeExternalSuccess?.assigneeUserId,
+    sourceStaffUserId,
+  );
+
+  assert.equal(await worker.runOnce(), true);
+  const [transferredAssignment] = await database.db
+    .select()
+    .from(consultationAssignments)
+    .where(eq(consultationAssignments.id, assignmentId));
+  const [completedTransfer] = await database.db
+    .select()
+    .from(consultationAssignmentTransfers)
+    .where(
+      eq(
+        consultationAssignmentTransfers.id,
+        managerChangeRequest.transferId,
+      ),
+    );
+  const [transferredLink] = await database.db
+    .select()
+    .from(legalFriendsCaseLinks)
+    .where(eq(legalFriendsCaseLinks.consultationId, consultationId));
+  const [transferredEvent] = await database.db
+    .select()
+    .from(outboxEvents)
+    .where(
+      and(
+        eq(outboxEvents.aggregateId, consultationId),
+        eq(outboxEvents.eventType, "consultation.assignment.transferred"),
+      ),
+    );
+  assert.equal(transferredAssignment?.assigneeUserId, targetStaffUserId);
+  assert.equal(transferredAssignment?.assignmentMethod, "transfer");
+  assert.equal(completedTransfer?.status, "succeeded");
+  assert.equal(
+    transferredLink?.managerExternalAccountId,
+    `verification-target-${targetStaffUserId}`,
+  );
+  assert.ok(transferredEvent);
+  assert.deepEqual(deliveredManagerChange, {
+    caseIdx: "verification-case-111",
+    memberId: `verification-target-${targetStaffUserId}`,
+  });
+
+  const targetMembership = {
+    id: targetMembershipId,
+    organization: { key: "lawand", name: "법무법인 로앤" },
+    region: { key: "seoul", name: "서울" },
+    department: "검증",
+    jobTitle: "변경 후 담당자",
+    role: "full_time" as const,
+    isPrimary: true,
+  };
+  const failedManagerChangeRequest =
+    await consultationService.requestAssigneeTransfer(
+      consultationId,
+      { targetStaffUserId: sourceStaffUserId, reason: "workload_balance" },
+      {
+        id: targetStaffUserId,
+        email: `transfer-target-${targetStaffUserId}@verification.invalid`,
+        displayName: "변경 후 검증 담당자",
+        primaryMembership: targetMembership,
+        memberships: [targetMembership],
+        roles: ["full_time"],
+      } satisfies StaffPrincipal,
+    );
+  const failingWorker = createOutboxWorker({
+    db: database.db,
+    protection,
+    workerId: "local-verification-failing-worker",
+    now: () => currentTime,
+    legalFriendsClient: {
+      createCase: async () => {
+        throw new Error("unexpected_registration");
+      },
+      changeManager: async () => {
+        throw new LegalFriendsDeliveryError(
+          "invalid_request",
+          "검증용 리걸프렌즈 변경 거절",
+          { httpStatus: 400, retryable: false },
+        );
+      },
+    },
+  });
+  assert.equal(await failingWorker.runOnce(), true);
+  const [assignmentAfterExternalFailure] = await database.db
+    .select()
+    .from(consultationAssignments)
+    .where(eq(consultationAssignments.id, assignmentId));
+  const [failedTransfer] = await database.db
+    .select()
+    .from(consultationAssignmentTransfers)
+    .where(
+      eq(
+        consultationAssignmentTransfers.id,
+        failedManagerChangeRequest.transferId,
+      ),
+    );
+  const [linkAfterExternalFailure] = await database.db
+    .select()
+    .from(legalFriendsCaseLinks)
+    .where(eq(legalFriendsCaseLinks.consultationId, consultationId));
+  assert.equal(
+    assignmentAfterExternalFailure?.assigneeUserId,
+    targetStaffUserId,
+  );
+  assert.equal(failedTransfer?.status, "failed");
+  assert.equal(
+    linkAfterExternalFailure?.managerExternalAccountId,
+    `verification-target-${targetStaffUserId}`,
+  );
 
   const invalidationPayload = {
     eventId: invalidationEventId,
@@ -231,31 +493,72 @@ try {
     invalidatedLink?.managerExternalAccountId,
     LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
   );
-  assert.equal(changeCalls, 1);
+  assert.equal(changeCalls, 2);
   assert.deepEqual(deliveredManagerChange, {
     caseIdx: "verification-case-111",
     memberId: LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
   });
   console.log("outbox 워커 로컬 통합 검증 완료");
 } finally {
+  const eventIds = (
+    await database.db
+      .select({ id: outboxEvents.id })
+      .from(outboxEvents)
+      .where(eq(outboxEvents.aggregateId, consultationId))
+  ).map((event) => event.id);
+  await database.db
+    .delete(staffAuditLogs)
+    .where(
+      and(
+        eq(staffAuditLogs.targetType, "consultation"),
+        eq(staffAuditLogs.targetId, consultationId),
+      ),
+    );
+  await database.db
+    .delete(consultationAssignmentTransfers)
+    .where(
+      eq(consultationAssignmentTransfers.consultationId, consultationId),
+    );
   await database.db
     .delete(legalFriendsCaseLinks)
     .where(eq(legalFriendsCaseLinks.consultationId, consultationId));
+  if (eventIds.length > 0) {
+    await database.db
+      .delete(outboxDeliveryAttempts)
+      .where(inArray(outboxDeliveryAttempts.outboxEventId, eventIds));
+    await database.db
+      .delete(outboxEvents)
+      .where(inArray(outboxEvents.id, eventIds));
+  }
   await database.db
-    .delete(outboxDeliveryAttempts)
-    .where(eq(outboxDeliveryAttempts.outboxEventId, invalidationEventId));
-  await database.db
-    .delete(outboxDeliveryAttempts)
-    .where(eq(outboxDeliveryAttempts.outboxEventId, eventId));
-  await database.db
-    .delete(outboxEvents)
-    .where(eq(outboxEvents.id, invalidationEventId));
-  await database.db.delete(outboxEvents).where(eq(outboxEvents.id, eventId));
+    .delete(consultationAssignments)
+    .where(eq(consultationAssignments.consultationId, consultationId));
   await database.db
     .delete(consultationRequests)
     .where(eq(consultationRequests.id, requestId));
   await database.db
     .delete(consultations)
     .where(eq(consultations.id, consultationId));
+  await database.db
+    .delete(staffExternalAccounts)
+    .where(inArray(staffExternalAccounts.staffUserId, [
+      sourceStaffUserId,
+      targetStaffUserId,
+    ]));
+  await database.db
+    .delete(staffMemberships)
+    .where(inArray(staffMemberships.userId, [
+      sourceStaffUserId,
+      targetStaffUserId,
+    ]));
+  await database.db
+    .delete(staffProfiles)
+    .where(inArray(staffProfiles.userId, [
+      sourceStaffUserId,
+      targetStaffUserId,
+    ]));
+  await database.db
+    .delete(staffUsers)
+    .where(inArray(staffUsers.id, [sourceStaffUserId, targetStaffUserId]));
   await database.pool.end();
 }

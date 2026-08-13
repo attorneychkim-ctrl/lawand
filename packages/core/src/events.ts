@@ -1,6 +1,9 @@
 import { z } from "zod";
 
-import { consultationModeSchema } from "./consultation.js";
+import {
+  consultationAssigneeTransferReasonSchema,
+  consultationModeSchema,
+} from "./consultation.js";
 
 export const LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID =
   "lawandfirm_s999" as const;
@@ -134,6 +137,36 @@ const legalFriendsInvalidationReferenceDataSchema = z
     ),
   })
   .strict();
+
+const assignmentTransferReferenceDataSchema = z
+  .object({
+    consultationId: z.uuid(),
+    transferId: z.uuid(),
+    transferRef: z
+      .string()
+      .regex(/^consultation_assignment_transfers\/[0-9a-f-]{36}$/),
+    assignmentId: z.uuid(),
+    assignmentRef: z
+      .string()
+      .regex(/^consultation_assignments\/[0-9a-f-]{36}$/),
+    caseLinkRef: z
+      .string()
+      .regex(/^legalfriends_case_links\/[0-9a-f-]{36}$/),
+    previousAssigneeUserId: z.uuid(),
+    targetAssigneeUserId: z.uuid(),
+    targetAssigneeMembershipId: z.uuid(),
+    requestedByUserId: z.uuid(),
+    reason: consultationAssigneeTransferReasonSchema,
+  })
+  .strict();
+
+const legalFriendsManagerChangeReferenceDataSchema =
+  assignmentTransferReferenceDataSchema
+    .extend({
+      targetManagerExternalAccountId: z.string().trim().min(1).max(200),
+      targetManagerMemberIdx: z.number().int().positive(),
+    })
+    .strict();
 
 const requestReferenceDataSchema = z
   .object({
@@ -316,6 +349,24 @@ export const legalfriendsInvalidationRequestedEventSchema =
     })
     .strict();
 
+export const legalfriendsManagerChangeRequestedEventSchema =
+  eventEnvelopeSchema
+    .extend({
+      eventType: z.literal(
+        "legalfriends.consultation.manager_change.requested",
+      ),
+      data: legalFriendsManagerChangeReferenceDataSchema,
+    })
+    .strict();
+
+export const consultationAssignmentTransferredEventSchema =
+  eventEnvelopeSchema
+    .extend({
+      eventType: z.literal("consultation.assignment.transferred"),
+      data: assignmentTransferReferenceDataSchema,
+    })
+    .strict();
+
 export const telephonyCallRequestedEventSchema = eventEnvelopeSchema
   .extend({
     eventType: z.literal("telephony.call.requested"),
@@ -359,12 +410,14 @@ export const platformEventSchema = z.discriminatedUnion("eventType", [
   consultationRequestUpdatedEventSchema,
   consultationDuplicateSuspectedEventSchema,
   consultationAssignedEventSchema,
+  consultationAssignmentTransferredEventSchema,
   consultationKakaoChatConfirmedEventSchema,
   consultationKakaoEntryInvalidatedEventSchema,
   telephonyCallRequestedEventSchema,
   telephonyMessageRequestedEventSchema,
   legalfriendsRegistrationRequestedEventSchema,
   legalfriendsInvalidationRequestedEventSchema,
+  legalfriendsManagerChangeRequestedEventSchema,
   alimtalkRequestNotificationRequestedEventSchema,
   alimtalkAssignmentNotificationRequestedEventSchema,
 ]);
@@ -381,6 +434,9 @@ export type ConsultationDuplicateSuspectedEvent = z.infer<
 export type ConsultationAssignedEvent = z.infer<
   typeof consultationAssignedEventSchema
 >;
+export type ConsultationAssignmentTransferredEvent = z.infer<
+  typeof consultationAssignmentTransferredEventSchema
+>;
 export type ConsultationKakaoChatConfirmedEvent = z.infer<
   typeof consultationKakaoChatConfirmedEventSchema
 >;
@@ -392,6 +448,9 @@ export type LegalfriendsRegistrationRequestedEvent = z.infer<
 >;
 export type LegalFriendsInvalidationRequestedEvent = z.infer<
   typeof legalfriendsInvalidationRequestedEventSchema
+>;
+export type LegalFriendsManagerChangeRequestedEvent = z.infer<
+  typeof legalfriendsManagerChangeRequestedEventSchema
 >;
 export type TelephonyCallRequestedEvent = z.infer<
   typeof telephonyCallRequestedEventSchema

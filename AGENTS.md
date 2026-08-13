@@ -71,6 +71,29 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-13 — ERP·리걸프렌즈 상담 담당자 동시 변경 후보
+- ERP 상담 상세 담당자 카드에 `변경` 모달을 추가했다. 현재 담당자 또는 관리자만 활성
+  리걸프렌즈 ID·`member_idx`가 연결된 다른 직원을 이름·부서·직책으로 찾아 선택하고
+  업무 분배·부재·전문 분야·관리자 조정·기타 사유를 남긴다. 모바일은 하단 시트로 열리고,
+  처리 중·실패·리걸프렌즈 확인 필요 상태와 완료 이력을 같은 카드에서 확인한다.
+- migration `0055_icy_harrier.sql`은 `consultation_assignment_transfers` 요청·결과 원장과
+  사유·상태 enum, 배정 방식 `transfer`를 추가한다. 요청은 개인정보 없는
+  `legalfriends.consultation.manager_change.requested` outbox와 감사 로그를 원자 저장한다.
+  기존 리걸프렌즈 직렬 워커가 `changeManager`에 성공한 뒤에만 사건 연결과 ERP 배정을
+  함께 변경하고 `consultation.assignment.transferred`를 발행한다. 실패하면 ERP 담당자를
+  그대로 두며, 응답이 불명확하면 자동 확정하지 않고 확인 필요로 남긴다. 변경 중에는
+  전화·무효 처리를 막고, 무효 처리와 일반 변경의 동시 실행도 양방향 차단한다.
+- 완료 이벤트는 개인정보 없는 SSE 신호로 모든 화면을 갱신하고 새 담당자에게만 ERP 탭·
+  브라우저 알림을 표시한다. 고객 알림톡은 이번 범위에서 만들지 않았고 승인 템플릿·발송
+  시점 확정 뒤 별도 이벤트로 추가한다. 기존 사건 문의처럼 새 리걸프렌즈 사건 연결이 없는
+  상담은 변경 대상에서 제외한다. `PROJECT_PLAN.md`는 v1.27이다.
+- 전체 5패키지 typecheck·lint·production build, core 80개·gateway 132개 테스트, DB schema
+  check와 `git diff --check`를 통과했다. 합성 `CB` 빈 원천을 둔 임시 PostgreSQL에서 migration
+  `0000..0055` 56개를 두 번 적용했고, 실제 서비스 요청의 멱등 원장 생성→리걸프렌즈 성공 뒤
+  ERP 확정과 외부 거절 시 기존 담당 유지→후속 무효 처리를 통합 검증한 뒤 fixture와 임시 DB를
+  삭제했다. 이 워크트리에서는 main 병합·운영 migration·gateway/ERP 배포·실제 사건 변경을
+  수행하지 않는다.
+
 ### 2026-08-13 — gateway DB 풀 적체·센트릭스 받기 지연 안정화 main 통합
 - 간헐적 ERP 5xx와 약 1분 뒤 통화 종료만 보인 현상을 읽기 진단해 CPU·메모리·디스크나
   PostgreSQL lock이 아니라 gateway 단일 DB 풀의 대기열을 공통 원인으로 확인했다. 세

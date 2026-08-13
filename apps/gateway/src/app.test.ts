@@ -2784,3 +2784,68 @@ test("상담 무효 처리는 인증된 직원과 상담 ID를 리걸프렌즈 �
     replayed: false,
   });
 });
+
+test("상담 담당자 변경은 검증된 대상과 사유를 현재 직원 문맥으로 전달한다", async (context) => {
+  const consultationId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2a4";
+  const targetStaffUserId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2a5";
+  let received:
+    | {
+        consultationId: string;
+        input: { targetStaffUserId: string; reason: string };
+        actor: StaffPrincipal;
+      }
+    | undefined;
+  const authService = {
+    authorize: async () => realtimeActor,
+  } as unknown as StaffAuthService;
+  const service = {
+    requestAssigneeTransfer: async (
+      receivedConsultationId: string,
+      input: { targetStaffUserId: string; reason: string },
+      actor: StaffPrincipal,
+    ) => {
+      received = { consultationId: receivedConsultationId, input, actor };
+      return {
+        consultationId: receivedConsultationId,
+        transferId: "019fa6a4-6834-7782-aa0b-4e71ffb8a2c2",
+        eventId: "019fa6a4-6834-7782-aa0b-4e71ffb8a2c3",
+        state: "queued" as const,
+        replayed: false,
+      };
+    },
+  } as unknown as ConsultationService;
+  const server = createGatewayServer({
+    authService,
+    internalApiKey: "test-internal-key",
+    service,
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const response = await fetch(
+    `http://127.0.0.1:${address.port}/v1/consultations/${consultationId}/assignee-transfer`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-lawand-internal-key": "test-internal-key",
+        "x-lawand-staff-session": "s".repeat(43),
+      },
+      body: JSON.stringify({
+        targetStaffUserId,
+        reason: "expertise",
+      }),
+    },
+  );
+
+  assert.equal(response.status, 201);
+  assert.equal(received?.consultationId, consultationId);
+  assert.deepEqual(received?.input, {
+    targetStaffUserId,
+    reason: "expertise",
+  });
+  assert.equal(received?.actor.id, realtimeActor.id);
+});

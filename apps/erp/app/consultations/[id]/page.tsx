@@ -19,6 +19,7 @@ import {
 } from "../../../lib/gateway";
 import { requireStaff } from "../../../lib/session";
 import { ClaimConsultationButton } from "../../_components/claim-consultation-button";
+import { ConsultationAssigneeTransfer } from "../../_components/consultation-assignee-transfer";
 import { ClickToCallButton } from "../../_components/click-to-call-button";
 import { CopyButton } from "../../_components/copy-button";
 import { KakaoEntryInvalidationButton } from "../../_components/kakao-entry-invalidation-button";
@@ -466,6 +467,7 @@ const integrationLabels: Record<string, string> = {
   "alimtalk.consultation.request_notification.requested": "접수 알림톡",
   "legalfriends.consultation.registration.requested": "리걸프렌즈 사건 등록",
   "legalfriends.consultation.invalidation.requested": "리걸프렌즈 무효 처리",
+  "legalfriends.consultation.manager_change.requested": "리걸프렌즈 담당자 변경",
   "alimtalk.consultation.assignment_notification.requested": "담당 배정 알림톡",
 };
 
@@ -475,6 +477,17 @@ function legalFriendsManagerLabel(externalAccountId: string) {
     ? "무효"
     : externalAccountId;
 }
+
+const assignmentTransferReasonLabels: Record<
+  ConsultationDetail["assignmentTransfers"][number]["reason"],
+  string
+> = {
+  workload_balance: "업무 분배",
+  absence: "부재",
+  expertise: "전문 분야",
+  manager_adjustment: "관리자 조정",
+  other: "기타",
+};
 
 function integrationTone(request: IntegrationRequest) {
   if (request.status === "published") return "success";
@@ -493,6 +506,24 @@ function integrationStatus(request: IntegrationRequest | undefined): string {
 }
 
 function nextAction(consultation: ConsultationDetail) {
+  const latestTransfer = consultation.assignmentTransfers[0];
+  if (latestTransfer?.status === "pending") {
+    return {
+      title: `${latestTransfer.targetAssigneeDisplayName} 담당자로 변경 중입니다`,
+      description:
+        "리걸프렌즈 변경이 성공하면 ERP 담당자도 자동으로 확정됩니다.",
+    };
+  }
+  if (
+    latestTransfer?.status === "failed" ||
+    latestTransfer?.status === "needs_confirmation"
+  ) {
+    return {
+      title: "리걸프렌즈 담당자 변경을 확인해 주세요",
+      description:
+        "ERP 담당자는 기존 상태로 유지했습니다. 리걸프렌즈 상태를 확인한 뒤 다시 동기화할 수 있습니다.",
+    };
+  }
   if (
     consultation.legalFriendsCase?.managerExternalAccountId ===
     LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID
@@ -674,7 +705,8 @@ export default async function ConsultationDetailPage({
       consultation.kakaoEntry.nameProvided);
   const canClickToCall =
     Boolean(latestPhone) &&
-    consultation.assignment?.assigneeUserId === staff.id;
+    consultation.assignment?.assigneeUserId === staff.id &&
+    consultation.assignmentTransfers[0]?.status !== "pending";
   const canSendMessage = canClickToCall;
   const latestMyCall = consultation.telephonyCalls.find(
     (call) => call.staffUserId === staff.id,
@@ -698,7 +730,19 @@ export default async function ConsultationDetailPage({
     (Boolean(consultation.legalFriendsCase) ||
       consultation.kakaoEntry?.status === "confirmed") &&
     (consultation.assignment?.assigneeUserId === staff.id ||
-      staff.roles.includes("admin"));
+      staff.roles.includes("admin")) &&
+    consultation.assignmentTransfers[0]?.status !== "pending";
+  const canChangeAssignee =
+    Boolean(consultation.assignment) &&
+    Boolean(consultation.legalFriendsCase) &&
+    !legalFriendsInvalidated &&
+    consultation.state !== "closed" &&
+    (consultation.assignment?.assigneeUserId === staff.id ||
+      staff.roles.includes("admin")) &&
+    consultation.assignmentOptions.some(
+      (option) =>
+        option.userId !== consultation.assignment?.assigneeUserId,
+    );
 
   return (
     <>
@@ -843,7 +887,28 @@ export default async function ConsultationDetailPage({
             <dl className="workflow-assignment">
               <div>
                 <dt>담당자</dt>
-                <dd>{consultation.assignment?.displayName ?? "미배정"}</dd>
+                <dd className="workflow-assignment-value">
+                  <span>{consultation.assignment?.displayName ?? "미배정"}</span>
+                  {consultation.assignment ? (
+                    <ConsultationAssigneeTransfer
+                      canChange={canChangeAssignee}
+                      consultationId={consultation.id}
+                      currentAssigneeDisplayName={
+                        consultation.assignment.displayName
+                      }
+                      currentAssigneeUserId={
+                        consultation.assignment.assigneeUserId
+                      }
+                      latestTransfer={consultation.assignmentTransfers[0] ?? null}
+                      options={consultation.assignmentOptions}
+                      key={
+                        consultation.assignmentTransfers[0]
+                          ? `${consultation.assignmentTransfers[0].id}:${consultation.assignmentTransfers[0].status}`
+                          : "no-transfer"
+                      }
+                    />
+                  ) : null}
+                </dd>
               </div>
               {consultation.assignment ? (
                 <div>
@@ -852,6 +917,27 @@ export default async function ConsultationDetailPage({
                 </div>
               ) : null}
             </dl>
+            {consultation.assignmentTransfers.some(
+              (transfer) => transfer.status === "succeeded",
+            ) ? (
+              <details className="assignment-transfer-history">
+                <summary>담당자 변경 이력</summary>
+                <ol>
+                  {consultation.assignmentTransfers
+                    .filter((transfer) => transfer.status === "succeeded")
+                    .map((transfer) => (
+                      <li key={transfer.id}>
+                        <strong>
+                          {transfer.previousAssigneeDisplayName} → {transfer.targetAssigneeDisplayName}
+                        </strong>
+                        <span>
+                          {assignmentTransferReasonLabels[transfer.reason]} · {formatDate(transfer.finishedAt ?? transfer.requestedAt)}
+                        </span>
+                      </li>
+                    ))}
+                </ol>
+              </details>
+            ) : null}
             <div className="workflow-integrations">
               <h3>자동화 상태</h3>
               {consultation.integrationRequests.length ? (

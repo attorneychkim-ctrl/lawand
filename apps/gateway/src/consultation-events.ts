@@ -12,7 +12,11 @@ export type ConsultationEventNotification = {
   eventType: string;
   consultationId: string;
   occurredAt: string;
-  notificationKind: "repeat_unassigned" | "repeat_assigned" | null;
+  notificationKind:
+    | "repeat_unassigned"
+    | "repeat_assigned"
+    | "assignment_transferred"
+    | null;
 };
 
 export type ConsultationEventMessage =
@@ -46,7 +50,8 @@ export function parseConsultationEventNotification(
       (value.notificationKind !== undefined &&
         value.notificationKind !== null &&
         value.notificationKind !== "repeat_unassigned" &&
-        value.notificationKind !== "repeat_assigned")
+        value.notificationKind !== "repeat_assigned" &&
+        value.notificationKind !== "assignment_transferred")
     ) {
       return null;
     }
@@ -57,7 +62,8 @@ export function parseConsultationEventNotification(
       occurredAt: value.occurredAt,
       notificationKind:
         value.notificationKind === "repeat_unassigned" ||
-        value.notificationKind === "repeat_assigned"
+        value.notificationKind === "repeat_assigned" ||
+        value.notificationKind === "assignment_transferred"
           ? value.notificationKind
           : null,
     };

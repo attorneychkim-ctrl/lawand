@@ -11,19 +11,24 @@ import {
 } from "drizzle-orm";
 
 import {
+  assertPlatformEvent,
   consultationIntakeAnswersSchema,
   createEventId,
   LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
   legalfriendsInvalidationRequestedEventSchema,
+  legalfriendsManagerChangeRequestedEventSchema,
   legalfriendsRegistrationRequestedEventSchema,
+  type PlatformEvent,
 } from "@lawand/core";
 import {
+  consultationAssignmentTransfers,
   consultationAssignments,
   consultationRequests,
   consultations,
   legalFriendsCaseLinks,
   outboxDeliveryAttempts,
   outboxEvents,
+  staffAuditLogs,
   staffExternalAccounts,
 } from "@lawand/db";
 import type { createDatabaseClient } from "@lawand/db";
@@ -44,9 +49,12 @@ const REGISTRATION_EVENT_TYPE =
   "legalfriends.consultation.registration.requested" as const;
 const INVALIDATION_EVENT_TYPE =
   "legalfriends.consultation.invalidation.requested" as const;
+const MANAGER_CHANGE_EVENT_TYPE =
+  "legalfriends.consultation.manager_change.requested" as const;
 const EVENT_TYPES = [
   REGISTRATION_EVENT_TYPE,
   INVALIDATION_EVENT_TYPE,
+  MANAGER_CHANGE_EVENT_TYPE,
 ] as const;
 const MAX_ATTEMPTS = 5;
 const LEASE_TIMEOUT_MS = 2 * 60 * 1_000;
@@ -194,6 +202,7 @@ export function createOutboxWorker(options: {
       const expired = await tx
         .select({
           id: outboxEvents.id,
+          eventType: outboxEvents.eventType,
           attemptNumber: outboxEvents.attempts,
         })
         .from(outboxEvents)
@@ -210,7 +219,64 @@ export function createOutboxWorker(options: {
         .for("update", { skipLocked: true });
 
       if (expired.length === 0) return 0;
-      const ids = expired.map((event) => event.id);
+      const managerEventIds = expired
+        .filter((event) => event.eventType === MANAGER_CHANGE_EVENT_TYPE)
+        .map((event) => event.id);
+      const completedManagerEventIds = new Set(
+        managerEventIds.length > 0
+          ? (
+              await tx
+                .select({
+                  outboxEventId:
+                    consultationAssignmentTransfers.outboxEventId,
+                })
+                .from(consultationAssignmentTransfers)
+                .where(
+                  and(
+                    inArray(
+                      consultationAssignmentTransfers.outboxEventId,
+                      managerEventIds,
+                    ),
+                    eq(
+                      consultationAssignmentTransfers.status,
+                      "succeeded",
+                    ),
+                  ),
+                )
+            ).map((transfer) => transfer.outboxEventId)
+          : [],
+      );
+      const completedIds = [...completedManagerEventIds];
+      if (completedIds.length > 0) {
+        await tx
+          .update(outboxEvents)
+          .set({
+            status: "published",
+            lockedAt: null,
+            lockedBy: null,
+            publishedAt: currentTime,
+            lastError: null,
+          })
+          .where(inArray(outboxEvents.id, completedIds));
+        await tx
+          .update(outboxDeliveryAttempts)
+          .set({
+            status: "succeeded",
+            httpStatus: 200,
+            finishedAt: currentTime,
+          })
+          .where(
+            and(
+              inArray(outboxDeliveryAttempts.outboxEventId, completedIds),
+              eq(outboxDeliveryAttempts.status, "started"),
+            ),
+          );
+      }
+      const unresolved = expired.filter(
+        (event) => !completedManagerEventIds.has(event.id),
+      );
+      if (unresolved.length === 0) return expired.length;
+      const ids = unresolved.map((event) => event.id);
       const message =
         "이전 리걸프렌즈 전송 작업이 응답 기록 전에 중단됐습니다. 리걸프렌즈에서 현재 사건 상태를 확인해 주세요.";
       await tx
@@ -236,6 +302,27 @@ export function createOutboxWorker(options: {
             eq(outboxDeliveryAttempts.status, "started"),
           ),
         );
+      const unresolvedManagerIds = unresolved
+        .filter((event) => event.eventType === MANAGER_CHANGE_EVENT_TYPE)
+        .map((event) => event.id);
+      if (unresolvedManagerIds.length > 0) {
+        await tx
+          .update(consultationAssignmentTransfers)
+          .set({
+            status: "needs_confirmation",
+            finishedAt: currentTime,
+            updatedAt: currentTime,
+          })
+          .where(
+            and(
+              inArray(
+                consultationAssignmentTransfers.outboxEventId,
+                unresolvedManagerIds,
+              ),
+              eq(consultationAssignmentTransfers.status, "pending"),
+            ),
+          );
+      }
       return expired.length;
     });
   }
@@ -467,6 +554,53 @@ export function createOutboxWorker(options: {
     const shouldRetry =
       failure.retryable && event.attemptNumber < MAX_ATTEMPTS;
     await db.transaction(async (tx) => {
+      if (event.eventType === MANAGER_CHANGE_EVENT_TYPE) {
+        const [completedTransfer] = await tx
+          .select({ id: consultationAssignmentTransfers.id })
+          .from(consultationAssignmentTransfers)
+          .where(
+            and(
+              eq(
+                consultationAssignmentTransfers.outboxEventId,
+                event.id,
+              ),
+              eq(consultationAssignmentTransfers.status, "succeeded"),
+            ),
+          )
+          .limit(1);
+        if (completedTransfer) {
+          await tx
+            .update(outboxEvents)
+            .set({
+              status: "published",
+              lockedAt: null,
+              lockedBy: null,
+              publishedAt: currentTime,
+              lastError: null,
+            })
+            .where(
+              and(
+                eq(outboxEvents.id, event.id),
+                eq(outboxEvents.status, "pending"),
+                eq(outboxEvents.lockedBy, workerId),
+              ),
+            );
+          await tx
+            .update(outboxDeliveryAttempts)
+            .set({
+              status: "succeeded",
+              httpStatus: 200,
+              finishedAt: currentTime,
+            })
+            .where(
+              and(
+                eq(outboxDeliveryAttempts.id, event.attemptId),
+                eq(outboxDeliveryAttempts.status, "started"),
+              ),
+            );
+          return;
+        }
+      }
       const updated = await tx
         .update(outboxEvents)
         .set({
@@ -507,6 +641,27 @@ export function createOutboxWorker(options: {
             eq(outboxDeliveryAttempts.status, "started"),
           ),
         );
+      if (event.eventType === MANAGER_CHANGE_EVENT_TYPE && !shouldRetry) {
+        await tx
+          .update(consultationAssignmentTransfers)
+          .set({
+            status:
+              failure.code === "ambiguous_delivery"
+                ? "needs_confirmation"
+                : "failed",
+            finishedAt: currentTime,
+            updatedAt: currentTime,
+          })
+          .where(
+            and(
+              eq(
+                consultationAssignmentTransfers.outboxEventId,
+                event.id,
+              ),
+              eq(consultationAssignmentTransfers.status, "pending"),
+            ),
+          );
+      }
     });
   }
 
@@ -644,6 +799,237 @@ export function createOutboxWorker(options: {
     return changed.httpStatus;
   }
 
+  async function deliverManagerChange(event: ClaimedEvent) {
+    const envelope = legalfriendsManagerChangeRequestedEventSchema.parse(
+      event.payload,
+    );
+    if (
+      envelope.correlationId !== event.aggregateId ||
+      envelope.data.consultationId !== event.aggregateId ||
+      envelope.data.transferRef !==
+        `consultation_assignment_transfers/${envelope.data.transferId}` ||
+      envelope.data.assignmentRef !==
+        `consultation_assignments/${envelope.data.assignmentId}` ||
+      envelope.data.caseLinkRef !==
+        `legalfriends_case_links/${event.aggregateId}`
+    ) {
+      throw new Error("legalfriends_manager_change_event_mismatch");
+    }
+
+    const [transfer] = await db
+      .select()
+      .from(consultationAssignmentTransfers)
+      .where(
+        and(
+          eq(consultationAssignmentTransfers.id, envelope.data.transferId),
+          eq(consultationAssignmentTransfers.outboxEventId, event.id),
+          eq(
+            consultationAssignmentTransfers.consultationId,
+            event.aggregateId,
+          ),
+        ),
+      )
+      .limit(1);
+    if (!transfer) throw new Error("assignment_transfer_not_found");
+    if (transfer.status === "succeeded") return 200;
+    if (transfer.status !== "pending") {
+      throw new Error("assignment_transfer_not_pending");
+    }
+    if (
+      transfer.assignmentId !== envelope.data.assignmentId ||
+      transfer.previousAssigneeUserId !==
+        envelope.data.previousAssigneeUserId ||
+      transfer.targetAssigneeUserId !==
+        envelope.data.targetAssigneeUserId ||
+      transfer.targetAssigneeMembershipId !==
+        envelope.data.targetAssigneeMembershipId ||
+      transfer.requestedByUserId !== envelope.data.requestedByUserId ||
+      transfer.reason !== envelope.data.reason ||
+      transfer.targetManagerExternalAccountId !==
+        envelope.data.targetManagerExternalAccountId ||
+      transfer.targetManagerMemberIdx !==
+        envelope.data.targetManagerMemberIdx
+    ) {
+      throw new Error("assignment_transfer_event_mismatch");
+    }
+
+    const [assignment] = await db
+      .select()
+      .from(consultationAssignments)
+      .where(
+        and(
+          eq(consultationAssignments.id, transfer.assignmentId),
+          eq(consultationAssignments.consultationId, event.aggregateId),
+        ),
+      )
+      .limit(1);
+    const [link] = await db
+      .select()
+      .from(legalFriendsCaseLinks)
+      .where(eq(legalFriendsCaseLinks.consultationId, event.aggregateId))
+      .limit(1);
+    if (!assignment) throw new Error("consultation_assignment_not_found");
+    if (!link) {
+      throw new LegalFriendsDependencyPendingError(
+        "리걸프렌즈 사건 등록 완료를 기다리고 있습니다.",
+      );
+    }
+    if (
+      assignment.assigneeUserId !== transfer.previousAssigneeUserId ||
+      assignment.assigneeMembershipId !==
+        transfer.previousAssigneeMembershipId
+    ) {
+      throw new Error("assignment_transfer_source_changed");
+    }
+
+    let httpStatus = 200;
+    let externalManagerChanged = false;
+    if (
+      link.managerExternalAccountId !==
+      transfer.targetManagerExternalAccountId
+    ) {
+      const changed = await legalFriendsClient.changeManager(
+        link.caseIdx,
+        transfer.targetManagerExternalAccountId,
+        {
+          eventId: event.id,
+          consultationId: event.aggregateId,
+        },
+      );
+      httpStatus = changed.httpStatus;
+      externalManagerChanged = true;
+    }
+
+    const changedAt = now();
+    try {
+      await db.transaction(async (tx) => {
+        const [lockedTransfer] = await tx
+          .select({ status: consultationAssignmentTransfers.status })
+          .from(consultationAssignmentTransfers)
+          .where(eq(consultationAssignmentTransfers.id, transfer.id))
+          .limit(1)
+          .for("update");
+        const [lockedAssignment] = await tx
+          .select({
+            assigneeUserId: consultationAssignments.assigneeUserId,
+            assigneeMembershipId:
+              consultationAssignments.assigneeMembershipId,
+          })
+          .from(consultationAssignments)
+          .where(eq(consultationAssignments.id, transfer.assignmentId))
+          .limit(1)
+          .for("update");
+        if (lockedTransfer?.status === "succeeded") return;
+        if (
+          lockedTransfer?.status !== "pending" ||
+          lockedAssignment?.assigneeUserId !==
+            transfer.previousAssigneeUserId ||
+          lockedAssignment.assigneeMembershipId !==
+            transfer.previousAssigneeMembershipId
+        ) {
+          throw new Error("assignment_transfer_commit_conflict");
+        }
+
+        await tx
+          .update(legalFriendsCaseLinks)
+          .set({
+            managerExternalAccountId:
+              transfer.targetManagerExternalAccountId,
+            managerAssignedAt: changedAt,
+            updatedAt: changedAt,
+          })
+          .where(
+            eq(legalFriendsCaseLinks.consultationId, event.aggregateId),
+          );
+        await tx
+          .update(consultationAssignments)
+          .set({
+            assigneeUserId: transfer.targetAssigneeUserId,
+            assigneeMembershipId: transfer.targetAssigneeMembershipId,
+            assignedByUserId: transfer.requestedByUserId,
+            assignmentMethod: "transfer",
+            assignedAt: changedAt,
+          })
+          .where(eq(consultationAssignments.id, transfer.assignmentId));
+        await tx
+          .update(consultationAssignmentTransfers)
+          .set({
+            status: "succeeded",
+            finishedAt: changedAt,
+            updatedAt: changedAt,
+          })
+          .where(eq(consultationAssignmentTransfers.id, transfer.id));
+
+        const transferredEvent: PlatformEvent = {
+          eventId: createEventId(),
+          eventType: "consultation.assignment.transferred",
+          eventVersion: 1,
+          occurredAt: changedAt.toISOString(),
+          producer: "lawand.gateway",
+          correlationId: event.aggregateId,
+          causationId: event.id,
+          data: {
+            consultationId: event.aggregateId,
+            transferId: transfer.id,
+            transferRef: `consultation_assignment_transfers/${transfer.id}`,
+            assignmentId: transfer.assignmentId,
+            assignmentRef: `consultation_assignments/${transfer.assignmentId}`,
+            caseLinkRef: `legalfriends_case_links/${event.aggregateId}`,
+            previousAssigneeUserId: transfer.previousAssigneeUserId,
+            targetAssigneeUserId: transfer.targetAssigneeUserId,
+            targetAssigneeMembershipId:
+              transfer.targetAssigneeMembershipId,
+            requestedByUserId: transfer.requestedByUserId,
+            reason: transfer.reason,
+          },
+        };
+        assertPlatformEvent(transferredEvent);
+        await tx.insert(outboxEvents).values({
+          id: transferredEvent.eventId,
+          aggregateType: "consultation",
+          aggregateId: event.aggregateId,
+          eventType: transferredEvent.eventType,
+          eventVersion: transferredEvent.eventVersion,
+          correlationId: transferredEvent.correlationId,
+          causationId: transferredEvent.causationId ?? null,
+          payload: transferredEvent,
+          status: "pending",
+          availableAt: changedAt,
+          occurredAt: changedAt,
+          createdAt: changedAt,
+        });
+        await tx.insert(staffAuditLogs).values({
+          id: createEventId(),
+          actorUserId: transfer.requestedByUserId,
+          action: "consultation.assignment_transfer_completed",
+          targetType: "consultation",
+          targetId: event.aggregateId,
+          metadata: {
+            transferId: transfer.id,
+            eventId: event.id,
+            assignmentId: transfer.assignmentId,
+            previousAssigneeUserId: transfer.previousAssigneeUserId,
+            targetAssigneeUserId: transfer.targetAssigneeUserId,
+            reason: transfer.reason,
+            caseIdx: link.caseIdx,
+          },
+          occurredAt: changedAt,
+          createdAt: changedAt,
+        });
+      });
+    } catch (error) {
+      if (externalManagerChanged) {
+        throw new LegalFriendsDeliveryError(
+          "ambiguous_delivery",
+          "리걸프렌즈 담당자는 변경됐지만 ERP 반영을 확정하지 못했습니다. 두 시스템의 현재 담당자를 확인해 주세요.",
+          { retryable: false },
+        );
+      }
+      throw error;
+    }
+    return httpStatus;
+  }
+
   async function runOnce(): Promise<boolean> {
     const currentTime = now();
     await recoverExpiredLeases(currentTime);
@@ -656,9 +1042,11 @@ export function createOutboxWorker(options: {
           ? await deliverRegistration(event)
           : event.eventType === INVALIDATION_EVENT_TYPE
             ? await deliverInvalidation(event)
-            : (() => {
-                throw new Error("unsupported_legalfriends_event");
-              })();
+            : event.eventType === MANAGER_CHANGE_EVENT_TYPE
+              ? await deliverManagerChange(event)
+              : (() => {
+                  throw new Error("unsupported_legalfriends_event");
+                })();
       await markSucceeded(event, now(), httpStatus);
       console.log(
         JSON.stringify({

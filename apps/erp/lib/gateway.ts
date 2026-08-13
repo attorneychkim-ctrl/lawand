@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 
 import { createSingleFlight } from "@lawand/core";
 import type {
+  ConsultationAssigneeTransferInput,
   LegalFriendsConsultationHandling,
   LegalFriendsDirectoryConsultationCreate,
   ResidenceRegion,
@@ -644,6 +645,29 @@ export type ConsultationDetail = {
     assignmentMethod: string;
     assignedAt: string;
   } | null;
+  assignmentOptions: Array<{
+    userId: string;
+    displayName: string;
+    membershipId: string;
+    organizationName: string;
+    department: string;
+    jobTitle: string;
+  }>;
+  assignmentTransfers: Array<{
+    id: string;
+    previousAssigneeUserId: string;
+    previousAssigneeDisplayName: string;
+    targetAssigneeUserId: string;
+    targetAssigneeDisplayName: string;
+    requestedByUserId: string;
+    requestedByDisplayName: string;
+    reason: ConsultationAssigneeTransferInput["reason"];
+    status: "pending" | "succeeded" | "failed" | "needs_confirmation";
+    eventStatus: "pending" | "published" | "dead";
+    requestedAt: string;
+    finishedAt: string | null;
+    lastError: string | null;
+  }>;
   integrationRequests: Array<{
     id: string;
     eventType: string;
@@ -1068,6 +1092,38 @@ export async function assignConsultationToMe(
     assignedAt: string;
     replayed: boolean;
     queuedEventTypes: string[];
+  };
+}
+
+export async function requestConsultationAssigneeTransfer(
+  id: string,
+  input: ConsultationAssigneeTransferInput,
+): Promise<{
+  consultationId: string;
+  transferId: string;
+  eventId: string;
+  state: "queued";
+  replayed: boolean;
+}> {
+  const response = await gatewayFetch(
+    `/v1/consultations/${id}/assignee-transfer`,
+    { method: "POST", body: input },
+  );
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      message?: string;
+    } | null;
+    throw new ConsultationGatewayError(
+      response.status,
+      body?.message ?? `담당자 변경 요청 실패 (${response.status})`,
+    );
+  }
+  return (await response.json()) as {
+    consultationId: string;
+    transferId: string;
+    eventId: string;
+    state: "queued";
+    replayed: boolean;
   };
 }
 

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   classifyConsultationSubmission,
+  consultationAssigneeTransferInputSchema,
   consultationAssignmentInputSchema,
   type ExistingConsultationCandidate,
 } from "./consultation.js";
@@ -206,6 +207,26 @@ test("리걸프렌즈 새 사건과 공유 연락처 선택에는 사건 ID를 �
   assert.equal(
     consultationAssignmentInputSchema.safeParse({
       legalFriendsHandling: { mode: "shared_contact", caseIdx: 202 },
+    }).success,
+    false,
+  );
+});
+
+test("담당자 변경은 새 직원 UUID와 정해진 사유만 받는다", () => {
+  assert.deepEqual(
+    consultationAssigneeTransferInputSchema.parse({
+      targetStaffUserId: "01984c7d-8500-7000-8000-000000000006",
+      reason: "expertise",
+    }),
+    {
+      targetStaffUserId: "01984c7d-8500-7000-8000-000000000006",
+      reason: "expertise",
+    },
+  );
+  assert.equal(
+    consultationAssigneeTransferInputSchema.safeParse({
+      targetStaffUserId: "01984c7d-8500-7000-8000-000000000006",
+      reason: "임의 사유",
     }).success,
     false,
   );
