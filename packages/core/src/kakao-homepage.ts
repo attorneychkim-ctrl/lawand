@@ -1,9 +1,10 @@
 import { z } from "zod";
 
 import { consultationAttributionInputSchema } from "./attribution.js";
+import { residenceRegionSchema } from "./intake.js";
 
 export const CURRENT_KAKAO_HOMEPAGE_ENTRY_NOTICE_VERSION =
-  "2026-08-12.kakao-homepage-entry.2";
+  "2026-08-13.kakao-homepage-entry.3";
 
 const kakaoHomepageDisplayNameSchema = z
   .string()
@@ -30,6 +31,7 @@ export const kakaoHomepageEntrySubmissionSchema = z
     source: z.literal("homepage_kakao"),
     idempotencyKey: z.uuid(),
     displayName: kakaoHomepageDisplayNameSchema,
+    residenceRegion: residenceRegionSchema,
     attribution: consultationAttributionInputSchema.optional(),
   })
   .strict();

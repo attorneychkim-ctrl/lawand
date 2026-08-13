@@ -1777,6 +1777,7 @@ test("홈페이지 카카오 진입은 접수 전용 키와 별도 익명 한도
         source: "homepage_kakao";
         idempotencyKey: string;
         displayName: string;
+        residenceRegion: string;
       }
     | undefined;
   let protectionChecked = false;
@@ -1785,6 +1786,7 @@ test("홈페이지 카카오 진입은 접수 전용 키와 별도 익명 한도
       source: "homepage_kakao";
       idempotencyKey: string;
       displayName: string;
+      residenceRegion: string;
     }) => {
       received = input;
       return {
@@ -1818,6 +1820,7 @@ test("홈페이지 카카오 진입은 접수 전용 키와 별도 익명 한도
     source: "homepage_kakao",
     idempotencyKey: "01984c7d-8500-7000-8000-000000000001",
     displayName: "김민수",
+    residenceRegion: "seoul",
   });
 
   const denied = await fetch(endpoint, {
@@ -1840,6 +1843,20 @@ test("홈페이지 카카오 진입은 접수 전용 키와 별도 익명 한도
   });
   assert.equal(missingDisplayName.status, 400);
 
+  const missingResidenceRegion = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-lawand-public-intake-key": "test-public-intake-key",
+    },
+    body: JSON.stringify({
+      source: "homepage_kakao",
+      idempotencyKey: "01984c7d-8500-7000-8000-000000000003",
+      displayName: "김민수",
+    }),
+  });
+  assert.equal(missingResidenceRegion.status, 400);
+
   const accepted = await fetch(endpoint, {
     method: "POST",
     headers: {
@@ -1855,6 +1872,7 @@ test("홈페이지 카카오 진입은 접수 전용 키와 별도 익명 한도
     "01984c7d-8500-7000-8000-000000000001",
   );
   assert.equal(received?.displayName, "김민수");
+  assert.equal(received?.residenceRegion, "seoul");
   assert.equal(
     ((await accepted.json()) as { status: string }).status,
     "pending",
@@ -2744,4 +2762,66 @@ test("상담 무효 처리는 인증된 직원과 상담 ID를 리걸프렌즈 �
     targetManagerMemberIdx: 1824,
     replayed: false,
   });
+});
+
+test("신규등록 상담 소프트삭제는 관리자 권한과 상담 ID를 서비스에 전달한다", async (context) => {
+  const consultationId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2a4";
+  const adminActor = {
+    ...realtimeActor,
+    roles: ["admin" as const],
+  };
+  let authorizedRoles: readonly string[] = [];
+  let received:
+    | { consultationId: string; actor: StaffPrincipal }
+    | undefined;
+  const authService = {
+    authorize: async (_token: string, roles: readonly string[]) => {
+      authorizedRoles = roles;
+      return adminActor;
+    },
+  } as unknown as StaffAuthService;
+  const service = {
+    softDeleteStaffConsultation: async (
+      receivedConsultationId: string,
+      receivedActor: StaffPrincipal,
+    ) => {
+      received = {
+        consultationId: receivedConsultationId,
+        actor: receivedActor,
+      };
+      return {
+        consultationId: receivedConsultationId,
+        state: "closed" as const,
+        softDeletedAt: "2026-08-13T09:00:00.000Z",
+        softDeletedByUserId: receivedActor.id,
+        replayed: false,
+      };
+    },
+  } as unknown as ConsultationService;
+  const server = createGatewayServer({
+    authService,
+    internalApiKey: "test-internal-key",
+    service,
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const response = await fetch(
+    `http://127.0.0.1:${address.port}/v1/consultations/${consultationId}`,
+    {
+      method: "DELETE",
+      headers: {
+        "x-lawand-internal-key": "test-internal-key",
+        "x-lawand-staff-session": "s".repeat(43),
+      },
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(authorizedRoles, ["admin"]);
+  assert.equal(received?.consultationId, consultationId);
+  assert.equal(received?.actor.id, adminActor.id);
 });

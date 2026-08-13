@@ -39,12 +39,13 @@ test("고객 입력 이름이 있는 대기 접수만 상담하기에서 확인�
   );
 });
 
-test("홈페이지 카카오 진입은 표시명과 UUID 멱등키를 받는다", () => {
+test("홈페이지 카카오 진입은 표시명·거주지역과 UUID 멱등키를 받는다", () => {
   assert.equal(
     kakaoHomepageEntrySubmissionSchema.safeParse({
       source: "homepage_kakao",
       idempotencyKey: "01984c7d-8500-7000-8000-000000000001",
       displayName: "김민수",
+      residenceRegion: "seoul",
     }).success,
     true,
   );
@@ -53,6 +54,7 @@ test("홈페이지 카카오 진입은 표시명과 UUID 멱등키를 받는다"
       source: "homepage_kakao",
       idempotencyKey: "not-a-uuid",
       displayName: "김민수",
+      residenceRegion: "seoul",
     }).success,
     false,
   );
@@ -61,6 +63,15 @@ test("홈페이지 카카오 진입은 표시명과 UUID 멱등키를 받는다"
       source: "homepage_kakao",
       idempotencyKey: "01984c7d-8500-7000-8000-000000000001",
       displayName: " ",
+      residenceRegion: "seoul",
+    }).success,
+    false,
+  );
+  assert.equal(
+    kakaoHomepageEntrySubmissionSchema.safeParse({
+      source: "homepage_kakao",
+      idempotencyKey: "01984c7d-8500-7000-8000-000000000001",
+      displayName: "김민수",
     }).success,
     false,
   );

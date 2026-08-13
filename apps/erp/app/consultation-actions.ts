@@ -8,8 +8,9 @@ import {
   ConsultationGatewayError,
   invalidateLegalFriendsCase,
   invalidateKakaoHomepageEntry,
+  softDeleteStaffConsultation,
 } from "../lib/gateway";
-import { requireStaff } from "../lib/session";
+import { requireAdmin, requireStaff } from "../lib/session";
 
 export type ConsultationAssignmentActionState = {
   error: string;
@@ -101,6 +102,31 @@ export async function invalidateKakaoHomepageEntryAction(
     await invalidateKakaoHomepageEntry(consultationId);
   } catch (error) {
     return { error: kakaoEntryError(error) };
+  }
+  revalidatePath("/");
+  revalidatePath(`/consultations/${consultationId}`);
+  return { error: "" };
+}
+
+export type ConsultationSoftDeleteActionState = {
+  error: string;
+};
+
+export async function softDeleteStaffConsultationAction(
+  consultationId: string,
+  previousState: ConsultationSoftDeleteActionState,
+): Promise<ConsultationSoftDeleteActionState> {
+  void previousState;
+  await requireAdmin();
+  try {
+    await softDeleteStaffConsultation(consultationId);
+  } catch (error) {
+    return {
+      error:
+        error instanceof ConsultationGatewayError
+          ? error.message
+          : "상담을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+    };
   }
   revalidatePath("/");
   revalidatePath(`/consultations/${consultationId}`);

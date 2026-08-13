@@ -213,6 +213,7 @@ try {
     source: "homepage_kakao",
     idempotencyKey,
     displayName: "김민수",
+    residenceRegion: "seoul",
   });
   assert.equal(first.status, "pending");
   assert.equal(first.replayed, false);
@@ -221,6 +222,7 @@ try {
     source: "homepage_kakao",
     idempotencyKey,
     displayName: "김민수",
+    residenceRegion: "seoul",
   });
   assert.equal(replay.publicReceiptCode, first.publicReceiptCode);
   assert.equal(replay.status, "pending");
@@ -247,6 +249,19 @@ try {
   assert.ok(request.nameNonce);
   assert.equal(request.privacyBasis, "customer_initiated_channel_entry");
   assert.equal(request.consentAgreedAt, null);
+  assert.equal(
+    JSON.parse(
+      protection.decrypt(
+        {
+          ciphertext: request.intakeCiphertext,
+          nonce: request.intakeNonce,
+          keyVersion: request.intakeKeyVersion,
+        },
+        `consultation_requests.intake:${request.id}`,
+      ),
+    ).residenceRegion,
+    "seoul",
+  );
 
   const [pendingEntry] = await database.db
     .select()
@@ -334,7 +349,7 @@ try {
     member_idx: 138,
     name: assignedDetail.displayName,
     phone: "010-0000-0000",
-    living_place: "미수집",
+    living_place: "서울특별시",
     memo: "접수 방식: 빠른 상담\n남긴 내용: 카카오 채팅방에서 상담 내용을 확인",
   });
 
@@ -358,6 +373,7 @@ try {
     source: "homepage_kakao",
     idempotencyKey: randomUUID(),
     displayName: "이탈고객",
+    residenceRegion: "gyeonggi",
   });
   const invalidConsultation = await consultationByReceipt(
     invalidReceipt.publicReceiptCode,
@@ -417,12 +433,12 @@ try {
     member_idx: 1824,
     name: invalidDetail.displayName,
     phone: "010-0000-0000",
-    living_place: "미수집",
+    living_place: "경기도",
     memo: "접수 방식: 빠른 상담\n남긴 내용: 카카오 채팅방에서 상담 내용을 확인",
   });
 
   console.log(
-    "홈페이지 카카오 진입 검증 완료: 이름 암호화·중복 클릭 1건 유지·가상번호 신건 등록·배정 후 무효 담당자 변경·배정 전 무효 담당자 신건 등록·알림톡 차단",
+    "홈페이지 카카오 진입 검증 완료: 이름·거주지역 암호화·중복 클릭 1건 유지·가상번호/실제 광역지역 신건 등록·배정 후 무효 담당자 변경·배정 전 무효 담당자 신건 등록·알림톡 차단",
   );
 } finally {
   await cleanup();

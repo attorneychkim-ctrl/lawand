@@ -1068,7 +1068,8 @@ summary:focus-visible {
   font-size: 11px;
 }
 
-.kakao-entry-modal-form input {
+.kakao-entry-modal-form input,
+.kakao-entry-modal-form select {
   width: 100%;
   min-height: 54px;
   padding: 13px 15px;
@@ -1081,7 +1082,8 @@ summary:focus-visible {
   font-size: 16px;
 }
 
-.kakao-entry-modal-form input:focus {
+.kakao-entry-modal-form input:focus,
+.kakao-entry-modal-form select:focus {
   border-color: var(--action-600);
   box-shadow: 0 0 0 4px rgba(39, 106, 87, 0.12);
 }

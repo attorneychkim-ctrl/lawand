@@ -19,6 +19,7 @@ import {
   assertPlatformEvent,
   centrexMessageByteLength,
   centrexMessageKind,
+  classifyConsultationSubmission,
   createConsultationId,
   createConsultationRequestId,
   createEventId,
@@ -26,6 +27,9 @@ import {
   createTelephonyCallId,
   createTelephonyMessageId,
   CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION,
+  DEDUPE_WINDOWS,
+  type DedupeOutcome,
+  type ExistingConsultationCandidate,
   type LegalFriendsDirectoryConsultationCreate,
   type MessageTemplateCreate,
   type MessageTemplateUpdate,
@@ -97,6 +101,33 @@ const callRootCurrentEndpoint = alias(
   "call_root_current_endpoint",
 );
 const callLegEndpoint = alias(telephonyEndpoints, "call_leg_endpoint");
+
+function normalizeConsultationName(value: string) {
+  return value
+    .normalize("NFKC")
+    .trim()
+    .replace(/\s+/gu, " ")
+    .toLocaleLowerCase("ko-KR");
+}
+
+function staffDedupeOutcome(
+  decision: ReturnType<typeof classifyConsultationSubmission>,
+): DedupeOutcome {
+  switch (decision.action) {
+    case "attach_exact_duplicate":
+      return "exact_duplicate";
+    case "attach_identity_enrichment":
+      return "identity_enrichment";
+    case "attach_repeat_request":
+      return decision.stage === "before_assignment"
+        ? "repeat_unassigned"
+        : "repeat_assigned";
+    case "create_suspected_duplicate":
+      return "suspected_duplicate";
+    default:
+      return "new";
+  }
+}
 
 export function isCentrexInboundAnswerDeliveryDelayed(input: {
   answerableBridge: boolean;
@@ -768,10 +799,15 @@ export function createTelephonyService(options: {
       source: requestSource,
       idempotencyKey: input.idempotencyKey,
     });
+    const phoneFingerprint = protection.fingerprint(input.phone);
+    const nameFingerprint = protection.fingerprint({
+      kind: "consultation_name",
+      value: normalizeConsultationName(input.customerName),
+    });
 
     return db.transaction(async (tx) => {
       await tx.execute(
-        sql`select pg_advisory_xact_lock(cast(${protection.advisoryLockKey(idempotencyFingerprint)} as bigint))`,
+        sql`select pg_advisory_xact_lock(cast(${protection.advisoryLockKey(input.directorySource ? idempotencyFingerprint : phoneFingerprint)} as bigint))`,
       );
       const [existing] = await tx
         .select({
@@ -779,6 +815,7 @@ export function createTelephonyService(options: {
           publicReceiptCode: consultations.publicReceiptCode,
           acceptedAt: consultationRequests.submittedAt,
           payloadFingerprint: consultationRequests.payloadFingerprint,
+          dedupeOutcome: consultationRequests.dedupeOutcome,
         })
         .from(consultationRequests)
         .innerJoin(
@@ -804,7 +841,102 @@ export function createTelephonyService(options: {
           publicReceiptCode: existing.publicReceiptCode,
           acceptedAt: existing.acceptedAt.toISOString(),
           replayed: true,
+          dedupeOutcome: existing.dedupeOutcome,
         };
+      }
+
+      let decision: ReturnType<typeof classifyConsultationSubmission>;
+      if (input.directorySource) {
+        decision = {
+          action: "create_new",
+          createConsultation: true,
+          createRequest: true,
+          eventTypes: ["consultation.requested"],
+        };
+      } else {
+        const candidateRows = await tx
+          .select({
+            consultationId: consultations.id,
+            state: consultations.state,
+            requestId: consultationRequests.id,
+            payloadFingerprint: consultationRequests.payloadFingerprint,
+            journeySessionId: consultationRequests.journeySessionId,
+            hasProvidedName: consultationRequests.hasProvidedName,
+            preferredNameCiphertext: consultations.preferredNameCiphertext,
+            preferredNameNonce: consultations.preferredNameNonce,
+            preferredNameKeyVersion: consultations.preferredNameKeyVersion,
+            submittedAt: consultationRequests.submittedAt,
+          })
+          .from(consultationRequests)
+          .innerJoin(
+            consultations,
+            eq(consultationRequests.consultationId, consultations.id),
+          )
+          .where(
+            and(
+              eq(consultationRequests.phoneFingerprint, phoneFingerprint),
+              isNull(consultations.softDeletedAt),
+              gte(
+                consultationRequests.submittedAt,
+                new Date(
+                  acceptedAt.getTime() - DEDUPE_WINDOWS.suspectedDuplicateMs,
+                ),
+              ),
+            ),
+          )
+          .orderBy(desc(consultationRequests.submittedAt));
+
+        const seenConsultations = new Set<string>();
+        const candidates: ExistingConsultationCandidate[] = [];
+        for (const row of candidateRows) {
+          if (seenConsultations.has(row.consultationId)) continue;
+          seenConsultations.add(row.consultationId);
+          const candidateName =
+            row.preferredNameCiphertext &&
+            row.preferredNameNonce &&
+            row.preferredNameKeyVersion
+              ? protection.decrypt(
+                  {
+                    ciphertext: row.preferredNameCiphertext,
+                    nonce: row.preferredNameNonce,
+                    keyVersion: row.preferredNameKeyVersion,
+                  },
+                  `consultations.preferred_name:${row.consultationId}`,
+                )
+              : null;
+          candidates.push({
+            consultationId: row.consultationId,
+            latestRequestId: row.requestId,
+            state: row.state,
+            phoneFingerprint: phoneFingerprint.toString("hex"),
+            latestPayloadFingerprint: row.payloadFingerprint.toString("hex"),
+            latestJourneySessionId: row.journeySessionId,
+            hasProvidedName: row.hasProvidedName,
+            nameFingerprint: candidateName
+              ? protection
+                  .fingerprint({
+                    kind: "consultation_name",
+                    value: normalizeConsultationName(candidateName),
+                  })
+                  .toString("hex")
+              : null,
+            latestRequestAt: row.submittedAt,
+          });
+        }
+        decision = classifyConsultationSubmission(
+          {
+            phoneFingerprint: phoneFingerprint.toString("hex"),
+            payloadFingerprint: payloadFingerprint.toString("hex"),
+            journeySessionId: null,
+            hasProvidedName: true,
+            nameFingerprint: nameFingerprint.toString("hex"),
+            submittedAt: acceptedAt,
+          },
+          candidates,
+        );
+        if (decision.action === "idempotent_replay") {
+          throw new Error("직원 신규등록 멱등성 판정 경로가 올바르지 않습니다.");
+        }
       }
 
       let source: LegalFriendsDirectoryConsultationSourceRow | undefined;
@@ -822,13 +954,12 @@ export function createTelephonyService(options: {
         }
       }
 
-      const consultationId = createConsultationId();
+      const consultationId = decision.createConsultation
+        ? createConsultationId()
+        : decision.consultationId;
       const requestId = createConsultationRequestId();
-      const publicReceiptCode = createPublicReceiptCode(acceptedAt);
-      const nameEncrypted = protection.encrypt(
-        input.customerName,
-        `consultations.preferred_name:${consultationId}`,
-      );
+      const dedupeOutcome = staffDedupeOutcome(decision);
+      let publicReceiptCode: string;
       const requestNameEncrypted = protection.encrypt(
         input.customerName,
         `consultation_requests.name:${requestId}`,
@@ -837,7 +968,6 @@ export function createTelephonyService(options: {
         input.phone,
         `consultation_requests.phone:${requestId}`,
       );
-      const phoneFingerprint = protection.fingerprint(input.phone);
       const intake = {
         residenceRegion: input.residenceRegion,
         topic:
@@ -878,21 +1008,42 @@ export function createTelephonyService(options: {
           )
         : null;
 
-      await tx.insert(consultations).values({
-        id: consultationId,
-        publicReceiptCode,
-        state: "requested",
-        contactChannel: "phone",
-        phoneFingerprint,
-        anonymousLabel: `${source ? "고객찾기" : "직접등록"}_${publicReceiptCode.slice(-6)}`,
-        preferredNameCiphertext: nameEncrypted.ciphertext,
-        preferredNameNonce: nameEncrypted.nonce,
-        preferredNameKeyVersion: nameEncrypted.keyVersion,
-        firstRequestedAt: acceptedAt,
-        lastRequestedAt: acceptedAt,
-        createdAt: acceptedAt,
-        updatedAt: acceptedAt,
-      });
+      if (decision.createConsultation) {
+        publicReceiptCode = createPublicReceiptCode(acceptedAt);
+        const nameEncrypted = protection.encrypt(
+          input.customerName,
+          `consultations.preferred_name:${consultationId}`,
+        );
+        await tx.insert(consultations).values({
+          id: consultationId,
+          publicReceiptCode,
+          state: "requested",
+          contactChannel: "phone",
+          phoneFingerprint,
+          anonymousLabel: `${source ? "고객찾기" : "직접등록"}_${publicReceiptCode.slice(-6)}`,
+          preferredNameCiphertext: nameEncrypted.ciphertext,
+          preferredNameNonce: nameEncrypted.nonce,
+          preferredNameKeyVersion: nameEncrypted.keyVersion,
+          firstRequestedAt: acceptedAt,
+          lastRequestedAt: acceptedAt,
+          createdAt: acceptedAt,
+          updatedAt: acceptedAt,
+        });
+      } else {
+        const [existingConsultation] = await tx
+          .select({ publicReceiptCode: consultations.publicReceiptCode })
+          .from(consultations)
+          .where(eq(consultations.id, consultationId))
+          .limit(1);
+        if (!existingConsultation) {
+          throw new Error("중복 판정된 기존 상담을 찾을 수 없습니다.");
+        }
+        publicReceiptCode = existingConsultation.publicReceiptCode;
+        await tx
+          .update(consultations)
+          .set({ lastRequestedAt: acceptedAt, updatedAt: acceptedAt })
+          .where(eq(consultations.id, consultationId));
+      }
       await tx.insert(consultationRequests).values({
         id: requestId,
         consultationId,
@@ -919,8 +1070,11 @@ export function createTelephonyService(options: {
         privacyBasis: "staff_recorded_phone_interaction",
         consentAgreedAt: null,
         journeySessionId: null,
-        dedupeOutcome: "new",
-        candidateConsultationId: null,
+        dedupeOutcome,
+        candidateConsultationId:
+          decision.action === "create_suspected_duplicate"
+            ? decision.candidateConsultationId
+            : null,
         submittedAt: acceptedAt,
         createdAt: acceptedAt,
       });
@@ -938,44 +1092,114 @@ export function createTelephonyService(options: {
           createdAt: acceptedAt,
         });
       }
-      await tx.insert(consultationStatusHistory).values({
-        id: createEventId(),
-        consultationId,
-        fromState: null,
-        toState: "requested",
-        reason:
-          input.directorySource?.relationship === "referrer"
-            ? "client_directory_referral"
-            : input.directorySource?.relationship === "customer"
-              ? "client_directory_conversion"
-              : "staff_manual_registration",
-        actorType: "staff",
-        actorId: actor.id,
-        changedAt: acceptedAt,
-        createdAt: acceptedAt,
-      });
-
-      const event: PlatformEvent = {
-        eventId: createEventId(),
-        eventType: "consultation.requested",
-        eventVersion: 1,
-        occurredAt: acceptedAt.toISOString(),
-        producer: "lawand.gateway",
-        correlationId: consultationId,
-        data: {
+      if (decision.createConsultation) {
+        await tx.insert(consultationStatusHistory).values({
+          id: createEventId(),
           consultationId,
-          requestId,
-          intakeRef: `consultation_requests/${requestId}`,
-          mode: "quick",
-          privacyNoticeVersion: CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION,
-          privacyBasis: "staff_recorded_phone_interaction",
-          dedupeOutcome: "new",
-        },
-      };
-      assertPlatformEvent(event);
-      await tx
-        .insert(outboxEvents)
-        .values(eventRow(event, consultationId, "consultation"));
+          fromState: null,
+          toState: "requested",
+          reason:
+            input.directorySource?.relationship === "referrer"
+              ? "client_directory_referral"
+              : input.directorySource?.relationship === "customer"
+                ? "client_directory_conversion"
+                : "staff_manual_registration",
+          actorType: "staff",
+          actorId: actor.id,
+          changedAt: acceptedAt,
+          createdAt: acceptedAt,
+        });
+      }
+
+      const occurredAt = acceptedAt.toISOString();
+      const events: PlatformEvent[] = [];
+      if (decision.createConsultation) {
+        const requestedEvent: PlatformEvent = {
+          eventId: createEventId(),
+          eventType: "consultation.requested",
+          eventVersion: 1,
+          occurredAt,
+          producer: "lawand.gateway",
+          correlationId: consultationId,
+          data: {
+            consultationId,
+            requestId,
+            intakeRef: `consultation_requests/${requestId}`,
+            mode: "quick",
+            privacyNoticeVersion: CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION,
+            privacyBasis: "staff_recorded_phone_interaction",
+            dedupeOutcome:
+              decision.action === "create_suspected_duplicate"
+                ? "suspected_duplicate"
+                : "new",
+          },
+        };
+        const requestNotificationEvent: PlatformEvent = {
+          eventId: createEventId(),
+          eventType:
+            "alimtalk.consultation.request_notification.requested",
+          eventVersion: 1,
+          occurredAt,
+          producer: "lawand.gateway",
+          correlationId: consultationId,
+          causationId: requestedEvent.eventId,
+          data: {
+            consultationId,
+            requestId,
+            intakeRef: `consultation_requests/${requestId}`,
+            templatePurpose: "consultation_requested",
+          },
+        };
+        events.push(requestedEvent, requestNotificationEvent);
+      }
+      if (decision.action === "attach_repeat_request") {
+        events.push({
+          eventId: createEventId(),
+          eventType: "consultation.request.updated",
+          eventVersion: 1,
+          occurredAt,
+          producer: "lawand.gateway",
+          correlationId: consultationId,
+          data: {
+            consultationId,
+            requestId,
+            intakeRef: `consultation_requests/${requestId}`,
+            updateReason: "repeat_request",
+            repeatStage: decision.stage,
+            dedupeOutcome:
+              decision.stage === "before_assignment"
+                ? "repeat_unassigned"
+                : "repeat_assigned",
+          },
+        });
+      }
+      if (decision.action === "create_suspected_duplicate") {
+        events.push({
+          eventId: createEventId(),
+          eventType: "consultation.duplicate_suspected",
+          eventVersion: 1,
+          occurredAt,
+          producer: "lawand.gateway",
+          correlationId: consultationId,
+          data: {
+            consultationId,
+            requestId,
+            candidateConsultationId: decision.candidateConsultationId,
+            reason: "same_phone_within_7_days",
+            dedupeOutcome: "suspected_duplicate",
+          },
+        });
+      }
+      for (const event of events) assertPlatformEvent(event);
+      if (events.length > 0) {
+        await tx
+          .insert(outboxEvents)
+          .values(
+            events.map((event) =>
+              eventRow(event, consultationId, "consultation"),
+            ),
+          );
+      }
       await tx.insert(staffAuditLogs).values({
         id: createEventId(),
         actorUserId: actor.id,
@@ -989,6 +1213,8 @@ export function createTelephonyService(options: {
           directoryClientIdx: input.directorySource?.clientIdx ?? null,
           directoryCaseIdx: input.directorySource?.caseIdx ?? null,
           relationship: input.directorySource?.relationship ?? null,
+          dedupeOutcome,
+          createdNewConsultation: decision.createConsultation,
         },
         occurredAt: acceptedAt,
         createdAt: acceptedAt,
@@ -999,6 +1225,7 @@ export function createTelephonyService(options: {
         publicReceiptCode,
         acceptedAt: acceptedAt.toISOString(),
         replayed: false,
+        dedupeOutcome,
       };
     });
   }

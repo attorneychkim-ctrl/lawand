@@ -1470,6 +1470,17 @@ a.inbound-customer:hover { text-decoration: underline; }
   background: var(--surface-hover);
 }
 
+.consultation-row.is-soft-deleted {
+  background: color-mix(in srgb, var(--danger-soft) 34%, var(--surface));
+}
+
+.consultation-row.is-soft-deleted .consultation-row-sensitive {
+  filter: blur(5px);
+  opacity: .62;
+  pointer-events: none;
+  user-select: none;
+}
+
 .consultation-row-link {
   display: grid;
   min-width: 0;
@@ -1893,7 +1904,8 @@ a.inbound-customer:hover { text-decoration: underline; }
 }
 
 .detail-actions .call-button,
-.detail-actions .consultation-invalidation-button {
+.detail-actions .consultation-invalidation-button,
+.detail-actions .consultation-soft-delete-button {
   min-height: 46px;
 }
 
@@ -5335,7 +5347,8 @@ a.inbound-customer:hover { text-decoration: underline; }
 .message-template-modal > header > button { border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 1.75rem; line-height: 1; }
 
 .consultation-invalidation-form { display: grid; gap: 5px; }
-.consultation-invalidation-button {
+.consultation-invalidation-button,
+.consultation-soft-delete-button {
   display: inline-flex;
   min-height: 42px;
   align-items: center;
@@ -5350,9 +5363,38 @@ a.inbound-customer:hover { text-decoration: underline; }
   font-size: .75rem;
   font-weight: 820;
 }
-.consultation-invalidation-button:hover:not(:disabled) { background: var(--danger-soft); }
-.consultation-invalidation-button:disabled { cursor: default; opacity: .58; }
+.consultation-invalidation-button:hover:not(:disabled),
+.consultation-soft-delete-button:hover:not(:disabled) { background: var(--danger-soft); }
+.consultation-invalidation-button:disabled,
+.consultation-soft-delete-button:disabled { cursor: default; opacity: .58; }
 .consultation-invalidation-error { max-width: 240px; margin: 0; color: var(--danger); font-size: .64rem; line-height: 1.4; text-align: right; }
+
+.soft-delete-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: -8px 0 18px;
+  padding: 13px 15px;
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--line));
+  border-radius: 12px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: .72rem;
+}
+
+.soft-delete-notice span {
+  color: var(--ink-soft);
+}
+
+.soft-delete-blur,
+.detail-shell.is-soft-deleted .consultation-command-grid,
+.detail-shell.is-soft-deleted .detail-section {
+  filter: blur(5px);
+  opacity: .62;
+  pointer-events: none;
+  user-select: none;
+}
 
 @media (max-width: 1040px) {
   .staff-bar-leading { gap: 20px; }
@@ -5663,7 +5705,8 @@ a.inbound-customer:hover { text-decoration: underline; }
   .detail-actions > * { flex: 1; }
   .detail-actions .claim-button,
   .detail-actions .secondary-action-link,
-  .detail-actions .consultation-invalidation-button { width: 100%; }
+  .detail-actions .consultation-invalidation-button,
+  .detail-actions .consultation-soft-delete-button { width: 100%; }
   .consultation-invalidation-error { max-width: none; text-align: left; }
   .detail-shell.has-mobile-action { padding-bottom: 118px; }
   .detail-shell.has-mobile-action .detail-actions .claim-form {

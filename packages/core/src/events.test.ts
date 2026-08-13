@@ -8,6 +8,7 @@ import {
   consultationAssignedEventSchema,
   consultationRequestUpdatedEventSchema,
   consultationRequestedEventSchema,
+  consultationSoftDeletedEventSchema,
   LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
   LEGALFRIENDS_INVALID_MANAGER_MEMBER_IDX,
   legalfriendsInvalidationRequestedEventSchema,
@@ -73,6 +74,30 @@ test("상담 재요청은 배정 전후 구분과 요청 참조만 남긴다", (
   assert.deepEqual(consultationRequestUpdatedEventSchema.parse(event), event);
   assert.equal(
     consultationRequestUpdatedEventSchema.safeParse({
+      ...event,
+      data: { ...event.data, phone: "01012345678" },
+    }).success,
+    false,
+  );
+});
+
+test("직원 직접등록 소프트삭제 이벤트는 상담·관리자 식별자만 남긴다", () => {
+  const event = {
+    eventId: "01984c7d-8500-7000-8000-000000000019",
+    eventType: "consultation.soft_deleted",
+    eventVersion: 1,
+    occurredAt: "2026-08-13T09:00:00+09:00",
+    producer: "lawand.gateway",
+    correlationId: requestedEvent.data.consultationId,
+    data: {
+      consultationId: requestedEvent.data.consultationId,
+      deletedByUserId: "01984c7d-8500-7000-8000-000000000006",
+      deletionKind: "staff_manual_soft_delete",
+    },
+  } as const;
+  assert.deepEqual(consultationSoftDeletedEventSchema.parse(event), event);
+  assert.equal(
+    consultationSoftDeletedEventSchema.safeParse({
       ...event,
       data: { ...event.data, phone: "01012345678" },
     }).success,

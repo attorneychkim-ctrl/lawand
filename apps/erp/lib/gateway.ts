@@ -27,6 +27,9 @@ export type ConsultationListItem = {
   displayName: string;
   contactChannel: "phone" | "kakao_channel" | "naver_booking";
   phone: string | null;
+  softDeletedAt: string | null;
+  softDeletedByUserId: string | null;
+  staffCreated: boolean;
   existingCustomer: boolean;
   requiresLegalFriendsReview: boolean;
   residenceRegion: string | null;
@@ -526,6 +529,12 @@ export type ClientDirectoryConsultationResult = {
   publicReceiptCode: string;
   acceptedAt: string;
   replayed: boolean;
+  dedupeOutcome:
+    | "new"
+    | "exact_duplicate"
+    | "repeat_unassigned"
+    | "repeat_assigned"
+    | "suspected_duplicate";
 };
 
 export type PhoneDeskStaffOption = {
@@ -566,6 +575,9 @@ export type ConsultationDetail = {
   state: string;
   displayName: string;
   contactChannel: "phone" | "kakao_channel" | "naver_booking";
+  softDeletedAt: string | null;
+  softDeletedByUserId: string | null;
+  staffCreated: boolean;
   existingCustomer: boolean;
   requiresLegalFriendsReview: boolean;
   legalFriendsMatches: Array<{
@@ -723,6 +735,7 @@ export type ConsultationDetail = {
       | "homepage_kakao"
       | "naver_booking_email"
       | "erp_phone_desk"
+      | "erp_staff"
       | "erp_client_directory";
     contactChannel: "phone" | "kakao_channel" | "naver_booking";
     phone: string | null;
@@ -1016,6 +1029,20 @@ export async function getConsultation(
     throw new Error(`상담 상세 조회 실패 (${response.status})`);
   }
   return (await response.json()) as ConsultationDetail;
+}
+
+export async function softDeleteStaffConsultation(id: string): Promise<{
+  consultationId: string;
+  state: "closed";
+  softDeletedAt: string;
+  softDeletedByUserId: string;
+  replayed: boolean;
+}> {
+  return phoneDeskResponse(
+    await gatewayFetch(`/v1/consultations/${id}`, {
+      method: "DELETE",
+    }),
+  );
 }
 
 export async function assignConsultationToMe(

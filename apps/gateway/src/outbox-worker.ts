@@ -16,6 +16,7 @@ import {
   LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
   legalfriendsInvalidationRequestedEventSchema,
   legalfriendsRegistrationRequestedEventSchema,
+  residenceRegionSchema,
 } from "@lawand/core";
 import {
   consultationAssignments,
@@ -362,11 +363,18 @@ export function createOutboxWorker(options: {
     const parsedIntake = consultationIntakeAnswersSchema.safeParse(
       storedIntake,
     );
+    const storedResidenceRegion = residenceRegionSchema.safeParse(
+      storedIntake && typeof storedIntake === "object"
+        ? (storedIntake as Record<string, unknown>).residenceRegion
+        : undefined,
+    );
     const intake = parsedIntake.success
       ? parsedIntake.data
       : isKakaoConsultation
         ? {
-            residenceRegion: "overseas_or_other" as const,
+            residenceRegion: storedResidenceRegion.success
+              ? storedResidenceRegion.data
+              : ("overseas_or_other" as const),
             urgencies: [],
             incomes: [],
             concern: "카카오 채팅방에서 상담 내용을 확인",
@@ -407,7 +415,7 @@ export function createOutboxWorker(options: {
         name,
         phone,
         intake,
-        ...(isKakaoConsultation
+        ...(isKakaoConsultation && !storedResidenceRegion.success
           ? {
               livingPlaceOverride:
                 KAKAO_LEGALFRIENDS_PLACEHOLDER_LIVING_PLACE,
