@@ -254,6 +254,27 @@ export const consultationAssignmentInputSchema = z
   })
   .strict();
 
+export const consultationAssigneeTransferReasonSchema = z.enum([
+  "workload_balance",
+  "absence",
+  "expertise",
+  "manager_adjustment",
+  "other",
+]);
+
+export const consultationAssigneeTransferInputSchema = z
+  .object({
+    targetStaffUserId: z.uuid(),
+    reason: consultationAssigneeTransferReasonSchema,
+  })
+  .strict();
+
 export type LegalFriendsConsultationHandling = z.infer<
   typeof legalFriendsConsultationHandlingSchema
+>;
+export type ConsultationAssigneeTransferReason = z.infer<
+  typeof consultationAssigneeTransferReasonSchema
+>;
+export type ConsultationAssigneeTransferInput = z.infer<
+  typeof consultationAssigneeTransferInputSchema
 >;

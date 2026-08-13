@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 
 import {
   and,
+  asc,
   count,
   desc,
   eq,
@@ -34,6 +35,7 @@ import {
   type KakaoHomepageEntryConfirmation,
   type KakaoHomepageEntryReceipt,
   type KakaoHomepageEntrySubmission,
+  type ConsultationAssigneeTransferInput,
   type KakaoConsultationReceipt,
   type LegalFriendsConsultationHandling,
   type PlatformEvent,
@@ -48,6 +50,7 @@ import {
 } from "@lawand/core";
 import {
   alimtalkDeliveries,
+  consultationAssignmentTransfers,
   consultationAssignments,
   consultationAttributions,
   consultationDirectorySources,
@@ -66,10 +69,12 @@ import {
   outboxEvents,
   selfDiagnosisCaseProfiles,
   staffAuditLogs,
+  staffExternalAccounts,
   staffMemberships,
   staffOrganizations,
   staffProfiles,
   staffRegions,
+  staffUsers,
   telephonyCallAftercare,
   telephonyCalls,
   telephonyEndpoints,
@@ -179,7 +184,27 @@ export class LegalFriendsInvalidationError extends Error {
     readonly code:
       | "consultation_not_found"
       | "case_not_registered"
-      | "invalidation_forbidden",
+      | "invalidation_forbidden"
+      | "assignment_transfer_pending",
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+export class ConsultationAssigneeTransferError extends Error {
+  constructor(
+    readonly code:
+      | "consultation_not_found"
+      | "assignment_not_found"
+      | "consultation_not_transferable"
+      | "transfer_forbidden"
+      | "target_assignee_invalid"
+      | "same_assignee"
+      | "case_not_registered"
+      | "case_invalidated"
+      | "invalidation_pending"
+      | "transfer_already_pending",
     message: string,
   ) {
     super(message);
@@ -1548,7 +1573,6 @@ export function createConsultationService(options: {
           "상담을 찾을 수 없습니다.",
         );
       }
-
       const [entry] = await tx
         .select()
         .from(kakaoHomepageEntries)
@@ -2443,7 +2467,6 @@ export function createConsultationService(options: {
           "상담을 찾을 수 없습니다.",
         );
       }
-
       const [assignment] = await tx
         .select({
           id: consultationAssignments.id,
@@ -2462,6 +2485,26 @@ export function createConsultationService(options: {
         throw new LegalFriendsInvalidationError(
           "invalidation_forbidden",
           "현재 상담 담당자 또는 관리자만 무효 처리할 수 있습니다.",
+        );
+      }
+
+      const [pendingTransfer] = await tx
+        .select({ id: consultationAssignmentTransfers.id })
+        .from(consultationAssignmentTransfers)
+        .where(
+          and(
+            eq(
+              consultationAssignmentTransfers.consultationId,
+              consultationId,
+            ),
+            eq(consultationAssignmentTransfers.status, "pending"),
+          ),
+        )
+        .limit(1);
+      if (pendingTransfer) {
+        throw new LegalFriendsInvalidationError(
+          "assignment_transfer_pending",
+          "담당자 변경이 끝난 뒤 무효 처리할 수 있습니다.",
         );
       }
 
@@ -2647,6 +2690,278 @@ export function createConsultationService(options: {
           LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
         targetManagerMemberIdx:
           LEGALFRIENDS_INVALID_MANAGER_MEMBER_IDX,
+        replayed: false,
+      };
+    });
+  }
+
+  async function requestAssigneeTransfer(
+    consultationId: string,
+    input: ConsultationAssigneeTransferInput,
+    actor: StaffPrincipal,
+  ) {
+    const now = new Date();
+    return db.transaction(async (tx) => {
+      const [consultation] = await tx
+        .select({ id: consultations.id, state: consultations.state })
+        .from(consultations)
+        .where(eq(consultations.id, consultationId))
+        .limit(1)
+        .for("update");
+      if (!consultation) {
+        throw new ConsultationAssigneeTransferError(
+          "consultation_not_found",
+          "상담을 찾을 수 없습니다.",
+        );
+      }
+      if (
+        consultation.state === "requested" ||
+        consultation.state === "closed"
+      ) {
+        throw new ConsultationAssigneeTransferError(
+          "consultation_not_transferable",
+          "진행 중인 배정 상담만 담당자를 변경할 수 있습니다.",
+        );
+      }
+
+      const [assignment] = await tx
+        .select({
+          id: consultationAssignments.id,
+          assigneeUserId: consultationAssignments.assigneeUserId,
+          assigneeMembershipId:
+            consultationAssignments.assigneeMembershipId,
+        })
+        .from(consultationAssignments)
+        .where(eq(consultationAssignments.consultationId, consultationId))
+        .limit(1)
+        .for("update");
+      if (!assignment) {
+        throw new ConsultationAssigneeTransferError(
+          "assignment_not_found",
+          "담당자가 배정된 상담만 변경할 수 있습니다.",
+        );
+      }
+      if (
+        assignment.assigneeUserId !== actor.id &&
+        !actor.roles.includes("admin")
+      ) {
+        throw new ConsultationAssigneeTransferError(
+          "transfer_forbidden",
+          "현재 상담 담당자 또는 관리자만 담당자를 변경할 수 있습니다.",
+        );
+      }
+      if (assignment.assigneeUserId === input.targetStaffUserId) {
+        throw new ConsultationAssigneeTransferError(
+          "same_assignee",
+          "현재 담당자와 다른 직원을 선택해 주세요.",
+        );
+      }
+
+      const [caseLink] = await tx
+        .select({
+          outboxEventId: legalFriendsCaseLinks.outboxEventId,
+          managerExternalAccountId:
+            legalFriendsCaseLinks.managerExternalAccountId,
+        })
+        .from(legalFriendsCaseLinks)
+        .where(eq(legalFriendsCaseLinks.consultationId, consultationId))
+        .limit(1)
+        .for("update");
+      if (!caseLink) {
+        throw new ConsultationAssigneeTransferError(
+          "case_not_registered",
+          "리걸프렌즈 사건 등록이 완료된 상담만 담당자를 변경할 수 있습니다.",
+        );
+      }
+      if (
+        caseLink.managerExternalAccountId ===
+        LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID
+      ) {
+        throw new ConsultationAssigneeTransferError(
+          "case_invalidated",
+          "무효 처리된 사건은 일반 담당자 변경으로 되돌릴 수 없습니다.",
+        );
+      }
+
+      const [pendingInvalidation] = await tx
+        .select({ id: outboxEvents.id })
+        .from(outboxEvents)
+        .where(
+          and(
+            eq(outboxEvents.aggregateId, consultationId),
+            eq(
+              outboxEvents.eventType,
+              "legalfriends.consultation.invalidation.requested",
+            ),
+            eq(outboxEvents.status, "pending"),
+          ),
+        )
+        .limit(1);
+      if (pendingInvalidation) {
+        throw new ConsultationAssigneeTransferError(
+          "invalidation_pending",
+          "무효 처리가 끝난 뒤 담당자를 변경할 수 있습니다.",
+        );
+      }
+
+      const [pendingTransfer] = await tx
+        .select({
+          id: consultationAssignmentTransfers.id,
+          outboxEventId: consultationAssignmentTransfers.outboxEventId,
+          targetAssigneeUserId:
+            consultationAssignmentTransfers.targetAssigneeUserId,
+        })
+        .from(consultationAssignmentTransfers)
+        .where(
+          and(
+            eq(
+              consultationAssignmentTransfers.consultationId,
+              consultationId,
+            ),
+            eq(consultationAssignmentTransfers.status, "pending"),
+          ),
+        )
+        .limit(1)
+        .for("update");
+      if (pendingTransfer) {
+        if (
+          pendingTransfer.targetAssigneeUserId === input.targetStaffUserId
+        ) {
+          return {
+            consultationId,
+            transferId: pendingTransfer.id,
+            eventId: pendingTransfer.outboxEventId,
+            state: "queued" as const,
+            replayed: true,
+          };
+        }
+        throw new ConsultationAssigneeTransferError(
+          "transfer_already_pending",
+          "다른 담당자 변경 요청이 처리 중입니다.",
+        );
+      }
+
+      const [target] = await tx
+        .select({
+          userId: staffUsers.id,
+          displayName: staffProfiles.displayName,
+          membershipId: staffMemberships.id,
+          externalAccountId: staffExternalAccounts.externalAccountId,
+          externalMemberIdx: staffExternalAccounts.externalMemberIdx,
+        })
+        .from(staffUsers)
+        .innerJoin(staffProfiles, eq(staffProfiles.userId, staffUsers.id))
+        .innerJoin(
+          staffMemberships,
+          and(
+            eq(staffMemberships.userId, staffUsers.id),
+            eq(staffMemberships.isPrimary, true),
+            eq(staffMemberships.isActive, true),
+          ),
+        )
+        .innerJoin(
+          staffExternalAccounts,
+          and(
+            eq(staffExternalAccounts.staffUserId, staffUsers.id),
+            eq(staffExternalAccounts.provider, "legalfriends"),
+            eq(staffExternalAccounts.isActive, true),
+            isNotNull(staffExternalAccounts.externalMemberIdx),
+          ),
+        )
+        .where(
+          and(
+            eq(staffUsers.id, input.targetStaffUserId),
+            eq(staffUsers.status, "active"),
+          ),
+        )
+        .limit(1);
+      if (
+        !target?.externalMemberIdx ||
+        target.externalAccountId ===
+          LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID
+      ) {
+        throw new ConsultationAssigneeTransferError(
+          "target_assignee_invalid",
+          "활성 리걸프렌즈 계정이 연결된 직원을 선택해 주세요.",
+        );
+      }
+
+      const transferId = createEventId();
+      const eventId = createEventId();
+      const occurredAt = now.toISOString();
+      const event: PlatformEvent = {
+        eventId,
+        eventType:
+          "legalfriends.consultation.manager_change.requested",
+        eventVersion: 1,
+        occurredAt,
+        producer: "lawand.gateway",
+        correlationId: consultationId,
+        causationId: caseLink.outboxEventId,
+        data: {
+          consultationId,
+          transferId,
+          transferRef:
+            `consultation_assignment_transfers/${transferId}`,
+          assignmentId: assignment.id,
+          assignmentRef: `consultation_assignments/${assignment.id}`,
+          caseLinkRef: `legalfriends_case_links/${consultationId}`,
+          previousAssigneeUserId: assignment.assigneeUserId,
+          targetAssigneeUserId: target.userId,
+          targetAssigneeMembershipId: target.membershipId,
+          requestedByUserId: actor.id,
+          reason: input.reason,
+          targetManagerExternalAccountId: target.externalAccountId,
+          targetManagerMemberIdx: target.externalMemberIdx,
+        },
+      };
+      assertPlatformEvent(event);
+      await tx.insert(outboxEvents).values(eventRow(event));
+      await tx.insert(consultationAssignmentTransfers).values({
+        id: transferId,
+        consultationId,
+        assignmentId: assignment.id,
+        previousAssigneeUserId: assignment.assigneeUserId,
+        previousAssigneeMembershipId: assignment.assigneeMembershipId,
+        targetAssigneeUserId: target.userId,
+        targetAssigneeMembershipId: target.membershipId,
+        requestedByUserId: actor.id,
+        reason: input.reason,
+        targetManagerExternalAccountId: target.externalAccountId,
+        targetManagerMemberIdx: target.externalMemberIdx,
+        outboxEventId: eventId,
+        status: "pending",
+        requestedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await tx.insert(staffAuditLogs).values({
+        id: createEventId(),
+        actorUserId: actor.id,
+        action: "consultation.assignment_transfer_requested",
+        targetType: "consultation",
+        targetId: consultationId,
+        metadata: {
+          transferId,
+          eventId,
+          assignmentId: assignment.id,
+          previousAssigneeUserId: assignment.assigneeUserId,
+          targetAssigneeUserId: target.userId,
+          reason: input.reason,
+        },
+        occurredAt: now,
+        createdAt: now,
+      });
+
+      return {
+        consultationId,
+        transferId,
+        eventId,
+        state: "queued" as const,
+        targetAssignee: {
+          userId: target.userId,
+          displayName: target.displayName,
+        },
         replayed: false,
       };
     });
@@ -3157,10 +3472,113 @@ export function createConsultationService(options: {
       )
       .where(eq(consultationAssignments.consultationId, consultationId))
       .limit(1);
+    const assignmentOptionRows = assignment
+      ? await db
+          .select({
+            userId: staffUsers.id,
+            displayName: staffProfiles.displayName,
+            membershipId: staffMemberships.id,
+            organizationName: staffOrganizations.name,
+            department: staffMemberships.department,
+            jobTitle: staffMemberships.jobTitle,
+            externalAccountId: staffExternalAccounts.externalAccountId,
+            externalMemberIdx: staffExternalAccounts.externalMemberIdx,
+          })
+          .from(staffUsers)
+          .innerJoin(
+            staffProfiles,
+            eq(staffProfiles.userId, staffUsers.id),
+          )
+          .innerJoin(
+            staffMemberships,
+            and(
+              eq(staffMemberships.userId, staffUsers.id),
+              eq(staffMemberships.isPrimary, true),
+              eq(staffMemberships.isActive, true),
+            ),
+          )
+          .innerJoin(
+            staffOrganizations,
+            eq(staffOrganizations.key, staffMemberships.organizationKey),
+          )
+          .innerJoin(
+            staffExternalAccounts,
+            and(
+              eq(staffExternalAccounts.staffUserId, staffUsers.id),
+              eq(staffExternalAccounts.provider, "legalfriends"),
+              eq(staffExternalAccounts.isActive, true),
+              isNotNull(staffExternalAccounts.externalMemberIdx),
+            ),
+          )
+          .where(eq(staffUsers.status, "active"))
+          .orderBy(asc(staffProfiles.displayName))
+      : [];
+    const assignmentTransferRows = assignment
+      ? await db
+          .select({
+            id: consultationAssignmentTransfers.id,
+            previousAssigneeUserId:
+              consultationAssignmentTransfers.previousAssigneeUserId,
+            targetAssigneeUserId:
+              consultationAssignmentTransfers.targetAssigneeUserId,
+            requestedByUserId:
+              consultationAssignmentTransfers.requestedByUserId,
+            reason: consultationAssignmentTransfers.reason,
+            status: consultationAssignmentTransfers.status,
+            requestedAt: consultationAssignmentTransfers.requestedAt,
+            finishedAt: consultationAssignmentTransfers.finishedAt,
+            eventStatus: outboxEvents.status,
+            lastError: outboxEvents.lastError,
+          })
+          .from(consultationAssignmentTransfers)
+          .innerJoin(
+            outboxEvents,
+            eq(
+              outboxEvents.id,
+              consultationAssignmentTransfers.outboxEventId,
+            ),
+          )
+          .where(
+            eq(
+              consultationAssignmentTransfers.consultationId,
+              consultationId,
+            ),
+          )
+          .orderBy(desc(consultationAssignmentTransfers.requestedAt))
+          .limit(10)
+      : [];
+    const assignmentTransferUserIds = [
+      ...new Set(
+        assignmentTransferRows.flatMap((row) => [
+          row.previousAssigneeUserId,
+          row.targetAssigneeUserId,
+          row.requestedByUserId,
+        ]),
+      ),
+    ];
+    const assignmentTransferProfileRows =
+      assignmentTransferUserIds.length > 0
+        ? await db
+            .select({
+              userId: staffProfiles.userId,
+              displayName: staffProfiles.displayName,
+            })
+            .from(staffProfiles)
+            .where(
+              inArray(staffProfiles.userId, assignmentTransferUserIds),
+            )
+        : [];
+    const assignmentTransferDisplayNames = new Map(
+      assignmentTransferProfileRows.map((row) => [
+        row.userId,
+        row.displayName,
+      ]),
+    );
     const integrationEventTypes = [
       "alimtalk.consultation.request_notification.requested",
       "legalfriends.consultation.registration.requested",
       "legalfriends.consultation.invalidation.requested",
+      "legalfriends.consultation.manager_change.requested",
       "alimtalk.consultation.assignment_notification.requested",
     ];
     const integrationRows = await db
@@ -3493,6 +3911,44 @@ export function createConsultationService(options: {
             assignedAt: assignment.assignedAt.toISOString(),
           }
         : null,
+      assignmentOptions: assignmentOptionRows
+        .filter(
+          (option) =>
+            option.externalMemberIdx &&
+            option.externalAccountId !==
+              LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
+        )
+        .map((option) => ({
+          userId: option.userId,
+          displayName: option.displayName,
+          membershipId: option.membershipId,
+          organizationName: option.organizationName,
+          department: option.department,
+          jobTitle: option.jobTitle,
+        })),
+      assignmentTransfers: assignmentTransferRows.map((transfer) => ({
+        id: transfer.id,
+        previousAssigneeUserId: transfer.previousAssigneeUserId,
+        previousAssigneeDisplayName:
+          assignmentTransferDisplayNames.get(
+            transfer.previousAssigneeUserId,
+          ) ?? "이전 담당자",
+        targetAssigneeUserId: transfer.targetAssigneeUserId,
+        targetAssigneeDisplayName:
+          assignmentTransferDisplayNames.get(
+            transfer.targetAssigneeUserId,
+          ) ?? "변경 담당자",
+        requestedByUserId: transfer.requestedByUserId,
+        requestedByDisplayName:
+          assignmentTransferDisplayNames.get(transfer.requestedByUserId) ??
+          "요청 직원",
+        reason: transfer.reason,
+        status: transfer.status,
+        eventStatus: transfer.eventStatus,
+        requestedAt: transfer.requestedAt.toISOString(),
+        finishedAt: transfer.finishedAt?.toISOString() ?? null,
+        lastError: transfer.lastError,
+      })),
       integrationRequests: integrationRows.map((row) => ({
         id: row.id,
         eventType: row.eventType,
@@ -3674,6 +4130,7 @@ export function createConsultationService(options: {
 
   return {
     assignToSelf,
+    requestAssigneeTransfer,
     confirmKakaoHomepageEntry,
     detail,
     ingestNaverBooking,

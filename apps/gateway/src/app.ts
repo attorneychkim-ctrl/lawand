@@ -8,6 +8,7 @@ import {
 import {
   consultationSubmissionSchema,
   consultationAssignmentInputSchema,
+  consultationAssigneeTransferInputSchema,
   createKakaoSkillResponse,
   kakaoHomepageEntryConfirmationSchema,
   kakaoHomepageEntrySubmissionSchema,
@@ -70,6 +71,7 @@ import {
 import type { ConsultationService } from "./service.js";
 import {
   ConsultationAssignmentError,
+  ConsultationAssigneeTransferError,
   ConsultationValidationError,
   KakaoHomepageEntryError,
   LegalFriendsInvalidationError,
@@ -2212,6 +2214,57 @@ export function createGatewayServer(options?: {
       if (
         request.method === "POST" &&
         url.pathname.startsWith("/v1/consultations/") &&
+        url.pathname.endsWith("/assignee-transfer")
+      ) {
+        if (
+          !options?.service ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const consultationId = url.pathname.slice(
+          "/v1/consultations/".length,
+          -"/assignee-transfer".length,
+        );
+        if (!validUuid(consultationId)) {
+          sendJson(response, 400, { error: "invalid_consultation_id" });
+          return;
+        }
+        const parsed = consultationAssigneeTransferInputSchema.safeParse(
+          await readJson(request),
+        );
+        if (!parsed.success) {
+          sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+          return;
+        }
+        const actor = await options.authService.authorize(
+          sessionToken,
+          [...consultationAccessRoles],
+        );
+        const result = await options.service.requestAssigneeTransfer(
+          consultationId,
+          parsed.data,
+          actor,
+        );
+        sendJson(response, result.replayed ? 200 : 201, result);
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        url.pathname.startsWith("/v1/consultations/") &&
         url.pathname.endsWith("/messages")
       ) {
         if (
@@ -2629,6 +2682,21 @@ export function createGatewayServer(options?: {
         sendJson(
           response,
           error.code === "consultation_not_found" ? 404 : 409,
+          {
+            error: error.code,
+            message: error.message,
+          },
+        );
+        return;
+      }
+      if (error instanceof ConsultationAssigneeTransferError) {
+        sendJson(
+          response,
+          error.code === "consultation_not_found"
+            ? 404
+            : error.code === "transfer_forbidden"
+              ? 403
+              : 409,
           {
             error: error.code,
             message: error.message,

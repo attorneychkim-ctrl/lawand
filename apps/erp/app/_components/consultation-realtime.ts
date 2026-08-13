@@ -5,7 +5,11 @@ export type ConsultationRealtimeChangedPayload = {
   eventType: string;
   consultationId: string;
   occurredAt: string;
-  notificationKind: "repeat_unassigned" | "repeat_assigned" | null;
+  notificationKind:
+    | "repeat_unassigned"
+    | "repeat_assigned"
+    | "assignment_transferred"
+    | null;
 };
 
 export type ConsultationRealtimeMessage =
@@ -39,7 +43,8 @@ function parseChangedPayload(
         (payload.notificationKind === undefined ||
           payload.notificationKind === null ||
           payload.notificationKind === "repeat_unassigned" ||
-          payload.notificationKind === "repeat_assigned")
+          payload.notificationKind === "repeat_assigned" ||
+          payload.notificationKind === "assignment_transferred")
       ? {
           eventId: payload.eventId,
           eventType: payload.eventType,
@@ -47,7 +52,8 @@ function parseChangedPayload(
           occurredAt: payload.occurredAt,
           notificationKind:
             payload.notificationKind === "repeat_unassigned" ||
-            payload.notificationKind === "repeat_assigned"
+            payload.notificationKind === "repeat_assigned" ||
+            payload.notificationKind === "assignment_transferred"
               ? payload.notificationKind
               : null,
         }

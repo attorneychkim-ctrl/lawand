@@ -22,6 +22,7 @@ import {
 
 import type {
   AttributionSource,
+  ConsultationAssigneeTransferReason,
   PlatformEvent,
   StaffRole,
 } from "@lawand/core";
@@ -74,6 +75,22 @@ export const contactPreferenceEnum = pgEnum("contact_preference", [
   "as_soon_as_possible",
   "scheduled_window",
 ]);
+
+export const consultationAssignmentTransferReasonEnum = pgEnum(
+  "consultation_assignment_transfer_reason",
+  [
+    "workload_balance",
+    "absence",
+    "expertise",
+    "manager_adjustment",
+    "other",
+  ],
+);
+
+export const consultationAssignmentTransferStatusEnum = pgEnum(
+  "consultation_assignment_transfer_status",
+  ["pending", "succeeded", "failed", "needs_confirmation"],
+);
 
 export const privacyBasisEnum = pgEnum("privacy_basis", [
   "explicit_consent",
@@ -1555,7 +1572,7 @@ export const consultationAssignments = pgTable(
     ),
     check(
       "consultation_assignments_method_allowed",
-      sql`${table.assignmentMethod} IN ('self_claim', 'phone_desk_conversion')`,
+      sql`${table.assignmentMethod} IN ('self_claim', 'phone_desk_conversion', 'transfer')`,
     ),
   ],
 );
@@ -2178,6 +2195,82 @@ export const outboxEvents = pgTable(
         AND ${table.payload}->>'eventType' = ${table.eventType}
         AND (${table.payload}->>'eventVersion')::integer = ${table.eventVersion}
         AND ${table.payload}->>'correlationId' = ${table.correlationId}::text`,
+    ),
+  ],
+);
+
+export const consultationAssignmentTransfers = pgTable(
+  "consultation_assignment_transfers",
+  {
+    id: uuid("id").primaryKey(),
+    consultationId: uuid("consultation_id")
+      .notNull()
+      .references(() => consultations.id, { onDelete: "restrict" }),
+    assignmentId: uuid("assignment_id")
+      .notNull()
+      .references(() => consultationAssignments.id, {
+        onDelete: "restrict",
+      }),
+    previousAssigneeUserId: uuid("previous_assignee_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "restrict" }),
+    previousAssigneeMembershipId: uuid("previous_assignee_membership_id")
+      .notNull()
+      .references(() => staffMemberships.id, { onDelete: "restrict" }),
+    targetAssigneeUserId: uuid("target_assignee_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "restrict" }),
+    targetAssigneeMembershipId: uuid("target_assignee_membership_id")
+      .notNull()
+      .references(() => staffMemberships.id, { onDelete: "restrict" }),
+    requestedByUserId: uuid("requested_by_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "restrict" }),
+    reason: consultationAssignmentTransferReasonEnum("reason")
+      .$type<ConsultationAssigneeTransferReason>()
+      .notNull(),
+    targetManagerExternalAccountId: varchar(
+      "target_manager_external_account_id",
+      { length: 200 },
+    ).notNull(),
+    targetManagerMemberIdx: integer("target_manager_member_idx").notNull(),
+    outboxEventId: uuid("outbox_event_id")
+      .notNull()
+      .references(() => outboxEvents.id, { onDelete: "restrict" }),
+    status: consultationAssignmentTransferStatusEnum("status")
+      .default("pending")
+      .notNull(),
+    requestedAt: timestamp("requested_at", { withTimezone: true }).notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("consultation_assignment_transfers_outbox_uidx").on(
+      table.outboxEventId,
+    ),
+    uniqueIndex("consultation_assignment_transfers_pending_uidx")
+      .on(table.consultationId)
+      .where(sql`${table.status} = 'pending'`),
+    index("consultation_assignment_transfers_consultation_requested_idx").on(
+      table.consultationId,
+      table.requestedAt,
+    ),
+    check(
+      "consultation_assignment_transfers_distinct_assignee",
+      sql`${table.previousAssigneeUserId} <> ${table.targetAssigneeUserId}`,
+    ),
+    check(
+      "consultation_assignment_transfers_target_manager_nonempty",
+      sql`length(btrim(${table.targetManagerExternalAccountId})) > 0`,
+    ),
+    check(
+      "consultation_assignment_transfers_target_member_positive",
+      sql`${table.targetManagerMemberIdx} > 0`,
+    ),
+    check(
+      "consultation_assignment_transfers_status_consistent",
+      sql`(${table.status} = 'pending' AND ${table.finishedAt} IS NULL)
+        OR (${table.status} <> 'pending' AND ${table.finishedAt} IS NOT NULL)`,
     ),
   ],
 );

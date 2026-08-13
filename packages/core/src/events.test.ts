@@ -6,11 +6,13 @@ import {
   alimtalkAssignmentNotificationRequestedEventSchema,
   alimtalkRequestNotificationRequestedEventSchema,
   consultationAssignedEventSchema,
+  consultationAssignmentTransferredEventSchema,
   consultationRequestUpdatedEventSchema,
   consultationRequestedEventSchema,
   LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
   LEGALFRIENDS_INVALID_MANAGER_MEMBER_IDX,
   legalfriendsInvalidationRequestedEventSchema,
+  legalfriendsManagerChangeRequestedEventSchema,
   legalfriendsRegistrationRequestedEventSchema,
   telephonyCallRequestedEventSchema,
   telephonyMessageRequestedEventSchema,
@@ -295,6 +297,59 @@ test("리걸프렌즈 무효 처리는 고정 담당자와 사건 연결 참조�
       },
     }).success,
     false,
+  );
+});
+
+test("담당자 변경 요청과 완료 이벤트는 개인정보 없이 직원·원장 참조만 남긴다", () => {
+  const transferData = {
+    consultationId: assignmentEnvelope.correlationId,
+    transferId: "01984c7d-8500-7000-8000-000000000040",
+    transferRef:
+      "consultation_assignment_transfers/01984c7d-8500-7000-8000-000000000040",
+    assignmentId: assignmentReference.assignmentId,
+    assignmentRef: assignmentReference.assignmentRef,
+    caseLinkRef:
+      "legalfriends_case_links/01984c7d-8500-7000-8000-000000000001",
+    previousAssigneeUserId:
+      "01984c7d-8500-7000-8000-000000000006",
+    targetAssigneeUserId: "01984c7d-8500-7000-8000-000000000007",
+    targetAssigneeMembershipId:
+      "01984c7d-8500-7000-8000-000000000008",
+    requestedByUserId: "01984c7d-8500-7000-8000-000000000006",
+    reason: "expertise",
+  } as const;
+  const managerChangeEvent = {
+    ...assignmentEnvelope,
+    eventId: "01984c7d-8500-7000-8000-000000000041",
+    eventType:
+      "legalfriends.consultation.manager_change.requested",
+    data: {
+      ...transferData,
+      targetManagerExternalAccountId: "lawandfirm_s123",
+      targetManagerMemberIdx: 321,
+    },
+  } as const;
+  assert.equal(
+    legalfriendsManagerChangeRequestedEventSchema.safeParse(
+      managerChangeEvent,
+    ).success,
+    true,
+  );
+  assert.equal(
+    legalfriendsManagerChangeRequestedEventSchema.safeParse({
+      ...managerChangeEvent,
+      data: { ...managerChangeEvent.data, customerPhone: "01012345678" },
+    }).success,
+    false,
+  );
+  assert.equal(
+    consultationAssignmentTransferredEventSchema.safeParse({
+      ...assignmentEnvelope,
+      eventId: "01984c7d-8500-7000-8000-000000000042",
+      eventType: "consultation.assignment.transferred",
+      data: transferData,
+    }).success,
+    true,
   );
 });
 

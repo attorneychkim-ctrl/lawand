@@ -759,7 +759,8 @@ export function InboundCallIndicator({
 
         if (!isRequestedEvent && !consultation) return;
         if (
-          payload.notificationKind === "repeat_assigned" &&
+          (payload.notificationKind === "repeat_assigned" ||
+            payload.notificationKind === "assignment_transferred") &&
           consultation?.assigneeUserId !== staffUserId
         ) {
           return;
@@ -768,6 +769,8 @@ export function InboundCallIndicator({
         const title = consultation
           ? payload.notificationKind === "repeat_assigned"
             ? `담당 상담 재요청 · ${consultation.displayName}`
+            : payload.notificationKind === "assignment_transferred"
+              ? `새 담당 상담 · ${consultation.displayName}`
             : payload.notificationKind === "repeat_unassigned"
               ? `상담 재요청 · ${consultation.displayName}`
               : `새 상담 · ${consultation.displayName}`
