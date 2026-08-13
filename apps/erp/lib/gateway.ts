@@ -1,5 +1,8 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
+import { createSingleFlight } from "@lawand/core";
 import type {
   LegalFriendsConsultationHandling,
   LegalFriendsDirectoryConsultationCreate,
@@ -11,6 +14,7 @@ import { readStaffSessionToken } from "./session";
 
 const gatewayUrl =
   process.env.LAWAND_GATEWAY_URL ?? "http://127.0.0.1:3022";
+const gatewayReadSingleFlight = createSingleFlight();
 
 function internalKey(): string {
   const value = process.env.LAWAND_INTERNAL_API_KEY;
@@ -761,9 +765,11 @@ async function gatewayFetch(
     signal?: AbortSignal;
     streaming?: boolean;
     timeoutMs?: number;
+    sessionToken?: string;
   } = {},
 ) {
-  const sessionToken = await readStaffSessionToken();
+  const sessionToken =
+    options.sessionToken ?? await readStaffSessionToken();
   if (!sessionToken) {
     throw new Error("직원 로그인이 필요합니다.");
   }
@@ -785,6 +791,22 @@ async function gatewayFetch(
       (options.streaming
         ? undefined
         : AbortSignal.timeout(options.timeoutMs ?? 8_000)),
+  });
+}
+
+async function coalescedGatewayRead<T>(
+  path: string,
+  errorMessage: (status: number) => string,
+): Promise<T> {
+  const sessionToken = await readStaffSessionToken();
+  if (!sessionToken) throw new Error("직원 로그인이 필요합니다.");
+  const sessionKey = createHash("sha256")
+    .update(sessionToken, "utf8")
+    .digest("hex");
+  return gatewayReadSingleFlight.run(`${sessionKey}:${path}`, async () => {
+    const response = await gatewayFetch(path, { sessionToken });
+    if (!response.ok) throw new Error(errorMessage(response.status));
+    return (await response.json()) as T;
   });
 }
 
@@ -821,13 +843,10 @@ function pagedDateParams<TFilter extends string>(
 export async function getConsultations(
   options: PagedDateOptions<ConsultationListFilter> = {},
 ): Promise<ConsultationListSnapshot> {
-  const response = await gatewayFetch(
+  return coalescedGatewayRead<ConsultationListSnapshot>(
     `/v1/consultations?${pagedDateParams(options).toString()}`,
+    (status) => `상담 목록 조회 실패 (${status})`,
   );
-  if (!response.ok) {
-    throw new Error(`상담 목록 조회 실패 (${response.status})`);
-  }
-  return (await response.json()) as ConsultationListSnapshot;
 }
 
 export async function openConsultationEventStream(
@@ -840,19 +859,17 @@ export async function openConsultationEventStream(
 }
 
 export async function getTelephonyInboundCalls(): Promise<TelephonyInboundCallSnapshot> {
-  const response = await gatewayFetch("/v1/telephony-inbound-calls");
-  if (!response.ok) {
-    throw new Error(`수신전화 상태 조회 실패 (${response.status})`);
-  }
-  return (await response.json()) as TelephonyInboundCallSnapshot;
+  return coalescedGatewayRead<TelephonyInboundCallSnapshot>(
+    "/v1/telephony-inbound-calls",
+    (status) => `수신전화 상태 조회 실패 (${status})`,
+  );
 }
 
 export async function getTelephonyCallActivities(): Promise<TelephonyCallActivitySnapshot> {
-  const response = await gatewayFetch("/v1/telephony-call-activities");
-  if (!response.ok) {
-    throw new Error(`통화 활동 상태 조회 실패 (${response.status})`);
-  }
-  return (await response.json()) as TelephonyCallActivitySnapshot;
+  return coalescedGatewayRead<TelephonyCallActivitySnapshot>(
+    "/v1/telephony-call-activities",
+    (status) => `통화 활동 상태 조회 실패 (${status})`,
+  );
 }
 
 export async function answerTelephonyInboundCall(
@@ -902,13 +919,10 @@ export type PhoneDeskCallResolutionInput = {
 export async function getPhoneDeskCalls(
   options: PagedDateOptions<PhoneDeskListFilter> = {},
 ): Promise<PhoneDeskCallSnapshot> {
-  const response = await gatewayFetch(
+  return coalescedGatewayRead<PhoneDeskCallSnapshot>(
     `/v1/phone-desk/calls?${pagedDateParams(options).toString()}`,
+    (status) => `전화데스크 목록 조회 실패 (${status})`,
   );
-  if (!response.ok) {
-    throw new Error(`전화데스크 목록 조회 실패 (${response.status})`);
-  }
-  return (await response.json()) as PhoneDeskCallSnapshot;
 }
 
 export async function searchLegalFriendsClientDirectory(

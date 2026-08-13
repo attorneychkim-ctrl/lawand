@@ -168,7 +168,14 @@ const solapiMmsSender = "025557455";
 
 const gatewaySecret = {
   ...existingGateway,
+  AWS_REGION: region,
   LAWAND_APP_DATABASE_URL: databaseSecret.appDatabaseUrl,
+  LAWAND_DB_REQUEST_POOL_MAX:
+    existingGateway.LAWAND_DB_REQUEST_POOL_MAX ?? "20",
+  LAWAND_DB_LISTENER_POOL_MAX:
+    existingGateway.LAWAND_DB_LISTENER_POOL_MAX ?? "4",
+  LAWAND_CLOUDWATCH_METRICS_ENABLED:
+    existingGateway.LAWAND_CLOUDWATCH_METRICS_ENABLED ?? "true",
   LAWAND_DATA_KEY_VERSION: "v1",
   LAWAND_DATA_ENCRYPTION_KEY_V1: shared.encryptionKey,
   LAWAND_DATA_HMAC_KEY_V1: shared.hmacKey,

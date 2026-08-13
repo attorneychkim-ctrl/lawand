@@ -1,5 +1,9 @@
 export type GatewayConfig = {
   databaseUrl: string;
+  databaseRequestPoolMax: number;
+  databaseListenerPoolMax: number;
+  cloudWatchMetricsEnabled: boolean;
+  awsRegion: string;
   encryptionKey: string;
   hmacKey: string;
   keyVersion: string;
@@ -60,6 +64,23 @@ function booleanValue(name: string, fallback: boolean): boolean {
   if (value === "true") return true;
   if (value === "false") return false;
   throw new Error(`${name}은 true 또는 false여야 합니다.`);
+}
+
+function integerValue(
+  name: string,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  const raw = process.env[name];
+  if (raw === undefined) return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < minimum || value > maximum) {
+    throw new Error(
+      `${name}은 ${minimum}부터 ${maximum} 사이의 정수여야 합니다.`,
+    );
+  }
+  return value;
 }
 
 function centrexCredentialsValue(): Readonly<Record<string, string>> | null {
@@ -328,8 +349,27 @@ export function readGatewayConfig(): GatewayConfig {
   const centrexCredentials = centrexCredentialsValue();
   const centrexBridgeKeys = centrexBridgeKeysValue();
   const centrexRingCallback = centrexRingCallbackValue();
+  const databaseRequestPoolMax = integerValue(
+    "LAWAND_DB_REQUEST_POOL_MAX",
+    20,
+    5,
+    100,
+  );
+  const databaseListenerPoolMax = integerValue(
+    "LAWAND_DB_LISTENER_POOL_MAX",
+    4,
+    3,
+    20,
+  );
   return {
     databaseUrl: required("LAWAND_APP_DATABASE_URL"),
+    databaseRequestPoolMax,
+    databaseListenerPoolMax,
+    cloudWatchMetricsEnabled: booleanValue(
+      "LAWAND_CLOUDWATCH_METRICS_ENABLED",
+      process.env.NODE_ENV === "production",
+    ),
+    awsRegion: process.env.AWS_REGION?.trim() || "ap-northeast-2",
     encryptionKey: required("LAWAND_DATA_ENCRYPTION_KEY_V1"),
     hmacKey: required("LAWAND_DATA_HMAC_KEY_V1"),
     keyVersion: required("LAWAND_DATA_KEY_VERSION"),

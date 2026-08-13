@@ -23,6 +23,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@aws-sdk/client-cloudwatch": "3.1104.0",
     "@lawand/core": "workspace:*",
     "@lawand/db": "workspace:*",
     "drizzle-orm": "0.45.1",

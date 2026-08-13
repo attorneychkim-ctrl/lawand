@@ -75,6 +75,8 @@ import type { createDatabaseClient } from "@lawand/db";
 
 import type { StaffPrincipal } from "./auth.js";
 import type { DataProtection } from "./crypto.js";
+import { createInboundCommandPollGate } from "./inbound-command-poll-gate.js";
+import { phoneDirectoryCustomersQuery } from "./phone-directory.js";
 import {
   inspectMmsJpeg,
   SolapiDeliveryError,
@@ -268,6 +270,10 @@ type LegalFriendsDirectoryRow = {
   court_name: string | null;
   case_created_on: string;
   case_updated_on: string;
+};
+
+type LegalFriendsDirectoryBatchRow = LegalFriendsDirectoryRow & {
+  candidate_phone: string;
 };
 
 type LegalFriendsClientSearchRow = {
@@ -557,6 +563,7 @@ export function createTelephonyService(options: {
   solapiClient?: SolapiClient | null;
   solapiMmsSender?: string | null;
   answerableBridgeIds?: ReadonlySet<string>;
+  idleCommandPollIntervalMs?: number;
   now?: () => Date;
 }) {
   const {
@@ -566,18 +573,34 @@ export function createTelephonyService(options: {
     solapiClient = null,
     solapiMmsSender = null,
     answerableBridgeIds = new Set<string>(),
+    idleCommandPollIntervalMs,
     now = () => new Date(),
   } = options;
+  const inboundCommandPollGate = createInboundCommandPollGate({
+    ...(idleCommandPollIntervalMs === undefined
+      ? {}
+      : { idlePollIntervalMs: idleCommandPollIntervalMs }),
+    now: () => now().getTime(),
+  });
 
-  async function resolveLegalFriendsPhone(
-    phone: string,
-  ): Promise<Extract<PhoneCustomerMatch, { source: "legal_friends" }> | null> {
+  async function resolveLegalFriendsPhones(phones: readonly string[]) {
+    const normalizedPhones = [
+      ...new Set(
+        phones
+          .map((phone) => phone.replace(/[^0-9]/g, ""))
+          .filter((phone) => phone.length >= 9 && phone.length <= 15),
+      ),
+    ];
+    const matches = new Map<
+      string,
+      Extract<PhoneCustomerMatch, { source: "legal_friends" }>
+    >();
+    if (normalizedPhones.length === 0) return matches;
+
     const result = await db.execute(
-      sql<LegalFriendsDirectoryRow>`SELECT * FROM public.resolve_inbound_phone_directory(${phone})`,
+      phoneDirectoryCustomersQuery(normalizedPhones),
     );
-    const rows = result.rows as LegalFriendsDirectoryRow[];
-    if (rows.length === 0) return null;
-
+    const rows = result.rows as LegalFriendsDirectoryBatchRow[];
     const memberIndexes = [
       ...new Set(
         rows
@@ -630,39 +653,57 @@ export function createTelephonyService(options: {
       ),
     );
 
-    const clientName = rows.find((row) => row.client_name)?.client_name ?? "이름 미확인";
-    return {
-      source: "legal_friends",
-      clientName,
-      cases: rows.map((row) => ({
-        clientIdx: row.client_idx,
-        caseIdx: row.case_idx,
-        caseNumber: row.case_number,
-        caseName: row.case_name,
-        caseType: row.case_type,
-        caseState: row.case_state,
-        isClosed: row.is_closed === 1,
-        isRepealed: row.is_repealed === 1,
-        courtName: row.court_name,
-        caseCreatedOn: row.case_created_on,
-        caseUpdatedOn: row.case_updated_on,
-        staffNames: [
-          row.primary_staff_name,
-          row.secondary_staff_name,
-          row.tertiary_staff_name,
-        ].filter((name): name is string => Boolean(name)),
-        staffUserIds: [
-          row.primary_member_idx,
-          row.secondary_member_idx,
-          row.tertiary_member_idx,
-        ].flatMap((memberIdx) => {
-          const staffUserId = memberIdx
-            ? staffByMemberIdx.get(memberIdx)
-            : undefined;
-          return staffUserId ? [staffUserId] : [];
-        }),
-      })),
-    };
+    const rowsByPhone = new Map<string, LegalFriendsDirectoryBatchRow[]>();
+    for (const row of rows) {
+      const current = rowsByPhone.get(row.candidate_phone) ?? [];
+      current.push(row);
+      rowsByPhone.set(row.candidate_phone, current);
+    }
+    for (const [phone, phoneRows] of rowsByPhone) {
+      const clientName =
+        phoneRows.find((row) => row.client_name)?.client_name ??
+        "이름 미확인";
+      matches.set(phone, {
+        source: "legal_friends",
+        clientName,
+        cases: phoneRows.map((row) => ({
+          clientIdx: row.client_idx,
+          caseIdx: row.case_idx,
+          caseNumber: row.case_number,
+          caseName: row.case_name,
+          caseType: row.case_type,
+          caseState: row.case_state,
+          isClosed: row.is_closed === 1,
+          isRepealed: row.is_repealed === 1,
+          courtName: row.court_name,
+          caseCreatedOn: row.case_created_on,
+          caseUpdatedOn: row.case_updated_on,
+          staffNames: [
+            row.primary_staff_name,
+            row.secondary_staff_name,
+            row.tertiary_staff_name,
+          ].filter((name): name is string => Boolean(name)),
+          staffUserIds: [
+            row.primary_member_idx,
+            row.secondary_member_idx,
+            row.tertiary_member_idx,
+          ].flatMap((memberIdx) => {
+            const staffUserId = memberIdx
+              ? staffByMemberIdx.get(memberIdx)
+              : undefined;
+            return staffUserId ? [staffUserId] : [];
+          }),
+        })),
+      });
+    }
+    return matches;
+  }
+
+  async function resolveLegalFriendsPhone(
+    phone: string,
+  ): Promise<Extract<PhoneCustomerMatch, { source: "legal_friends" }> | null> {
+    const normalizedPhone = phone.replace(/[^0-9]/g, "");
+    return (await resolveLegalFriendsPhones([phone])).get(normalizedPhone) ?? null;
   }
 
   async function searchLegalFriendsClients(
@@ -1024,10 +1065,25 @@ export function createTelephonyService(options: {
     );
   }
 
-  async function resolvePhoneCustomer(phone: string): Promise<PhoneCustomerMatch> {
-    const phoneFingerprint = protection.fingerprint(phone);
-    const [consultation] = await db
+  async function resolvePhoneCustomers(phones: readonly string[]) {
+    const uniquePhones = [...new Set(phones.filter(Boolean))];
+    const matches = new Map<string, PhoneCustomerMatch>(
+      uniquePhones.map((phone) => [phone, null]),
+    );
+    if (uniquePhones.length === 0) return matches;
+
+    const fingerprintsByPhone = new Map(
+      uniquePhones.map((phone) => [phone, protection.fingerprint(phone)]),
+    );
+    const phoneByFingerprint = new Map(
+      [...fingerprintsByPhone].map(([phone, fingerprint]) => [
+        fingerprint.toString("hex"),
+        phone,
+      ]),
+    );
+    const consultationRows = await db
       .select({
+        phoneFingerprint: consultations.phoneFingerprint,
         id: consultations.id,
         publicReceiptCode: consultations.publicReceiptCode,
         state: consultations.state,
@@ -1049,11 +1105,25 @@ export function createTelephonyService(options: {
         staffProfiles,
         eq(staffProfiles.userId, consultationAssignments.assigneeUserId),
       )
-      .where(eq(consultations.phoneFingerprint, phoneFingerprint))
-      .orderBy(desc(consultations.lastRequestedAt))
-      .limit(1);
+      .where(
+        and(
+          isNotNull(consultations.phoneFingerprint),
+          inArray(
+            consultations.phoneFingerprint,
+            [...fingerprintsByPhone.values()],
+          ),
+        ),
+      )
+      .orderBy(desc(consultations.lastRequestedAt));
 
-    if (consultation) {
+    const consultationMatchedPhones = new Set<string>();
+    for (const consultation of consultationRows) {
+      if (!consultation.phoneFingerprint) continue;
+      const phone = phoneByFingerprint.get(
+        consultation.phoneFingerprint.toString("hex"),
+      );
+      if (!phone || consultationMatchedPhones.has(phone)) continue;
+      consultationMatchedPhones.add(phone);
       const displayName =
         consultation.preferredNameCiphertext &&
         consultation.preferredNameNonce &&
@@ -1067,7 +1137,7 @@ export function createTelephonyService(options: {
               `consultations.preferred_name:${consultation.id}`,
             )
           : consultation.anonymousLabel;
-      return {
+      matches.set(phone, {
         source: "consultation",
         consultation: {
           id: consultation.id,
@@ -1079,28 +1149,64 @@ export function createTelephonyService(options: {
           assigneeUserId: consultation.assigneeUserId,
           assigneeDisplayName: consultation.assigneeDisplayName,
         },
-      };
+      });
     }
 
-    return resolveLegalFriendsPhone(phone);
+    const unmatchedPhones = uniquePhones.filter(
+      (phone) => !consultationMatchedPhones.has(phone),
+    );
+    const legalFriendsMatches = await resolveLegalFriendsPhones(
+      unmatchedPhones,
+    );
+    for (const phone of unmatchedPhones) {
+      matches.set(
+        phone,
+        legalFriendsMatches.get(phone.replace(/[^0-9]/g, "")) ?? null,
+      );
+    }
+    return matches;
   }
 
-  async function latestInboundAnswerCommand(inboundCallId: string) {
-    const [command] = await db
-      .select({
-        id: telephonyInboundCommands.id,
-        inboundCallId: telephonyInboundCommands.inboundCallId,
-        status: telephonyInboundCommands.status,
-        requestedAt: telephonyInboundCommands.requestedAt,
-        expiresAt: telephonyInboundCommands.expiresAt,
-        completedAt: telephonyInboundCommands.completedAt,
-        resultCode: telephonyInboundCommands.resultCode,
-      })
-      .from(telephonyInboundCommands)
-      .where(eq(telephonyInboundCommands.inboundCallId, inboundCallId))
-      .orderBy(desc(telephonyInboundCommands.requestedAt))
-      .limit(1);
-    return command ? inboundAnswerCommandResponse(command) : null;
+  function createPhoneCustomerLoader() {
+    const cache = new Map<string, Promise<PhoneCustomerMatch>>();
+    const queued = new Map<
+      string,
+      {
+        resolve: (match: PhoneCustomerMatch) => void;
+        reject: (error: unknown) => void;
+      }
+    >();
+    let scheduled = false;
+
+    const flush = async () => {
+      scheduled = false;
+      const batch = [...queued];
+      for (const [phone] of batch) queued.delete(phone);
+      try {
+        const batchMatches = await resolvePhoneCustomers(
+          batch.map(([phone]) => phone),
+        );
+        for (const [phone, deferred] of batch) {
+          deferred.resolve(batchMatches.get(phone) ?? null);
+        }
+      } catch (error) {
+        for (const [, deferred] of batch) deferred.reject(error);
+      }
+    };
+
+    return (phone: string) => {
+      const existing = cache.get(phone);
+      if (existing) return existing;
+      const pending = new Promise<PhoneCustomerMatch>((resolve, reject) => {
+        queued.set(phone, { resolve, reject });
+      });
+      cache.set(phone, pending);
+      if (!scheduled) {
+        scheduled = true;
+        queueMicrotask(() => void flush());
+      }
+      return pending;
+    };
   }
 
   async function getCallActivitySnapshot(actor: StaffPrincipal) {
@@ -1259,6 +1365,31 @@ export function createTelephonyService(options: {
       current.push(owner.staffUserId);
       ownersByActivityEndpoint.set(owner.endpointId, current);
     }
+    const remotePhonesByRoot = new Map<string, string>();
+    for (const rootRows of grouped.values()) {
+      const root = rootRows[0];
+      if (
+        root?.scope === "external" &&
+        root.remotePhoneCiphertext &&
+        root.remotePhoneNonce &&
+        root.remotePhoneKeyVersion
+      ) {
+        remotePhonesByRoot.set(
+          root.id,
+          protection.decrypt(
+            {
+              ciphertext: root.remotePhoneCiphertext,
+              nonce: root.remotePhoneNonce,
+              keyVersion: root.remotePhoneKeyVersion,
+            },
+            `telephony_inbound_calls/${root.id}/remote_phone`,
+          ),
+        );
+      }
+    }
+    const customerMatches = await resolvePhoneCustomers([
+      ...remotePhonesByRoot.values(),
+    ]);
     const items = [];
     for (const rootRows of grouped.values()) {
       const root = rootRows[0];
@@ -1292,22 +1423,9 @@ export function createTelephonyService(options: {
       ) {
         continue;
       }
-      const remotePhone =
-        root.scope === "external" &&
-        root.remotePhoneCiphertext &&
-        root.remotePhoneNonce &&
-        root.remotePhoneKeyVersion
-          ? protection.decrypt(
-              {
-                ciphertext: root.remotePhoneCiphertext,
-                nonce: root.remotePhoneNonce,
-                keyVersion: root.remotePhoneKeyVersion,
-              },
-              `telephony_inbound_calls/${root.id}/remote_phone`,
-            )
-          : null;
+      const remotePhone = remotePhonesByRoot.get(root.id) ?? null;
       const customerMatch = remotePhone
-        ? await resolvePhoneCustomer(remotePhone)
+        ? customerMatches.get(remotePhone) ?? null
         : null;
       const relations = relationsByRoot.get(root.id) ?? [];
       const latestRelation = relations[0] ?? null;
@@ -1517,6 +1635,55 @@ export function createTelephonyService(options: {
       )
       .orderBy(desc(telephonyInboundCalls.lastEventAt));
 
+    const remotePhonesByCallId = new Map<string, string>();
+    for (const row of rows) {
+      if (remotePhonesByCallId.has(row.id)) continue;
+      remotePhonesByCallId.set(
+        row.id,
+        protection.decrypt(
+          {
+            ciphertext: row.remotePhoneCiphertext,
+            nonce: row.remotePhoneNonce,
+            keyVersion: row.remotePhoneKeyVersion,
+          },
+          `telephony_inbound_calls/${row.id}/remote_phone`,
+        ),
+      );
+    }
+    const inboundCallIds = [...remotePhonesByCallId.keys()];
+    const [customerMatches, answerCommandRows] = await Promise.all([
+      resolvePhoneCustomers([...remotePhonesByCallId.values()]),
+      inboundCallIds.length
+        ? db
+            .select({
+              id: telephonyInboundCommands.id,
+              inboundCallId: telephonyInboundCommands.inboundCallId,
+              status: telephonyInboundCommands.status,
+              requestedAt: telephonyInboundCommands.requestedAt,
+              expiresAt: telephonyInboundCommands.expiresAt,
+              completedAt: telephonyInboundCommands.completedAt,
+              resultCode: telephonyInboundCommands.resultCode,
+            })
+            .from(telephonyInboundCommands)
+            .where(
+              inArray(telephonyInboundCommands.inboundCallId, inboundCallIds),
+            )
+            .orderBy(desc(telephonyInboundCommands.requestedAt))
+        : [],
+    ]);
+    const answerCommandByCallId = new Map<
+      string,
+      ReturnType<typeof inboundAnswerCommandResponse>
+    >();
+    for (const command of answerCommandRows) {
+      if (!answerCommandByCallId.has(command.inboundCallId)) {
+        answerCommandByCallId.set(
+          command.inboundCallId,
+          inboundAnswerCommandResponse(command),
+        );
+      }
+    }
+
     const items = new Map<
       string,
       {
@@ -1547,14 +1714,8 @@ export function createTelephonyService(options: {
           occurredAt: row.ringingEventOccurredAt,
           receivedAt: row.ringingEventReceivedAt,
         });
-        const remotePhone = protection.decrypt(
-          {
-            ciphertext: row.remotePhoneCiphertext,
-            nonce: row.remotePhoneNonce,
-            keyVersion: row.remotePhoneKeyVersion,
-          },
-          `telephony_inbound_calls/${row.id}/remote_phone`,
-        );
+        const remotePhone = remotePhonesByCallId.get(row.id);
+        if (!remotePhone) continue;
         item = {
           id: row.id,
           endpointId: row.endpointId,
@@ -1567,8 +1728,8 @@ export function createTelephonyService(options: {
           endedAt: row.endedAt?.toISOString() ?? null,
           lastEventAt: row.lastEventAt.toISOString(),
           owners: [],
-          customerMatch: await resolvePhoneCustomer(remotePhone),
-          answerCommand: await latestInboundAnswerCommand(row.id),
+          customerMatch: customerMatches.get(remotePhone) ?? null,
+          answerCommand: answerCommandByCallId.get(row.id) ?? null,
           answerAvailable: answerableBridge && !deliveryDelayed,
           deliveryDelayed,
         };
@@ -2036,14 +2197,7 @@ export function createTelephonyService(options: {
       ownersByEndpoint.set(owner.endpointId, owners);
     }
 
-    const customerCache = new Map<string, Promise<PhoneCustomerMatch>>();
-    const customerMatch = (phone: string) => {
-      const existing = customerCache.get(phone);
-      if (existing) return existing;
-      const pending = resolvePhoneCustomer(phone);
-      customerCache.set(phone, pending);
-      return pending;
-    };
+    const customerMatch = createPhoneCustomerLoader();
     const consultationDisplayName = (row: {
       consultationId: string;
       consultationAnonymousLabel: string;
@@ -3739,7 +3893,8 @@ export function createTelephonyService(options: {
     const expiresAt = new Date(
       requestedAt.getTime() + INBOUND_ANSWER_COMMAND_TTL_MS,
     );
-    return db.transaction(async (tx) => {
+    let requestedBridgeId: string | null = null;
+    const response = await db.transaction(async (tx) => {
       const [call] = await tx
         .select({
           id: telephonyInboundCalls.id,
@@ -3779,6 +3934,7 @@ export function createTelephonyService(options: {
           "비즈콜 앱으로 온 전화는 휴대폰 앱에서 받아 주세요.",
         );
       }
+      requestedBridgeId = call.bridgeId;
 
       const [binding] = await tx
         .select({ id: staffTelephonyBindings.id })
@@ -3894,115 +4050,141 @@ export function createTelephonyService(options: {
         replayed: false,
       };
     });
+    if (requestedBridgeId) inboundCommandPollGate.hint(requestedBridgeId);
+    return response;
   }
 
   async function pollInboundAnswerCommand(authentication: {
     bridgeId: string;
     endpointId: string;
   }) {
+    if (
+      !inboundCommandPollGate.shouldCheckDatabase(authentication.bridgeId)
+    ) {
+      return null;
+    }
     const polledAt = now();
-    return db.transaction(async (tx) => {
-      await tx
-        .update(telephonyInboundCommands)
-        .set({
-          status: "expired",
-          completedAt: polledAt,
-          resultCode: "command_expired",
-          updatedAt: polledAt,
-        })
-        .where(
-          and(
-            eq(telephonyInboundCommands.bridgeId, authentication.bridgeId),
-            eq(telephonyInboundCommands.endpointId, authentication.endpointId),
-            eq(telephonyInboundCommands.status, "queued"),
-            lt(telephonyInboundCommands.expiresAt, polledAt),
-          ),
-        );
-      await tx
-        .update(telephonyInboundCommands)
-        .set({
-          status: "expired",
-          completedAt: polledAt,
-          resultCode: "dispatch_timeout",
-          updatedAt: polledAt,
-        })
-        .where(
-          and(
-            eq(telephonyInboundCommands.bridgeId, authentication.bridgeId),
-            eq(telephonyInboundCommands.endpointId, authentication.endpointId),
-            eq(telephonyInboundCommands.status, "dispatching"),
-            lt(
-              telephonyInboundCommands.requestedAt,
-              new Date(
-                polledAt.getTime() -
-                  INBOUND_ANSWER_DISPATCH_TIMEOUT_MS,
-              ),
-            ),
-          ),
-        );
-
-      const [command] = await tx
-        .select()
-        .from(telephonyInboundCommands)
-        .where(
-          and(
-            eq(telephonyInboundCommands.bridgeId, authentication.bridgeId),
-            eq(telephonyInboundCommands.endpointId, authentication.endpointId),
-            inArray(telephonyInboundCommands.status, [
-              "queued",
-              "dispatching",
-            ]),
-          ),
-        )
-        .orderBy(telephonyInboundCommands.requestedAt)
-        .limit(1)
-        .for("update");
-      if (!command) return null;
-
-      const [call] = await tx
-        .select({
-          direction: telephonyInboundCalls.direction,
-          state: telephonyInboundCalls.state,
-        })
-        .from(telephonyInboundCalls)
-        .where(eq(telephonyInboundCalls.id, command.inboundCallId))
-        .limit(1);
-      if (
-        !call ||
-        call.direction !== "inbound" ||
-        call.state !== "ringing"
-      ) {
+    try {
+      const command = await db.transaction(async (tx) => {
         await tx
           .update(telephonyInboundCommands)
           .set({
             status: "expired",
             completedAt: polledAt,
-            resultCode: "call_not_ringing",
+            resultCode: "command_expired",
             updatedAt: polledAt,
           })
-          .where(eq(telephonyInboundCommands.id, command.id));
-        return null;
-      }
+          .where(
+            and(
+              eq(telephonyInboundCommands.bridgeId, authentication.bridgeId),
+              eq(
+                telephonyInboundCommands.endpointId,
+                authentication.endpointId,
+              ),
+              eq(telephonyInboundCommands.status, "queued"),
+              lt(telephonyInboundCommands.expiresAt, polledAt),
+            ),
+          );
+        await tx
+          .update(telephonyInboundCommands)
+          .set({
+            status: "expired",
+            completedAt: polledAt,
+            resultCode: "dispatch_timeout",
+            updatedAt: polledAt,
+          })
+          .where(
+            and(
+              eq(telephonyInboundCommands.bridgeId, authentication.bridgeId),
+              eq(
+                telephonyInboundCommands.endpointId,
+                authentication.endpointId,
+              ),
+              eq(telephonyInboundCommands.status, "dispatching"),
+              lt(
+                telephonyInboundCommands.requestedAt,
+                new Date(
+                  polledAt.getTime() -
+                    INBOUND_ANSWER_DISPATCH_TIMEOUT_MS,
+                ),
+              ),
+            ),
+          );
 
-      await tx
-        .update(telephonyInboundCommands)
-        .set({
-          status: "dispatching",
-          firstDispatchedAt: sql`coalesce(${telephonyInboundCommands.firstDispatchedAt}, ${polledAt})`,
-          lastDispatchedAt: polledAt,
-          dispatchAttempts: sql`${telephonyInboundCommands.dispatchAttempts} + 1`,
-          updatedAt: polledAt,
-        })
-        .where(eq(telephonyInboundCommands.id, command.id));
-      return {
-        schemaVersion: 1 as const,
-        commandId: command.id,
-        inboundCallId: command.inboundCallId,
-        commandType: "answer" as const,
-        expectedProviderCallId: command.providerCallId,
-        expiresAt: command.expiresAt.toISOString(),
-      };
-    });
+        const [pendingCommand] = await tx
+          .select()
+          .from(telephonyInboundCommands)
+          .where(
+            and(
+              eq(telephonyInboundCommands.bridgeId, authentication.bridgeId),
+              eq(
+                telephonyInboundCommands.endpointId,
+                authentication.endpointId,
+              ),
+              inArray(telephonyInboundCommands.status, [
+                "queued",
+                "dispatching",
+              ]),
+            ),
+          )
+          .orderBy(telephonyInboundCommands.requestedAt)
+          .limit(1)
+          .for("update");
+        if (!pendingCommand) return null;
+
+        const [call] = await tx
+          .select({
+            direction: telephonyInboundCalls.direction,
+            state: telephonyInboundCalls.state,
+          })
+          .from(telephonyInboundCalls)
+          .where(eq(telephonyInboundCalls.id, pendingCommand.inboundCallId))
+          .limit(1);
+        if (
+          !call ||
+          call.direction !== "inbound" ||
+          call.state !== "ringing"
+        ) {
+          await tx
+            .update(telephonyInboundCommands)
+            .set({
+              status: "expired",
+              completedAt: polledAt,
+              resultCode: "call_not_ringing",
+              updatedAt: polledAt,
+            })
+            .where(eq(telephonyInboundCommands.id, pendingCommand.id));
+          return null;
+        }
+
+        await tx
+          .update(telephonyInboundCommands)
+          .set({
+            status: "dispatching",
+            firstDispatchedAt: sql`coalesce(${telephonyInboundCommands.firstDispatchedAt}, ${polledAt})`,
+            lastDispatchedAt: polledAt,
+            dispatchAttempts: sql`${telephonyInboundCommands.dispatchAttempts} + 1`,
+            updatedAt: polledAt,
+          })
+          .where(eq(telephonyInboundCommands.id, pendingCommand.id));
+        return {
+          schemaVersion: 1 as const,
+          commandId: pendingCommand.id,
+          inboundCallId: pendingCommand.inboundCallId,
+          commandType: "answer" as const,
+          expectedProviderCallId: pendingCommand.providerCallId,
+          expiresAt: pendingCommand.expiresAt.toISOString(),
+        };
+      });
+      inboundCommandPollGate.completeCheck(
+        authentication.bridgeId,
+        Boolean(command),
+      );
+      return command;
+    } catch (error) {
+      inboundCommandPollGate.failCheck(authentication.bridgeId);
+      throw error;
+    }
   }
 
   async function completeInboundAnswerCommand(
