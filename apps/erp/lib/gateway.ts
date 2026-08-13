@@ -36,6 +36,7 @@ export type ConsultationListItem = {
   softDeletedByUserId: string | null;
   staffCreated: boolean;
   existingCustomer: boolean;
+  legalFriendsRegistered: boolean;
   requiresLegalFriendsReview: boolean;
   residenceRegion: string | null;
   mode: "quick" | "detailed" | "self_diagnosis";
@@ -584,6 +585,7 @@ export type ConsultationDetail = {
   softDeletedByUserId: string | null;
   staffCreated: boolean;
   existingCustomer: boolean;
+  legalFriendsRegistered: boolean;
   requiresLegalFriendsReview: boolean;
   legalFriendsMatches: Array<{
     clientIdx: number;
