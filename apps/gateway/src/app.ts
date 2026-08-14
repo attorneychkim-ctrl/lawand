@@ -3378,8 +3378,7 @@ export function createGatewayServer(options?: {
         ].includes(error.code)
           ? 404
           : error.code === "request_idempotency_conflict" ||
-              error.code === "review_already_published" ||
-              error.code === "template_in_use"
+              error.code === "review_already_published"
             ? 409
             : 400;
         sendJson(response, statusCode, {

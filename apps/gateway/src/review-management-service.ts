@@ -2,6 +2,7 @@ import {
   and,
   desc,
   eq,
+  isNull,
   or,
   sql,
 } from "drizzle-orm";
@@ -1015,7 +1016,12 @@ export function createReviewManagementService(options: {
     const rows = await db
       .select()
       .from(customerReviewRequestTemplates)
-      .where(eq(customerReviewRequestTemplates.ownerUserId, actor.id))
+      .where(
+        and(
+          eq(customerReviewRequestTemplates.ownerUserId, actor.id),
+          isNull(customerReviewRequestTemplates.deletedAt),
+        ),
+      )
       .orderBy(
         sql`CASE ${customerReviewRequestTemplates.presetKey}
           WHEN 'consultation' THEN 1
@@ -1068,6 +1074,7 @@ export function createReviewManagementService(options: {
         and(
           eq(customerReviewRequestTemplates.id, templateId),
           eq(customerReviewRequestTemplates.ownerUserId, actor.id),
+          isNull(customerReviewRequestTemplates.deletedAt),
         ),
       )
       .limit(1);
@@ -1103,6 +1110,7 @@ export function createReviewManagementService(options: {
         and(
           eq(customerReviewRequestTemplates.id, templateId),
           eq(customerReviewRequestTemplates.ownerUserId, actor.id),
+          isNull(customerReviewRequestTemplates.deletedAt),
         ),
       )
       .returning();
@@ -1115,6 +1123,7 @@ export function createReviewManagementService(options: {
       .select({
         id: customerReviewRequestTemplates.id,
         presetKey: customerReviewRequestTemplates.presetKey,
+        deletedAt: customerReviewRequestTemplates.deletedAt,
       })
       .from(customerReviewRequestTemplates)
       .where(
@@ -1133,30 +1142,39 @@ export function createReviewManagementService(options: {
         "기본 후기 요청 템플릿은 삭제할 수 없습니다. 문자 내용은 자유롭게 수정할 수 있습니다.",
       );
     }
-    const [used] = await db
-      .select({ id: customerReviewRequests.id })
-      .from(customerReviewRequests)
-      .where(eq(customerReviewRequests.templateId, templateId))
-      .limit(1);
-    if (used) {
-      throw new ReviewManagementError(
-        "template_in_use",
-        "발송 이력이 있는 템플릿은 삭제할 수 없습니다. 이름과 문구를 수정해 주세요.",
-      );
+    if (!template.deletedAt) {
+      const deletedAt = now();
+      await db.transaction(async (tx) => {
+        const [deleted] = await tx
+          .update(customerReviewRequestTemplates)
+          .set({
+            deletedAt,
+            updatedByUserId: actor.id,
+            updatedAt: deletedAt,
+          })
+          .where(
+            and(
+              eq(customerReviewRequestTemplates.id, templateId),
+              eq(customerReviewRequestTemplates.ownerUserId, actor.id),
+              isNull(customerReviewRequestTemplates.deletedAt),
+            ),
+          )
+          .returning({ id: customerReviewRequestTemplates.id });
+        if (deleted) {
+          await tx.insert(staffAuditLogs).values({
+            id: createEventId(),
+            actorUserId: actor.id,
+            action: "review.request_template.deleted",
+            targetType: "customer_review_request_template",
+            targetId: templateId,
+            metadata: { softDelete: true },
+            occurredAt: deletedAt,
+            createdAt: deletedAt,
+          });
+        }
+      });
     }
-    const [deleted] = await db
-      .delete(customerReviewRequestTemplates)
-      .where(
-        and(
-          eq(customerReviewRequestTemplates.id, templateId),
-          eq(customerReviewRequestTemplates.ownerUserId, actor.id),
-        ),
-      )
-      .returning({ id: customerReviewRequestTemplates.id });
-    if (!deleted) {
-      throw new ReviewManagementError("template_not_found", "내 후기 요청 템플릿을 찾을 수 없습니다.");
-    }
-    return { id: deleted.id, deleted: true as const };
+    return { id: template.id, deleted: true as const };
   }
 
   async function sendRequests(
@@ -1171,6 +1189,7 @@ export function createReviewManagementService(options: {
         and(
           eq(customerReviewRequestTemplates.id, input.templateId),
           eq(customerReviewRequestTemplates.ownerUserId, actor.id),
+          isNull(customerReviewRequestTemplates.deletedAt),
         ),
       )
       .limit(1);

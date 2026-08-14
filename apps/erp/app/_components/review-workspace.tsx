@@ -237,6 +237,12 @@ export function ReviewWorkspace({
       const next = templates.filter((item) => item.id !== template.id);
       setTemplates(next);
       setSelectedTemplateId(next[0]?.id ?? "");
+      if (editingTemplateId === template.id) {
+        setEditingTemplateId(null);
+        setTemplateName("");
+        setTemplateBody(newTemplateBody);
+        setTemplateProgressStage("other");
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "템플릿을 삭제하지 못했습니다.");
     } finally {
