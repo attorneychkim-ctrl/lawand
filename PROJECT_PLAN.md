@@ -1,4 +1,4 @@
-# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.43)
+# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.44)
 
 > 이 문서는 새 로앤 홈페이지 + 새 ERP + 리걸플로/리걸프렌즈 연동을 하나의 플랫폼으로
 > 묶기 위한 **저장소 구조·아키텍처 설계 초안**이다. 코덱스/클로드코드 세션이 번갈아
@@ -1093,6 +1093,15 @@
 > 화면과 새 발송 선택에서는 즉시 제거하되 `deleted_at` 소프트 삭제로 과거 요청의 템플릿 참조를
 > 보존하며, 삭제한 이름은 새 템플릿에 다시 사용할 수 있다. 고정 기본 슬롯 네 개만 삭제를 막는다.
 > 이 경계는 `0063_review_request_template_soft_delete.sql`에 이어 적용한다.
+> 2026-08-14 릴리스 `20260814T093947Z-integrated-phonebook-reviews-lawand-os-v1`로 공용
+> 전화번호부·후기 요청 기준선·`LAW& OS` 브랜드와 관련 홈페이지·ERP·gateway 변경을 운영에
+> 함께 반영했다. GitHub Actions `31787901184`이 검증한 소스
+> `8f75bf5ce16dd4ebe2b2a17cc76db8b2679af6c7`의 세 `linux/arm64` ECR digest를 사용했고,
+> 암호화 RDS snapshot 뒤 같은 gateway digest로 `0061..0063`을 적용해 migration 원장 64개와
+> 활성 직원 43명의 기본 후기 슬롯 172개를 확인했다. 수정 대상 리걸프렌즈 dead event 한 건만
+> 기존 1차 실패를 보존한 채 2차 시도로 재처리해 사건 연결·담당 배정·ERP 완료를 확인했으며,
+> 리걸프렌즈 dead와 새 릴리스 dead는 0이다. 기존 통화 원장과 Windows bridge는 변경하지 않았고
+> 실제 전화·문자/MMS·새 후기 링크 canary는 만들지 않았다.
 
 ---
 
@@ -2334,6 +2343,9 @@ Manager와 별도 역할·보안그룹·TLS 기준을 적용한다.
   endpoint 양쪽 번호 일치 해석
 - [x] 암호화 공용 전화번호부 출시 후보: 원번호·연결번호 동시 지문 해석, 후처리 저장·수정,
   `/phonebook` 검색·등록·수정·소프트삭제, migration `0061`
+- [x] 운영 migration `0061..0063`과 홈페이지·ERP·gateway 통합 배포: 암호화 snapshot,
+  migration 원장 64개, 직원 43명 기본 후기 슬롯 172개, 대상 리걸프렌즈 실패 1건의 보존형
+  2차 성공과 새 dead 0 확인
 - [x] Windows 다중 bridge 운영 안정화: 감독기·비정상 종료 재시작, SYSTEM health metric·
   CloudWatch 5종 경보, DPAPI dead-letter, 직원관리 4단계 상태, 관리자 유휴 슬롯 재배정
 - [x] bridge 재접속 전 활성 수·발신 종료 보정 + gateway endpoint lock 기반 회선당 활성

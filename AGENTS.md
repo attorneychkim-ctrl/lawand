@@ -88,6 +88,43 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-14 — worktree 6개 통합·0061~0063 운영 배포 완료
+- 배포 소스 `8f75bf5ce16dd4ebe2b2a17cc76db8b2679af6c7`는 배포 시점
+  `origin/main`과 일치했고 GitHub Actions `31787901184`의 검증·게시 작업이 모두 성공했다.
+  `linux/arm64` ECR digest는 홈페이지
+  `sha256:fb011dca4c5db2e817f9e7eefae717654b364682ccd8f73a4efb208eda05b1ea`, ERP
+  `sha256:a6bca6023f920848eae8b0d331e117c0681683fc9bae88570e2204870d1074a5`, gateway
+  `sha256:1e41000487d1d04fe04a3c4d7c303781b1caa8bdcf6b27eb042ab3931b069023`다.
+  앱·revision·아키텍처 label을 대조했고 ECR scan은 세 앱 모두 기존과 같은 CRITICAL 3·
+  HIGH 10·MEDIUM 8·LOW 1이며 finding 이름·심각도 기준 추가·제거는 각각 0이다.
+- 암호화 RDS snapshot
+  `lawand-prod-pre-phonebook-reviews-lawand-os-20260814t093947z`을 available·100%까지 확보한 뒤
+  같은 gateway digest로 `0061..0063`을 적용했다. 운영 migration 원장은 64개이고 세 해시는
+  준비 기록과 일치한다. 전화번호부 테이블·중복 차단 trigger·앱/조회자 최소 권한과 PUBLIC
+  grant 0을 확인했으며 초기 연락처는 0건이다. 활성 직원 43명 모두 기본 후기 슬롯 네 개를
+  가져 preset 172개, 누락·중복·링크 변수 누락은 각각 0이다.
+- 통합 릴리스 `20260814T093947Z-integrated-phonebook-reviews-lawand-os-v1`로 gateway를 먼저,
+  ERP와 홈페이지를 이어서 tag가 아닌 digest로 전환했다. 최종 image ID는 홈페이지
+  `sha256:1319ac96d52dc2c560d585452711b8a7c9ea9ea16746751e2821adf31cc4a08d`, ERP
+  `sha256:b7001d2ba39f3afdc1e54790e0ace25f2ede067d0eee0b74e4bc897058d4dd25`, gateway
+  `sha256:c7b4aaaade1e494e48c9f57593dc19d983b607a1a6cb60ea7bd83df95af423e0`다. 각 앱은
+  현재와 rollback 2개, source release 2개만 보존했다. BuildKit cache는 홈페이지 1.421GB·
+  ERP 1.429GB·gateway 1.381GB로 4 GiB 아래이며 정리 전후 가용량·회수량·이미지 ID를 각 서버
+  `/var/log/lawand/deployments.log`에 남겼다.
+- 정식·EIP HTTPS health와 홈페이지 후기 화면, ERP 로그인·아이콘, 인증 ERP 8개 화면과 관련
+  API 12개가 모두 200이다. 임시 5분 세션은 매번 삭제해 잔존 0을 확인했다. 세 앱과 Caddy는
+  active, restart 0, 환경파일 600이고 gateway pool waiting 0/20·LISTEN waiting 0/4다. ERP에서
+  보인 `ECONNREFUSED`는 gateway 교체 중 2.2초 구간에만 있었고 ERP 준비 완료 뒤 같은 패턴과
+  priority error는 0이다. RDS와 네 EC2·SSM은 정상이며 CloudWatch ALARM·INSUFFICIENT_DATA는 0이다.
+- 원인이 수정된 리걸프렌즈 dead event `019ffe5c-4661-7424-893c-40afa9484623` 하나만 기존
+  1차 `invalid_stored_data` 시도와 사건 미연결을 원자적으로 확인한 뒤 2차 시도로 재대기시켰다.
+  2차 외부 응답은 HTTP 200으로 성공했고 사건 연결 1개·담당 배정·ERP 등록 완료·누적 시도 2회를
+  확인했다. 1차 실패 원장은 그대로 보존했다. 최종 dead outbox는 배포 전 문자 5건뿐이고
+  리걸프렌즈 dead/pending과 새 릴리스 dead는 0이다.
+- 배포 구간 발신·받기 명령은 0이고 기존 미종결 통화 root는 강제 종료·보정하지 않았다.
+  Windows bridge 코드·인스턴스도 변경하지 않았으며 active assignment와 registry key는 51개다.
+  실제 전화·문자/MMS·새 후기 링크 canary는 만들지 않았다. `PROJECT_PLAN.md`는 v1.44다.
+
 ### 2026-08-14 — 최근 worktree 6개 main 통합·0061~0063 운영 배포 준비
 - 재부팅 뒤 `HERDR_ENV=1`의 main과 HERDR worktree 6개, 원격
   `origin/worktree/*` 52개를 다시 전수 대조했다. `quiet-cloud-1d0d`,

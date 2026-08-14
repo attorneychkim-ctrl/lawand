@@ -1,18 +1,19 @@
 # AWS 운영 배포 기준선 v2
 
-기준 시각: 2026-08-13 KST
+기준 시각: 2026-08-14 KST
 CloudFormation 스택: `lawand-prod`
 리전: 서울(`ap-northeast-2`)
 최초 배포 릴리스: `20260804T085006Z-84e8708`
-현재 홈페이지 릴리스: `20260813T041933Z-integrated-consultation-kakao-v1`
-현재 ERP 릴리스: `20260813T041933Z-integrated-consultation-kakao-v1`
-현재 gateway 릴리스: `20260813T041933Z-integrated-consultation-kakao-v1`
+현재 홈페이지 릴리스: `20260814T093947Z-integrated-phonebook-reviews-lawand-os-v1`
+현재 ERP 릴리스: `20260814T093947Z-integrated-phonebook-reviews-lawand-os-v1`
+현재 gateway 릴리스: `20260814T093947Z-integrated-phonebook-reviews-lawand-os-v1`
 현재 Windows bridge: `v0.8.3.0`
 
-완료된 모든 worktree를 main에 통합한 기준선 위에 migration `0055`·`0056`, 홈페이지·ERP·
-gateway와 DB 풀 경보를 같은 릴리스로 운영 반영했다. 상담 담당자 변경과 직원 신규 상담
-후속 처리, 카카오 선택 전화·강한 첫 메시지 안내, 상담 브라우저 알림과 gateway DB 풀
-안정화가 포함됐다. Windows bridge는 코드 영향이 없어 `v0.8.3.0`을 유지했다.
+완료된 모든 worktree를 main에 통합한 기준선 위에 migration `0061..0063`, 홈페이지·ERP·
+gateway를 같은 릴리스로 운영 반영했다. 암호화 공용 전화번호부와 수신 발신자 식별,
+미확정 통화 수동 담당자 확정, 후기 요청 기본 슬롯·고객별 무입력 링크·개인 템플릿 삭제,
+ERP `LAW& OS` 브랜드와 문자 스크롤 개선, 묶음 상담 리걸프렌즈 등록 복구가 포함됐다.
+Windows bridge는 코드 영향이 없어 `v0.8.3.0`을 유지했다.
 
 이 문서는 정식 도메인 전환 이후를 포함한 실제 AWS 구성, 접속점, 데이터 이관 범위와
 운영 체크리스트를 기록한다. 비밀번호·API 키·AWS 계정 ID·RDS 마스터 시크릿 ARN은
@@ -1112,6 +1113,56 @@ x86 OCX 프로세스 하나를 격리해 실행하고, 배정된 회선과 제�
   wildcard→apex로 돌린다. 세 서버의 전환 전 Caddyfile은
   `Caddyfile.pre-domain-cutover-20260812T004900Z`에 있고 Cafe24 구 zone·호스팅·SSL과
   직전 홈페이지 이미지도 보존했다.
+
+## 2026-08-14 전화번호부·후기요청·LAW& OS 통합 릴리스
+
+완료 worktree 6개와 원격 `origin/worktree/*` 52개를 전수 대조해 모든 HEAD가 main ancestor이고
+제외·진행 중 브랜치가 없음을 확인했다. 배포 소스
+`8f75bf5ce16dd4ebe2b2a17cc76db8b2679af6c7`는 배포 시점 `origin/main`과 일치한다.
+
+- GitHub Actions `31787901184`이 검증한 세 `linux/arm64` 이미지를 private ECR에 게시했다.
+  홈페이지 digest는 `sha256:fb011dca4c5db2e817f9e7eefae717654b364682ccd8f73a4efb208eda05b1ea`,
+  ERP는 `sha256:a6bca6023f920848eae8b0d331e117c0681683fc9bae88570e2204870d1074a5`,
+  gateway는 `sha256:1e41000487d1d04fe04a3c4d7c303781b1caa8bdcf6b27eb042ab3931b069023`다.
+  각 앱·revision·아키텍처 label을 대조했다. ECR scan은 모두 기존과 같은 CRITICAL 3·HIGH 10·
+  MEDIUM 8·LOW 1이며 finding 이름·심각도 기준 추가·제거는 0이다.
+- 암호화 snapshot `lawand-prod-pre-phonebook-reviews-lawand-os-20260814t093947z`을
+  available·100%까지 확보한 뒤 같은 gateway digest로 migration `0061..0063`을 적용했다.
+  운영 migration 원장은 64개이고 해시는 각각
+  `583609c13440495d8ff48a16f23b340aaccd30e2c6aad3bd245113c445de392e`,
+  `cdcb6c854e5ee0c8c4fc17f27db1b1431880c59ebbfe48c1416b3415fe2b81af`,
+  `c90859301c6c865e70d20520e2ad84f2d4ee72a9c2a521f5483e039a4c68abca`로 Git과 일치한다.
+  전화번호부 테이블·중복 차단 trigger·앱/조회자 최소 권한과 PUBLIC grant 0을 확인했다.
+  초기 연락처는 0건이며 활성 직원 43명의 기본 후기 슬롯은 172개로 누락·중복·링크 변수
+  누락이 없다.
+- 릴리스 `20260814T093947Z-integrated-phonebook-reviews-lawand-os-v1`로 gateway를 먼저,
+  ERP와 홈페이지를 이어서 tag가 아닌 digest로 전환했다. 최종 image ID는 홈페이지
+  `sha256:1319ac96d52dc2c560d585452711b8a7c9ea9ea16746751e2821adf31cc4a08d`, ERP
+  `sha256:b7001d2ba39f3afdc1e54790e0ace25f2ede067d0eee0b74e4bc897058d4dd25`, gateway
+  `sha256:c7b4aaaade1e494e48c9f57593dc19d983b607a1a6cb60ea7bd83df95af423e0`다.
+  rollback image ID는 홈페이지 `sha256:d95d28089e99e3c7f502541679b35281c561862493d88121ec4ac5358366c6b5`·
+  `sha256:00cdfc9f487b95ee977a35e3b430a70540ea5f0e5ceaf1728fbaf1464f853483`, ERP
+  `sha256:d0eac77e0d067cbb1e91718d96c2c3cbcf87942daddb8cb984db0a6e04ce3458`·
+  `sha256:a5de4f57e318fcfce82c7076ff6dd187aa1259ca1977314557f33960df4ec6c7`, gateway
+  `sha256:37d880601772e37e4a5f835f2ff26763dc73a0686016896ac75e1e1c14a879c1`·
+  `sha256:597be0d81989911180c5e51a22577550537bd9623f8b34f291f774ad44d78434`다.
+- 새 앱과 외부 health 성공 뒤 각 서버에 현재와 rollback 이미지 2개, source release 2개만
+  보존했다. BuildKit cache는 홈페이지 1.421GB·ERP 1.429GB·gateway 1.381GB로 4 GiB 아래다.
+  정리 전후 cache·가용 바이트·회수 바이트·이미지 ID는 `/var/log/lawand/deployments.log`에
+  기록했다.
+- 정식·EIP HTTPS의 홈페이지 주요 후기 화면, ERP 로그인·아이콘, gateway health가 모두
+  200이다. 임시 5분 세션으로 ERP 8개 화면과 관련 API 12개를 확인하고 세션을 삭제해 잔존
+  0을 확인했다. 세 앱과 Caddy는 active, restart 0, 환경파일 600이며 gateway request pool은
+  waiting 0/20, LISTEN은 waiting 0/4다. ERP의 일시적인 `ECONNREFUSED`는 gateway 교체 중
+  2.2초 구간에만 있었고 ERP 준비 완료 뒤 같은 패턴과 priority error는 0이다. RDS와 네 EC2·
+  SSM은 정상이고 CloudWatch ALARM·INSUFFICIENT_DATA는 0이다.
+- 수정 대상이던 리걸프렌즈 dead event `019ffe5c-4661-7424-893c-40afa9484623` 하나만 1차
+  `invalid_stored_data`와 사건 미연결을 확인하고 2차 시도로 재대기시켰다. 외부 응답 HTTP 200,
+  사건 연결 1개·담당 배정·ERP 등록 완료·누적 시도 2회를 확인했으며 1차 실패 원장은 보존했다.
+  최종 dead outbox는 배포 전 문자 5건뿐이고 리걸프렌즈 dead/pending과 새 릴리스 dead는 0이다.
+- 배포 구간 발신·받기 명령은 0이다. 기존 미종결 통화 root는 강제 종료·보정하지 않았고
+  Windows bridge 코드·인스턴스도 변경하지 않았다. 실제 전화·문자/MMS·새 후기 링크 canary는
+  만들지 않았다.
 
 ## 2026-08-14 전화·문자·후기 통합 릴리스
 
