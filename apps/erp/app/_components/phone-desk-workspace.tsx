@@ -246,6 +246,22 @@ function CustomerSummary({ call }: { call: PhoneDeskCall }) {
       </Link>
     );
   }
+  if (call.customerMatch.source === "staff") {
+    return (
+      <span className="phone-desk-customer">
+        <strong>
+          {call.customerMatch.staffMembers
+            .map((member) => member.displayName)
+            .join(" · ")}
+        </strong>
+        <span>
+          직원 회선 · {call.customerMatch.staffMembers
+            .map((member) => `내선 ${member.extension}`)
+            .join(" · ")}
+        </span>
+      </span>
+    );
+  }
   const latestCase = call.customerMatch.cases[0];
   return (
     <span className="phone-desk-customer">

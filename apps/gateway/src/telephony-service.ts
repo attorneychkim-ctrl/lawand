@@ -212,6 +212,38 @@ export function phoneDeskItemMatchesAssignee(
   );
 }
 
+export function isPhoneDeskAftercareWritableState(
+  state:
+    | "pending"
+    | "ringing"
+    | "connected"
+    | "ended"
+    | "failed"
+    | "unknown",
+): boolean {
+  return state === "connected" || state === "ended";
+}
+
+export function shouldAutoOpenConnectedAftercare(input: {
+  scope: "external" | "internal";
+  state:
+    | "ringing"
+    | "connected"
+    | "transferring"
+    | "needs_confirmation"
+    | "ended";
+  actorUserId: string;
+  currentEndpointOwnerUserIds: readonly string[];
+  participantUserIds: readonly (string | null)[];
+}): boolean {
+  return (
+    input.scope === "external" &&
+    input.state === "connected" &&
+    (input.currentEndpointOwnerUserIds.includes(input.actorUserId) ||
+      input.participantUserIds.includes(input.actorUserId))
+  );
+}
+
 export function canonicalizePhoneDeskObservedCalls<
   T extends {
     id: string;
@@ -336,6 +368,17 @@ export type PhoneCustomerMatch =
       };
     }
   | {
+      source: "staff";
+      staffMembers: Array<{
+        staffUserId: string;
+        displayName: string;
+        lineNumber: string;
+        extension: string;
+        department: string;
+        jobTitle: string;
+      }>;
+    }
+  | {
       source: "legal_friends";
       clientName: string;
       cases: Array<{
@@ -355,6 +398,46 @@ export type PhoneCustomerMatch =
       }>;
     }
   | null;
+
+type StaffPhoneCustomerMatch = Extract<
+  PhoneCustomerMatch,
+  { source: "staff" }
+>;
+
+export function staffPhoneCustomerMatches(
+  rows: ReadonlyArray<{
+    lineNumber: string | null;
+    staffUserId: string;
+    displayName: string;
+    extension: string | null;
+    department: string;
+    jobTitle: string;
+  }>,
+): Map<string, StaffPhoneCustomerMatch> {
+  const membersByPhone = new Map<
+    string,
+    StaffPhoneCustomerMatch["staffMembers"]
+  >();
+  for (const staff of rows) {
+    if (!staff.lineNumber || !staff.extension) continue;
+    const members = membersByPhone.get(staff.lineNumber) ?? [];
+    members.push({
+      staffUserId: staff.staffUserId,
+      displayName: staff.displayName,
+      lineNumber: staff.lineNumber,
+      extension: staff.extension,
+      department: staff.department,
+      jobTitle: staff.jobTitle,
+    });
+    membersByPhone.set(staff.lineNumber, members);
+  }
+  return new Map(
+    [...membersByPhone].map(([phone, staffMembers]) => [
+      phone,
+      { source: "staff" as const, staffMembers },
+    ]),
+  );
+}
 
 type LegalFriendsDirectoryRow = {
   client_idx: number;
@@ -1672,8 +1755,49 @@ export function createTelephonyService(options: {
       });
     }
 
-    const unmatchedPhones = uniquePhones.filter(
+    const unmatchedAfterConsultations = uniquePhones.filter(
       (phone) => !consultationMatchedPhones.has(phone),
+    );
+    const staffRows = unmatchedAfterConsultations.length
+      ? await db
+          .select({
+            lineNumber: staffProfiles.centrexLineNumber,
+            staffUserId: staffUsers.id,
+            displayName: staffProfiles.displayName,
+            extension: staffProfiles.centrexExtension,
+            department: staffMemberships.department,
+            jobTitle: staffMemberships.jobTitle,
+          })
+          .from(staffProfiles)
+          .innerJoin(staffUsers, eq(staffUsers.id, staffProfiles.userId))
+          .innerJoin(
+            staffMemberships,
+            and(
+              eq(staffMemberships.userId, staffUsers.id),
+              eq(staffMemberships.isPrimary, true),
+              eq(staffMemberships.isActive, true),
+            ),
+          )
+          .where(
+            and(
+              eq(staffUsers.status, "active"),
+              inArray(
+                staffProfiles.centrexLineNumber,
+                unmatchedAfterConsultations,
+              ),
+              isNotNull(staffProfiles.centrexLineNumber),
+              isNotNull(staffProfiles.centrexExtension),
+            ),
+          )
+          .orderBy(asc(staffProfiles.displayName))
+      : [];
+    const staffMatches = staffPhoneCustomerMatches(staffRows);
+    for (const [phone, staffMatch] of staffMatches) {
+      matches.set(phone, staffMatch);
+    }
+
+    const unmatchedPhones = unmatchedAfterConsultations.filter(
+      (phone) => !staffMatches.has(phone),
     );
     const legalFriendsMatches = await resolveLegalFriendsPhones(
       unmatchedPhones,
@@ -2103,6 +2227,16 @@ export function createTelephonyService(options: {
         customerMatch,
         notificationKind,
         notificationTargetUserIds,
+        canOpenLiveAftercare: shouldAutoOpenConnectedAftercare({
+          scope: root.scope,
+          state: root.state,
+          actorUserId: actor.id,
+          currentEndpointOwnerUserIds:
+            ownersByActivityEndpoint.get(root.currentEndpointId!) ?? [],
+          participantUserIds: participants.map(
+            (participant) => participant.staffUserId,
+          ),
+        }),
         canOpenAftercare:
           root.state === "ended" &&
           root.correlationStatus === "confirmed" &&
@@ -3899,6 +4033,9 @@ export function createTelephonyService(options: {
         const customerName =
           linkedConsultation?.displayName ??
           matchedConsultation?.displayName ??
+          (match?.source === "staff"
+            ? match.staffMembers.map((staff) => staff.displayName).join(" · ")
+            : null) ??
           (match?.source === "legal_friends" ? match.clientName : null) ??
           "고객명 미확인";
         const contactTarget = task.consultationId && linkedConsultation
@@ -4210,13 +4347,13 @@ export function createTelephonyService(options: {
   ) {
     const detail = await getPhoneDeskCall(callId);
     const call = detail.call;
-    if (call.state !== "ended") {
+    if (!isPhoneDeskAftercareWritableState(call.state)) {
       throw new TelephonyCallError(
         "call_not_ended",
-        "통화 종료를 확인한 뒤 후처리를 저장해 주세요.",
+        "통화가 연결된 뒤 후처리를 저장해 주세요.",
       );
     }
-    if (call.correlationStatus !== "confirmed") {
+    if (call.state === "ended" && call.correlationStatus !== "confirmed") {
       throw new TelephonyCallError(
         "call_resolution_required",
         "최종 통화자를 확인한 뒤 후처리를 저장해 주세요.",
@@ -4247,27 +4384,6 @@ export function createTelephonyService(options: {
       );
     }
     const callRootId = call.callRootId === callId ? callId : null;
-    if (
-      callRootId &&
-      call.scope === "external" &&
-      call.finalStaffUserId &&
-      call.finalStaffUserId !== actor.id
-    ) {
-      throw new TelephonyCallError(
-        "call_owned_by_other_staff",
-        "최종적으로 고객과 통화한 담당자만 후처리를 입력할 수 있습니다.",
-      );
-    }
-    if (
-      callRootId &&
-      call.scope === "internal" &&
-      !call.participants.some((participant) => participant.staffUserId === actor.id)
-    ) {
-      throw new TelephonyCallError(
-        "call_owned_by_other_staff",
-        "내선 통화에 참여한 직원만 후처리를 입력할 수 있습니다.",
-      );
-    }
     const confirmedAt = now();
     const dueAt = input.followUp.enabled
       ? assertValidFollowUpDueAt(input.followUp.dueAt, confirmedAt)
@@ -6009,23 +6125,6 @@ export function createTelephonyService(options: {
           "상담을 찾을 수 없습니다.",
         );
       }
-      const [assignment] = await tx
-        .select({ assigneeUserId: consultationAssignments.assigneeUserId })
-        .from(consultationAssignments)
-        .where(eq(consultationAssignments.consultationId, consultationId))
-        .limit(1);
-      if (!assignment) {
-        throw new TelephonyCallError(
-          "consultation_not_assigned",
-          "상담하기로 담당자를 먼저 지정해 주세요.",
-        );
-      }
-      if (assignment.assigneeUserId !== actor.id) {
-        throw new TelephonyCallError(
-          "consultation_assigned_to_other_staff",
-          "현재 담당자만 이 상담 고객에게 문자를 보낼 수 있습니다.",
-        );
-      }
       const [request] = await tx
         .select({
           id: consultationRequests.id,
@@ -6034,8 +6133,34 @@ export function createTelephonyService(options: {
         .from(consultationRequests)
         .where(
           and(
-            eq(consultationRequests.consultationId, consultationId),
-            eq(consultationRequests.contactChannel, "phone"),
+            or(
+              eq(consultationRequests.consultationId, consultationId),
+              inArray(
+                consultationRequests.consultationId,
+                tx
+                  .select({
+                    consultationId:
+                      consultationGroupMembers.consultationId,
+                  })
+                  .from(consultationGroupMembers)
+                  .innerJoin(
+                    consultationGroups,
+                    eq(
+                      consultationGroups.id,
+                      consultationGroupMembers.groupId,
+                    ),
+                  )
+                  .where(
+                    and(
+                      eq(consultationGroups.status, "active"),
+                      eq(
+                        consultationGroups.canonicalConsultationId,
+                        consultationId,
+                      ),
+                    ),
+                  ),
+              ),
+            ),
             isNotNull(consultationRequests.phoneCiphertext),
             isNotNull(consultationRequests.phoneNonce),
             isNotNull(consultationRequests.phoneKeyVersion),
@@ -6518,24 +6643,6 @@ export function createTelephonyService(options: {
         );
       }
 
-      const [assignment] = await tx
-        .select({ assigneeUserId: consultationAssignments.assigneeUserId })
-        .from(consultationAssignments)
-        .where(eq(consultationAssignments.consultationId, consultationId))
-        .limit(1);
-      if (!assignment) {
-        throw new TelephonyCallError(
-          "consultation_not_assigned",
-          "상담하기로 담당자를 먼저 지정해 주세요.",
-        );
-      }
-      if (assignment.assigneeUserId !== actor.id) {
-        throw new TelephonyCallError(
-          "consultation_assigned_to_other_staff",
-          "현재 담당자만 이 상담의 클릭투콜을 실행할 수 있습니다.",
-        );
-      }
-
       const [request] = await tx
         .select({
           id: consultationRequests.id,
@@ -6544,8 +6651,34 @@ export function createTelephonyService(options: {
         .from(consultationRequests)
         .where(
           and(
-            eq(consultationRequests.consultationId, consultationId),
-            eq(consultationRequests.contactChannel, "phone"),
+            or(
+              eq(consultationRequests.consultationId, consultationId),
+              inArray(
+                consultationRequests.consultationId,
+                tx
+                  .select({
+                    consultationId:
+                      consultationGroupMembers.consultationId,
+                  })
+                  .from(consultationGroupMembers)
+                  .innerJoin(
+                    consultationGroups,
+                    eq(
+                      consultationGroups.id,
+                      consultationGroupMembers.groupId,
+                    ),
+                  )
+                  .where(
+                    and(
+                      eq(consultationGroups.status, "active"),
+                      eq(
+                        consultationGroups.canonicalConsultationId,
+                        consultationId,
+                      ),
+                    ),
+                  ),
+              ),
+            ),
             isNotNull(consultationRequests.phoneCiphertext),
             isNotNull(consultationRequests.phoneNonce),
             isNotNull(consultationRequests.phoneKeyVersion),

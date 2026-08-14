@@ -292,6 +292,17 @@ export type TelephonyInboundCall = {
           staffUserIds: string[];
         }>;
       }
+    | {
+        source: "staff";
+        staffMembers: Array<{
+          staffUserId: string;
+          displayName: string;
+          lineNumber: string;
+          extension: string;
+          department: string;
+          jobTitle: string;
+        }>;
+      }
     | null;
 };
 
@@ -351,6 +362,7 @@ export type TelephonyCallActivity = {
     | "transfer_returned"
     | null;
   notificationTargetUserIds: string[];
+  canOpenLiveAftercare: boolean;
   canOpenAftercare: boolean;
 };
 

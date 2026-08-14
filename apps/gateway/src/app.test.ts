@@ -536,7 +536,7 @@ test("수신전화 받기 API는 인증된 회선 사용자와 통화 ID를 서�
   assert.equal(requestedBy, realtimeActor.id);
 });
 
-test("클릭투콜 API는 인증된 현재 담당자와 상담 ID를 서비스에 전달한다", async (context) => {
+test("클릭투콜 API는 인증된 직원과 상담 ID를 서비스에 전달한다", async (context) => {
   const consultationId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2c1";
   let received:
     | { consultationId: string; actor: StaffPrincipal }
@@ -836,7 +836,7 @@ test("고객찾기와 직원 신규등록 API는 인증된 서비스에 입력�
   });
 });
 
-test("일반 직원은 자신의 문자 템플릿을 만들고 담당 상담에 문자를 요청한 뒤 삭제한다", async (context) => {
+test("일반 직원은 자신의 문자 템플릿을 만들고 상담 고객에게 문자를 요청한 뒤 삭제한다", async (context) => {
   const consultationId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2d8";
   const templateId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2d9";
   const messageId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2da";

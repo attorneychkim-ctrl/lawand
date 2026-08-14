@@ -65,7 +65,11 @@ export default async function PhoneDeskDetailPage({
       ? call.customerMatch.consultation.displayName
       : call.customerMatch?.source === "legal_friends"
         ? call.customerMatch.clientName
-        : "발신자 정보 없음");
+        : call.customerMatch?.source === "staff"
+          ? call.customerMatch.staffMembers
+              .map((member) => member.displayName)
+              .join(" · ")
+          : "발신자 정보 없음");
 
   return (
     <>
@@ -130,7 +134,7 @@ export default async function PhoneDeskDetailPage({
 
         {call.state === "ended" && call.correlationStatus === "needs_confirmation" ? (
           <PhoneCallResolutionForm call={call} />
-        ) : call.state === "ended" ? (
+        ) : call.state === "connected" || call.state === "ended" ? (
           <section className="phone-desk-aftercare-card">
             <div className="section-heading">
               <div>
@@ -139,13 +143,20 @@ export default async function PhoneDeskDetailPage({
               </div>
               {call.aftercare ? (
                 <span className="count-badge">저장됨 · 수정 가능</span>
+              ) : call.state === "connected" ? (
+                <span className="count-badge attention">통화 중 작성 가능</span>
               ) : (
                 <span className="count-badge attention">입력 필요</span>
               )}
             </div>
+            {call.state === "connected" ? (
+              <p className="info-banner">
+                통화 중에도 메모와 다음 일정을 저장할 수 있습니다. 통화가 끝난 뒤 결과를 다시 확인하거나 수정해 주세요.
+              </p>
+            ) : null}
             <PhoneAftercareForm
               detail={detail}
-              returnTo="/phone-desk"
+              returnTo={call.state === "ended" ? "/phone-desk" : undefined}
               staffName={staff.displayName}
             />
           </section>

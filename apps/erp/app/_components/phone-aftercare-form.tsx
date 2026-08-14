@@ -918,10 +918,16 @@ export function PhoneAftercareDialog({
         <header>
           <div>
             <p className="eyebrow">CALL AFTERCARE</p>
-            <h2 id="phone-aftercare-dialog-title">통화 후처리</h2>
+            <h2 id="phone-aftercare-dialog-title">
+              {detail?.call.state === "connected"
+                ? "통화 중 후처리"
+                : "통화 후처리"}
+            </h2>
             <p>
               {detail
-                ? detail.call.scope === "internal"
+                ? detail.call.state === "connected"
+                  ? `${formatPhone(detail.call.remotePhone)} 통화 중입니다. 메모·재연락 일정·문자를 바로 남길 수 있습니다.`
+                  : detail.call.scope === "internal"
                   ? "내선 통화 결과를 정리해 주세요."
                   : `${formatPhone(detail.call.remotePhone)} 통화 결과를 정리해 주세요.`
                 : "통화 정보를 불러오는 중입니다."}
