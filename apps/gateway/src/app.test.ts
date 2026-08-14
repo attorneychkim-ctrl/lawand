@@ -1615,7 +1615,7 @@ test("통합 통화 활동 조회는 인증된 직원 문맥으로만 개인정�
 test("전화데스크 통화자 확정·후처리·재통화 완료 API는 통합 계약과 현재 직원을 전달한다", async (context) => {
   const callId = "019fa6a4-6834-7782-aa0b-4e71ffb8a301";
   const taskId = "019fa6a4-6834-7782-aa0b-4e71ffb8a302";
-  const finalLegId = "019fa6a4-6834-7782-aa0b-4e71ffb8a303";
+  const finalStaffUserId = "019fa6a4-6834-7782-aa0b-4e71ffb8a304";
   let savedResult = "";
   let savedAssignee = "";
   let completedBy = "";
@@ -1640,11 +1640,11 @@ test("전화데스크 통화자 확정·후처리·재통화 완료 API는 통�
     },
     resolvePhoneDeskCall: async (
       receivedCallId: string,
-      input: { finalLegId: string },
+      input: { finalLegId?: string; finalStaffUserId?: string },
       actor: StaffPrincipal,
     ) => {
       assert.equal(receivedCallId, callId);
-      assert.equal(input.finalLegId, finalLegId);
+      assert.equal(input.finalStaffUserId, finalStaffUserId);
       resolvedBy = actor.id;
       return { call: { id: callId, correlationStatus: "confirmed" as const } };
     },
@@ -1691,7 +1691,7 @@ test("전화데스크 통화자 확정·후처리·재통화 완료 API는 통�
     {
       method: "POST",
       headers,
-      body: JSON.stringify({ finalLegId }),
+      body: JSON.stringify({ finalStaffUserId }),
     },
   );
   assert.equal(resolved.status, 200);

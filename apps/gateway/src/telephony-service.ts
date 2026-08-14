@@ -10,6 +10,7 @@ import {
   isNull,
   lt,
   ne,
+  notExists,
   or,
   sql,
 } from "drizzle-orm";
@@ -99,6 +100,7 @@ const INBOUND_RINGING_SNAPSHOT_WINDOW_MS = 3 * 60_000;
 const INBOUND_CONNECTED_SNAPSHOT_WINDOW_MS = 12 * 60 * 60_000;
 const INBOUND_ENDED_SNAPSHOT_WINDOW_MS = 20_000;
 const INTERNAL_SINGLE_LEG_CONFIRMATION_WINDOW_MS = 3 * 60_000;
+const MANUAL_FINAL_PARTICIPANT_DELAY_MS = 2 * 60_000;
 const INBOUND_ANSWER_COMMAND_TTL_MS = 20_000;
 const INBOUND_ANSWER_EVENT_MAX_DELIVERY_DELAY_MS = 15_000;
 const INBOUND_ANSWER_DISPATCH_TIMEOUT_MS = 3 * 60_000;
@@ -279,6 +281,30 @@ export function isPhoneDeskAftercareWritableState(
     | "unknown",
 ): boolean {
   return state === "connected" || state === "ended";
+}
+
+export function canResolvePhoneDeskFinalParticipant(input: {
+  scope: "external" | "internal";
+  state:
+    | "ringing"
+    | "connected"
+    | "transferring"
+    | "needs_confirmation"
+    | "ended";
+  correlationStatus: "pending" | "confirmed" | "needs_confirmation" | "rejected";
+  hasEndedCustomerLeg: boolean;
+  hasActiveCustomerLeg: boolean;
+  lastEventAt: Date;
+  resolutionAt: Date;
+}) {
+  if (input.correlationStatus !== "needs_confirmation") return false;
+  if (input.state === "ended") return true;
+  return input.scope === "external" &&
+    input.state === "needs_confirmation" &&
+    input.hasEndedCustomerLeg &&
+    !input.hasActiveCustomerLeg &&
+    input.resolutionAt.getTime() - input.lastEventAt.getTime() >=
+      MANUAL_FINAL_PARTICIPANT_DELAY_MS;
 }
 
 export function shouldAutoOpenConnectedAftercare(input: {
@@ -667,6 +693,9 @@ export class TelephonyCallError extends Error {
       | "call_resolution_not_required"
       | "call_resolution_leg_invalid"
       | "call_resolution_leg_active"
+      | "call_resolution_staff_required"
+      | "call_resolution_staff_mismatch"
+      | "call_resolution_staff_inactive"
       | "call_phone_not_available"
       | "internal_aftercare_result_invalid"
       | "internal_consultation_not_allowed"
@@ -2230,7 +2259,13 @@ export function createTelephonyService(options: {
           ?.includes(actor.id),
       );
       const relations = relationsByRoot.get(root.id) ?? [];
-      const latestRelation = relations[0] ?? null;
+      const latestTransferRelation = relations.find(
+        (relation) =>
+          relation.relationType === "transfer_attempted" ||
+          relation.relationType === "transfer_completed" ||
+          relation.relationType === "transfer_returned" ||
+          relation.relationType === "transfer_unresolved",
+      ) ?? null;
       const participantByLeg = new Map(
         participants.map((participant) => [participant.legId, participant]),
       );
@@ -2242,11 +2277,11 @@ export function createTelephonyService(options: {
         | null = null;
       let notificationTargetUserIds: string[] = [];
       if (
-        latestRelation?.relationType === "transfer_completed" ||
-        latestRelation?.relationType === "transfer_attempted"
+        latestTransferRelation?.relationType === "transfer_completed" ||
+        latestTransferRelation?.relationType === "transfer_attempted"
       ) {
-        const targetParticipant = latestRelation.toLegId
-          ? participantByLeg.get(latestRelation.toLegId)
+        const targetParticipant = latestTransferRelation.toLegId
+          ? participantByLeg.get(latestTransferRelation.toLegId)
           : null;
         if (targetParticipant?.direction === "inbound") {
           notificationKind = "transferred_customer";
@@ -2257,10 +2292,10 @@ export function createTelephonyService(options: {
                 : [])),
           );
         }
-      } else if (latestRelation?.relationType === "transfer_returned") {
+      } else if (latestTransferRelation?.relationType === "transfer_returned") {
         notificationKind = "transfer_returned";
-        const targetParticipant = latestRelation.fromLegId
-          ? participantByLeg.get(latestRelation.fromLegId)
+        const targetParticipant = latestTransferRelation.fromLegId
+          ? participantByLeg.get(latestTransferRelation.fromLegId)
           : null;
         if (targetParticipant) {
           notificationTargetUserIds.push(
@@ -2290,6 +2325,11 @@ export function createTelephonyService(options: {
           (staff) => staff.staffUserId,
         );
       }
+      const displayedTransferRelation =
+        latestTransferRelation?.relationType === "transfer_unresolved" &&
+          root.correlationStatus === "confirmed"
+          ? null
+          : latestTransferRelation;
       items.push({
         id: root.id,
         observedCallId: observedCall?.observedCallId ?? null,
@@ -2318,10 +2358,10 @@ export function createTelephonyService(options: {
           extension: root.endpointExtension,
         },
         participants,
-        transfer: latestRelation
+        transfer: displayedTransferRelation
           ? {
-              state: latestRelation.relationType,
-              correlationStatus: latestRelation.correlationStatus,
+              state: displayedTransferRelation.relationType,
+              correlationStatus: displayedTransferRelation.correlationStatus,
             }
           : null,
         customerMatch,
@@ -2370,6 +2410,7 @@ export function createTelephonyService(options: {
         lastEventAt: telephonyInboundCalls.lastEventAt,
         ringingEventOccurredAt: telephonyInboundEvents.occurredAt,
         ringingEventReceivedAt: telephonyInboundEvents.receivedAt,
+        endpointType: telephonyEndpoints.endpointType,
         extension: telephonyEndpoints.extension,
         ownerUserId: staffTelephonyBindings.staffUserId,
         ownerDisplayName: staffProfiles.displayName,
@@ -2500,6 +2541,7 @@ export function createTelephonyService(options: {
         state: "ringing" | "connected" | "ended";
         remotePhone: string;
         incomingLineLast4: string;
+        endpointType: "personal" | "representative";
         extension: string;
         ringingAt: string;
         connectedAt: string | null;
@@ -2530,6 +2572,7 @@ export function createTelephonyService(options: {
           state: row.state,
           remotePhone,
           incomingLineLast4: row.incomingLineLast4,
+          endpointType: row.endpointType,
           extension: row.extension,
           ringingAt: row.ringingAt.toISOString(),
           connectedAt: row.connectedAt?.toISOString() ?? null,
@@ -2945,10 +2988,12 @@ export function createTelephonyService(options: {
         endedAt: telephonyInboundCalls.endedAt,
         providerEndCause: telephonyInboundCalls.providerEndCause,
         lastEventAt: telephonyInboundCalls.lastEventAt,
+        endpointType: telephonyEndpoints.endpointType,
         endpointLabel: telephonyEndpoints.label,
         endpointLineNumber: telephonyEndpoints.lineNumber,
         endpointExtension: telephonyEndpoints.extension,
         rootEndpointId: callRootCurrentEndpoint.id,
+        rootEndpointType: callRootCurrentEndpoint.endpointType,
         rootEndpointLabel: callRootCurrentEndpoint.label,
         rootEndpointLineNumber: callRootCurrentEndpoint.lineNumber,
         rootEndpointExtension: callRootCurrentEndpoint.extension,
@@ -3047,6 +3092,7 @@ export function createTelephonyService(options: {
         providerBillableSeconds: telephonyCalls.providerBillableSeconds,
         reconciledAt: telephonyCalls.reconciledAt,
         disposition: telephonyCalls.disposition,
+        endpointType: telephonyEndpoints.endpointType,
         endpointLabel: telephonyEndpoints.label,
         endpointLineNumber: telephonyEndpoints.lineNumber,
         endpointExtension: telephonyEndpoints.extension,
@@ -3127,6 +3173,7 @@ export function createTelephonyService(options: {
         endedAt: telephonyCallRoots.endedAt,
         lastEventAt: telephonyCallRoots.lastEventAt,
         finalStaffUserId: telephonyCallRoots.finalStaffUserId,
+        endpointType: callRootCurrentEndpoint.endpointType,
         endpointLabel: callRootCurrentEndpoint.label,
         endpointLineNumber: callRootCurrentEndpoint.lineNumber,
         endpointExtension: callRootCurrentEndpoint.extension,
@@ -3167,6 +3214,56 @@ export function createTelephonyService(options: {
       )
       .orderBy(desc(telephonyCallRoots.startedAt));
 
+    const rootOnlyExternalRows = callId
+      ? await db
+          .select({
+            id: telephonyCallRoots.id,
+            direction: telephonyCallRoots.direction,
+            state: telephonyCallRoots.state,
+            correlationStatus: telephonyCallRoots.correlationStatus,
+            currentEndpointId: telephonyCallRoots.currentEndpointId,
+            remotePhoneCiphertext:
+              telephonyCallRoots.remotePhoneCiphertext,
+            remotePhoneNonce: telephonyCallRoots.remotePhoneNonce,
+            remotePhoneKeyVersion: telephonyCallRoots.remotePhoneKeyVersion,
+            startedAt: telephonyCallRoots.startedAt,
+            connectedAt: telephonyCallRoots.connectedAt,
+            endedAt: telephonyCallRoots.endedAt,
+            lastEventAt: telephonyCallRoots.lastEventAt,
+            finalStaffUserId: telephonyCallRoots.finalStaffUserId,
+            endpointType: callRootCurrentEndpoint.endpointType,
+            endpointLabel: callRootCurrentEndpoint.label,
+            endpointLineNumber: callRootCurrentEndpoint.lineNumber,
+            endpointExtension: callRootCurrentEndpoint.extension,
+          })
+          .from(telephonyCallRoots)
+          .innerJoin(
+            callRootCurrentEndpoint,
+            eq(
+              callRootCurrentEndpoint.id,
+              telephonyCallRoots.currentEndpointId,
+            ),
+          )
+          .where(
+            and(
+              eq(telephonyCallRoots.id, callId),
+              eq(telephonyCallRoots.scope, "external"),
+              notExists(
+                db
+                  .select({ id: telephonyInboundCalls.id })
+                  .from(telephonyInboundCalls)
+                  .where(
+                    eq(
+                      telephonyInboundCalls.callRootId,
+                      telephonyCallRoots.id,
+                    ),
+                  ),
+              ),
+            ),
+          )
+          .limit(1)
+      : [];
+
     const endpointIds = [
       ...new Set([
         ...observedRows.map((row) => row.endpointId),
@@ -3174,6 +3271,9 @@ export function createTelephonyService(options: {
           row.rootEndpointId ? [row.rootEndpointId] : [],
         ),
         ...standaloneClickRows.map((row) => row.endpointId),
+        ...rootOnlyExternalRows.flatMap((row) =>
+          row.currentEndpointId ? [row.currentEndpointId] : [],
+        ),
         ...internalRows.flatMap((row) => [
           row.currentEndpointId!,
           ...(row.legEndpointId ? [row.legEndpointId] : []),
@@ -3246,6 +3346,92 @@ export function createTelephonyService(options: {
         },
         `telephony_call_directory_targets/${row.callId}/client_name`,
       );
+
+    const rootOnlyExternalItems = await Promise.all(
+      rootOnlyExternalRows.map(async (row) => {
+        if (
+          !row.direction ||
+          !row.currentEndpointId ||
+          !row.remotePhoneCiphertext ||
+          !row.remotePhoneNonce ||
+          !row.remotePhoneKeyVersion
+        ) {
+          throw new Error("phone_desk_external_root_data_incomplete");
+        }
+        const remotePhone = protection.decrypt(
+          {
+            ciphertext: row.remotePhoneCiphertext,
+            nonce: row.remotePhoneNonce,
+            keyVersion: row.remotePhoneKeyVersion,
+          },
+          `telephony_inbound_calls/${row.id}/remote_phone`,
+        );
+        const ringEndAt = row.connectedAt ?? row.endedAt;
+        const ringSeconds = ringEndAt
+          ? Math.max(
+              0,
+              Math.round(
+                (ringEndAt.getTime() - row.startedAt.getTime()) / 1_000,
+              ),
+            )
+          : null;
+        const durationSeconds = row.connectedAt && row.endedAt
+          ? Math.max(
+              0,
+              Math.round(
+                (row.endedAt.getTime() - row.connectedAt.getTime()) / 1_000,
+              ),
+            )
+          : null;
+        return {
+          id: row.id,
+          observedCallId: null,
+          callRootId: row.id,
+          scope: "external" as const,
+          direction: row.direction,
+          receptionMode:
+            row.direction === "inbound"
+              ? ("office_bridge" as const)
+              : null,
+          source:
+            row.direction === "inbound"
+              ? ("inbound" as const)
+              : ("centrex_direct" as const),
+          state:
+            row.state === "ended"
+              ? ("ended" as const)
+              : row.state === "ringing"
+                ? ("ringing" as const)
+                : row.state === "needs_confirmation"
+                  ? ("unknown" as const)
+                  : ("connected" as const),
+          correlationStatus: row.correlationStatus,
+          remotePhone,
+          occurredAt: row.startedAt.toISOString(),
+          ringingAt: row.startedAt.toISOString(),
+          connectedAt: row.connectedAt?.toISOString() ?? null,
+          endedAt: row.endedAt?.toISOString() ?? null,
+          lastEventAt: row.lastEventAt.toISOString(),
+          ringSeconds,
+          durationSeconds,
+          providerEndCause: null,
+          endpoint: {
+            id: row.currentEndpointId,
+            endpointType: row.endpointType,
+            label: row.endpointLabel,
+            lineNumber: row.endpointLineNumber,
+            extension: row.endpointExtension,
+          },
+          finalStaffUserId: row.finalStaffUserId,
+          endpointOwners:
+            ownersByEndpoint.get(row.currentEndpointId) ?? [],
+          participants: [],
+          relationType: null,
+          customerMatch: await customerMatch(remotePhone),
+          clickToCall: null,
+        };
+      }),
+    );
 
     const observedItems = await Promise.all(
       observedRows.map(async (row) => {
@@ -3343,6 +3529,7 @@ export function createTelephonyService(options: {
           providerEndCause: row.providerEndCause,
           endpoint: {
             id: row.rootEndpointId ?? row.endpointId,
+            endpointType: row.rootEndpointType ?? row.endpointType,
             label: row.rootEndpointLabel ?? row.endpointLabel,
             lineNumber:
               row.rootEndpointLineNumber ?? row.endpointLineNumber,
@@ -3488,6 +3675,7 @@ export function createTelephonyService(options: {
           providerEndCause: null,
           endpoint: {
             id: row.endpointId,
+            endpointType: row.endpointType,
             label: row.endpointLabel,
             lineNumber: row.endpointLineNumber,
             extension: row.endpointExtension,
@@ -3634,6 +3822,7 @@ export function createTelephonyService(options: {
         providerEndCause: null,
         endpoint: {
           id: root.currentEndpointId,
+          endpointType: root.endpointType,
           label: root.endpointLabel,
           lineNumber: root.endpointLineNumber,
           extension: root.endpointExtension,
@@ -3650,6 +3839,7 @@ export function createTelephonyService(options: {
     const baseItems = [
       ...canonicalObservedItems,
       ...standaloneClickItems,
+      ...rootOnlyExternalItems,
       ...internalItems,
     ]
       .sort(
@@ -4228,9 +4418,11 @@ export function createTelephonyService(options: {
       );
     }
     let call = initialCall;
+    let canResolveFinalParticipant = false;
     if (call.callRootId === callId) {
       const [root] = await db
         .select({
+          scope: telephonyCallRoots.scope,
           state: telephonyCallRoots.state,
           correlationStatus: telephonyCallRoots.correlationStatus,
           endedAt: telephonyCallRoots.endedAt,
@@ -4241,6 +4433,27 @@ export function createTelephonyService(options: {
         .where(eq(telephonyCallRoots.id, callId))
         .limit(1);
       if (root) {
+        const resolutionLegs = await db
+          .select({
+            kind: telephonyCallLegs.kind,
+            state: telephonyCallLegs.state,
+          })
+          .from(telephonyCallLegs)
+          .where(eq(telephonyCallLegs.rootId, callId));
+        canResolveFinalParticipant =
+          canResolvePhoneDeskFinalParticipant({
+            scope: root.scope,
+            state: root.state,
+            correlationStatus: root.correlationStatus,
+            hasEndedCustomerLeg: resolutionLegs.some(
+              (leg) => leg.kind === "customer" && leg.state === "ended",
+            ),
+            hasActiveCustomerLeg: resolutionLegs.some(
+              (leg) => leg.kind === "customer" && leg.state !== "ended",
+            ),
+            lastEventAt: root.lastEventAt,
+            resolutionAt: new Date(snapshot.snapshotAt),
+          });
         const staleOneSided = isStaleOneSidedInternalCall({
           scope: call.scope,
           state: root.state,
@@ -4305,6 +4518,7 @@ export function createTelephonyService(options: {
       snapshotAt: snapshot.snapshotAt,
       call,
       staffOptions,
+      canResolveFinalParticipant,
       legalFriendsMatch,
       recommendedAssigneeUserIds: [...recommended].filter((id) =>
         staffOptions.some((staff) => staff.staffUserId === id),
@@ -4339,8 +4553,12 @@ export function createTelephonyService(options: {
       const [root] = await tx
         .select({
           id: telephonyCallRoots.id,
+          scope: telephonyCallRoots.scope,
           state: telephonyCallRoots.state,
           correlationStatus: telephonyCallRoots.correlationStatus,
+          currentEndpointId: telephonyCallRoots.currentEndpointId,
+          endedAt: telephonyCallRoots.endedAt,
+          lastEventAt: telephonyCallRoots.lastEventAt,
         })
         .from(telephonyCallRoots)
         .where(eq(telephonyCallRoots.id, callId))
@@ -4352,53 +4570,161 @@ export function createTelephonyService(options: {
           "전화 원장을 찾을 수 없습니다.",
         );
       }
-      if (root.state !== "ended") {
-        throw new TelephonyCallError(
-          "call_not_ended",
-          "통화 종료를 확인한 뒤 최종 통화자를 선택해 주세요.",
-        );
-      }
       if (root.correlationStatus !== "needs_confirmation") {
         throw new TelephonyCallError(
           "call_resolution_not_required",
           "이미 최종 통화자가 확인된 전화입니다.",
         );
       }
-      const [selectedLeg] = await tx
+      const rootLegs = await tx
         .select({
           id: telephonyCallLegs.id,
           endpointId: telephonyCallLegs.endpointId,
           staffUserId: telephonyCallLegs.staffUserId,
+          kind: telephonyCallLegs.kind,
           state: telephonyCallLegs.state,
+          lastEventAt: telephonyCallLegs.lastEventAt,
         })
         .from(telephonyCallLegs)
-        .where(
-          and(
-            eq(telephonyCallLegs.id, input.finalLegId),
-            eq(telephonyCallLegs.rootId, root.id),
-          ),
-        )
-        .limit(1)
+        .where(eq(telephonyCallLegs.rootId, root.id))
         .for("update");
-      if (!selectedLeg || !selectedLeg.staffUserId) {
+      if (
+        !canResolvePhoneDeskFinalParticipant({
+          scope: root.scope,
+          state: root.state,
+          correlationStatus: root.correlationStatus,
+          hasEndedCustomerLeg: rootLegs.some(
+            (leg) => leg.kind === "customer" && leg.state === "ended",
+          ),
+          hasActiveCustomerLeg: rootLegs.some(
+            (leg) => leg.kind === "customer" && leg.state !== "ended",
+          ),
+          lastEventAt: root.lastEventAt,
+          resolutionAt: resolvedAt,
+        })
+      ) {
+        throw new TelephonyCallError(
+          "call_not_ended",
+          "마지막 고객 연결이 끝난 뒤 2분이 지나면 담당자를 확정할 수 있습니다.",
+        );
+      }
+
+      let selectedLeg = input.finalLegId
+        ? rootLegs.find((leg) => leg.id === input.finalLegId)
+        : undefined;
+      if (input.finalLegId && (!selectedLeg || !selectedLeg.staffUserId)) {
         throw new TelephonyCallError(
           "call_resolution_leg_invalid",
           "선택한 통화자의 직원 연결 정보를 확인할 수 없습니다.",
         );
       }
-      if (selectedLeg.state !== "ended") {
+      if (input.finalLegId && selectedLeg?.state !== "ended") {
         throw new TelephonyCallError(
           "call_resolution_leg_active",
           "선택한 통화자의 종료가 아직 확인되지 않았습니다.",
         );
       }
+      const selectedStaffUserId =
+        input.finalStaffUserId ?? selectedLeg?.staffUserId ?? null;
+      if (!selectedStaffUserId) {
+        throw new TelephonyCallError(
+          "call_resolution_staff_required",
+          "실제로 통화한 직원을 선택해 주세요.",
+        );
+      }
+      if (
+        input.finalStaffUserId &&
+        selectedLeg?.staffUserId &&
+        input.finalStaffUserId !== selectedLeg.staffUserId
+      ) {
+        throw new TelephonyCallError(
+          "call_resolution_staff_mismatch",
+          "선택한 통화 leg와 직원 정보가 일치하지 않습니다.",
+        );
+      }
+      const [selectedStaff] = await tx
+        .select({ id: staffUsers.id })
+        .from(staffUsers)
+        .innerJoin(
+          staffMemberships,
+          and(
+            eq(staffMemberships.userId, staffUsers.id),
+            eq(staffMemberships.isPrimary, true),
+            eq(staffMemberships.isActive, true),
+          ),
+        )
+        .where(
+          and(
+            eq(staffUsers.id, selectedStaffUserId),
+            eq(staffUsers.status, "active"),
+          ),
+        )
+        .limit(1);
+      if (!selectedStaff) {
+        throw new TelephonyCallError(
+          "call_resolution_staff_inactive",
+          "선택한 직원의 활성 계정을 확인할 수 없습니다.",
+        );
+      }
+      if (!selectedLeg) {
+        selectedLeg = rootLegs
+          .filter((leg) => leg.staffUserId === selectedStaffUserId)
+          .sort((left, right) => {
+            if (left.state === "ended" && right.state !== "ended") return -1;
+            if (left.state !== "ended" && right.state === "ended") return 1;
+            return right.lastEventAt.getTime() - left.lastEventAt.getTime();
+          })[0];
+      }
+      const [selectedBinding] = await tx
+        .select({ endpointId: staffTelephonyBindings.endpointId })
+        .from(staffTelephonyBindings)
+        .innerJoin(
+          telephonyEndpoints,
+          and(
+            eq(telephonyEndpoints.id, staffTelephonyBindings.endpointId),
+            eq(telephonyEndpoints.isActive, true),
+          ),
+        )
+        .where(
+          and(
+            eq(staffTelephonyBindings.staffUserId, selectedStaffUserId),
+            eq(staffTelephonyBindings.isActive, true),
+          ),
+        )
+        .orderBy(
+          desc(staffTelephonyBindings.isPrimary),
+          desc(staffTelephonyBindings.assignedAt),
+        )
+        .limit(1);
+      const finalEndpointId =
+        selectedLeg?.endpointId ?? selectedBinding?.endpointId ?? null;
+      const terminalAt = root.endedAt ?? root.lastEventAt;
+      const terminalizedLegs = await tx
+        .update(telephonyCallLegs)
+        .set({
+          state: "ended",
+          endedAt: sql`greatest(${telephonyCallLegs.startedAt}, ${terminalAt})`,
+          providerEndCause: "MANUAL_STAFF_CONFIRMATION",
+          lastEventAt: sql`greatest(${telephonyCallLegs.lastEventAt}, ${terminalAt})`,
+          updatedAt: resolvedAt,
+        })
+        .where(
+          and(
+            eq(telephonyCallLegs.rootId, root.id),
+            inArray(telephonyCallLegs.state, ["ringing", "connected"]),
+          ),
+        )
+        .returning({ id: telephonyCallLegs.id });
       await tx
         .update(telephonyCallRoots)
         .set({
+          state: "ended",
           correlationStatus: "confirmed",
-          currentEndpointId: selectedLeg.endpointId,
-          finalEndpointId: selectedLeg.endpointId,
-          finalStaffUserId: selectedLeg.staffUserId,
+          currentEndpointId: finalEndpointId ?? root.currentEndpointId,
+          finalEndpointId,
+          finalStaffUserId: selectedStaffUserId,
+          endedAt: terminalAt,
+          lastEventAt: root.lastEventAt,
           updatedAt: resolvedAt,
         })
         .where(eq(telephonyCallRoots.id, root.id));
@@ -4407,14 +4733,18 @@ export function createTelephonyService(options: {
         .values({
           id: createEventId(),
           rootId: root.id,
-          fromLegId: selectedLeg.id,
-          toLegId: selectedLeg.id,
+          fromLegId: selectedLeg?.id ?? null,
+          toLegId: selectedLeg?.id ?? null,
           relationType: "staff_resolved",
           correlationStatus: "confirmed",
           correlationKey: `staff-resolved:${root.id}`,
           evidence: {
-            method: "phone_desk_final_participant_selection_v1",
-            selectedLegId: selectedLeg.id,
+            method: "phone_desk_final_participant_selection_v2",
+            selectedLegId: selectedLeg?.id ?? null,
+            selectedStaffUserId,
+            selectedEndpointId: finalEndpointId,
+            rootStateBeforeResolution: root.state,
+            terminalizedActiveLegCount: terminalizedLegs.length,
             actorUserId: actor.id,
           },
           occurredAt: resolvedAt,
@@ -4429,9 +4759,11 @@ export function createTelephonyService(options: {
         targetType: "telephony_call_root",
         targetId: root.id,
         metadata: {
-          finalLegId: selectedLeg.id,
-          finalEndpointId: selectedLeg.endpointId,
-          finalStaffUserId: selectedLeg.staffUserId,
+          finalLegId: selectedLeg?.id ?? null,
+          finalEndpointId,
+          finalStaffUserId: selectedStaffUserId,
+          rootStateBeforeResolution: root.state,
+          terminalizedActiveLegCount: terminalizedLegs.length,
         },
         occurredAt: resolvedAt,
         createdAt: resolvedAt,

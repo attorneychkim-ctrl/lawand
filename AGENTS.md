@@ -88,6 +88,34 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-14 — 호전환 미확정 수동 종결·상태바 시간/대표 공용 회선 UX 후보
+- 운영 원장·Windows bridge·CloudWatch를 읽기 전용으로 대조했다. `***9684`의 16:42 수신은
+  황정훈 내선 1571에서 고객 leg가 16:42:57 KST에 cause 129/16으로 종료됐지만, 직전 시작된
+  대상 내선 9971 consultation leg에는 종료 관측이 없어 root가 `needs_confirmation`으로 남았다.
+  9971은 운영 endpoint·직원 프로필 어느 쪽에도 등록되지 않아 실제 최종 통화자를 자동 추정할
+  수 없다. 기존 상세와 확정 API가 `ended` root·종료 participant만 허용해 담당자 선택 자체가
+  나타나지 않은 것이 `***9684` 상세 후처리 문제의 직접 원인이다.
+- 고객 종료 근거가 있고 활성 고객 leg가 없으며 2분 동안 새 신호가 없는 미확정 외부 root는
+  인증 직원이 전화데스크 상세에서 활성 직원 전체 중 실제 최종 통화자를 선택할 수 있게 했다.
+  확정 트랜잭션은 남은 비고객 활성 leg를 `MANUAL_STAFF_CONFIRMATION`으로 닫고 root를
+  `ended/confirmed`로 전환하며, 선택 직원·leg/endpoint·실행자·이전 상태를 `staff_resolved`
+  관계와 감사 로그에 보존한다. legacy 수신 행이 없는 외부 root도 ID 상세를 열며 기존
+  `finalLegId` 계약은 하위 호환한다. 자동 귀속이나 운영 원장 일괄 보정은 하지 않는다.
+- 상태바는 시작 시각과 미확정 root의 마지막 신호 시각, `담당자 확인` 상세 링크를 표시한다.
+  실제 transfer relation이 있을 때만 `호전환 확인 필요`라고 하고 나머지는 수신/발신 상태
+  확인으로 구분한다. owner 없는 대표 endpoint 7455·1919는 `대표번호 공용 회선`으로 표시하고,
+  개인 endpoint에만 `회선 담당 미지정`을 유지한다. 16:09의 0488 대표 수신에서 확인된 bridge 직원은
+  고은혜/5224, 16:18의 1919 수신은 서화영/9973으로 확인됐으나, 7455의 15:59·16:08 통화는
+  exact 직원 bridge/provider 근거가 없어 최종 직원을 확정하지 않았다.
+- 16:09 전후 bridge 유입은 50~68ms이고 queue 최고 1·현재 0, dead-letter 0이었다. E2E 계측은
+  summary 405줄·표본 3,244개를 정상 수집했으며 해당 시각 서버 원천→gateway는 45ms였다.
+  브라우저 Notification 처리 10.48초 표본 하나와 U+ polling 발견 지연은 있었지만 DB wait나
+  지속 적체는 없었다. core 86개·gateway 159개 테스트, 전체 5패키지 typecheck·lint·production
+  build, DB schema check와 `git diff --check`를 통과했다. 합성 외부 root를 실제 서비스 경계로
+  생성해 root-only 상세→직원 선택→모든 leg/root 종료·재확정 차단을 검증하고 합성 원장과 임시
+  역할을 삭제했다. migration·운영 데이터 변경·재시작·배포는 하지 않았다. 메인 세션에서
+  gateway와 ERP를 같은 릴리스로 반영한 뒤 업무 담당자가 `***9684`의 실제 통화자를 확정한다.
+
 ### 2026-08-14 — 완료 worktree 8개 통합·세 앱/0058~0060 운영 배포·후기 API 핫픽스
 - HERDR worktree 9개와 원격 `origin/worktree/*` 46개를 전수 대조해 완료 브랜치 8개를 모두
   main에 병합했고, 모든 원격 HEAD가 main ancestor이며 제외·진행 중 브랜치는 없다. 통합 이미지

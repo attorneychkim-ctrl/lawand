@@ -802,7 +802,9 @@ export function PhoneDeskWorkspace({
                     .filter(Boolean)
                     .join(" · ") || "내선 담당 미지정"
               : call.endpointOwners.map((owner) => owner.displayName).join(" · ") ||
-                "회선 담당 미지정";
+                (call.endpoint.endpointType === "representative"
+                  ? "대표번호 공용 회선"
+                  : "회선 담당 미지정");
             return (
               <article className="phone-desk-row" key={call.id}>
                 <div className={`phone-desk-direction is-${call.source}`}>

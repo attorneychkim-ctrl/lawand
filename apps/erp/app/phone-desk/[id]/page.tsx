@@ -105,7 +105,15 @@ export default async function PhoneDeskDetailPage({
           </div>
           <div>
             <span>통화 상태</span>
-            <strong>{call.state === "ended" ? "통화 종료" : call.state === "connected" ? "통화 중" : "처리 중"}</strong>
+            <strong>
+              {call.correlationStatus === "needs_confirmation"
+                ? "담당자 확인 필요"
+                : call.state === "ended"
+                  ? "통화 종료"
+                  : call.state === "connected"
+                    ? "통화 중"
+                    : "처리 중"}
+            </strong>
           </div>
           <div>
             <span>통화 시간</span>
@@ -127,13 +135,20 @@ export default async function PhoneDeskDetailPage({
                     .map((item) => item.displayName)
                     .filter(Boolean)
                     .join(" · ") || "미지정"
-                : call.endpointOwners.map((owner) => owner.displayName).join(" · ") || "미지정"}
+                : call.endpointOwners.map((owner) => owner.displayName).join(" · ") ||
+                  (call.endpoint.endpointType === "representative"
+                    ? "대표번호 공용 회선"
+                    : "미지정")}
             </strong>
           </div>
         </section>
 
-        {call.state === "ended" && call.correlationStatus === "needs_confirmation" ? (
-          <PhoneCallResolutionForm call={call} />
+        {call.correlationStatus === "needs_confirmation" &&
+        detail.canResolveFinalParticipant ? (
+          <PhoneCallResolutionForm
+            call={call}
+            staffOptions={detail.staffOptions}
+          />
         ) : call.state === "connected" || call.state === "ended" ? (
           <section className="phone-desk-aftercare-card">
             <div className="section-heading">

@@ -306,9 +306,13 @@ export const phoneDeskCallResultSchema = z.enum([
 
 export const phoneDeskCallResolutionSchema = z
   .object({
-    finalLegId: z.uuid(),
+    finalLegId: z.uuid().optional(),
+    finalStaffUserId: z.uuid().optional(),
   })
-  .strict();
+  .strict()
+  .refine((value) => value.finalLegId || value.finalStaffUserId, {
+    message: "최종 통화자를 선택해 주세요.",
+  });
 
 const phoneDeskConsultationActionSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("none") }).strict(),

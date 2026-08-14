@@ -373,6 +373,7 @@ export type TelephonyInboundCall = {
   state: "ringing" | "connected" | "ended";
   remotePhone: string;
   incomingLineLast4: string;
+  endpointType: "personal" | "representative";
   extension: string;
   ringingAt: string;
   connectedAt: string | null;
@@ -532,6 +533,7 @@ export type PhoneDeskCall = {
   finalStaffUserId: string | null;
   endpoint: {
     id: string;
+    endpointType: "personal" | "representative";
     label: string;
     lineNumber: string;
     extension: string;
@@ -708,6 +710,7 @@ export type PhoneDeskCallDetail = {
   snapshotAt: string;
   call: PhoneDeskCall;
   staffOptions: PhoneDeskStaffOption[];
+  canResolveFinalParticipant: boolean;
   legalFriendsMatch: Extract<
     NonNullable<TelephonyInboundCall["customerMatch"]>,
     { source: "legal_friends" }
@@ -1163,7 +1166,8 @@ export type TelephonyRealtimeAck = {
 };
 
 export type PhoneDeskCallResolutionInput = {
-  finalLegId: string;
+  finalLegId?: string;
+  finalStaffUserId?: string;
 };
 
 export async function getPhoneDeskCalls(
