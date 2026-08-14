@@ -2,12 +2,14 @@ import {
   and,
   desc,
   eq,
+  isNull,
   or,
   sql,
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import {
+  REVIEW_REQUEST_DEFAULT_TEMPLATES,
   centrexMessageByteLength,
   createEventId,
   renderReviewRequestTemplate,
@@ -20,6 +22,7 @@ import {
   type ReviewCustomerLink,
   type ReviewModeration,
   type ReviewReplyUpsert,
+  type ReviewProgressStage,
   type ReviewRequestBatchSend,
   type ReviewRequestTemplateCreate,
   type ReviewRequestTemplateUpdate,
@@ -42,6 +45,7 @@ import type { StaffPrincipal } from "./auth.js";
 import type { DataProtection } from "./crypto.js";
 import {
   replaceReviewLinkManagers,
+  reviewPracticeAreaFromDirectoryCaseType,
   resolveReviewDirectoryTarget,
   type ReviewDirectoryTarget,
 } from "./review-directory.js";
@@ -87,9 +91,11 @@ export type ReviewManagementSnapshot = {
 
 export type ReviewRequestTemplate = {
   id: string;
+  presetKey: ReviewProgressStage | null;
   name: string;
   body: string;
   bodyByteLength: number;
+  defaultProgressStage: ReviewProgressStage;
   createdAt: string;
   updatedAt: string;
 };
@@ -249,6 +255,33 @@ export function createReviewManagementService(options: {
     now = () => new Date(),
   } = options;
   const normalizedReviewWriteUrl = reviewWriteUrl.replace(/\/$/, "");
+
+  async function ensureDefaultRequestTemplates(actor: StaffPrincipal) {
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtextextended(${`review-request-defaults:${actor.id}`}, 0))`,
+      );
+      for (const template of REVIEW_REQUEST_DEFAULT_TEMPLATES) {
+        const occurredAt = now();
+        await tx
+          .insert(customerReviewRequestTemplates)
+          .values({
+            id: createEventId(),
+            ownerUserId: actor.id,
+            presetKey: template.presetKey,
+            name: template.name,
+            body: template.body,
+            bodyByteLength: centrexMessageByteLength(template.body),
+            defaultProgressStage: template.defaultProgressStage,
+            createdByUserId: actor.id,
+            updatedByUserId: actor.id,
+            createdAt: occurredAt,
+            updatedAt: occurredAt,
+          })
+          .onConflictDoNothing();
+      }
+    });
+  }
 
   async function list(
     actor: StaffPrincipal,
@@ -968,20 +1001,37 @@ export function createReviewManagementService(options: {
   ): ReviewRequestTemplate {
     return {
       id: row.id,
+      presetKey: row.presetKey,
       name: row.name,
       body: row.body,
       bodyByteLength: row.bodyByteLength,
+      defaultProgressStage: row.defaultProgressStage,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };
   }
 
   async function listRequestTemplates(actor: StaffPrincipal) {
+    await ensureDefaultRequestTemplates(actor);
     const rows = await db
       .select()
       .from(customerReviewRequestTemplates)
-      .where(eq(customerReviewRequestTemplates.ownerUserId, actor.id))
-      .orderBy(desc(customerReviewRequestTemplates.updatedAt));
+      .where(
+        and(
+          eq(customerReviewRequestTemplates.ownerUserId, actor.id),
+          isNull(customerReviewRequestTemplates.deletedAt),
+        ),
+      )
+      .orderBy(
+        sql`CASE ${customerReviewRequestTemplates.presetKey}
+          WHEN 'consultation' THEN 1
+          WHEN 'commencement' THEN 2
+          WHEN 'discharge' THEN 3
+          WHEN 'other' THEN 4
+          ELSE 5
+        END`,
+        desc(customerReviewRequestTemplates.updatedAt),
+      );
     return { items: rows.map(templateResponse) };
   }
 
@@ -990,6 +1040,7 @@ export function createReviewManagementService(options: {
     actor: StaffPrincipal,
   ) {
     const input = reviewRequestTemplateCreateSchema.parse(rawInput);
+    await ensureDefaultRequestTemplates(actor);
     const occurredAt = now();
     const [row] = await db
       .insert(customerReviewRequestTemplates)
@@ -999,6 +1050,7 @@ export function createReviewManagementService(options: {
         name: input.name,
         body: input.body,
         bodyByteLength: centrexMessageByteLength(input.body),
+        defaultProgressStage: input.defaultProgressStage,
         createdByUserId: actor.id,
         updatedByUserId: actor.id,
         createdAt: occurredAt,
@@ -1015,12 +1067,42 @@ export function createReviewManagementService(options: {
     actor: StaffPrincipal,
   ) {
     const input = reviewRequestTemplateUpdateSchema.parse(rawInput);
+    const [existing] = await db
+      .select()
+      .from(customerReviewRequestTemplates)
+      .where(
+        and(
+          eq(customerReviewRequestTemplates.id, templateId),
+          eq(customerReviewRequestTemplates.ownerUserId, actor.id),
+          isNull(customerReviewRequestTemplates.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (!existing) {
+      throw new ReviewManagementError("template_not_found", "내 후기 요청 템플릿을 찾을 수 없습니다.");
+    }
+    const preset = existing.presetKey
+      ? REVIEW_REQUEST_DEFAULT_TEMPLATES.find(
+          (template) => template.presetKey === existing.presetKey,
+        )
+      : null;
+    if (
+      preset &&
+      (input.name !== preset.name ||
+        input.defaultProgressStage !== preset.defaultProgressStage)
+    ) {
+      throw new ReviewManagementError(
+        "template_preset_locked",
+        "기본 템플릿의 이름과 후기 시점은 바꿀 수 없습니다. 문자 내용은 자유롭게 수정할 수 있습니다.",
+      );
+    }
     const [row] = await db
       .update(customerReviewRequestTemplates)
       .set({
         name: input.name,
         body: input.body,
         bodyByteLength: centrexMessageByteLength(input.body),
+        defaultProgressStage: input.defaultProgressStage,
         updatedByUserId: actor.id,
         updatedAt: now(),
       })
@@ -1028,40 +1110,71 @@ export function createReviewManagementService(options: {
         and(
           eq(customerReviewRequestTemplates.id, templateId),
           eq(customerReviewRequestTemplates.ownerUserId, actor.id),
+          isNull(customerReviewRequestTemplates.deletedAt),
         ),
       )
       .returning();
-    if (!row) {
-      throw new ReviewManagementError("template_not_found", "내 후기 요청 템플릿을 찾을 수 없습니다.");
-    }
+    if (!row) throw new ReviewManagementError("template_not_found", "내 후기 요청 템플릿을 찾을 수 없습니다.");
     return templateResponse(row);
   }
 
   async function deleteRequestTemplate(templateId: string, actor: StaffPrincipal) {
-    const [used] = await db
-      .select({ id: customerReviewRequests.id })
-      .from(customerReviewRequests)
-      .where(eq(customerReviewRequests.templateId, templateId))
-      .limit(1);
-    if (used) {
-      throw new ReviewManagementError(
-        "template_in_use",
-        "발송 이력이 있는 템플릿은 삭제할 수 없습니다. 이름과 문구를 수정해 주세요.",
-      );
-    }
-    const [deleted] = await db
-      .delete(customerReviewRequestTemplates)
+    const [template] = await db
+      .select({
+        id: customerReviewRequestTemplates.id,
+        presetKey: customerReviewRequestTemplates.presetKey,
+        deletedAt: customerReviewRequestTemplates.deletedAt,
+      })
+      .from(customerReviewRequestTemplates)
       .where(
         and(
           eq(customerReviewRequestTemplates.id, templateId),
           eq(customerReviewRequestTemplates.ownerUserId, actor.id),
         ),
       )
-      .returning({ id: customerReviewRequestTemplates.id });
-    if (!deleted) {
+      .limit(1);
+    if (!template) {
       throw new ReviewManagementError("template_not_found", "내 후기 요청 템플릿을 찾을 수 없습니다.");
     }
-    return { id: deleted.id, deleted: true as const };
+    if (template.presetKey) {
+      throw new ReviewManagementError(
+        "template_preset_required",
+        "기본 후기 요청 템플릿은 삭제할 수 없습니다. 문자 내용은 자유롭게 수정할 수 있습니다.",
+      );
+    }
+    if (!template.deletedAt) {
+      const deletedAt = now();
+      await db.transaction(async (tx) => {
+        const [deleted] = await tx
+          .update(customerReviewRequestTemplates)
+          .set({
+            deletedAt,
+            updatedByUserId: actor.id,
+            updatedAt: deletedAt,
+          })
+          .where(
+            and(
+              eq(customerReviewRequestTemplates.id, templateId),
+              eq(customerReviewRequestTemplates.ownerUserId, actor.id),
+              isNull(customerReviewRequestTemplates.deletedAt),
+            ),
+          )
+          .returning({ id: customerReviewRequestTemplates.id });
+        if (deleted) {
+          await tx.insert(staffAuditLogs).values({
+            id: createEventId(),
+            actorUserId: actor.id,
+            action: "review.request_template.deleted",
+            targetType: "customer_review_request_template",
+            targetId: templateId,
+            metadata: { softDelete: true },
+            occurredAt: deletedAt,
+            createdAt: deletedAt,
+          });
+        }
+      });
+    }
+    return { id: template.id, deleted: true as const };
   }
 
   async function sendRequests(
@@ -1076,6 +1189,7 @@ export function createReviewManagementService(options: {
         and(
           eq(customerReviewRequestTemplates.id, input.templateId),
           eq(customerReviewRequestTemplates.ownerUserId, actor.id),
+          isNull(customerReviewRequestTemplates.deletedAt),
         ),
       )
       .limit(1);
@@ -1159,6 +1273,9 @@ export function createReviewManagementService(options: {
       const requestId = existing?.id ?? createEventId();
       const requestedAt = existing?.requestedAt ?? now();
       const expiresAt = existing?.expiresAt ?? new Date(requestedAt);
+      const suggestedPracticeArea =
+        reviewPracticeAreaFromDirectoryCaseType(target.caseType);
+      const suggestedProgressStage = template.defaultProgressStage;
       if (!existing) {
         expiresAt.setUTCDate(expiresAt.getUTCDate() + REQUEST_EXPIRY_DAYS);
         await db.insert(customerReviewRequests).values({
@@ -1168,12 +1285,28 @@ export function createReviewManagementService(options: {
           directoryCaseIdx: targetInput.caseIdx,
           requestedByUserId: actor.id,
           templateId: input.templateId,
+          suggestedPracticeArea,
+          suggestedProgressStage,
           status: "queued",
           requestedAt,
           expiresAt,
           createdAt: requestedAt,
           updatedAt: requestedAt,
         });
+      } else {
+        await db
+          .update(customerReviewRequests)
+          .set({
+            suggestedPracticeArea,
+            suggestedProgressStage,
+            updatedAt: now(),
+          })
+          .where(
+            and(
+              eq(customerReviewRequests.id, requestId),
+              eq(customerReviewRequests.status, "queued"),
+            ),
+          );
       }
       if (expiresAt <= now()) {
         const failedAt = now();
@@ -1202,7 +1335,7 @@ export function createReviewManagementService(options: {
         continue;
       }
       const token = createReviewRequestToken(requestId, protection);
-      const link = `${normalizedReviewWriteUrl}?request=${encodeURIComponent(token)}`;
+      const link = `${normalizedReviewWriteUrl}#request=${encodeURIComponent(token)}`;
       const body = renderReviewRequestTemplate(template.body, {
         "{{고객명}}": target.clientName,
         "{{담당자명}}": actor.displayName,
@@ -1282,6 +1415,8 @@ export function createReviewManagementService(options: {
               templateId: input.templateId,
               telephonyMessageId: message.id,
               expiresAt: expiresAt.toISOString(),
+              suggestedPracticeArea,
+              suggestedProgressStage,
             },
             occurredAt: sentAt,
             createdAt: sentAt,

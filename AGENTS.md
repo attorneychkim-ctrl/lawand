@@ -195,6 +195,52 @@
   역할을 삭제했다. migration·운영 데이터 변경·재시작·배포는 하지 않았다. 메인 세션에서
   gateway와 ERP를 같은 릴리스로 반영한 뒤 업무 담당자가 `***9684`의 실제 통화자를 확정한다.
 
+### 2026-08-14 — 개인 후기 요청 템플릿 발송 이력 무관 삭제 후보
+- 직원이 직접 만든 추가 후기 요청 템플릿은 발송 이력 유무와 관계없이 ERP의 기존 `삭제`
+  동작으로 즉시 활성 목록에서 제거한다. 별도 보관함·복원 UI는 노출하지 않는다. gateway는
+  `deleted_at` 소프트 삭제와 비식별 감사 로그를 남기고 목록·수정·새 발송에서 삭제 템플릿을
+  제외해 과거 `customer_review_requests.template_id` 참조는 보존한다. 삭제한 이름은 partial
+  unique index 덕분에 새 템플릿에 다시 사용할 수 있다. 고정 기본 템플릿 네 개만 UI·서비스·
+  DB 제약에서 삭제를 계속 막는다.
+- migration `0063_review_request_template_soft_delete.sql`의 SHA-256은
+  `c90859301c6c865e70d20520e2ad84f2d4ee72a9c2a521f5483e039a4c68abca`다. 운영 데이터가 없는
+  schema-only 임시 PostgreSQL에서 합성 직원으로 후기 migration 두 개를 적용한 뒤 기본 preset 4개
+  활성, 발송 요청이 참조하는 개인 템플릿 삭제, 과거 참조 1개 보존, 활성 목록 제외와 같은
+  이름 재생성을 확인했다. 결과는 개인 템플릿 전체 2·활성 1·과거 참조 1이며 임시 DB를 삭제해
+  잔존 0을 확인했다.
+- gateway 162개 테스트, 전체 5패키지 typecheck·lint·production build, DB schema check와
+  `git diff --check`를 통과했다. `PROJECT_PLAN.md`는 v1.42다. 이 워크트리에서는 main 병합·
+  운영 migration/데이터 변경·배포를 하지 않는다. 메인 통합 시 RDS snapshot 뒤 같은 gateway
+  digest로 `0061..0063`을 순서대로 적용하고 gateway·ERP·홈페이지를 같은 릴리스로 전환한 뒤,
+  발송 이력이 있는 개인 템플릿 삭제→목록/발송 선택 제거→동일 이름 재생성과 과거 요청 이력
+  조회를 통제 계정으로 확인한다.
+
+### 2026-08-14 — 후기 요청 기본 템플릿·고객별 무입력 링크 후보
+- 모든 직원에게 `상담을 받은 뒤`·`개시절차 진행 중`·`면책결정 이후`·`그 밖의 시점` 네
+  기본 템플릿 슬롯을 보장했다. 슬롯 이름·자동화 시점은 고정하고 문자 본문은 개인별로
+  수정할 수 있으며, 별도 템플릿은 이름·본문·기본 작성 시점을 정해 추가·수정·삭제할 수 있다.
+  고객찾기에서 선택한 수신 대상은 검색을 바꿔도 별도 목록에 유지하고 고객명·전화번호·
+  사건명·사건 진행상태와 개별 제외 동작을 표시한다.
+- 고객별 90일·1회용 HMAC 링크는 query 대신 URL fragment로 발송하고 홈페이지 same-origin
+  POST에서 검증한다. 유효한 전용 링크는 사건에 등록된 휴대전화와 가린 공개 이름을 gateway가
+  사용하므로 고객이 이름·전화번호를 다시 입력하지 않는다. 발송 시점의 사건 유형과 템플릿
+  시점을 snapshot으로 남겨 개인회생·파산면책·아직 잘 모르겠어요 및 후기 작성 시점을 기본
+  선택하고, 고객은 필요할 때만 이를 바꾼 뒤 경험 표현 1~3개·후기 원문·필수 동의를 제출한다.
+  링크 없는 일반 공개 후기의 이름·전화 입력과 정확한 전화 일치 연결은 그대로 유지하며, 기존
+  query 링크도 fragment로 즉시 치환해 호환한다.
+- migration `0062_review_request_defaults.sql`은 템플릿 preset·기본 시점과 요청별 추천 문맥을
+  추가한다. SHA-256은
+  `cdcb6c854e5ee0c8c4fc17f27db1b1431880c59ebbfe48c1416b3415fe2b81af`다. 운영 데이터가 없는
+  schema-only 임시 PostgreSQL에서 합성 직원과 개인 수정된 기존 기본 문구를 넣고 migration을
+  두 번 적용해 journal 62개, preset 4종·중복 0, 링크 변수·시점 일치와 기존 수정 문구 보존을
+  확인한 뒤 임시 DB를 삭제했다.
+- core 88개·gateway 161개 테스트, 전체 5패키지 typecheck·lint·production build, DB schema
+  check와 `git diff --check`를 통과했다. `PROJECT_PLAN.md`는 v1.41이다. 이 워크트리에서는 main
+  병합·운영 migration/데이터 변경·배포·실제 후기요청 문자·모바일 Chrome 실기기 canary를 하지
+  않는다. 운영 반영 시 메인 세션에서 RDS snapshot 뒤 검증한 gateway digest로 `0062`를
+  적용하고 gateway·ERP·홈페이지를 같은 릴리스 ID로 전환한 다음, 통제 고객 1건의 문자 링크
+  열기→자동 사건/시점 선택→이름·전화 무입력 제출과 hydration 경고 0을 확인한다.
+
 ### 2026-08-14 — 완료 worktree 8개 통합·세 앱/0058~0060 운영 배포·후기 API 핫픽스
 - HERDR worktree 9개와 원격 `origin/worktree/*` 46개를 전수 대조해 완료 브랜치 8개를 모두
   main에 병합했고, 모든 원격 HEAD가 main ancestor이며 제외·진행 중 브랜치는 없다. 통합 이미지

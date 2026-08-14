@@ -15,6 +15,7 @@ import {
   kakaoHomepageEntrySubmissionSchema,
   kakaoSkillRequestSchema,
   kakaoSkillUserKey,
+  reviewRequestContextRequestSchema,
   reviewSubmissionSchema,
   reviewCustomerLinkSchema,
   reviewModerationSchema,
@@ -1647,6 +1648,60 @@ export function createGatewayServer(options?: {
 
       if (
         request.method === "POST" &&
+        url.pathname === "/v1/review-request-context"
+      ) {
+        if (
+          !options?.publicIntakeApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-public-intake-key",
+            options.publicIntakeApiKey,
+          )
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        if (!options.reviewService || !options.intakeProtection) {
+          sendJson(response, 503, { error: "service_unavailable" });
+          return;
+        }
+        const parsed = reviewRequestContextRequestSchema.safeParse(
+          await readJson(request),
+        );
+        if (!parsed.success) {
+          sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+          return;
+        }
+        const protection = options.intakeProtection.checkKakaoEntry({
+          clientKey:
+            typeof request.headers["x-lawand-client-key"] === "string"
+              ? request.headers["x-lawand-client-key"]
+              : null,
+          idempotencyKey: parsed.data.requestToken.slice(0, 36),
+        });
+        if (!protection.allowed) {
+          sendJson(
+            response,
+            429,
+            {
+              error: "too_many_requests",
+              message:
+                "후기 요청 링크 확인이 짧은 시간에 반복되었습니다. 잠시 후 다시 시도해 주세요.",
+            },
+            { "retry-after": String(protection.retryAfterSeconds) },
+          );
+          return;
+        }
+        sendJson(
+          response,
+          200,
+          await options.reviewService.getRequestContext(parsed.data),
+        );
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
         url.pathname === "/v1/review-submissions"
       ) {
         if (
@@ -1671,14 +1726,20 @@ export function createGatewayServer(options?: {
           sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
           return;
         }
-        const protection = options.intakeProtection.check({
-          clientKey:
-            typeof request.headers["x-lawand-client-key"] === "string"
-              ? request.headers["x-lawand-client-key"]
-              : null,
-          idempotencyKey: parsed.data.idempotencyKey,
-          phone: parsed.data.phone,
-        });
+        const clientKey =
+          typeof request.headers["x-lawand-client-key"] === "string"
+            ? request.headers["x-lawand-client-key"]
+            : null;
+        const protection = parsed.data.requestToken
+          ? options.intakeProtection.checkKakaoEntry({
+              clientKey,
+              idempotencyKey: parsed.data.idempotencyKey,
+            })
+          : options.intakeProtection.check({
+              clientKey,
+              idempotencyKey: parsed.data.idempotencyKey,
+              phone: parsed.data.phone ?? "",
+            });
         if (!protection.allowed) {
           sendJson(
             response,
@@ -3432,8 +3493,7 @@ export function createGatewayServer(options?: {
         ].includes(error.code)
           ? 404
           : error.code === "request_idempotency_conflict" ||
-              error.code === "review_already_published" ||
-              error.code === "template_in_use"
+              error.code === "review_already_published"
             ? 409
             : 400;
         sendJson(response, statusCode, {

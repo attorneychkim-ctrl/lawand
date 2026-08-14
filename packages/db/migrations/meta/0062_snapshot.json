@@ -1,6 +1,6 @@
 {
-  "id": "d1fa3fed-85d6-4aa2-9717-f28cdfe1c276",
-  "prevId": "715864af-c13f-47dd-8372-f92677217812",
+  "id": "fb155262-154e-4399-a11d-5009cd578057",
+  "prevId": "d1fa3fed-85d6-4aa2-9717-f28cdfe1c276",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2748,6 +2748,13 @@
           "primaryKey": false,
           "notNull": true
         },
+        "preset_key": {
+          "name": "preset_key",
+          "type": "review_progress_stage",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
         "name": {
           "name": "name",
           "type": "varchar(80)",
@@ -2765,6 +2772,14 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true
+        },
+        "default_progress_stage": {
+          "name": "default_progress_stage",
+          "type": "review_progress_stage",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'other'"
         },
         "created_by_user_id": {
           "name": "created_by_user_id",
@@ -2811,6 +2826,28 @@
             }
           ],
           "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "customer_review_request_templates_owner_preset_uidx": {
+          "name": "customer_review_request_templates_owner_preset_uidx",
+          "columns": [
+            {
+              "expression": "owner_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "preset_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"customer_review_request_templates\".\"preset_key\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -2923,6 +2960,22 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
+        },
+        "suggested_practice_area": {
+          "name": "suggested_practice_area",
+          "type": "review_practice_area",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'other'"
+        },
+        "suggested_progress_stage": {
+          "name": "suggested_progress_stage",
+          "type": "review_progress_stage",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'other'"
         },
         "telephony_message_id": {
           "name": "telephony_message_id",

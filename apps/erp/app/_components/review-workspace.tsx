@@ -4,7 +4,10 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
-import { centrexMessageByteLength } from "@lawand/core";
+import {
+  REVIEW_REQUEST_DEFAULT_TEMPLATES,
+  centrexMessageByteLength,
+} from "@lawand/core";
 
 import type {
   LegalFriendsClientDirectoryItem,
@@ -38,11 +41,16 @@ const areaLabels = {
 } as const;
 
 const stageLabels = {
-  consultation: "상담 후",
-  commencement: "절차 진행 중",
-  discharge: "면책 후",
-  other: "기타 시점",
+  consultation: "상담을 받은 뒤",
+  commencement: "개시절차 진행 중",
+  discharge: "면책결정 이후",
+  other: "그 밖의 시점",
 } as const;
+
+const newTemplateBody =
+  REVIEW_REQUEST_DEFAULT_TEMPLATES.find(
+    (template) => template.presetKey === "other",
+  )?.body ?? "{{고객명}}님, 후기 작성 부탁드립니다.\n{{후기작성링크}}";
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("ko-KR", {
@@ -69,6 +77,29 @@ function caseTypeLabel(value: number) {
   return value === 1 ? "개인회생" : value === 2 ? "파산면책" : "기타사건";
 }
 
+const revivalStateLabels = new Map([
+  [5, "상담대기"], [10, "상담완료"], [11, "재상담필요"], [15, "계약"],
+  [20, "서류준비"], [21, "부채증명서 발급중"], [22, "부채증명서 발급완료"],
+  [25, "신청서 작성 진행중"], [30, "신청서 제출"], [35, "금지명령"],
+  [40, "보정기간"], [45, "개시결정"], [50, "채권자 집회기일"], [55, "인가결정"],
+]);
+
+const bankruptcyStateLabels = new Map([
+  [5, "상담대기"], [10, "상담완료"], [11, "재상담필요"], [15, "계약"],
+  [20, "서류준비"], [21, "부채증명서 발급중"], [22, "부채증명서 발급완료"],
+  [25, "신청서 작성 진행중"], [30, "신청서 제출"], [40, "보정기간"],
+  [100, "파산선고"], [105, "의견청취기일"], [110, "재산환가 및 배당"],
+  [115, "파산폐지"], [120, "면책결정"], [125, "면책불허가"],
+]);
+
+function caseStateLabel(item: LegalFriendsClientDirectoryItem) {
+  const labels = item.caseType === 2 ? bankruptcyStateLabels : revivalStateLabels;
+  const state = labels.get(item.caseState) ?? `진행 상태 ${item.caseState}`;
+  return [state, item.isClosed ? "종결" : null, item.isRepealed ? "폐지" : null]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 export function ReviewWorkspace({
   initialSnapshot,
   initialTemplates,
@@ -87,9 +118,10 @@ export function ReviewWorkspace({
     initialTemplates[0]?.id ?? "",
   );
   const [templateName, setTemplateName] = useState("");
-  const [templateBody, setTemplateBody] = useState(
-    "{{고객명}}님, 안녕하세요. 법무법인 로앤 {{담당자명}}입니다. 함께한 경험을 아래 링크에 남겨주시면 감사하겠습니다.\n{{후기작성링크}}",
-  );
+  const [templateBody, setTemplateBody] = useState(newTemplateBody);
+  const [templateProgressStage, setTemplateProgressStage] = useState<
+    ReviewRequestTemplate["defaultProgressStage"]
+  >("other");
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [templateBusy, setTemplateBusy] = useState(false);
   const [query, setQuery] = useState("");
@@ -134,6 +166,10 @@ export function ReviewWorkspace({
     () => templates.find((template) => template.id === selectedTemplateId) ?? null,
     [selectedTemplateId, templates],
   );
+  const editingTemplate = useMemo(
+    () => templates.find((template) => template.id === editingTemplateId) ?? null,
+    [editingTemplateId, templates],
+  );
   const templateBodyByteLength = centrexMessageByteLength(templateBody);
   const templateValid =
     templateBodyByteLength <= 500 &&
@@ -151,7 +187,11 @@ export function ReviewWorkspace({
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ name: templateName, body: templateBody }),
+          body: JSON.stringify({
+            name: templateName,
+            body: templateBody,
+            defaultProgressStage: templateProgressStage,
+          }),
         },
       );
       const body = (await response.json().catch(() => null)) as
@@ -168,9 +208,8 @@ export function ReviewWorkspace({
       setSelectedTemplateId(body.id);
       setEditingTemplateId(null);
       setTemplateName("");
-      setTemplateBody(
-        "{{고객명}}님, 안녕하세요. 법무법인 로앤 {{담당자명}}입니다. 함께한 경험을 아래 링크에 남겨주시면 감사하겠습니다.\n{{후기작성링크}}",
-      );
+      setTemplateBody(newTemplateBody);
+      setTemplateProgressStage("other");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "템플릿을 저장하지 못했습니다.");
     } finally {
@@ -182,6 +221,7 @@ export function ReviewWorkspace({
     setEditingTemplateId(template.id);
     setTemplateName(template.name);
     setTemplateBody(template.body);
+    setTemplateProgressStage(template.defaultProgressStage);
   }
 
   async function deleteTemplate(template: ReviewRequestTemplate) {
@@ -197,6 +237,12 @@ export function ReviewWorkspace({
       const next = templates.filter((item) => item.id !== template.id);
       setTemplates(next);
       setSelectedTemplateId(next[0]?.id ?? "");
+      if (editingTemplateId === template.id) {
+        setEditingTemplateId(null);
+        setTemplateName("");
+        setTemplateBody(newTemplateBody);
+        setTemplateProgressStage("other");
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "템플릿을 삭제하지 못했습니다.");
     } finally {
@@ -389,7 +435,7 @@ export function ReviewWorkspace({
           <section className="review-template-panel">
             <header>
               <div><p className="eyebrow">MY TEMPLATE</p><h2>내 후기 요청 템플릿</h2></div>
-              <span>{templates.length}개</span>
+              <span>기본 4종 · 전체 {templates.length}개</span>
             </header>
             <div className="review-template-layout">
               <div className="review-template-list">
@@ -397,24 +443,37 @@ export function ReviewWorkspace({
                   <article className={selectedTemplateId === template.id ? "is-selected" : undefined} key={template.id}>
                     <button onClick={() => setSelectedTemplateId(template.id)} type="button">
                       <strong>{template.name}</strong>
-                      <span>{template.bodyByteLength}바이트</span>
+                      <span>
+                        {template.presetKey ? "기본 템플릿" : "추가 템플릿"}
+                        {` · ${stageLabels[template.defaultProgressStage]} · ${template.bodyByteLength}바이트`}
+                      </span>
                       <p>{template.body}</p>
                     </button>
                     <div>
                       <button onClick={() => editTemplate(template)} type="button">수정</button>
-                      <button disabled={templateBusy} onClick={() => void deleteTemplate(template)} type="button">삭제</button>
+                      {!template.presetKey ? <button disabled={templateBusy} onClick={() => void deleteTemplate(template)} type="button">삭제</button> : <span>항상 유지</span>}
                     </div>
                   </article>
                 )) : <p>아직 템플릿이 없습니다. 첫 문구를 만들어 주세요.</p>}
               </div>
               <form className="review-template-form" onSubmit={(event) => void saveTemplate(event)}>
                 <h3>{editingTemplateId ? "템플릿 수정" : "새 템플릿"}</h3>
-                <label><span>템플릿 이름</span><input maxLength={80} onChange={(event) => setTemplateName(event.target.value)} placeholder="예: 사건 종결 후 후기 요청" required value={templateName} /></label>
+                <label><span>템플릿 이름</span><input disabled={Boolean(editingTemplate?.presetKey)} maxLength={80} onChange={(event) => setTemplateName(event.target.value)} placeholder="예: 사건 종결 후 후기 요청" required value={templateName} /></label>
+                <label>
+                  <span>후기 작성 시 기본 시점</span>
+                  <select
+                    disabled={Boolean(editingTemplate?.presetKey)}
+                    onChange={(event) => setTemplateProgressStage(event.target.value as ReviewRequestTemplate["defaultProgressStage"])}
+                    value={templateProgressStage}
+                  >
+                    {Object.entries(stageLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  </select>
+                </label>
                 <label><span>문자 내용</span><textarea maxLength={720} onChange={(event) => setTemplateBody(event.target.value)} required rows={7} value={templateBody} /></label>
                 <p className={templateValid ? undefined : "is-invalid"}>{templateBodyByteLength} / 500바이트 · <code>{"{{후기작성링크}}"}</code> 필수</p>
                 <div className="review-template-variables"><code>{"{{고객명}}"}</code><code>{"{{담당자명}}"}</code><code>{"{{사건번호}}"}</code><code>{"{{후기작성링크}}"}</code></div>
                 <div className="review-form-actions">
-                  {editingTemplateId ? <button onClick={() => { setEditingTemplateId(null); setTemplateName(""); }} type="button">취소</button> : null}
+                  {editingTemplateId ? <button onClick={() => { setEditingTemplateId(null); setTemplateName(""); setTemplateBody(newTemplateBody); setTemplateProgressStage("other"); }} type="button">취소</button> : null}
                   <button className="primary-button" disabled={templateBusy || !templateValid} type="submit">{templateBusy ? "저장 중…" : "템플릿 저장"}</button>
                 </div>
               </form>
@@ -447,6 +506,48 @@ export function ReviewWorkspace({
                 }) : <p>일치하는 고객 사건을 찾지 못했습니다.</p>}
               </div>
             ) : <p className="review-picker-help">리걸프렌즈 고객찾기와 같은 기준으로 삭제되지 않은 사건을 검색합니다.</p>}
+            <div className="review-selected-customers" aria-live="polite">
+              <header>
+                <div>
+                  <strong>선택한 수신 고객</strong>
+                  <span>검색을 바꿔도 아래 목록은 발송 전까지 유지됩니다.</span>
+                </div>
+                <b>{selectedTargets.size}명</b>
+              </header>
+              {selectedTargets.size ? (
+                <div>
+                  {[...selectedTargets.values()].map((item) => (
+                    <article key={targetKey(item)}>
+                      <span>
+                        <small>고객명</small>
+                        <strong>{item.clientName}</strong>
+                      </span>
+                      <span>
+                        <small>전화번호</small>
+                        <strong>{formatPhone(item.phone)}</strong>
+                      </span>
+                      <span>
+                        <small>사건명</small>
+                        <strong>{item.caseName ?? caseTypeLabel(item.caseType)}</strong>
+                      </span>
+                      <span>
+                        <small>사건 진행상태</small>
+                        <strong>{caseStateLabel(item)}</strong>
+                      </span>
+                      <button
+                        aria-label={`${item.clientName} 고객 선택 해제`}
+                        onClick={() => toggleTarget(item)}
+                        type="button"
+                      >
+                        제외
+                      </button>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p>고객찾기 결과에서 수신 고객을 선택해 주세요.</p>
+              )}
+            </div>
           </section>
 
           <section className="review-send-dock">

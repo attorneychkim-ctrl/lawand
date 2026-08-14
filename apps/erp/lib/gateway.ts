@@ -233,9 +233,15 @@ export type ReviewManagementDetail = {
 
 export type ReviewRequestTemplate = {
   id: string;
+  presetKey: "consultation" | "commencement" | "discharge" | "other" | null;
   name: string;
   body: string;
   bodyByteLength: number;
+  defaultProgressStage:
+    | "consultation"
+    | "commencement"
+    | "discharge"
+    | "other";
   createdAt: string;
   updatedAt: string;
 };
@@ -1678,6 +1684,7 @@ export async function getReviewRequestTemplates(): Promise<
 export async function createReviewRequestTemplate(input: {
   name: string;
   body: string;
+  defaultProgressStage: ReviewRequestTemplate["defaultProgressStage"];
 }): Promise<ReviewRequestTemplate> {
   return reviewResponse(
     await gatewayFetch("/v1/review-request-templates", {
@@ -1689,7 +1696,11 @@ export async function createReviewRequestTemplate(input: {
 
 export async function updateReviewRequestTemplate(
   templateId: string,
-  input: { name: string; body: string },
+  input: {
+    name: string;
+    body: string;
+    defaultProgressStage: ReviewRequestTemplate["defaultProgressStage"];
+  },
 ): Promise<ReviewRequestTemplate> {
   return reviewResponse(
     await gatewayFetch(`/v1/review-request-templates/${templateId}`, {

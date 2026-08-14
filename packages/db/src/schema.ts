@@ -2876,22 +2876,29 @@ export const customerReviewRequestTemplates = pgTable(
     ownerUserId: uuid("owner_user_id")
       .notNull()
       .references(() => staffUsers.id, { onDelete: "restrict" }),
+    presetKey: reviewProgressStageEnum("preset_key"),
     name: varchar("name", { length: 80 }).notNull(),
     body: text("body").notNull(),
     bodyByteLength: integer("body_byte_length").notNull(),
+    defaultProgressStage: reviewProgressStageEnum("default_progress_stage")
+      .default("other")
+      .notNull(),
     createdByUserId: uuid("created_by_user_id")
       .notNull()
       .references(() => staffUsers.id, { onDelete: "restrict" }),
     updatedByUserId: uuid("updated_by_user_id")
       .notNull()
       .references(() => staffUsers.id, { onDelete: "restrict" }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
-    uniqueIndex("customer_review_request_templates_owner_name_lower_uidx").on(
-      table.ownerUserId,
-      sql`lower(${table.name})`,
-    ),
+    uniqueIndex("customer_review_request_templates_owner_name_lower_uidx")
+      .on(table.ownerUserId, sql`lower(${table.name})`)
+      .where(sql`${table.deletedAt} IS NULL`),
+    uniqueIndex("customer_review_request_templates_owner_preset_uidx")
+      .on(table.ownerUserId, table.presetKey)
+      .where(sql`${table.presetKey} IS NOT NULL`),
     check(
       "customer_review_request_templates_name_nonempty",
       sql`length(btrim(${table.name})) > 0`,
@@ -2912,6 +2919,10 @@ export const customerReviewRequestTemplates = pgTable(
       "customer_review_request_templates_owner_audit_consistent",
       sql`${table.createdByUserId} = ${table.ownerUserId}
         AND ${table.updatedByUserId} = ${table.ownerUserId}`,
+    ),
+    check(
+      "customer_review_request_templates_preset_active",
+      sql`${table.presetKey} IS NULL OR ${table.deletedAt} IS NULL`,
     ),
   ],
 );
@@ -3153,6 +3164,14 @@ export const customerReviewRequests = pgTable(
       .references(() => customerReviewRequestTemplates.id, {
         onDelete: "restrict",
       }),
+    suggestedPracticeArea: reviewPracticeAreaEnum("suggested_practice_area")
+      .default("other")
+      .notNull(),
+    suggestedProgressStage: reviewProgressStageEnum(
+      "suggested_progress_stage",
+    )
+      .default("other")
+      .notNull(),
     telephonyMessageId: uuid("telephony_message_id").references(
       () => telephonyMessages.id,
       { onDelete: "restrict" },

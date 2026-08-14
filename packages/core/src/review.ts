@@ -21,6 +21,9 @@ export const reviewProgressStageSchema = z.enum([
   "other",
 ]);
 
+export type ReviewPracticeArea = z.infer<typeof reviewPracticeAreaSchema>;
+export type ReviewProgressStage = z.infer<typeof reviewProgressStageSchema>;
+
 export const reviewExperienceKeywordSchema = z.enum([
   "친절",
   "세심",
@@ -38,6 +41,20 @@ const reviewPhoneSchema = z
   .transform((value) => value.replace(/\D/g, ""))
   .pipe(z.string().regex(/^010\d{8}$/, "010으로 시작하는 휴대전화 번호를 입력해 주세요."));
 
+const reviewAuthorDisplaySchema = z
+  .string()
+  .trim()
+  .min(2, "공개 이름을 두 글자 이상 입력해 주세요.")
+  .max(20, "공개 이름은 스무 글자까지 입력할 수 있습니다.");
+
+export const reviewRequestTokenSchema = z
+  .string()
+  .trim()
+  .regex(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.[A-Za-z0-9_-]{43}$/i,
+    "후기 요청 링크가 올바르지 않습니다.",
+  );
+
 export const reviewSubmissionSchema = z
   .object({
     source: z.literal("homepage").default("homepage"),
@@ -51,17 +68,13 @@ export const reviewSubmissionSchema = z
       .refine((values) => new Set(values).size === values.length, {
         message: "같은 경험 키워드를 중복해서 고를 수 없습니다.",
       }),
-    authorDisplay: z
-      .string()
-      .trim()
-      .min(2, "공개 이름을 두 글자 이상 입력해 주세요.")
-      .max(20, "공개 이름은 스무 글자까지 입력할 수 있습니다."),
+    authorDisplay: reviewAuthorDisplaySchema.optional(),
     content: z
       .string()
       .trim()
       .min(20, "후기를 스무 글자 이상 남겨 주세요.")
       .max(3_000, "후기는 3,000자까지 남길 수 있습니다."),
-    phone: reviewPhoneSchema,
+    phone: reviewPhoneSchema.optional(),
     privacyNoticeVersion: z.literal(CURRENT_REVIEW_PRIVACY_NOTICE_VERSION),
     publicationConsentVersion: z.literal(
       CURRENT_REVIEW_PUBLICATION_CONSENT_VERSION,
@@ -69,19 +82,26 @@ export const reviewSubmissionSchema = z
     consentAgreedAt: z.iso.datetime({ offset: true }),
     privacyConsent: z.literal(true),
     publicationConsent: z.literal(true),
-    requestToken: z
-      .string()
-      .trim()
-      .regex(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.[A-Za-z0-9_-]{43}$/i,
-        "후기 요청 링크가 올바르지 않습니다.",
-      )
-      .optional(),
+    requestToken: reviewRequestTokenSchema.optional(),
     website: z.literal("").optional(),
   })
   .strict()
   .superRefine((value, context) => {
-    if (/\d{7,}|@/.test(value.authorDisplay)) {
+    if (!value.requestToken && !value.authorDisplay) {
+      context.addIssue({
+        code: "custom",
+        message: "공개 이름을 입력해 주세요.",
+        path: ["authorDisplay"],
+      });
+    }
+    if (!value.requestToken && !value.phone) {
+      context.addIssue({
+        code: "custom",
+        message: "휴대전화 번호를 입력해 주세요.",
+        path: ["phone"],
+      });
+    }
+    if (value.authorDisplay && /\d{7,}|@/.test(value.authorDisplay)) {
       context.addIssue({
         code: "custom",
         message: "공개 이름에는 연락처나 이메일을 입력할 수 없습니다.",
@@ -96,6 +116,19 @@ export const reviewSubmissionResponseSchema = z
     acceptedAt: z.iso.datetime({ offset: true }),
     status: z.literal("pending_review"),
     replayed: z.boolean(),
+  })
+  .strict();
+
+export const reviewRequestContextRequestSchema = z
+  .object({ requestToken: reviewRequestTokenSchema })
+  .strict();
+
+export const reviewRequestContextResponseSchema = z
+  .object({
+    authorDisplay: reviewAuthorDisplaySchema,
+    practiceArea: reviewPracticeAreaSchema,
+    progressStage: reviewProgressStageSchema,
+    expiresAt: z.iso.datetime({ offset: true }),
   })
   .strict();
 
@@ -190,6 +223,38 @@ export const REVIEW_REQUEST_TEMPLATE_VARIABLES = [
 export type ReviewRequestTemplateVariable =
   (typeof REVIEW_REQUEST_TEMPLATE_VARIABLES)[number];
 
+export const REVIEW_REQUEST_DEFAULT_TEMPLATES = [
+  {
+    presetKey: "consultation",
+    name: "상담을 받은 뒤",
+    body: "{{고객명}}님, 안녕하세요. 법무법인 로앤 {{담당자명}}입니다. 상담 과정에서 느끼신 점을 편하게 남겨주시면 앞으로의 안내를 더 잘 다듬는 데 도움이 됩니다.\n{{후기작성링크}}",
+    defaultProgressStage: "consultation",
+  },
+  {
+    presetKey: "commencement",
+    name: "개시절차 진행 중",
+    body: "{{고객명}}님, 안녕하세요. 법무법인 로앤 {{담당자명}}입니다. {{사건번호}} 절차를 함께 진행하며 지금까지의 설명과 진행 과정에서 느끼신 점을 솔직하게 들려주세요.\n{{후기작성링크}}",
+    defaultProgressStage: "commencement",
+  },
+  {
+    presetKey: "discharge",
+    name: "면책결정 이후",
+    body: "{{고객명}}님, 안녕하세요. 법무법인 로앤 {{담당자명}}입니다. {{사건번호}} 면책결정까지 함께해 주셔서 감사합니다. 실제 과정에서 느끼신 점을 있는 그대로 남겨주시면 감사하겠습니다.\n{{후기작성링크}}",
+    defaultProgressStage: "discharge",
+  },
+  {
+    presetKey: "other",
+    name: "그 밖의 시점",
+    body: "{{고객명}}님, 안녕하세요. 법무법인 로앤 {{담당자명}}입니다. 로앤과 함께한 과정에서 기억에 남은 점을 편하게 들려주세요. 남겨주신 말씀은 확인 후 소중히 반영하겠습니다.\n{{후기작성링크}}",
+    defaultProgressStage: "other",
+  },
+] as const satisfies readonly {
+  presetKey: ReviewProgressStage;
+  name: string;
+  body: string;
+  defaultProgressStage: ReviewProgressStage;
+}[];
+
 function reviewRequestTemplateVariables(value: string): string[] {
   return value.match(/\{\{[^{}]+\}\}/g) ?? [];
 }
@@ -236,6 +301,7 @@ export const reviewRequestTemplateCreateSchema = z
   .object({
     name: z.string().trim().min(1).max(80),
     body: reviewRequestTemplateBodySchema,
+    defaultProgressStage: reviewProgressStageSchema,
   })
   .strict();
 
@@ -285,6 +351,12 @@ export function renderReviewRequestTemplate(
 export type ReviewSubmission = z.infer<typeof reviewSubmissionSchema>;
 export type ReviewSubmissionResponse = z.infer<
   typeof reviewSubmissionResponseSchema
+>;
+export type ReviewRequestContextRequest = z.infer<
+  typeof reviewRequestContextRequestSchema
+>;
+export type ReviewRequestContextResponse = z.infer<
+  typeof reviewRequestContextResponseSchema
 >;
 export type ReviewRestrictionReason = z.infer<
   typeof reviewRestrictionReasonSchema

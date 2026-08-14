@@ -5395,6 +5395,24 @@ svg {
   line-height: 1.7;
 }
 
+.review-request-error {
+  display: grid;
+  min-height: 560px;
+  align-content: center;
+  justify-items: start;
+  gap: 16px;
+}
+
+.review-request-error h1,
+.review-request-error p {
+  margin: 0;
+}
+
+.review-request-error p:not(.eyebrow) {
+  color: var(--slate-600);
+  line-height: 1.75;
+}
+
 .review-write-body {
   padding: 72px 0 110px;
 }
@@ -5454,6 +5472,72 @@ svg {
   color: var(--slate-600);
   font-size: 12px;
   line-height: 1.75;
+}
+
+.review-invitation-defaults,
+.review-invitation-identity {
+  display: grid;
+  gap: 18px;
+  margin-top: 25px;
+  padding: 22px;
+  border: 1px solid #cbdad4;
+  border-radius: 17px;
+  background: var(--mint-050);
+}
+
+.review-invitation-defaults > p,
+.review-invitation-identity > p {
+  margin: 0;
+  color: #475851;
+  font-size: 12px;
+  line-height: 1.75;
+}
+
+.review-invitation-defaults dl,
+.review-invitation-identity dl {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.review-invitation-defaults dl > div,
+.review-invitation-identity dl > div {
+  padding: 14px 15px;
+  border: 1px solid rgba(39, 106, 87, .16);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .72);
+}
+
+.review-invitation-defaults dt,
+.review-invitation-identity dt {
+  color: var(--slate-600);
+  font-size: 10px;
+}
+
+.review-invitation-defaults dd,
+.review-invitation-identity dd {
+  margin: 5px 0 0;
+  color: var(--action-700);
+  font-size: 13px;
+  font-weight: 780;
+}
+
+.review-invitation-defaults > button,
+.review-context-reset {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid currentColor;
+  background: transparent;
+  color: var(--action-700);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.review-context-reset {
+  margin-top: 22px;
 }
 
 .review-choice-grid {
@@ -12427,6 +12511,11 @@ svg {
   .review-area-choices,
   .review-stage-choices,
   .review-contact-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .review-invitation-defaults dl,
+  .review-invitation-identity dl {
     grid-template-columns: 1fr;
   }
 

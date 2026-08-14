@@ -4,12 +4,14 @@ import test from "node:test";
 import {
   CURRENT_REVIEW_PRIVACY_NOTICE_VERSION,
   CURRENT_REVIEW_PUBLICATION_CONSENT_VERSION,
+  REVIEW_REQUEST_DEFAULT_TEMPLATES,
   detectReviewPiiFlags,
   renderReviewRequestTemplate,
   reviewModerationSchema,
   reviewRequestTemplateCreateSchema,
   reviewSubmissionSchema,
 } from "./review.js";
+import { centrexMessageByteLength } from "./telephony.js";
 
 const validSubmission = {
   source: "homepage",
@@ -37,6 +39,26 @@ test("후기 제출 계약은 전화번호를 정규화하고 정해진 필드�
     reviewSubmissionSchema.safeParse({
       ...validSubmission,
       hiddenTrackingValue: "no",
+    }).success,
+    false,
+  );
+});
+
+test("전용 후기 요청 링크는 이미 보유한 이름과 전화번호를 다시 요구하지 않는다", () => {
+  const parsed = reviewSubmissionSchema.safeParse({
+    ...validSubmission,
+    authorDisplay: undefined,
+    phone: undefined,
+    requestToken:
+      "019fa6a4-6834-7782-aa0b-4e71ffb8a2a1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  });
+  assert.equal(parsed.success, true);
+
+  assert.equal(
+    reviewSubmissionSchema.safeParse({
+      ...validSubmission,
+      authorDisplay: undefined,
+      phone: undefined,
     }).success,
     false,
   );
@@ -91,7 +113,11 @@ test("개인 후기 요청 템플릿은 전용 링크를 요구하고 허용 변
   const body =
     "{{고객명}}님, {{담당자명}}입니다. 사건 {{사건번호}} 후기: {{후기작성링크}}";
   assert.equal(
-    reviewRequestTemplateCreateSchema.safeParse({ name: "종결 고객", body })
+    reviewRequestTemplateCreateSchema.safeParse({
+      name: "종결 고객",
+      body,
+      defaultProgressStage: "discharge",
+    })
       .success,
     true,
   );
@@ -99,6 +125,7 @@ test("개인 후기 요청 템플릿은 전용 링크를 요구하고 허용 변
     reviewRequestTemplateCreateSchema.safeParse({
       name: "잘못된 변수",
       body: "{{고객}}님 후기: {{후기작성링크}}",
+      defaultProgressStage: "other",
     }).success,
     false,
   );
@@ -111,4 +138,16 @@ test("개인 후기 요청 템플릿은 전용 링크를 요구하고 허용 변
     }),
     "홍길동님, 김담당입니다. 사건 2026개회1234 후기: https://example.test/review",
   );
+});
+
+test("후기 요청 기본 템플릿은 네 시점을 빠짐없이 고정하고 문자 제한을 지킨다", () => {
+  assert.deepEqual(
+    REVIEW_REQUEST_DEFAULT_TEMPLATES.map((template) => template.presetKey),
+    ["consultation", "commencement", "discharge", "other"],
+  );
+  for (const template of REVIEW_REQUEST_DEFAULT_TEMPLATES) {
+    assert.equal(template.defaultProgressStage, template.presetKey);
+    assert.equal(template.body.includes("{{후기작성링크}}"), true);
+    assert.equal(centrexMessageByteLength(template.body) <= 500, true);
+  }
 });
