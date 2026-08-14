@@ -25,7 +25,16 @@ export const metadata: Metadata = {
   },
 };
 
-export default function ReviewWritePage() {
+export default async function ReviewWritePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ request?: string }>;
+}) {
+  const requestValue = (await searchParams).request;
+  const requestToken =
+    typeof requestValue === "string" && requestValue.length <= 100
+      ? requestValue
+      : undefined;
   return (
     <>
       <a className="skip-link" href="#main-content">
@@ -33,7 +42,7 @@ export default function ReviewWritePage() {
       </a>
       <SiteHeader />
       <main id="main-content" className="review-write-page">
-        <ReviewFormLoader />
+        <ReviewFormLoader requestToken={requestToken} />
       </main>
       <SiteFooter />
     </>

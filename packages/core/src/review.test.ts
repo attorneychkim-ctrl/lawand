@@ -5,6 +5,9 @@ import {
   CURRENT_REVIEW_PRIVACY_NOTICE_VERSION,
   CURRENT_REVIEW_PUBLICATION_CONSENT_VERSION,
   detectReviewPiiFlags,
+  renderReviewRequestTemplate,
+  reviewModerationSchema,
+  reviewRequestTemplateCreateSchema,
   reviewSubmissionSchema,
 } from "./review.js";
 
@@ -62,5 +65,50 @@ test("후기 개인정보 탐지는 자동 공개 전에 연락처와 사건번�
       "연락처는 010-1234-5678이고 사건은 2026개회12345입니다.",
     ),
     ["phone", "case_number"],
+  );
+});
+
+test("공개 제한에는 사유가 필요하고 기타 사유에는 메모가 필요하다", () => {
+  assert.equal(
+    reviewModerationSchema.safeParse({
+      action: "restrict",
+      reason: null,
+      note: null,
+    }).success,
+    false,
+  );
+  assert.equal(
+    reviewModerationSchema.safeParse({
+      action: "restrict",
+      reason: "other",
+      note: "고객과 사실관계를 추가 확인 중",
+    }).success,
+    true,
+  );
+});
+
+test("개인 후기 요청 템플릿은 전용 링크를 요구하고 허용 변수만 치환한다", () => {
+  const body =
+    "{{고객명}}님, {{담당자명}}입니다. 사건 {{사건번호}} 후기: {{후기작성링크}}";
+  assert.equal(
+    reviewRequestTemplateCreateSchema.safeParse({ name: "종결 고객", body })
+      .success,
+    true,
+  );
+  assert.equal(
+    reviewRequestTemplateCreateSchema.safeParse({
+      name: "잘못된 변수",
+      body: "{{고객}}님 후기: {{후기작성링크}}",
+    }).success,
+    false,
+  );
+  assert.equal(
+    renderReviewRequestTemplate(body, {
+      "{{고객명}}": "홍길동",
+      "{{담당자명}}": "김담당",
+      "{{사건번호}}": "2026개회1234",
+      "{{후기작성링크}}": "https://example.test/review",
+    }),
+    "홍길동님, 김담당입니다. 사건 2026개회1234 후기: https://example.test/review",
   );
 });

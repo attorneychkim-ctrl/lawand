@@ -9,6 +9,7 @@ export type GatewayConfig = {
   keyVersion: string;
   internalApiKey: string;
   publicIntakeApiKey: string;
+  reviewWriteUrl: string;
   outboxWorkerEnabled: boolean;
   legalFriendsApiToken: string | null;
   alimtalkWorkerEnabled: boolean;
@@ -215,6 +216,29 @@ function positiveIntegerValue(
   return value;
 }
 
+function reviewWriteUrlValue(): string {
+  const raw =
+    process.env.LAWAND_REVIEW_WRITE_URL?.trim() ||
+    "https://lawandfirm.com/bank/reviews/write";
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("LAWAND_REVIEW_WRITE_URL은 유효한 절대 URL이어야 합니다.");
+  }
+  if (
+    !["https:", "http:"].includes(url.protocol) ||
+    (process.env.NODE_ENV === "production" && url.protocol !== "https:")
+  ) {
+    throw new Error(
+      "LAWAND_REVIEW_WRITE_URL은 운영에서 HTTPS 절대 URL이어야 합니다.",
+    );
+  }
+  url.search = "";
+  url.hash = "";
+  return url.toString().replace(/\/$/, "");
+}
+
 function centrexRingCallbackValue(): GatewayConfig["centrexRingCallback"] {
   if (!booleanValue("LAWAND_CENTREX_RING_CALLBACK_ENABLED", false)) {
     return null;
@@ -375,6 +399,7 @@ export function readGatewayConfig(): GatewayConfig {
     keyVersion: required("LAWAND_DATA_KEY_VERSION"),
     internalApiKey: required("LAWAND_INTERNAL_API_KEY"),
     publicIntakeApiKey: required("LAWAND_PUBLIC_INTAKE_API_KEY"),
+    reviewWriteUrl: reviewWriteUrlValue(),
     outboxWorkerEnabled,
     legalFriendsApiToken,
     alimtalkWorkerEnabled,

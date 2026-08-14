@@ -15,6 +15,7 @@ import { createCentrexMessageInboxWorker } from "./centrex-message-inbox-worker.
 import { createCentrexWorker } from "./centrex-worker.js";
 import { readGatewayConfig } from "./config.js";
 import { createPostgresConsultationEventSource } from "./consultation-events.js";
+import { createPostgresReviewEventSource } from "./review-events.js";
 import { createDataProtection } from "./crypto.js";
 import { createDatabasePoolMonitor } from "./database-pool-monitor.js";
 import { createPublicIntakeProtection } from "./intake-protection.js";
@@ -26,6 +27,7 @@ import { createTelephonyService } from "./telephony-service.js";
 import { createPostgresTelephonyInboundEventSource } from "./telephony-inbound-events.js";
 import { createPostgresTelephonyDeskEventSource } from "./telephony-desk-events.js";
 import { createReviewSubmissionService } from "./review-service.js";
+import { createReviewManagementService } from "./review-management-service.js";
 import { createSolapiClient } from "./solapi.js";
 
 const localEnvPath = resolve(process.cwd(), ".env.local");
@@ -116,6 +118,12 @@ const telephonyService = createTelephonyService({
   solapiMmsSender: config.solapiMmsSender,
   answerableBridgeIds: new Set(Object.keys(config.centrexBridgeKeys ?? {})),
 });
+const reviewManagementService = createReviewManagementService({
+  db: database.db,
+  protection,
+  telephonyService,
+  reviewWriteUrl: config.reviewWriteUrl,
+});
 const centrexBridgeIngress = createCentrexBridgeIngressService({
   db: database.db,
   protection,
@@ -136,6 +144,12 @@ const consultationEvents = createPostgresConsultationEventSource({
   pool: listenerPool,
   onError: (error) => {
     console.error("lawand consultation realtime source error", error);
+  },
+});
+const reviewEvents = createPostgresReviewEventSource({
+  pool: listenerPool,
+  onError: (error) => {
+    console.error("lawand review realtime source error", error);
   },
 });
 const telephonyInboundEvents = createPostgresTelephonyInboundEventSource({
@@ -169,6 +183,7 @@ const host = process.env.HOST ?? "0.0.0.0";
 const server = createGatewayServer({
   authService,
   consultationEvents,
+  reviewEvents,
   telephonyInboundEvents,
   telephonyDeskEvents,
   databasePoolHealth: databasePoolMonitor.snapshot,
@@ -183,6 +198,7 @@ const server = createGatewayServer({
     ? { centrexBridgeProvisioning }
     : {}),
   reviewService,
+  reviewManagementService,
   internalApiKey: config.internalApiKey,
   publicIntakeApiKey: config.publicIntakeApiKey,
   intakeProtection,
@@ -243,6 +259,7 @@ const centrexMessageInboxWorker = config.centrexWorkerEnabled
 await Promise.all([
   centrexBridgeProvisioning?.start(),
   consultationEvents.start(),
+  reviewEvents.start(),
   telephonyInboundEvents.start(),
   telephonyDeskEvents.start(),
 ]);
@@ -251,6 +268,7 @@ databasePoolMonitor.start();
 server.listen(port, host, () => {
   console.log(`lawand-gateway listening on http://${host}:${port}`);
   console.log("lawand consultation realtime source started");
+  console.log("lawand review realtime source started");
   console.log("lawand telephony inbound realtime source started");
   console.log("lawand telephony desk realtime source started");
   if (legalFriendsOutboxWorker) {
@@ -302,6 +320,7 @@ function shutdown(signal: string) {
     void (async () => {
       await Promise.all([
         consultationEvents.stop(),
+        reviewEvents.stop(),
         telephonyInboundEvents.stop(),
         telephonyDeskEvents.stop(),
         legalFriendsOutboxWorker?.stop(),

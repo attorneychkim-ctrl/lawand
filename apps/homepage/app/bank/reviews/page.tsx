@@ -316,6 +316,16 @@ export default async function ReviewsPage({
                         <p className="review-story-short">{review.content}</p>
                       )}
 
+                      {review.reply ? (
+                        <aside className="review-official-reply">
+                          <strong>법무법인 로앤의 답글</strong>
+                          <p>{review.reply.content}</p>
+                          <time dateTime={review.reply.updatedAt.toISOString()}>
+                            {formatReviewDate(review.reply.updatedAt)}
+                          </time>
+                        </aside>
+                      ) : null}
+
                       <footer>
                         <strong>{review.authorDisplay}</strong>
                         {review.experienceKeywords.length > 0 ? (

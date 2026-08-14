@@ -1,0 +1,884 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>법무법인 로앤 모바일쿠폰 API 연동 서비스 소개서 및 기획서</title>
+    <style>
+      @page {
+        size: A4;
+        margin: 15mm 16mm 16mm;
+      }
+
+      :root {
+        --ink: #17201d;
+        --muted: #5c6863;
+        --green: #276a57;
+        --green-dark: #17483a;
+        --green-soft: #eaf2ef;
+        --ivory: #f7f4ec;
+        --line: #d7dfdb;
+        --white: #ffffff;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        font-family: "NanumSquare", "NanumGothic", sans-serif;
+        color: var(--ink);
+        font-size: 10.5pt;
+        line-height: 1.62;
+        word-break: keep-all;
+      }
+
+      body {
+        margin: 0;
+        background: var(--white);
+      }
+
+      h1,
+      h2,
+      h3,
+      p,
+      ul,
+      ol,
+      dl {
+        margin-top: 0;
+      }
+
+      h1,
+      h2,
+      h3,
+      strong {
+        font-weight: 700;
+      }
+
+      h1 {
+        margin-bottom: 13mm;
+        font-size: 31pt;
+        line-height: 1.22;
+        letter-spacing: -0.04em;
+      }
+
+      h2 {
+        margin: 0 0 5mm;
+        color: var(--green-dark);
+        font-size: 20pt;
+        line-height: 1.3;
+        letter-spacing: -0.03em;
+      }
+
+      h3 {
+        margin: 0 0 2mm;
+        font-size: 12.5pt;
+        line-height: 1.4;
+      }
+
+      p {
+        margin-bottom: 3.5mm;
+      }
+
+      ul,
+      ol {
+        margin-bottom: 4mm;
+        padding-left: 6mm;
+      }
+
+      li + li {
+        margin-top: 1.5mm;
+      }
+
+      .page {
+        min-height: 266mm;
+        position: relative;
+        break-after: page;
+        page-break-after: always;
+      }
+
+      .page:last-child {
+        break-after: auto;
+        page-break-after: auto;
+      }
+
+      .cover {
+        display: flex;
+        min-height: 266mm;
+        flex-direction: column;
+        justify-content: space-between;
+        overflow: hidden;
+        padding: 10mm 7mm 8mm;
+      }
+
+      .cover::before {
+        position: absolute;
+        top: -28mm;
+        right: -42mm;
+        width: 140mm;
+        height: 140mm;
+        border-radius: 50%;
+        background: var(--green-soft);
+        content: "";
+        z-index: -1;
+      }
+
+      .brand-logo {
+        width: 56mm;
+        height: auto;
+      }
+
+      .cover-label {
+        margin-bottom: 6mm;
+        color: var(--green);
+        font-size: 11pt;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+      }
+
+      .cover-copy {
+        max-width: 145mm;
+        color: var(--muted);
+        font-size: 13pt;
+        line-height: 1.7;
+      }
+
+      .cover-meta {
+        display: grid;
+        margin: 14mm 0 0;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 4mm;
+      }
+
+      .cover-meta div {
+        padding-top: 3mm;
+        border-top: 1px solid var(--line);
+      }
+
+      .cover-meta dt {
+        color: var(--muted);
+        font-size: 8.5pt;
+      }
+
+      .cover-meta dd {
+        margin: 1mm 0 0;
+        font-weight: 700;
+      }
+
+      .section-kicker {
+        margin-bottom: 2mm;
+        color: var(--green);
+        font-size: 8.5pt;
+        font-weight: 700;
+        letter-spacing: 0.13em;
+        text-transform: uppercase;
+      }
+
+      .lead {
+        margin-bottom: 7mm;
+        color: #39443f;
+        font-size: 12.5pt;
+        line-height: 1.72;
+      }
+
+      .summary-box {
+        margin: 6mm 0;
+        padding: 6mm;
+        border: 1px solid #bad0c7;
+        border-radius: 4mm;
+        background: var(--green-soft);
+      }
+
+      .summary-box p:last-child {
+        margin-bottom: 0;
+      }
+
+      .grid-2 {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 4mm;
+      }
+
+      .grid-3 {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 3.5mm;
+      }
+
+      .card {
+        padding: 5mm;
+        border: 1px solid var(--line);
+        border-radius: 3.5mm;
+        break-inside: avoid;
+        background: var(--white);
+      }
+
+      .card p:last-child,
+      .card ul:last-child {
+        margin-bottom: 0;
+      }
+
+      .number {
+        display: inline-flex;
+        width: 8mm;
+        height: 8mm;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 3mm;
+        border-radius: 50%;
+        background: var(--green);
+        color: var(--white);
+        font-size: 9pt;
+        font-weight: 700;
+      }
+
+      .flow {
+        display: grid;
+        margin: 6mm 0;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 2mm;
+      }
+
+      .flow-step {
+        position: relative;
+        min-height: 37mm;
+        padding: 4mm 3mm;
+        border: 1px solid var(--line);
+        border-radius: 3mm;
+        background: var(--ivory);
+        text-align: center;
+      }
+
+      .flow-step:not(:last-child)::after {
+        position: absolute;
+        top: 50%;
+        right: -2.7mm;
+        color: var(--green);
+        content: "›";
+        font-size: 17pt;
+        font-weight: 700;
+        transform: translateY(-54%);
+        z-index: 2;
+      }
+
+      .flow-step strong {
+        display: block;
+        margin-bottom: 1.5mm;
+        color: var(--green-dark);
+      }
+
+      .flow-step span {
+        color: var(--muted);
+        font-size: 8.5pt;
+        line-height: 1.45;
+      }
+
+      table {
+        width: 100%;
+        margin: 4mm 0 6mm;
+        border-collapse: collapse;
+        font-size: 9.3pt;
+      }
+
+      th,
+      td {
+        padding: 3mm;
+        border: 1px solid var(--line);
+        vertical-align: top;
+        text-align: left;
+      }
+
+      th {
+        background: var(--green-soft);
+        color: var(--green-dark);
+      }
+
+      .architecture {
+        display: grid;
+        margin: 6mm 0;
+        grid-template-columns: 1fr 8mm 1fr 8mm 1fr;
+        align-items: stretch;
+      }
+
+      .architecture-box {
+        display: flex;
+        min-height: 37mm;
+        flex-direction: column;
+        justify-content: center;
+        padding: 4mm;
+        border: 1px solid var(--line);
+        border-radius: 3mm;
+        background: var(--white);
+        text-align: center;
+      }
+
+      .architecture-box strong {
+        color: var(--green-dark);
+      }
+
+      .architecture-box span {
+        margin-top: 1mm;
+        color: var(--muted);
+        font-size: 8.5pt;
+      }
+
+      .arrow {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--green);
+        font-size: 18pt;
+      }
+
+      .check-list {
+        list-style: none;
+        padding-left: 0;
+      }
+
+      .check-list li {
+        position: relative;
+        padding-left: 6mm;
+      }
+
+      .check-list li::before {
+        position: absolute;
+        left: 0;
+        color: var(--green);
+        content: "✓";
+        font-weight: 700;
+      }
+
+      .note {
+        margin: 5mm 0;
+        padding: 4mm 5mm;
+        border-left: 3px solid var(--green);
+        background: var(--ivory);
+        color: #3d4944;
+      }
+
+      .small {
+        color: var(--muted);
+        font-size: 8.5pt;
+      }
+
+      .footer {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        display: flex;
+        justify-content: space-between;
+        padding-top: 2mm;
+        border-top: 1px solid var(--line);
+        color: #7b8581;
+        font-size: 8pt;
+      }
+
+      .contact-box {
+        display: grid;
+        margin-top: 8mm;
+        padding: 7mm;
+        border-radius: 4mm;
+        grid-template-columns: 1.1fr 1fr;
+        gap: 8mm;
+        background: var(--green-dark);
+        color: var(--white);
+      }
+
+      .applied-screen {
+        display: block;
+        width: 170mm;
+        max-width: 100%;
+        margin: 4mm auto;
+        border: 1px solid var(--line);
+        border-radius: 3mm;
+      }
+
+      .screen-caption {
+        padding: 4mm 5mm;
+        border-left: 1.2mm solid var(--green);
+        background: var(--green-soft);
+        color: var(--muted);
+        font-size: 9.5pt;
+      }
+
+      .contact-box h3,
+      .contact-box strong {
+        color: var(--white);
+      }
+
+      .contact-box p {
+        margin-bottom: 1.5mm;
+        color: #dfeae6;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+    </style>
+  </head>
+  <body>
+    <section class="page cover">
+      <header>
+        <img
+          class="brand-logo"
+          src="../../apps/homepage/public/images/brand/lawand-wordmark-signature.svg"
+          alt="LAW&amp; 법무법인 로앤"
+        />
+      </header>
+
+      <main>
+        <p class="cover-label">MOBILE COUPON API INTEGRATION</p>
+        <h1>모바일쿠폰 API 연동<br />서비스 소개서 및 기획서</h1>
+        <p class="cover-copy">
+          법무법인 로앤의 내부 ERP 후기관리 업무에서, 실제 의뢰인이 자발적으로
+          남긴 후기에 대한 감사 쿠폰을 담당 직원이 안전하게 발송하기 위한
+          기프티쇼 비즈 API 연동 계획입니다.
+        </p>
+
+        <dl class="cover-meta">
+          <div>
+            <dt>신청 기업</dt>
+            <dd>법무법인 로앤</dd>
+          </div>
+          <div>
+            <dt>작성일</dt>
+            <dd>2026년 8월 14일</dd>
+          </div>
+          <div>
+            <dt>문서 버전</dt>
+            <dd>v1.0</dd>
+          </div>
+        </dl>
+      </main>
+
+      <footer class="footer">
+        <span>법무법인 로앤 · 내부 ERP 연동 계획</span>
+        <span>1</span>
+      </footer>
+    </section>
+
+    <section class="page">
+      <p class="section-kicker">01 · Service overview</p>
+      <h2>서비스 개요</h2>
+      <p class="lead">
+        로앤은 홈페이지와 내부 ERP를 직접 운영하며, 상담 접수부터 사건 담당자 확인,
+        고객 후기 공개와 답변까지 하나의 인증된 업무 흐름으로 관리하고 있습니다.
+        이번 연동은 후기 작성자를 대상으로 한 감사 모바일쿠폰을 직원이 수동 발송하는
+        기능입니다.
+      </p>
+
+      <div class="summary-box">
+        <h3>연동 목적</h3>
+        <p>
+          고객이 로앤 홈페이지에 실제 이용 경험을 자발적으로 작성한 뒤, 담당 직원이
+          후기와 고객·사건 정보를 확인하고 사전에 허용된 소액 모바일쿠폰을 감사의 뜻으로
+          발송합니다. 긍정적인 내용이나 특정 평가를 지급 조건으로 요구하지 않습니다.
+        </p>
+      </div>
+
+      <div class="grid-3">
+        <article class="card">
+          <span class="number">1</span>
+          <h3>대상</h3>
+          <p>로앤의 실제 의뢰인 중 홈페이지에 후기를 제출하고 내부 고객 확인이 끝난 사람</p>
+        </article>
+        <article class="card">
+          <span class="number">2</span>
+          <h3>발송 주체</h3>
+          <p>ERP에 로그인한 권한 있는 직원이 후기 상세에서 수신자와 상품을 확인한 뒤 수동 발송</p>
+        </article>
+        <article class="card">
+          <span class="number">3</span>
+          <h3>제공 방식</h3>
+          <p>기프티쇼 비즈 API의 MMS 위탁 발송을 통한 일회성 모바일쿠폰 제공</p>
+        </article>
+      </div>
+
+      <h3 style="margin-top: 8mm">기업 및 운영 서비스 정보</h3>
+      <table>
+        <tbody>
+          <tr>
+            <th scope="row">법인명</th>
+            <td>법무법인 로앤</td>
+            <th scope="row">대표자</th>
+            <td>김충환 대표변호사</td>
+          </tr>
+          <tr>
+            <th scope="row">사업자등록번호</th>
+            <td>783-86-00865</td>
+            <th scope="row">법인등록번호</th>
+            <td>110146-0091058</td>
+          </tr>
+          <tr>
+            <th scope="row">홈페이지</th>
+            <td>https://lawandfirm.com</td>
+            <th scope="row">대표전화</th>
+            <td>1670-8480</td>
+          </tr>
+          <tr>
+            <th scope="row">소재지</th>
+            <td colspan="3">서울특별시 강남구 논현로87길 25 HB타워 3층, 4층</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <footer class="footer">
+        <span>기프티쇼 비즈 모바일쿠폰 API 연동 서비스 소개서</span>
+        <span>2</span>
+      </footer>
+    </section>
+
+    <section class="page">
+      <p class="section-kicker">02 · User journey</p>
+      <h2>사용자 흐름과 화면 계획</h2>
+      <p class="lead">
+        고객이 쿠폰을 직접 구매하거나 현금화하는 서비스가 아닙니다. 내부 직원만 접근하는
+        ERP에서 고객 확인과 최종 확인을 거친 단건 발송이 기본입니다.
+      </p>
+
+      <div class="flow">
+        <div class="flow-step">
+          <strong>후기 제출</strong>
+          <span>고객이 로앤 홈페이지에서 자신의 실제 경험을 작성</span>
+        </div>
+        <div class="flow-step">
+          <strong>고객 확인</strong>
+          <span>ERP에서 고객·관련 사건·담당자와 연락처를 확인</span>
+        </div>
+        <div class="flow-step">
+          <strong>상품 선택</strong>
+          <span>관리자가 허용한 소액 상품 중 하나를 직원이 선택</span>
+        </div>
+        <div class="flow-step">
+          <strong>API 발송</strong>
+          <span>수신자 재확인 후 기프티쇼 비즈가 MMS 위탁 발송</span>
+        </div>
+        <div class="flow-step">
+          <strong>결과 기록</strong>
+          <span>거래 ID와 성공·실패·취소 상태를 ERP에 기록</span>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <article class="card">
+          <h3>ERP 후기 상세</h3>
+          <ul class="check-list">
+            <li>후기 원문과 홈페이지 공개 상태</li>
+            <li>고객 전체 이름과 확인된 연락처</li>
+            <li>관련 사건·주담당자·부담당자 정보</li>
+            <li>이전 쿠폰 발송 여부와 현재 상태</li>
+            <li>발송 직원과 처리 시각</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>쿠폰 발송 모달</h3>
+          <ul class="check-list">
+            <li>허용 상품의 이름·교환처·금액 표시</li>
+            <li>고객 이름과 전체 전화번호 재확인</li>
+            <li>발송 메시지와 제공 조건 확인</li>
+            <li>중복 발송 여부 자동 검사</li>
+            <li>최종 확인 뒤 한 번만 발송 요청</li>
+          </ul>
+        </article>
+      </div>
+
+      <div class="note">
+        <strong>운영 초기 통제 기준</strong><br />
+        월 100건 이하, 후기 한 건당 쿠폰 한 장, 3천원~1만원대의 관리자가 승인한 상품만
+        허용합니다. 자동 발송·불특정 다수 발송·핀번호 재판매·현금 교환 기능은 제공하지
+        않습니다.
+      </div>
+
+      <footer class="footer">
+        <span>법무법인 로앤 · 사용자 흐름</span>
+        <span>3</span>
+      </footer>
+    </section>
+
+    <section class="page">
+      <p class="section-kicker">03 · API scope</p>
+      <h2>API 연동 범위</h2>
+      <p class="lead">
+        기프티쇼 비즈의 표준 기능을 사용하고, 쿠폰 자체 발행이나 바코드 생성은 하지
+        않습니다. 운영에 꼭 필요한 조회·발송·상태 관리만 연동합니다.
+      </p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>구분</th>
+            <th>사용 목적</th>
+            <th>로앤 ERP 처리</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>브랜드·상품 조회</td>
+            <td>발송 가능한 상품명, 이미지, 가격, 유효기간과 유의사항 확인</td>
+            <td>허용 목록만 정기 동기화하고 직원 화면에는 승인 상품만 노출</td>
+          </tr>
+          <tr>
+            <td>비즈머니 잔액 조회</td>
+            <td>발송 전 구매 가능 여부 확인</td>
+            <td>잔액 부족 시 발송을 막고 개인정보 없는 오류 표시</td>
+          </tr>
+          <tr>
+            <td>쿠폰 단건 발송</td>
+            <td>확인된 고객 휴대전화로 MMS 위탁 발송</td>
+            <td>후기별 고유 거래 ID를 만들어 중복 요청 차단</td>
+          </tr>
+          <tr>
+            <td>쿠폰 상세·상태 조회</td>
+            <td>접수·발송·사용 가능 상태와 유효기간 확인</td>
+            <td>ERP 발송 원장의 최종 결과 보강</td>
+          </tr>
+          <tr>
+            <td>재전송·취소</td>
+            <td>미수신 또는 오발송 건의 운영 대응</td>
+            <td>직원이 현재 상태와 제공사 허용 조건을 확인한 뒤 수동 실행</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="architecture">
+        <div class="architecture-box">
+          <strong>로앤 ERP</strong>
+          <span>직원 인증 · 고객/후기 확인 · 최종 발송 확인</span>
+        </div>
+        <div class="arrow">→</div>
+        <div class="architecture-box">
+          <strong>로앤 Gateway</strong>
+          <span>서버 비밀키 · 멱등 처리 · 발송/결과 원장</span>
+        </div>
+        <div class="arrow">→</div>
+        <div class="architecture-box">
+          <strong>기프티쇼 비즈</strong>
+          <span>쿠폰 발행 · MMS 위탁 발송 · 상태/취소 처리</span>
+        </div>
+      </div>
+
+      <h3>중복·불명확 응답 처리</h3>
+      <ul>
+        <li>후기 ID와 발송 원장을 기준으로 거래 ID를 유일하게 생성합니다.</li>
+        <li>타임아웃처럼 실제 발행 여부가 불명확한 경우 동일 상품을 자동 재발송하지 않습니다.</li>
+        <li>제공사 상태 조회와 취소 가능 여부를 먼저 확인한 뒤 직원이 재전송을 결정합니다.</li>
+        <li>제공사 오류가 후기 공개·답글 등 다른 ERP 기능을 중단시키지 않도록 독립 처리합니다.</li>
+      </ul>
+
+      <footer class="footer">
+        <span>법무법인 로앤 · API 연동 범위</span>
+        <span>4</span>
+      </footer>
+    </section>
+
+    <section class="page">
+      <p class="section-kicker">04 · Security &amp; privacy</p>
+      <h2>보안·개인정보 보호 계획</h2>
+      <p class="lead">
+        기프티쇼 비즈 API 키와 고객 전화번호는 브라우저에 노출하지 않습니다. 권한 있는
+        ERP 직원의 요청을 로앤 gateway가 다시 검증한 뒤 필요한 최소 정보만 제공사에
+        전달합니다.
+      </p>
+
+      <div class="grid-2">
+        <article class="card">
+          <h3>접근 통제</h3>
+          <ul class="check-list">
+            <li>초대 기반 ERP 직원 계정과 서버 세션 사용</li>
+            <li>고객·사건·전화번호를 발송 시점에 서버에서 재확인</li>
+            <li>허용된 후기와 쿠폰 상품에만 발송 가능</li>
+            <li>직원·시각·대상·상품·결과의 감사 기록 보존</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>비밀정보 보호</h3>
+          <ul class="check-list">
+            <li>API 인증값은 AWS Secrets Manager에 저장</li>
+            <li>ERP 브라우저와 공개 홈페이지에는 인증값 미노출</li>
+            <li>운영 로그에 전화번호·쿠폰번호·인증 토큰 미기록</li>
+            <li>TLS 통신과 서버별 최소 네트워크 권한 적용</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>개인정보 처리</h3>
+          <ul class="check-list">
+            <li>수신자 이름과 전화번호는 쿠폰 발송·고객센터 대응 목적에 한정</li>
+            <li>기프티쇼 MMS 위탁 발송에 필요한 정보만 전달</li>
+            <li>KT알파 처리위탁 내용과 재전송 업무를 개인정보처리방침에 고지</li>
+            <li>보유기간 종료 또는 처리 목적 달성 시 내부 원장 정리</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>오남용 방지</h3>
+          <ul class="check-list">
+            <li>후기 한 건당 기본 한 장으로 중복 차단</li>
+            <li>자동·예약·무제한 대량 발송 미제공</li>
+            <li>정해진 소액 상품과 월간 운영 상한 적용</li>
+            <li>오발송은 상태 확인 후 제공사 정책 범위에서 취소</li>
+          </ul>
+        </article>
+      </div>
+
+      <div class="note">
+        전화번호가 기프티쇼 비즈에 전달되는 MMS 위탁 발송 방식을 사용할 예정이며,
+        주식회사 케이티알파에 대한 개인정보 처리위탁과 고객센터 조회·재전송 업무를
+        로앤 개인정보처리방침 및 내부 처리기록에 반영합니다.
+      </div>
+
+      <footer class="footer">
+        <span>법무법인 로앤 · 보안 및 개인정보 보호</span>
+        <span>5</span>
+      </footer>
+    </section>
+
+    <section class="page">
+      <p class="section-kicker">05 · Operation policy</p>
+      <h2>운영 정책과 소비자 보호</h2>
+      <p class="lead">
+        모바일쿠폰은 좋은 평가를 유도하거나 부정적인 후기를 배제하는 수단으로 사용하지
+        않습니다. 후기 내용과 쿠폰 제공 여부를 분리하고, 경제적 이해관계가 있는 공개 후기에는
+        그 사실을 소비자가 쉽게 확인할 수 있도록 표시합니다.
+      </p>
+
+      <div class="grid-2">
+        <article class="card">
+          <h3>후기 원칙</h3>
+          <ul class="check-list">
+            <li>실제 이용 경험이 있는 고객만 내부 확인</li>
+            <li>긍정적인 평가·특정 문구·별점을 요구하지 않음</li>
+            <li>부정적인 의견도 쿠폰 제공에서 차별하지 않음</li>
+            <li>개인정보와 권리침해 내용 외에는 원문을 임의 미화하지 않음</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>쿠폰 원칙</h3>
+          <ul class="check-list">
+            <li>발송 전 제공 상품·유효기간·사용처를 확인</li>
+            <li>수신자에게 재판매·현금화 목적이 아님을 안내</li>
+            <li>잘못된 번호와 중복 발송을 ERP에서 사전 차단</li>
+            <li>발송 실패·오발송 문의를 로앤과 제공사 절차로 처리</li>
+          </ul>
+        </article>
+      </div>
+
+      <h3 style="margin-top: 8mm">도입 일정</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>단계</th>
+            <th>주요 작업</th>
+            <th>완료 기준</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>1. 가입·검토</td>
+            <td>서비스 소개서 제출, API 이용 범위와 정산 방식 협의, 상용키 신청</td>
+            <td>기프티쇼 비즈의 연동 승인과 계약 조건 확인</td>
+          </tr>
+          <tr>
+            <td>2. 개발</td>
+            <td>상품 조회, 단건 발송, 결과 조회, 재전송·취소, 잔액 조회 연동</td>
+            <td>개발 환경의 개인정보 없는 계약 테스트 통과</td>
+          </tr>
+          <tr>
+            <td>3. 통제 검증</td>
+            <td>허용된 내부 수신번호 1건으로 발송·수신·상태·취소 가능 범위 확인</td>
+            <td>중복 0건, 로그 개인정보 0건, 감사 원장 일치</td>
+          </tr>
+          <tr>
+            <td>4. 상용 운영</td>
+            <td>월 100건 이하의 수동 단건 발송으로 시작하고 실패·잔액·민원을 관찰</td>
+            <td>정상 발송과 운영 대응 절차 안정화</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <footer class="footer">
+        <span>법무법인 로앤 · 운영 정책</span>
+        <span>6</span>
+      </footer>
+    </section>
+
+    <section class="page">
+      <p class="section-kicker">06 · Applied commercial screen</p>
+      <h2>실 서비스 적용 화면</h2>
+      <p class="lead">
+        아래 화면은 로앤 ERP 후기 상세에 실제 구현한 모바일쿠폰 발송 UI입니다. 고객·사건·담당자
+        확인, 상품 선택, 발송 사유, 안내 문구, 최종 확인의 운영 흐름을 적용했으며 상용 Key 승인
+        전에는 발송 버튼과 외부 API 호출을 잠가 두었습니다.
+      </p>
+
+      <img
+        class="applied-screen"
+        src="./giftishow-biz-commercial-screen-lawand-20260814.png"
+        alt="로앤 ERP 후기 고객 감사 기프티콘 발송 적용 화면"
+      />
+
+      <p class="screen-caption">
+        심사 제출용 비식별 예시 데이터로 렌더링한 실제 ERP 컴포넌트 화면입니다. 상용 Key 승인 후
+        기프티쇼 비즈의 승인 상품 조회·발송·결과 조회 API만 서버에서 연결하며, 화면의 고객 확인과
+        중복·감사 통제는 그대로 유지합니다.
+      </p>
+
+      <footer class="footer">
+        <span>법무법인 로앤 · 실 서비스 적용 화면</span>
+        <span>7</span>
+      </footer>
+    </section>
+
+    <section class="page">
+      <p class="section-kicker">07 · Contact &amp; references</p>
+      <h2>연동 요청 사항</h2>
+      <p class="lead">
+        아래 범위의 기프티쇼 비즈 모바일쿠폰 API 연동 검토와 상용키 발급 절차 안내를
+        요청드립니다.
+      </p>
+
+      <div class="summary-box">
+        <ol>
+          <li>기업용 모바일쿠폰 MMS 위탁 발송 API 이용 승인</li>
+          <li>브랜드·상품·쿠폰 상태·비즈머니 잔액 조회 권한</li>
+          <li>단건 발송, 재전송 및 취소 API 이용 조건</li>
+          <li>선불 비즈머니와 후정산 가능 여부, 상품별 공급 조건 안내</li>
+          <li>개인정보 처리위탁 계약 및 고객센터 처리 범위 안내</li>
+        </ol>
+      </div>
+
+      <div class="contact-box">
+        <div>
+          <h3>법무법인 로앤</h3>
+          <p>대표변호사 김충환</p>
+          <p>사업자등록번호 783-86-00865</p>
+          <p>서울특별시 강남구 논현로87길 25 HB타워 3층, 4층</p>
+        </div>
+        <div>
+          <h3>연락처</h3>
+          <p>대표전화 1670-8480</p>
+          <p>이메일 lawand5@lawandfirm.com</p>
+          <p>홈페이지 https://lawandfirm.com</p>
+        </div>
+      </div>
+
+      <h3 style="margin-top: 10mm">참고한 기프티쇼 비즈 공식 자료</h3>
+      <ul class="small">
+        <li>기프티쇼 비즈 API 서비스 안내: https://biz.giftishow.com/orderSend/apiintro</li>
+        <li>기프티쇼 비즈 API 연동규격서: https://biz.giftishow.com/external/down/api_qna.pdf</li>
+        <li>기프티쇼 비즈 개인정보 처리업무 위수탁 및 B2B 거래 안내</li>
+      </ul>
+
+      <p class="note">
+        본 문서는 법무법인 로앤이 계획 중인 내부 ERP 모바일쿠폰 발송 기능의 용도와
+        통제 방식을 설명하기 위한 서비스 소개서입니다. 실제 연동 범위는 기프티쇼 비즈의
+        승인 결과와 최신 API 규격 및 계약 조건에 맞춰 확정합니다.
+      </p>
+
+      <footer class="footer">
+        <span>법무법인 로앤 · 연동 문의</span>
+        <span>8</span>
+      </footer>
+    </section>
+  </body>
+</html>

@@ -36,11 +36,20 @@ type TelephonyBrowserNotification = {
   occurredAt: string;
 };
 
+type ReviewBrowserNotification = {
+  title: string;
+  body: string;
+  eventId: string;
+  reviewId: string;
+  href: string;
+  occurredAt: string;
+};
+
 type ErpBrowserNotification = {
   title: string;
   body: string;
   notificationId: string;
-  resourceKind: "consultation" | "telephony";
+  resourceKind: "consultation" | "telephony" | "review";
   resourceId: string;
   href: string;
   deskHref: string;
@@ -207,5 +216,22 @@ export function showTelephonyBrowserNotification(
     occurredAt: input.occurredAt,
     detailActionTitle: "전화 보기",
     deskActionTitle: "전화데스크",
+  });
+}
+
+export function showReviewBrowserNotification(
+  input: ReviewBrowserNotification,
+) {
+  return showErpBrowserNotification({
+    title: input.title,
+    body: input.body,
+    notificationId: input.eventId,
+    resourceKind: "review",
+    resourceId: input.reviewId,
+    href: input.href,
+    deskHref: "/reviews",
+    occurredAt: input.occurredAt,
+    detailActionTitle: "후기 보기",
+    deskActionTitle: "후기관리",
   });
 }

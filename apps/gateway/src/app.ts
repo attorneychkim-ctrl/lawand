@@ -16,6 +16,12 @@ import {
   kakaoSkillRequestSchema,
   kakaoSkillUserKey,
   reviewSubmissionSchema,
+  reviewCustomerLinkSchema,
+  reviewModerationSchema,
+  reviewReplyUpsertSchema,
+  reviewRequestBatchSendSchema,
+  reviewRequestTemplateCreateSchema,
+  reviewRequestTemplateUpdateSchema,
   selfDiagnosisSubmissionSchema,
   staffCentrexLineUpdateSchema,
   staffExternalAccountUpdateSchema,
@@ -45,6 +51,7 @@ import {
   type StaffAuthService,
 } from "./auth.js";
 import type { ConsultationEventSource } from "./consultation-events.js";
+import type { ReviewEventSource } from "./review-events.js";
 import type { TelephonyInboundEventSource } from "./telephony-inbound-events.js";
 import type { TelephonyDeskEventSource } from "./telephony-desk-events.js";
 import {
@@ -85,6 +92,12 @@ import {
   ReviewSubmissionValidationError,
   type ReviewSubmissionService,
 } from "./review-service.js";
+import {
+  ReviewManagementError,
+  type ReviewListFilter,
+  type ReviewManagementService,
+  type ReviewRecordType,
+} from "./review-management-service.js";
 import {
   TelephonyCallError,
   type TelephonyService,
@@ -198,6 +211,21 @@ function validUuid(value: string): boolean {
   );
 }
 
+function validReviewRecordType(value: string): value is ReviewRecordType {
+  return value === "review" || value === "submission";
+}
+
+function validReviewListFilter(value: string): value is ReviewListFilter {
+  return [
+    "all",
+    "reply_needed",
+    "pending",
+    "published",
+    "restricted",
+    "mine",
+  ].includes(value);
+}
+
 type PagedDateQuery = {
   page: number;
   pageSize: 20 | 50 | 100;
@@ -250,6 +278,8 @@ export function createGatewayServer(options?: {
   authService?: StaffAuthService;
   intakeProtection?: PublicIntakeProtection;
   reviewService?: ReviewSubmissionService;
+  reviewManagementService?: ReviewManagementService;
+  reviewEvents?: ReviewEventSource;
   telephonyService?: TelephonyService;
   centrexBridgeIngress?: CentrexBridgeIngressService;
   centrexBridgeKeys?: CentrexBridgeKeyMap;
@@ -577,6 +607,74 @@ export function createGatewayServer(options?: {
         }, SSE_HEARTBEAT_INTERVAL_MS);
         heartbeat.unref();
 
+        let closed = false;
+        const close = () => {
+          if (closed) return;
+          closed = true;
+          clearInterval(heartbeat);
+          unsubscribe();
+        };
+        request.once("aborted", close);
+        response.once("close", close);
+        return;
+      }
+
+      if (
+        request.method === "GET" &&
+        url.pathname === "/v1/review-events/stream"
+      ) {
+        if (
+          !options?.reviewEvents ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        response.writeHead(200, {
+          "content-type": "text/event-stream; charset=utf-8",
+          "cache-control": "no-cache, no-store, no-transform",
+          connection: "keep-alive",
+          "x-accel-buffering": "no",
+          "x-content-type-options": "nosniff",
+        });
+        response.flushHeaders();
+        response.write("retry: 3000\n\n");
+        sendSseEvent(response, "review.sync", { reason: "connected" });
+        const unsubscribe = options.reviewEvents.subscribe((message) => {
+          if (response.destroyed || response.writableEnded) return;
+          if (message.kind === "sync") {
+            sendSseEvent(response, "review.sync", {
+              reason: "source_reconnected",
+            });
+            return;
+          }
+          sendSseEvent(
+            response,
+            "review.changed",
+            message.notification,
+            message.notification.eventId,
+          );
+        });
+        const heartbeat = setInterval(() => {
+          if (!response.destroyed && !response.writableEnded) {
+            response.write(": keepalive\n\n");
+          }
+        }, SSE_HEARTBEAT_INTERVAL_MS);
+        heartbeat.unref();
         let closed = false;
         const close = () => {
           if (closed) return;
@@ -1136,6 +1234,357 @@ export function createGatewayServer(options?: {
           userKey: kakaoSkillUserKey(parsed.data),
         });
         sendJson(response, 200, createKakaoSkillResponse(receipt));
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        url.pathname === "/v1/review-requests/send"
+      ) {
+        if (
+          !options?.reviewManagementService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(request, "x-lawand-internal-key", options.internalApiKey) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const parsed = reviewRequestBatchSendSchema.safeParse(
+          await readJson(request),
+        );
+        if (!parsed.success) {
+          sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        sendJson(
+          response,
+          200,
+          await options.reviewManagementService.sendRequests(
+            parsed.data,
+            actor,
+          ),
+        );
+        return;
+      }
+
+      if (
+        request.method === "GET" &&
+        url.pathname === "/v1/review-request-templates"
+      ) {
+        if (
+          !options?.reviewManagementService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(request, "x-lawand-internal-key", options.internalApiKey) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        sendJson(
+          response,
+          200,
+          await options.reviewManagementService.listRequestTemplates(actor),
+        );
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        url.pathname === "/v1/review-request-templates"
+      ) {
+        if (
+          !options?.reviewManagementService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(request, "x-lawand-internal-key", options.internalApiKey) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const parsed = reviewRequestTemplateCreateSchema.safeParse(
+          await readJson(request),
+        );
+        if (!parsed.success) {
+          sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        sendJson(
+          response,
+          201,
+          await options.reviewManagementService.createRequestTemplate(
+            parsed.data,
+            actor,
+          ),
+        );
+        return;
+      }
+
+      const reviewTemplateMatch = url.pathname.match(
+        /^\/v1\/review-request-templates\/([^/]+)$/,
+      );
+      if (
+        reviewTemplateMatch &&
+        (request.method === "POST" || request.method === "DELETE")
+      ) {
+        if (
+          !options?.reviewManagementService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(request, "x-lawand-internal-key", options.internalApiKey) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const templateId = reviewTemplateMatch[1] ?? "";
+        if (!validUuid(templateId)) {
+          sendJson(response, 400, { error: "invalid_template_id" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        if (request.method === "DELETE") {
+          sendJson(
+            response,
+            200,
+            await options.reviewManagementService.deleteRequestTemplate(
+              templateId,
+              actor,
+            ),
+          );
+          return;
+        }
+        const parsed = reviewRequestTemplateUpdateSchema.safeParse(
+          await readJson(request),
+        );
+        if (!parsed.success) {
+          sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+          return;
+        }
+        sendJson(
+          response,
+          200,
+          await options.reviewManagementService.updateRequestTemplate(
+            templateId,
+            parsed.data,
+            actor,
+          ),
+        );
+        return;
+      }
+
+      if (
+        request.method === "GET" &&
+        url.pathname === "/v1/reviews/duty-count"
+      ) {
+        if (
+          !options?.reviewManagementService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(request, "x-lawand-internal-key", options.internalApiKey) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        sendJson(
+          response,
+          200,
+          await options.reviewManagementService.dutyCount(actor),
+        );
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/v1/reviews") {
+        if (
+          !options?.reviewManagementService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(request, "x-lawand-internal-key", options.internalApiKey) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const pageValue = url.searchParams.get("page") ?? "1";
+        const filterValue = url.searchParams.get("filter") ?? "all";
+        if (!/^\d+$/.test(pageValue) || !validReviewListFilter(filterValue)) {
+          sendJson(response, 400, { error: "invalid_review_query" });
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        sendJson(
+          response,
+          200,
+          await options.reviewManagementService.list(actor, {
+            page: Number(pageValue),
+            filter: filterValue,
+          }),
+        );
+        return;
+      }
+
+      const reviewRecordMatch = url.pathname.match(
+        /^\/v1\/reviews\/([^/]+)\/([^/]+)(?:\/([^/]+))?$/,
+      );
+      if (reviewRecordMatch) {
+        if (
+          !options?.reviewManagementService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(request, "x-lawand-internal-key", options.internalApiKey) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const recordType = reviewRecordMatch[1] ?? "";
+        const recordId = reviewRecordMatch[2] ?? "";
+        const action = reviewRecordMatch[3] ?? null;
+        if (!validReviewRecordType(recordType) || !validUuid(recordId)) {
+          sendJson(response, 400, { error: "invalid_review_id" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        if (request.method === "GET" && action === null) {
+          const detail = await options.reviewManagementService.getDetail(
+            recordType,
+            recordId,
+            actor,
+          );
+          sendJson(
+            response,
+            detail ? 200 : 404,
+            detail ?? { error: "review_not_found" },
+          );
+          return;
+        }
+        if (request.method === "GET" && action === "notification") {
+          const notification = await options.reviewManagementService.notification(
+            recordType,
+            recordId,
+            actor,
+          );
+          sendJson(
+            response,
+            notification ? 200 : 404,
+            notification ?? { error: "review_notification_not_found" },
+          );
+          return;
+        }
+        if (request.method === "POST" && action === "link") {
+          const parsed = reviewCustomerLinkSchema.safeParse(
+            await readJson(request),
+          );
+          if (!parsed.success) {
+            sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+            return;
+          }
+          sendJson(
+            response,
+            200,
+            await options.reviewManagementService.linkCustomer(
+              recordType,
+              recordId,
+              parsed.data,
+              actor,
+            ),
+          );
+          return;
+        }
+        if (request.method === "POST" && action === "moderation") {
+          const parsed = reviewModerationSchema.safeParse(
+            await readJson(request),
+          );
+          if (!parsed.success) {
+            sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+            return;
+          }
+          sendJson(
+            response,
+            200,
+            await options.reviewManagementService.moderate(
+              recordType,
+              recordId,
+              parsed.data,
+              actor,
+            ),
+          );
+          return;
+        }
+        if (
+          request.method === "POST" &&
+          action === "reply" &&
+          recordType === "review"
+        ) {
+          const parsed = reviewReplyUpsertSchema.safeParse(
+            await readJson(request),
+          );
+          if (!parsed.success) {
+            sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+            return;
+          }
+          sendJson(
+            response,
+            200,
+            await options.reviewManagementService.upsertReply(
+              recordId,
+              parsed.data,
+              actor,
+            ),
+          );
+          return;
+        }
+        sendJson(response, 404, { error: "not_found" });
         return;
       }
 
@@ -2746,6 +3195,24 @@ export function createGatewayServer(options?: {
       if (error instanceof ReviewSubmissionValidationError) {
         sendJson(response, 400, {
           error: "invalid_request",
+          message: error.message,
+        });
+        return;
+      }
+      if (error instanceof ReviewManagementError) {
+        const statusCode = [
+          "review_not_found",
+          "template_not_found",
+          "directory_target_not_found",
+        ].includes(error.code)
+          ? 404
+          : error.code === "request_idempotency_conflict" ||
+              error.code === "review_already_published" ||
+              error.code === "template_in_use"
+            ? 409
+            : 400;
+        sendJson(response, statusCode, {
+          error: error.code,
           message: error.message,
         });
         return;
