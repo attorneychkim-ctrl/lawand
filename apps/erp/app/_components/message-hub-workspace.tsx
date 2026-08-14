@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -71,7 +72,13 @@ function deliveryLabel(status: string) {
             : "결과 확인 중";
 }
 
-function MessageHistoryImage({ url }: { url: string }) {
+function MessageHistoryImage({
+  onLoad,
+  url,
+}: {
+  onLoad: () => void;
+  url: string;
+}) {
   const [failed, setFailed] = useState(false);
   if (failed) {
     return (
@@ -86,6 +93,7 @@ function MessageHistoryImage({ url }: { url: string }) {
       className="message-history-image"
       loading="lazy"
       onError={() => setFailed(true)}
+      onLoad={onLoad}
       referrerPolicy="no-referrer"
       src={url}
     />
@@ -212,6 +220,13 @@ export function MessageHubWorkspace({
   const hubLoadingMoreRef = useRef(false);
   const threadLoadingOlderRef = useRef(false);
   const timelineRef = useRef<HTMLDivElement>(null);
+  const timelineNearBottomRef = useRef(true);
+  const pendingBottomScrollRef = useRef<string | null>(null);
+  const pendingScrollRestorationRef = useRef<{
+    key: string;
+    scrollHeight: number;
+    scrollTop: number;
+  } | null>(null);
 
   const filteredThreads = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase("ko-KR");
@@ -318,10 +333,8 @@ export function MessageHubWorkspace({
         );
         setLoadError("");
         if (shouldStickToBottom) {
-          window.requestAnimationFrame(() => {
-            const element = timelineRef.current;
-            if (element) element.scrollTop = element.scrollHeight;
-          });
+          timelineNearBottomRef.current = true;
+          pendingBottomScrollRef.current = key;
         }
       } catch (error) {
         if (requestSequence !== latestThreadRequest.current) return;
@@ -358,6 +371,11 @@ export function MessageHubWorkspace({
     setThreadLoadingOlder(true);
     try {
       const result = await fetchThreadPage(selectedKey, thread.nextCursor);
+      pendingScrollRestorationRef.current = {
+        key: selectedKey,
+        scrollHeight: previousHeight,
+        scrollTop: previousTop,
+      };
       setThread((current) =>
         current?.thread.key === selectedKey
           ? {
@@ -367,14 +385,8 @@ export function MessageHubWorkspace({
             }
           : current,
       );
-      window.requestAnimationFrame(() => {
-        const currentElement = timelineRef.current;
-        if (currentElement) {
-          currentElement.scrollTop =
-            previousTop + currentElement.scrollHeight - previousHeight;
-        }
-      });
     } catch (error) {
+      pendingScrollRestorationRef.current = null;
       setLoadError(
         error instanceof Error
           ? error.message
@@ -385,6 +397,33 @@ export function MessageHubWorkspace({
       setThreadLoadingOlder(false);
     }
   }, [fetchThreadPage, selectedKey, thread]);
+
+  useLayoutEffect(() => {
+    const element = timelineRef.current;
+    if (!element || !selectedKey || thread?.thread.key !== selectedKey) return;
+
+    const restoration = pendingScrollRestorationRef.current;
+    if (restoration?.key === selectedKey) {
+      element.scrollTop =
+        restoration.scrollTop + element.scrollHeight - restoration.scrollHeight;
+      pendingScrollRestorationRef.current = null;
+      return;
+    }
+
+    if (pendingBottomScrollRef.current === selectedKey) {
+      element.scrollTop = element.scrollHeight;
+      timelineNearBottomRef.current = true;
+      pendingBottomScrollRef.current = null;
+    }
+  }, [selectedKey, thread]);
+
+  const keepLatestMessageVisible = useCallback(() => {
+    if (!timelineNearBottomRef.current) return;
+    window.requestAnimationFrame(() => {
+      const element = timelineRef.current;
+      if (element) element.scrollTop = element.scrollHeight;
+    });
+  }, []);
 
   useEffect(() => {
     latestThreadRequest.current += 1;
@@ -615,6 +654,9 @@ export function MessageHubWorkspace({
                   onClick={() => {
                     if (item.key === selectedKey) return;
                     latestThreadRequest.current += 1;
+                    timelineNearBottomRef.current = true;
+                    pendingBottomScrollRef.current = item.key;
+                    pendingScrollRestorationRef.current = null;
                     setSelectedKey(item.key);
                     setThread(null);
                     setThreadLoading(true);
@@ -691,7 +733,10 @@ export function MessageHubWorkspace({
             className="message-timeline"
             aria-live="polite"
             onScroll={(event) => {
-              if (event.currentTarget.scrollTop < 100) {
+              const element = event.currentTarget;
+              timelineNearBottomRef.current =
+                element.scrollHeight - element.scrollTop - element.clientHeight < 80;
+              if (element.scrollTop < 100) {
                 void loadOlderMessages();
               }
             }}
@@ -722,7 +767,11 @@ export function MessageHubWorkspace({
                 >
                   <div className="message-history-bubble">
                     {message.imageUrl ? (
-                      <MessageHistoryImage key={message.imageUrl} url={message.imageUrl} />
+                      <MessageHistoryImage
+                        key={message.imageUrl}
+                        onLoad={keepLatestMessageVisible}
+                        url={message.imageUrl}
+                      />
                     ) : message.imageAttached ? (
                       <span className="message-history-image-unavailable">
                         첨부 이미지를 표시할 수 없습니다.
