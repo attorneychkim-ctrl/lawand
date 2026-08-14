@@ -5,11 +5,58 @@ import {
   canonicalizePhoneDeskObservedCalls,
   externalInboundNotificationTargetUserIds,
   isCentrexInboundAnswerDeliveryDelayed,
+  isPhoneDeskAftercareWritableState,
   legalFriendsResidenceRegion,
   phoneDeskItemAssignees,
   phoneDeskItemMatchesAssignee,
   phoneDeskItemMatchesFilter,
+  staffPhoneCustomerMatches,
 } from "./telephony-service.js";
+
+test("후처리는 통화 연결 시점부터 종료 뒤까지 작성할 수 있다", () => {
+  assert.equal(isPhoneDeskAftercareWritableState("pending"), false);
+  assert.equal(isPhoneDeskAftercareWritableState("ringing"), false);
+  assert.equal(isPhoneDeskAftercareWritableState("connected"), true);
+  assert.equal(isPhoneDeskAftercareWritableState("ended"), true);
+  assert.equal(isPhoneDeskAftercareWritableState("failed"), false);
+  assert.equal(isPhoneDeskAftercareWritableState("unknown"), false);
+});
+
+test("직원 전체 회선번호는 같은 번호의 직원 정보와 내선으로 식별한다", () => {
+  const matches = staffPhoneCustomerMatches([
+    {
+      lineNumber: "07046074595",
+      staffUserId: "staff-4425",
+      displayName: "직원 예시",
+      extension: "4425",
+      department: "송무팀",
+      jobTitle: "사원",
+    },
+    {
+      lineNumber: null,
+      staffUserId: "staff-unlinked",
+      displayName: "미연결 직원",
+      extension: null,
+      department: "관리팀",
+      jobTitle: "사원",
+    },
+  ]);
+
+  assert.deepEqual(matches.get("07046074595"), {
+    source: "staff",
+    staffMembers: [
+      {
+        staffUserId: "staff-4425",
+        displayName: "직원 예시",
+        lineNumber: "07046074595",
+        extension: "4425",
+        department: "송무팀",
+        jobTitle: "사원",
+      },
+    ],
+  });
+  assert.equal(matches.size, 1);
+});
 
 test("외부 수신전화 알림은 담당 여부와 무관하게 활성 직원 전체를 대상으로 한다", () => {
   assert.deepEqual(

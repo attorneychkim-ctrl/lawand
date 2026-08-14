@@ -196,6 +196,13 @@ function CustomerMatch({
       상담데스크 · {consultation.displayName} · {consultation.state}{consultation.assigneeDisplayName ? ` · 담당 ${consultation.assigneeDisplayName}` : ""}
     </Link>;
   }
+  if (call.customerMatch.source === "staff") {
+    const members = call.customerMatch.staffMembers;
+    return <span className="inbound-customer">
+      직원 회선 · {members.map((member) => member.displayName).join(" · ")}
+      {members[0]?.extension ? ` · 내선 ${members[0].extension}` : ""}
+    </span>;
+  }
   const match = call.customerMatch;
   const latestCase = match.cases[0];
   return <span className="inbound-customer">
@@ -288,6 +295,8 @@ function notificationCopy(
     ? customer.consultation.displayName
     : customer?.source === "legal_friends"
       ? customer.clientName
+      : customer?.source === "staff"
+        ? customer.staffMembers.map((member) => member.displayName).join(" · ")
       : "발신자 정보 없음";
   const details: string[] = [];
   const myCustomer = isMyCustomer(activity, staffUserId);
@@ -319,6 +328,12 @@ function notificationCopy(
     if (customer.cases.length > 1) {
       details.push(`연결 사건 ${customer.cases.length}건`);
     }
+  } else if (customer?.source === "staff") {
+    details.push(
+      `직원 회선 · ${customer.staffMembers
+        .map((member) => `${member.displayName} · 내선 ${member.extension}`)
+        .join(" / ")}`,
+    );
   } else {
     details.push("상담·리걸프렌즈 일치 고객 없음");
   }
@@ -1135,7 +1150,9 @@ export function InboundCallIndicator({
                     {answerLabel}
                   </button>
                 ) : null}
-                {activity.canOpenAftercare ? (
+                {activity.state === "connected" ||
+                (activity.state === "ended" &&
+                  activity.correlationStatus === "confirmed") ? (
                   <button
                     className="inbound-aftercare-button"
                     onClick={() => setAftercareCallId(activity.id)}
@@ -1195,10 +1212,7 @@ export function InboundCallIndicator({
                 <CustomerMatch call={call} />
               </span>
               <span className="inbound-call-actions">
-                {call.state === "ended" &&
-                call.endpointOwners.some(
-                  (owner) => owner.staffUserId === staffUserId,
-                ) ? (
+                {call.state === "connected" || call.state === "ended" ? (
                   <button
                     className="inbound-aftercare-button"
                     onClick={() => setAftercareCallId(call.id)}
@@ -1277,7 +1291,7 @@ export function InboundCallIndicator({
                 >
                   {answerLabel}
                 </button> : null}
-                {call.state === "ended" ? (
+                {call.state === "connected" || call.state === "ended" ? (
                   <button
                     className="inbound-aftercare-button"
                     onClick={() => setAftercareCallId(call.id)}

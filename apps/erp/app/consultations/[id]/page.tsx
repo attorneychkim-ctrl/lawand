@@ -710,7 +710,6 @@ export default async function ConsultationDetailPage({
   const canClickToCall =
     !isSoftDeleted &&
     Boolean(latestPhone) &&
-    consultation.assignment?.assigneeUserId === staff.id &&
     consultation.assignmentTransfers[0]?.status !== "pending";
   const canSendMessage = canClickToCall;
   const latestMyCall = consultation.telephonyCalls.find(
