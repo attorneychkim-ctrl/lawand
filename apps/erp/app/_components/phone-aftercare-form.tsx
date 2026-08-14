@@ -333,11 +333,31 @@ export function PhoneAftercareForm({
   const internal = detail.call.scope === "internal";
   const suggested = suggestedConsultation(detail);
   const recommendedAssignee = detail.recommendedAssigneeUserIds[0] ?? "";
+  const existingPhonebook = detail.call.customerMatch?.source === "phonebook"
+    ? detail.call.customerMatch.contact
+    : null;
+  const canOfferPhonebook = Boolean(
+    !internal &&
+      detail.call.remotePhone &&
+      (!detail.call.customerMatch || existingPhonebook),
+  );
   const [result, setResult] = useState<PhoneDeskCallResult | "">(
     existing?.result ?? "consultation_completed",
   );
   const [otherText, setOtherText] = useState(existing?.otherText ?? "");
   const [memo, setMemo] = useState(existing?.memo ?? "");
+  const [phonebookEnabled, setPhonebookEnabled] = useState(
+    Boolean(existingPhonebook),
+  );
+  const [phonebookName, setPhonebookName] = useState(
+    existingPhonebook?.displayName ?? "",
+  );
+  const [phonebookOriginalPhone, setPhonebookOriginalPhone] = useState(
+    existingPhonebook?.originalPhone ?? detail.call.remotePhone ?? "",
+  );
+  const [phonebookConnectedPhone, setPhonebookConnectedPhone] = useState(
+    existingPhonebook?.connectedPhone ?? "",
+  );
   const [consultationMode, setConsultationMode] = useState<
     "none" | "link" | "create"
   >(internal ? "none" : existing?.consultationId || suggested ? "link" : "none");
@@ -404,18 +424,37 @@ export function PhoneAftercareForm({
     followUpDueAt && minimumDueAt && followUpDueAt >= minimumDueAt,
   );
   const safeMessageTarget = messageTarget(detail);
+  const normalizedOriginalPhone = phonebookOriginalPhone.replace(/\D/g, "");
+  const normalizedConnectedPhone = phonebookConnectedPhone.replace(/\D/g, "");
+  const phonebookCallNumberIncluded = Boolean(
+    detail.call.remotePhone &&
+      [normalizedOriginalPhone, normalizedConnectedPhone].includes(
+        detail.call.remotePhone,
+      ),
+  );
   const canSave = Boolean(
     result &&
       (result !== "other" || otherText.trim()) &&
       (consultationMode !== "link" || linkedConsultationId) &&
       (consultationMode !== "create" || customerName.trim()) &&
-      (!followUpEnabled || (followUpDueValid && followUpAssignee)),
+      (!followUpEnabled || (followUpDueValid && followUpAssignee)) &&
+      (!phonebookEnabled ||
+        (phonebookName.trim() &&
+          normalizedOriginalPhone.length >= 8 &&
+          phonebookCallNumberIncluded)),
   );
   const visibleResultOptions = internal ? internalResultOptions : resultOptions;
 
   function chooseResult(value: PhoneDeskCallResult) {
     setResult(value);
     setFollowUpEnabled(followUpDefaultResults.has(value));
+    if (
+      canOfferPhonebook &&
+      !existingPhonebook &&
+      (value === "public_institution" || value === "creditor")
+    ) {
+      setPhonebookEnabled(true);
+    }
     setSaved(false);
   }
 
@@ -448,6 +487,16 @@ export function PhoneAftercareForm({
             assigneeUserId: followUpAssignee,
           }
         : { enabled: false },
+      phonebook: phonebookEnabled
+        ? {
+            mode: "save",
+            displayName: phonebookName.trim(),
+            originalPhone: normalizedOriginalPhone,
+            ...(normalizedConnectedPhone
+              ? { connectedPhone: normalizedConnectedPhone }
+              : {}),
+          }
+        : { mode: "none" },
     };
     try {
       const response = await fetch(
@@ -541,6 +590,65 @@ export function PhoneAftercareForm({
             </div>
           )}
         </section>
+
+        {canOfferPhonebook ? (
+          <fieldset className="phone-aftercare-section phone-aftercare-phonebook">
+            <legend>발신자 정보</legend>
+            <label className="phone-aftercare-choice">
+              <input
+                checked={phonebookEnabled}
+                onChange={(event) => setPhonebookEnabled(event.target.checked)}
+                type="checkbox"
+              />
+              <span>
+                <strong>{existingPhonebook ? "전화번호부 정보 수정" : "전화번호부에 저장"}</strong>
+                <span>다음 수신부터 저장한 이름과 전화번호를 알림에 표시합니다.</span>
+              </span>
+            </label>
+            {phonebookEnabled ? (
+              <div className="phone-aftercare-grid">
+                <label className="phone-aftercare-field">
+                  <span>발신자 이름</span>
+                  <input
+                    maxLength={100}
+                    onChange={(event) => setPhonebookName(event.target.value)}
+                    placeholder="예: 서울회생법원"
+                    value={phonebookName}
+                  />
+                </label>
+                <label className="phone-aftercare-field">
+                  <span>원번호</span>
+                  <input
+                    inputMode="tel"
+                    maxLength={20}
+                    onChange={(event) => setPhonebookOriginalPhone(event.target.value)}
+                    placeholder="02-530-1953"
+                    value={formatPhone(phonebookOriginalPhone)}
+                  />
+                </label>
+                <label className="phone-aftercare-field">
+                  <span>연결번호 <small>선택</small></span>
+                  <input
+                    inputMode="tel"
+                    maxLength={20}
+                    onChange={(event) => setPhonebookConnectedPhone(event.target.value)}
+                    placeholder="착신·지역 연결 시 보이는 번호"
+                    value={formatPhone(phonebookConnectedPhone)}
+                  />
+                </label>
+                <p className="phone-aftercare-phonebook-help">
+                  원번호와 연결번호 어느 쪽으로 전화가 와도 같은 발신자로 찾습니다.
+                  현재 통화 번호는 둘 중 하나에 포함되어야 합니다.
+                </p>
+                {!phonebookCallNumberIncluded ? (
+                  <p className="phone-aftercare-schedule-error">
+                    현재 통화 번호 {formatPhone(detail.call.remotePhone)}를 원번호 또는 연결번호에 입력해 주세요.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </fieldset>
+        ) : null}
 
         <fieldset className="phone-aftercare-section">
         <legend>상담데스크 연결</legend>

@@ -1689,6 +1689,118 @@
   }
 }
 
+/* 공용 전화번호부 */
+.phonebook-shell { width: min(1180px, calc(100% - 40px)); }
+.phonebook-panel { display: grid; gap: 18px; padding: 22px; }
+.phonebook-toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+}
+.phonebook-search { display: grid; width: min(560px, 100%); gap: 7px; }
+.phonebook-search > span,
+.phonebook-editor label > span {
+  color: var(--ink-soft);
+  font-size: .68rem;
+  font-weight: 800;
+}
+.phonebook-search input,
+.phonebook-editor input {
+  min-height: 44px;
+  padding: 0 13px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+.phonebook-editor {
+  display: grid;
+  gap: 15px;
+  padding: 19px;
+  border: 1px solid color-mix(in srgb, var(--brand) 26%, var(--line));
+  border-radius: 15px;
+  background: var(--brand-softer);
+}
+.phonebook-editor h2 { margin: 2px 0 0; font-size: 1.05rem; }
+.phonebook-editor-grid {
+  display: grid;
+  grid-template-columns: 1.25fr 1fr 1fr;
+  gap: 12px;
+}
+.phonebook-editor-grid label { display: grid; gap: 7px; }
+.phonebook-editor small { color: var(--muted); }
+.phonebook-editor > p { margin: 0; color: var(--muted); font-size: .68rem; }
+.phonebook-editor-actions,
+.phonebook-row-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.phonebook-list { display: grid; gap: 9px; }
+.phonebook-list article {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.2fr) minmax(320px, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface);
+}
+.phonebook-contact-identity { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.phonebook-contact-identity > span {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+  font-weight: 900;
+}
+.phonebook-contact-identity div { display: grid; gap: 2px; min-width: 0; }
+.phonebook-contact-identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phonebook-contact-identity small { color: var(--muted); font-size: .61rem; }
+.phonebook-list dl { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0; }
+.phonebook-list dl > div { display: grid; gap: 3px; }
+.phonebook-list dt { color: var(--muted); font-size: .59rem; font-weight: 800; }
+.phonebook-list dd { margin: 0; color: var(--ink); font-size: .74rem; font-weight: 780; }
+.phonebook-row-actions button {
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink-soft);
+  cursor: pointer;
+  font: inherit;
+  font-size: .65rem;
+  font-weight: 780;
+}
+.phonebook-row-actions button:last-child { color: var(--danger); }
+.phonebook-empty { margin: 0; padding: 46px 20px; text-align: center; color: var(--muted); }
+.phonebook-error,
+.phone-aftercare-phonebook-help { margin: 0; color: var(--muted); font-size: .65rem; }
+.phonebook-error { color: var(--danger); font-weight: 760; }
+.phone-aftercare-phonebook {
+  border-color: color-mix(in srgb, var(--brand) 22%, var(--line));
+  background: var(--brand-softer);
+}
+.phone-aftercare-phonebook .phone-aftercare-grid { margin-top: 12px; }
+.phone-aftercare-phonebook-help { align-self: end; padding-bottom: 11px; line-height: 1.55; }
+
+@media (max-width: 900px) {
+  .phonebook-editor-grid,
+  .phonebook-list article { grid-template-columns: 1fr; }
+  .phonebook-row-actions { justify-content: flex-start; }
+}
+
+@media (max-width: 620px) {
+  .phonebook-shell { width: min(100% - 20px, 1180px); }
+  .phonebook-panel { padding: 14px; }
+  .phonebook-toolbar { align-items: stretch; flex-direction: column; }
+  .phonebook-toolbar .primary-button { width: 100%; }
+  .phonebook-list dl { grid-template-columns: 1fr; }
+}
+
 :root[data-theme="dark"] {
   color-scheme: dark;
   --bg: #0e1511;

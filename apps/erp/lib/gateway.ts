@@ -434,6 +434,15 @@ export type TelephonyInboundCall = {
           jobTitle: string;
         }>;
       }
+    | {
+        source: "phonebook";
+        contact: {
+          id: string;
+          displayName: string;
+          originalPhone: string;
+          connectedPhone: string | null;
+        };
+      }
     | null;
 };
 
@@ -726,6 +735,29 @@ export type PhoneDeskAftercareInput = {
   followUp:
     | { enabled: false }
     | { enabled: true; dueAt: string; assigneeUserId: string };
+  phonebook?:
+    | { mode: "none" }
+    | {
+        mode: "save";
+        displayName: string;
+        originalPhone: string;
+        connectedPhone?: string | null;
+      };
+};
+
+export type PhonebookContact = {
+  id: string;
+  displayName: string;
+  originalPhone: string;
+  connectedPhone: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PhonebookContactInput = {
+  displayName: string;
+  originalPhone: string;
+  connectedPhone?: string | null;
 };
 
 export type ConsultationDetail = {
@@ -1217,6 +1249,43 @@ async function phoneDeskResponse<T>(response: Response): Promise<T> {
     );
   }
   return (await response.json()) as T;
+}
+
+export async function getPhonebookContacts(): Promise<{
+  items: PhonebookContact[];
+  total: number;
+}> {
+  return phoneDeskResponse(
+    await gatewayFetch("/v1/phonebook"),
+  );
+}
+
+export async function createPhonebookContact(
+  input: PhonebookContactInput,
+): Promise<PhonebookContact> {
+  return phoneDeskResponse(
+    await gatewayFetch("/v1/phonebook", { method: "POST", body: input }),
+  );
+}
+
+export async function updatePhonebookContact(
+  contactId: string,
+  input: PhonebookContactInput,
+): Promise<PhonebookContact> {
+  return phoneDeskResponse(
+    await gatewayFetch(`/v1/phonebook/${contactId}`, {
+      method: "POST",
+      body: input,
+    }),
+  );
+}
+
+export async function deactivatePhonebookContact(
+  contactId: string,
+): Promise<{ id: string; deactivated: true }> {
+  return phoneDeskResponse(
+    await gatewayFetch(`/v1/phonebook/${contactId}`, { method: "DELETE" }),
+  );
 }
 
 export async function getPhoneDeskCall(

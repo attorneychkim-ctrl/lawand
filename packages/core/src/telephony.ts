@@ -8,6 +8,29 @@ export const MMS_IMAGE_MAX_BYTES = 200 * 1024;
 export const MMS_IMAGE_MAX_WIDTH = 1_500;
 export const MMS_IMAGE_MAX_HEIGHT = 1_440;
 
+export type TelephonyCallerIdentity =
+  | { source: "consultation"; consultation: { displayName: string } }
+  | { source: "legal_friends"; clientName: string }
+  | { source: "staff"; staffMembers: Array<{ displayName: string }> }
+  | { source: "phonebook"; contact: { displayName: string } }
+  | null;
+
+export function telephonyCallerDisplayName(
+  identity: TelephonyCallerIdentity,
+): string {
+  if (identity?.source === "consultation") {
+    return identity.consultation.displayName;
+  }
+  if (identity?.source === "legal_friends") return identity.clientName;
+  if (identity?.source === "staff") {
+    return identity.staffMembers
+      .map((member) => member.displayName)
+      .join(" · ");
+  }
+  if (identity?.source === "phonebook") return identity.contact.displayName;
+  return "발신자 정보 없음";
+}
+
 export const MESSAGE_TEMPLATE_VARIABLES = [
   "{{고객명}}",
   "{{담당자명}}",
@@ -338,6 +361,54 @@ const phoneDeskFollowUpSchema = z.discriminatedUnion("enabled", [
     .strict(),
 ]);
 
+const phonebookPhoneSchema = z
+  .string()
+  .trim()
+  .transform((value) => value.replace(/\D/g, ""))
+  .pipe(
+    z
+      .string()
+      .regex(/^[0-9]{8,15}$/, "전화번호는 숫자 8~15자리여야 합니다."),
+  );
+
+export const phonebookContactSaveSchema = z
+  .object({
+    displayName: z.string().trim().min(1).max(100),
+    originalPhone: phonebookPhoneSchema,
+    connectedPhone: phonebookPhoneSchema.nullable().optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.connectedPhone === value.originalPhone) {
+      context.addIssue({
+        code: "custom",
+        message: "연결번호는 원번호와 다를 때만 입력해 주세요.",
+        path: ["connectedPhone"],
+      });
+    }
+  });
+
+const phoneDeskPhonebookActionSchema = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("none") }).strict(),
+  z
+    .object({
+      mode: z.literal("save"),
+      displayName: z.string().trim().min(1).max(100),
+      originalPhone: phonebookPhoneSchema,
+      connectedPhone: phonebookPhoneSchema.nullable().optional(),
+    })
+    .strict()
+    .superRefine((value, context) => {
+      if (value.connectedPhone === value.originalPhone) {
+        context.addIssue({
+          code: "custom",
+          message: "연결번호는 원번호와 다를 때만 입력해 주세요.",
+          path: ["connectedPhone"],
+        });
+      }
+    }),
+]);
+
 export const phoneDeskAftercareSaveSchema = z
   .object({
     result: phoneDeskCallResultSchema,
@@ -345,6 +416,7 @@ export const phoneDeskAftercareSaveSchema = z
     memo: z.string().trim().max(2_000).optional(),
     consultation: phoneDeskConsultationActionSchema,
     followUp: phoneDeskFollowUpSchema,
+    phonebook: phoneDeskPhonebookActionSchema.optional(),
   })
   .strict()
   .superRefine((value, context) => {
@@ -378,6 +450,9 @@ export type PhoneDeskAftercareSave = z.infer<
 >;
 export type PhoneDeskCallResolution = z.infer<
   typeof phoneDeskCallResolutionSchema
+>;
+export type PhonebookContactSave = z.infer<
+  typeof phonebookContactSaveSchema
 >;
 
 const bridgeIdSchema = z

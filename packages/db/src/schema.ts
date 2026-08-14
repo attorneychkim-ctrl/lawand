@@ -2778,6 +2778,97 @@ export const telephonyMessageManualContacts = pgTable(
   ],
 );
 
+export const telephonyPhonebookContacts = pgTable(
+  "telephony_phonebook_contacts",
+  {
+    id: uuid("id").primaryKey(),
+    displayNameCiphertext: bytea("display_name_ciphertext").notNull(),
+    displayNameNonce: bytea("display_name_nonce").notNull(),
+    displayNameKeyVersion: varchar("display_name_key_version", {
+      length: 50,
+    }).notNull(),
+    originalPhoneFingerprint: bytea("original_phone_fingerprint").notNull(),
+    originalPhoneCiphertext: bytea("original_phone_ciphertext").notNull(),
+    originalPhoneNonce: bytea("original_phone_nonce").notNull(),
+    originalPhoneKeyVersion: varchar("original_phone_key_version", {
+      length: 50,
+    }).notNull(),
+    connectedPhoneFingerprint: bytea("connected_phone_fingerprint"),
+    connectedPhoneCiphertext: bytea("connected_phone_ciphertext"),
+    connectedPhoneNonce: bytea("connected_phone_nonce"),
+    connectedPhoneKeyVersion: varchar("connected_phone_key_version", {
+      length: 50,
+    }),
+    isActive: boolean("is_active").default(true).notNull(),
+    createdByUserId: uuid("created_by_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "restrict" }),
+    updatedByUserId: uuid("updated_by_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "restrict" }),
+    deactivatedByUserId: uuid("deactivated_by_user_id").references(
+      () => staffUsers.id,
+      { onDelete: "restrict" },
+    ),
+    deactivatedAt: timestamp("deactivated_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("telephony_phonebook_contacts_active_original_phone_uidx")
+      .on(table.originalPhoneFingerprint)
+      .where(sql`${table.isActive} = true`),
+    uniqueIndex("telephony_phonebook_contacts_active_connected_phone_uidx")
+      .on(table.connectedPhoneFingerprint)
+      .where(
+        sql`${table.isActive} = true AND ${table.connectedPhoneFingerprint} IS NOT NULL`,
+      ),
+    index("telephony_phonebook_contacts_active_updated_idx").on(
+      table.isActive,
+      table.updatedAt,
+    ),
+    check(
+      "telephony_phonebook_contacts_display_name_crypto",
+      sql`octet_length(${table.displayNameCiphertext}) >= 17
+        AND octet_length(${table.displayNameNonce}) = 12
+        AND length(btrim(${table.displayNameKeyVersion})) > 0`,
+    ),
+    check(
+      "telephony_phonebook_contacts_original_phone_crypto",
+      sql`octet_length(${table.originalPhoneFingerprint}) = 32
+        AND octet_length(${table.originalPhoneCiphertext}) >= 17
+        AND octet_length(${table.originalPhoneNonce}) = 12
+        AND length(btrim(${table.originalPhoneKeyVersion})) > 0`,
+    ),
+    check(
+      "telephony_phonebook_contacts_connected_phone_crypto",
+      sql`(
+        ${table.connectedPhoneFingerprint} IS NULL
+        AND ${table.connectedPhoneCiphertext} IS NULL
+        AND ${table.connectedPhoneNonce} IS NULL
+        AND ${table.connectedPhoneKeyVersion} IS NULL
+      ) OR (
+        octet_length(${table.connectedPhoneFingerprint}) = 32
+        AND octet_length(${table.connectedPhoneCiphertext}) >= 17
+        AND octet_length(${table.connectedPhoneNonce}) = 12
+        AND length(btrim(${table.connectedPhoneKeyVersion})) > 0
+        AND ${table.connectedPhoneFingerprint} <> ${table.originalPhoneFingerprint}
+      )`,
+    ),
+    check(
+      "telephony_phonebook_contacts_active_state",
+      sql`(
+        ${table.isActive} = true
+        AND ${table.deactivatedAt} IS NULL
+        AND ${table.deactivatedByUserId} IS NULL
+      ) OR (
+        ${table.isActive} = false
+        AND ${table.deactivatedAt} IS NOT NULL
+        AND ${table.deactivatedByUserId} IS NOT NULL
+      )`,
+    ),
+  ],
+);
+
 export const customerReviewRequestTemplates = pgTable(
   "customer_review_request_templates",
   {

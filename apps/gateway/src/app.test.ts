@@ -1555,6 +1555,105 @@ test("직원 전화데스크 목록은 권한 확인 뒤 통합 원장을 반환
   assert.doesNotMatch(body, /remotePhoneCiphertext/);
 });
 
+test("인증된 직원은 원번호·연결번호 전화번호부를 조회하고 등록·수정·삭제한다", async (context) => {
+  const contactId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2f8";
+  const received: Array<{ action: string; displayName?: string; actorId?: string }> = [];
+  const contact = {
+    id: contactId,
+    displayName: "서울회생법원",
+    originalPhone: "025301953",
+    connectedPhone: "07053011953",
+    createdAt: "2026-08-14T00:00:00.000Z",
+    updatedAt: "2026-08-14T00:00:00.000Z",
+  };
+  const telephonyService = {
+    listPhonebookContacts: async () => ({ items: [contact], total: 1 }),
+    createPhonebookContact: async (
+      input: { displayName: string; originalPhone: string; connectedPhone?: string | null },
+      actor: StaffPrincipal,
+    ) => {
+      received.push({ action: "create", displayName: input.displayName, actorId: actor.id });
+      assert.equal(input.originalPhone, "025301953");
+      assert.equal(input.connectedPhone, "07053011953");
+      return contact;
+    },
+    updatePhonebookContact: async (
+      receivedId: string,
+      input: { displayName: string },
+      actor: StaffPrincipal,
+    ) => {
+      assert.equal(receivedId, contactId);
+      received.push({ action: "update", displayName: input.displayName, actorId: actor.id });
+      return { ...contact, displayName: input.displayName };
+    },
+    deactivatePhonebookContact: async (
+      receivedId: string,
+      actor: StaffPrincipal,
+    ) => {
+      assert.equal(receivedId, contactId);
+      received.push({ action: "delete", actorId: actor.id });
+      return { id: contactId, deactivated: true as const };
+    },
+  } as unknown as TelephonyService;
+  const authService = {
+    authorize: async () => realtimeActor,
+  } as unknown as StaffAuthService;
+  const server = createGatewayServer({
+    authService,
+    internalApiKey: "test-internal-key",
+    telephonyService,
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}/v1/phonebook`;
+  const headers = {
+    "content-type": "application/json",
+    "x-lawand-internal-key": "test-internal-key",
+    "x-lawand-staff-session": "test-session",
+  };
+  assert.equal((await fetch(baseUrl)).status, 401);
+  assert.equal((await fetch(baseUrl, { headers })).status, 200);
+  assert.equal(
+    (await fetch(baseUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        displayName: " 서울회생법원 ",
+        originalPhone: "02-530-1953",
+        connectedPhone: "070-5301-1953",
+      }),
+    })).status,
+    201,
+  );
+  assert.equal(
+    (await fetch(`${baseUrl}/${contactId}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        displayName: "서울회생법원 민원실",
+        originalPhone: "02-530-1953",
+      }),
+    })).status,
+    200,
+  );
+  assert.equal(
+    (await fetch(`${baseUrl}/${contactId}`, {
+      method: "DELETE",
+      headers,
+    })).status,
+    200,
+  );
+  assert.deepEqual(received, [
+    { action: "create", displayName: "서울회생법원", actorId: realtimeActor.id },
+    { action: "update", displayName: "서울회생법원 민원실", actorId: realtimeActor.id },
+    { action: "delete", actorId: realtimeActor.id },
+  ]);
+});
+
 test("통합 통화 활동 조회는 인증된 직원 문맥으로만 개인정보 snapshot을 반환한다", async (context) => {
   let requestedBy = "";
   const rootId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2f9";
