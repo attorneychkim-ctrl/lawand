@@ -1,6 +1,6 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 
-import { createEventId } from "@lawand/core";
+import { createEventId, type ReviewPracticeArea } from "@lawand/core";
 import {
   customerReviewLinkManagers,
   staffExternalAccounts,
@@ -66,6 +66,14 @@ type ExactPhoneTargetRow = {
   client_idx: number;
   case_idx: number;
 };
+
+export function reviewPracticeAreaFromDirectoryCaseType(
+  caseType: number,
+): ReviewPracticeArea {
+  if (caseType === 1) return "personal_rehabilitation";
+  if (caseType === 2) return "personal_bankruptcy";
+  return "other";
+}
 
 function toTarget(row: ReviewDirectoryTargetRow): ReviewDirectoryTarget {
   const staffEntries = [

@@ -2387,6 +2387,89 @@ test("공개 후기 쓰기는 홈페이지 서버의 접수 전용 키와 검수
   });
 });
 
+test("고객별 후기 링크는 이름·전화 재입력 없이 사전 선택 문맥을 읽고 제출한다", async (context) => {
+  const requestToken =
+    "019fa6a4-6834-7782-aa0b-4e71ffb8a2a1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  let usedNetworkOnlyLimit = false;
+  let submittedWithoutIdentity = false;
+  const reviewService = {
+    getRequestContext: async () => ({
+      authorDisplay: "김○○ 고객",
+      practiceArea: "personal_rehabilitation" as const,
+      progressStage: "commencement" as const,
+      expiresAt: "2026-11-12T00:00:00.000Z",
+    }),
+    submit: async (input: { authorDisplay?: string; phone?: string }) => {
+      submittedWithoutIdentity = !input.authorDisplay && !input.phone;
+      return {
+        publicReceiptCode: "RV-260814-23456789",
+        acceptedAt: "2026-08-14T00:00:00.000Z",
+        status: "pending_review" as const,
+        replayed: false,
+      };
+    },
+  } as unknown as ReviewSubmissionService;
+  const server = createGatewayServer({
+    reviewService,
+    publicIntakeApiKey: "test-public-intake-key",
+    intakeProtection: {
+      check: () => {
+        throw new Error("전용 링크 제출은 전화번호 rate limit을 사용하지 않습니다.");
+      },
+      checkKakaoEntry: () => {
+        usedNetworkOnlyLimit = true;
+        return { allowed: true };
+      },
+    },
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const headers = {
+    "content-type": "application/json",
+    "x-lawand-public-intake-key": "test-public-intake-key",
+  };
+  const contextResponse = await fetch(`${baseUrl}/v1/review-request-context`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ requestToken }),
+  });
+  assert.equal(contextResponse.status, 200);
+  assert.deepEqual(await contextResponse.json(), {
+    authorDisplay: "김○○ 고객",
+    practiceArea: "personal_rehabilitation",
+    progressStage: "commencement",
+    expiresAt: "2026-11-12T00:00:00.000Z",
+  });
+
+  const submissionResponse = await fetch(`${baseUrl}/v1/review-submissions`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      source: "homepage",
+      idempotencyKey: "01984c7d-8500-7000-8000-000000000011",
+      practiceArea: "personal_rehabilitation",
+      progressStage: "commencement",
+      experienceKeywords: ["친절", "든든"],
+      content: "상담부터 개시 절차까지 진행 상황을 차분하게 설명해 주셔서 안심할 수 있었습니다.",
+      privacyNoticeVersion: "2026-07-29.1",
+      publicationConsentVersion: "2026-07-29.1",
+      consentAgreedAt: "2026-08-14T09:00:00+09:00",
+      privacyConsent: true,
+      publicationConsent: true,
+      requestToken,
+      website: "",
+    }),
+  });
+  assert.equal(submissionResponse.status, 201);
+  assert.equal(usedNetworkOnlyLimit, true);
+  assert.equal(submittedWithoutIdentity, true);
+});
+
 test("직원 로그인 API는 ERP 내부 키를 요구한다", async (context) => {
   const authService = {
     login: async () => ({

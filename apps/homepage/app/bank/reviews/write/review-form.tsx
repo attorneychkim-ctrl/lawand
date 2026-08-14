@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   CURRENT_REVIEW_PRIVACY_NOTICE_VERSION,
   CURRENT_REVIEW_PUBLICATION_CONSENT_VERSION,
+  type ReviewRequestContextResponse,
   type ReviewSubmission,
   type ReviewSubmissionResponse,
 } from "@lawand/core";
@@ -106,22 +107,25 @@ function displayStage(value: ProgressStage) {
   );
 }
 
-function validate(form: ReviewFormData): string | null {
+function validate(form: ReviewFormData, invitationConfirmed: boolean): string | null {
   if (!form.practiceArea) return "함께한 분야를 골라 주세요.";
   if (!form.progressStage) return "후기를 쓰는 시점을 골라 주세요.";
   if (form.experienceKeywords.length === 0) {
     return "도움을 느낀 점을 하나 이상 골라 주세요.";
   }
-  if (form.authorDisplay.trim().length < 2) {
+  if (!invitationConfirmed && form.authorDisplay.trim().length < 2) {
     return "공개 이름을 두 글자 이상 입력해 주세요.";
   }
-  if (/\d{7,}|@/.test(form.authorDisplay)) {
+  if (!invitationConfirmed && /\d{7,}|@/.test(form.authorDisplay)) {
     return "공개 이름에는 연락처나 이메일을 입력할 수 없습니다.";
   }
   if (form.content.trim().length < 20) {
     return "후기를 스무 글자 이상 남겨 주세요.";
   }
-  if (!/^010\d{8}$/.test(form.phone.replace(/\D/g, ""))) {
+  if (
+    !invitationConfirmed &&
+    !/^010\d{8}$/.test(form.phone.replace(/\D/g, ""))
+  ) {
     return "010으로 시작하는 휴대전화 번호를 확인해 주세요.";
   }
   if (!form.privacyConsent || !form.publicationConsent) {
@@ -132,11 +136,59 @@ function validate(form: ReviewFormData): string | null {
 
 export function ReviewForm({ requestToken }: { requestToken?: string }) {
   const [form, setForm] = useState<ReviewFormData>(initialForm);
+  const [requestContext, setRequestContext] =
+    useState<ReviewRequestContextResponse | null>(null);
+  const [requestContextStatus, setRequestContextStatus] = useState<
+    "idle" | "loading" | "ready" | "error"
+  >(requestToken ? "loading" : "idle");
+  const [requestContextError, setRequestContextError] = useState("");
+  const [editingSuggestedContext, setEditingSuggestedContext] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<ReviewSubmissionResponse | null>(null);
   const idempotencyKey = useRef(crypto.randomUUID());
   const errorRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!requestToken) return;
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch("/api/reviews/request-context", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ requestToken }),
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const body = (await response.json().catch(() => null)) as
+          | (ReviewRequestContextResponse & { message?: string })
+          | null;
+        if (!response.ok || !body) {
+          throw new Error(
+            body?.message ?? "후기 요청 링크를 확인하지 못했습니다.",
+          );
+        }
+        setRequestContext(body);
+        setForm((current) => ({
+          ...current,
+          authorDisplay: body.authorDisplay,
+          practiceArea: body.practiceArea,
+          progressStage: body.progressStage,
+        }));
+        setRequestContextStatus("ready");
+      } catch (caught) {
+        if (controller.signal.aborted) return;
+        setRequestContextError(
+          caught instanceof Error
+            ? caught.message
+            : "후기 요청 링크를 확인하지 못했습니다.",
+        );
+        setRequestContextStatus("error");
+      }
+    })();
+    return () => controller.abort();
+  }, [requestToken]);
 
   const previewContent = useMemo(
     () =>
@@ -177,7 +229,7 @@ export function ReviewForm({ requestToken }: { requestToken?: string }) {
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const validationError = validate(form);
+    const validationError = validate(form, Boolean(requestContext));
     if (validationError) {
       setError(validationError);
       requestAnimationFrame(() => errorRef.current?.focus());
@@ -194,15 +246,19 @@ export function ReviewForm({ requestToken }: { requestToken?: string }) {
       practiceArea: form.practiceArea,
       progressStage: form.progressStage,
       experienceKeywords: form.experienceKeywords,
-      authorDisplay: form.authorDisplay.trim(),
       content: form.content.trim(),
-      phone: form.phone,
       privacyNoticeVersion: CURRENT_REVIEW_PRIVACY_NOTICE_VERSION,
       publicationConsentVersion:
         CURRENT_REVIEW_PUBLICATION_CONSENT_VERSION,
       consentAgreedAt: submittedAt,
       privacyConsent: true,
       publicationConsent: true,
+      ...(requestContext
+        ? {}
+        : {
+            authorDisplay: form.authorDisplay.trim(),
+            phone: form.phone,
+          }),
       ...(requestToken ? { requestToken } : {}),
       website: form.website as "",
     };
@@ -237,6 +293,27 @@ export function ReviewForm({ requestToken }: { requestToken?: string }) {
     }
   }
 
+  if (requestToken && requestContextStatus === "loading") {
+    return (
+      <section className="review-write-loading shell" aria-live="polite">
+        <strong>고객님의 후기 요청 정보를 안전하게 확인하고 있습니다.</strong>
+      </section>
+    );
+  }
+
+  if (requestToken && requestContextStatus === "error") {
+    return (
+      <section className="review-request-error shell" role="alert">
+        <p className="eyebrow">REVIEW LINK</p>
+        <h1>전용 후기 링크를 확인하지 못했습니다.</h1>
+        <p>{requestContextError}</p>
+        <a className="button button-secondary" href="/bank/reviews/write">
+          일반 후기 작성으로 이동
+        </a>
+      </section>
+    );
+  }
+
   if (result) {
     return (
       <section className="review-write-complete shell">
@@ -251,7 +328,8 @@ export function ReviewForm({ requestToken }: { requestToken?: string }) {
         </h1>
         <p>
           후기는 아직 공개되지 않았습니다. 담당자가 실제 이용 여부와 개인정보
-          포함 여부를 확인한 뒤 공개하며, 확인이 필요할 때만 입력하신 번호로
+          포함 여부를 확인한 뒤 공개하며, 확인이 필요할 때만
+          {requestContext ? " 사건 정보에 등록된 연락처로" : " 입력하신 번호로"}
           연락드립니다.
         </p>
         <dl>
@@ -316,8 +394,9 @@ export function ReviewForm({ requestToken }: { requestToken?: string }) {
           </div>
           {requestToken ? (
             <p className="review-request-arrival" role="status">
-              로앤 담당자가 보내드린 전용 링크로 들어오셨습니다. 작성하신
-              후기는 해당 고객 사건과 안전하게 연결되어 담당자가 확인합니다.
+              로앤 담당자가 보내드린 전용 링크로 들어오셨습니다. 고객님의
+              이름과 연락처는 연결된 사건 정보로 확인되어 다시 입력하지 않아도
+              되며, 홈페이지와 공개 후기에는 노출되지 않습니다.
             </p>
           ) : null}
         </div>
@@ -339,49 +418,93 @@ export function ReviewForm({ requestToken }: { requestToken?: string }) {
             <fieldset className="review-form-section">
               <legend>
                 <span>01</span>
-                어떤 과정을 함께하셨나요?
+                어떤 사건과 시점의 후기인가요?
               </legend>
-              <p className="review-field-help">
-                후기의 결과를 단정하려는 질문이 아니라, 읽는 분이 맥락을
-                이해하도록 함께 표시하는 정보입니다.
-              </p>
-              <div className="review-choice-grid review-area-choices">
-                {PRACTICE_AREAS.map((option) => (
-                  <label key={option.value}>
-                    <input
-                      checked={form.practiceArea === option.value}
-                      name="practiceArea"
-                      onChange={() => setValue("practiceArea", option.value)}
-                      type="radio"
-                      value={option.value}
-                    />
-                    <span>
-                      <strong>{option.label}</strong>
-                      <small>{option.description}</small>
-                    </span>
-                  </label>
-                ))}
-              </div>
-
-              <div className="review-field-block">
-                <span className="review-field-label">후기를 쓰는 시점</span>
-                <div className="review-choice-grid review-stage-choices">
-                  {PROGRESS_STAGES.map((option) => (
-                    <label key={option.value}>
-                      <input
-                        checked={form.progressStage === option.value}
-                        name="progressStage"
-                        onChange={() =>
-                          setValue("progressStage", option.value)
-                        }
-                        type="radio"
-                        value={option.value}
-                      />
-                      <span>{option.label}</span>
-                    </label>
-                  ))}
+              {requestContext && !editingSuggestedContext ? (
+                <div className="review-invitation-defaults">
+                  <p>
+                    연결된 사건과 요청 시점에 맞춰 미리 선택했습니다. 아래 내용이
+                    맞으면 따로 고르지 않아도 됩니다.
+                  </p>
+                  <dl>
+                    <div>
+                      <dt>사건 분야</dt>
+                      <dd>{displayArea(form.practiceArea)}</dd>
+                    </div>
+                    <div>
+                      <dt>후기를 쓰는 시점</dt>
+                      <dd>{displayStage(form.progressStage)}</dd>
+                    </div>
+                  </dl>
+                  <button
+                    onClick={() => setEditingSuggestedContext(true)}
+                    type="button"
+                  >
+                    내용이 다르면 직접 바꾸기
+                  </button>
                 </div>
-              </div>
+              ) : (
+                <>
+                  <p className="review-field-help">
+                    후기의 결과를 단정하려는 질문이 아니라, 읽는 분이 맥락을
+                    이해하도록 함께 표시하는 정보입니다.
+                  </p>
+                  <div className="review-choice-grid review-area-choices">
+                    {PRACTICE_AREAS.map((option) => (
+                      <label key={option.value}>
+                        <input
+                          checked={form.practiceArea === option.value}
+                          name="practiceArea"
+                          onChange={() =>
+                            setValue("practiceArea", option.value)
+                          }
+                          type="radio"
+                          value={option.value}
+                        />
+                        <span>
+                          <strong>{option.label}</strong>
+                          <small>{option.description}</small>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+
+                  <div className="review-field-block">
+                    <span className="review-field-label">
+                      후기를 쓰는 시점
+                    </span>
+                    <div className="review-choice-grid review-stage-choices">
+                      {PROGRESS_STAGES.map((option) => (
+                        <label key={option.value}>
+                          <input
+                            checked={form.progressStage === option.value}
+                            name="progressStage"
+                            onChange={() =>
+                              setValue("progressStage", option.value)
+                            }
+                            type="radio"
+                            value={option.value}
+                          />
+                          <span>{option.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  {requestContext ? (
+                    <button
+                      className="review-context-reset"
+                      onClick={() => {
+                        setValue("practiceArea", requestContext.practiceArea);
+                        setValue("progressStage", requestContext.progressStage);
+                        setEditingSuggestedContext(false);
+                      }}
+                      type="button"
+                    >
+                      자동 선택으로 되돌리기
+                    </button>
+                  ) : null}
+                </>
+              )}
             </fieldset>
 
             <fieldset className="review-form-section">
@@ -435,42 +558,61 @@ export function ReviewForm({ requestToken }: { requestToken?: string }) {
             <fieldset className="review-form-section">
               <legend>
                 <span>03</span>
-                공개 이름과 확인 연락처
+                {requestContext ? "요청 대상 확인과 동의" : "공개 이름과 확인 연락처"}
               </legend>
-              <div className="review-contact-grid">
-                <label className="review-text-field">
-                  <span>공개 이름</span>
-                  <input
-                    autoComplete="nickname"
-                    maxLength={20}
-                    onChange={(event) =>
-                      setValue("authorDisplay", event.target.value)
-                    }
-                    placeholder="예: 김○○ 고객"
-                    type="text"
-                    value={form.authorDisplay}
-                  />
-                  <small>
-                    실명 대신 일부를 가린 이름이나 별칭을 권합니다.
-                  </small>
-                </label>
-                <label className="review-text-field">
-                  <span>휴대전화 번호</span>
-                  <input
-                    autoComplete="tel"
-                    inputMode="tel"
-                    onChange={(event) =>
-                      setValue("phone", formatPhone(event.target.value))
-                    }
-                    placeholder="010-0000-0000"
-                    type="tel"
-                    value={form.phone}
-                  />
-                  <small>
-                    공개되지 않으며 작성자 확인·수정·철회 대응에만 씁니다.
-                  </small>
-                </label>
-              </div>
+              {requestContext ? (
+                <div className="review-invitation-identity">
+                  <p>
+                    고객별 전용 링크와 연결된 사건 정보로 확인했습니다. 실명과
+                    전화번호는 이 화면에 표시하지 않습니다.
+                  </p>
+                  <dl>
+                    <div>
+                      <dt>홈페이지 공개 이름</dt>
+                      <dd>{requestContext.authorDisplay}</dd>
+                    </div>
+                    <div>
+                      <dt>작성자 연락처</dt>
+                      <dd>연결 확인 완료 · 공개 안 함</dd>
+                    </div>
+                  </dl>
+                </div>
+              ) : (
+                <div className="review-contact-grid">
+                  <label className="review-text-field">
+                    <span>공개 이름</span>
+                    <input
+                      autoComplete="nickname"
+                      maxLength={20}
+                      onChange={(event) =>
+                        setValue("authorDisplay", event.target.value)
+                      }
+                      placeholder="예: 김○○ 고객"
+                      type="text"
+                      value={form.authorDisplay}
+                    />
+                    <small>
+                      실명 대신 일부를 가린 이름이나 별칭을 권합니다.
+                    </small>
+                  </label>
+                  <label className="review-text-field">
+                    <span>휴대전화 번호</span>
+                    <input
+                      autoComplete="tel"
+                      inputMode="tel"
+                      onChange={(event) =>
+                        setValue("phone", formatPhone(event.target.value))
+                      }
+                      placeholder="010-0000-0000"
+                      type="tel"
+                      value={form.phone}
+                    />
+                    <small>
+                      공개되지 않으며 작성자 확인·수정·철회 대응에만 씁니다.
+                    </small>
+                  </label>
+                </div>
+              )}
 
               <div className="review-honeypot" aria-hidden="true">
                 <label>
@@ -499,16 +641,18 @@ export function ReviewForm({ requestToken }: { requestToken?: string }) {
                   <span>
                     <strong>[필수] 후기 접수 개인정보 수집·이용 동의</strong>
                     <small>
-                      휴대전화 번호와 작성 내용을 작성자 확인, 개인정보 검수,
-                      수정·철회 대응 목적으로 접수일부터 1년간 보관합니다.
+                      {requestContext
+                        ? "사건 정보에 등록된 휴대전화 번호와 작성 내용을 작성자 확인, 개인정보 검수, 수정·철회 대응 목적으로 접수일부터 1년간 보관합니다."
+                        : "휴대전화 번호와 작성 내용을 작성자 확인, 개인정보 검수, 수정·철회 대응 목적으로 접수일부터 1년간 보관합니다."}
                     </small>
                   </span>
                 </label>
                 <details>
                   <summary>수집·이용 내용 자세히 보기</summary>
                   <p>
-                    개인정보처리자는 법무법인 로앤입니다. 수집 항목은 휴대전화
-                    번호, 공개 이름, 분야·작성 시점·경험 키워드와 후기
+                    개인정보처리자는 법무법인 로앤입니다. 수집 항목은
+                    {requestContext ? " 기존 사건 정보에 등록된 " : " "}
+                    휴대전화 번호, 공개 이름, 분야·작성 시점·경험 키워드와 후기
                     원문입니다. 동의를 거부할 수 있으나 후기 접수는 할 수
                     없습니다. 검수 중인 원문과 연락처는 암호화해 보관하고
                     보관기간이 지나면 법령상 별도 의무가 없는 한 파기합니다.

@@ -11,7 +11,10 @@ import {
   createReviewReceiptCode,
   createReviewSubmissionId,
   detectReviewPiiFlags,
+  reviewRequestContextRequestSchema,
   reviewSubmissionSchema,
+  type ReviewRequestContextRequest,
+  type ReviewRequestContextResponse,
   type ReviewSubmission,
   type ReviewSubmissionResponse,
 } from "@lawand/core";
@@ -38,11 +41,83 @@ const RETENTION_YEARS = 1;
 
 export class ReviewSubmissionValidationError extends Error {}
 
+export function maskedReviewAuthorDisplay(clientName: string): string {
+  const firstCharacter = Array.from(clientName.trim()).find((value) => /\S/u.test(value));
+  return `${firstCharacter ?? "고"}○○ 고객`;
+}
+
+function invitationPhone(value: string | null): string | null {
+  const digits = (value ?? "").replace(/\D/g, "");
+  return /^010\d{8}$/.test(digits) ? digits : null;
+}
+
+function replayResponse(row: {
+  publicReceiptCode: string;
+  submittedAt: Date;
+}): ReviewSubmissionResponse {
+  return {
+    publicReceiptCode: row.publicReceiptCode,
+    acceptedAt: row.submittedAt.toISOString(),
+    status: "pending_review",
+    replayed: true,
+  };
+}
+
 export function createReviewSubmissionService(options: {
   db: Database;
   protection: DataProtection;
 }) {
   const { db, protection } = options;
+
+  async function getRequestContext(
+    rawInput: ReviewRequestContextRequest,
+  ): Promise<ReviewRequestContextResponse> {
+    const input = reviewRequestContextRequestSchema.parse(rawInput);
+    const requestId = verifyReviewRequestToken(input.requestToken, protection);
+    if (!requestId) {
+      throw new ReviewSubmissionValidationError(
+        "후기 요청 링크가 올바르지 않습니다.",
+      );
+    }
+    const checkedAt = new Date();
+    const [requestRecord] = await db
+      .select({
+        status: customerReviewRequests.status,
+        clientIdx: customerReviewRequests.directoryClientIdx,
+        caseIdx: customerReviewRequests.directoryCaseIdx,
+        suggestedPracticeArea: customerReviewRequests.suggestedPracticeArea,
+        suggestedProgressStage: customerReviewRequests.suggestedProgressStage,
+        expiresAt: customerReviewRequests.expiresAt,
+      })
+      .from(customerReviewRequests)
+      .where(eq(customerReviewRequests.id, requestId))
+      .limit(1);
+    if (
+      !requestRecord ||
+      requestRecord.status !== "sent" ||
+      requestRecord.expiresAt <= checkedAt
+    ) {
+      throw new ReviewSubmissionValidationError(
+        "후기 요청 링크가 만료됐거나 이미 사용되었습니다.",
+      );
+    }
+    const target = await resolveReviewDirectoryTarget(
+      db,
+      requestRecord.clientIdx,
+      requestRecord.caseIdx,
+    );
+    if (!target || !invitationPhone(target.phone)) {
+      throw new ReviewSubmissionValidationError(
+        "후기 요청에 연결된 고객 사건을 확인할 수 없습니다.",
+      );
+    }
+    return {
+      authorDisplay: maskedReviewAuthorDisplay(target.clientName),
+      practiceArea: requestRecord.suggestedPracticeArea,
+      progressStage: requestRecord.suggestedProgressStage,
+      expiresAt: requestRecord.expiresAt.toISOString(),
+    };
+  }
 
   async function submit(
     rawSubmission: ReviewSubmission,
@@ -60,25 +135,7 @@ export function createReviewSubmissionService(options: {
       );
     }
 
-    const phoneFingerprint = protection.fingerprint({
-      kind: "review-submission-phone-v1",
-      phone: submission.phone,
-    });
-    const payloadFingerprint = protection.fingerprint({
-      kind: "review-submission-payload-v1",
-      authorDisplay: submission.authorDisplay,
-      content: submission.content,
-      experienceKeywords: submission.experienceKeywords,
-      phone: submission.phone,
-      practiceArea: submission.practiceArea,
-      progressStage: submission.progressStage,
-    });
-
     return db.transaction(async (tx) => {
-      await tx.execute(
-        sql`SELECT pg_advisory_xact_lock(${protection.advisoryLockKey(phoneFingerprint)}::bigint)`,
-      );
-
       const [idempotentSubmission] = await tx
         .select({
           publicReceiptCode: customerReviewSubmissions.publicReceiptCode,
@@ -96,13 +153,80 @@ export function createReviewSubmissionService(options: {
         )
         .limit(1);
       if (idempotentSubmission) {
-        return {
-          publicReceiptCode: idempotentSubmission.publicReceiptCode,
-          acceptedAt: idempotentSubmission.submittedAt.toISOString(),
-          status: "pending_review",
-          replayed: true,
-        };
+        return replayResponse(idempotentSubmission);
       }
+
+      let authorDisplay = submission.authorDisplay ?? null;
+      let phone = submission.phone ?? null;
+      let linkSource: "invitation" | "exact_phone" | null = null;
+      let reviewRequestId: string | null = null;
+      let target: ReviewDirectoryTarget | null = null;
+      if (submission.requestToken) {
+        reviewRequestId = verifyReviewRequestToken(
+          submission.requestToken,
+          protection,
+        );
+        if (!reviewRequestId) {
+          throw new ReviewSubmissionValidationError(
+            "후기 요청 링크가 올바르지 않습니다.",
+          );
+        }
+        const [requestRecord] = await tx
+          .select({
+            status: customerReviewRequests.status,
+            clientIdx: customerReviewRequests.directoryClientIdx,
+            caseIdx: customerReviewRequests.directoryCaseIdx,
+            expiresAt: customerReviewRequests.expiresAt,
+          })
+          .from(customerReviewRequests)
+          .where(eq(customerReviewRequests.id, reviewRequestId))
+          .limit(1)
+          .for("update");
+        if (
+          !requestRecord ||
+          requestRecord.status !== "sent" ||
+          requestRecord.expiresAt <= submittedAt
+        ) {
+          throw new ReviewSubmissionValidationError(
+            "후기 요청 링크가 만료됐거나 이미 사용되었습니다.",
+          );
+        }
+        target = await resolveReviewDirectoryTarget(
+          tx,
+          requestRecord.clientIdx,
+          requestRecord.caseIdx,
+        );
+        phone = target ? invitationPhone(target.phone) : null;
+        if (!target || !phone) {
+          throw new ReviewSubmissionValidationError(
+            "후기 요청에 연결된 고객 사건을 확인할 수 없습니다.",
+          );
+        }
+        authorDisplay = maskedReviewAuthorDisplay(target.clientName);
+        linkSource = "invitation";
+      }
+      if (!authorDisplay || !phone) {
+        throw new ReviewSubmissionValidationError(
+          "공개 이름과 휴대전화 번호를 확인해 주세요.",
+        );
+      }
+
+      const phoneFingerprint = protection.fingerprint({
+        kind: "review-submission-phone-v1",
+        phone,
+      });
+      const payloadFingerprint = protection.fingerprint({
+        kind: "review-submission-payload-v1",
+        authorDisplay,
+        content: submission.content,
+        experienceKeywords: submission.experienceKeywords,
+        phone,
+        practiceArea: submission.practiceArea,
+        progressStage: submission.progressStage,
+      });
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(${protection.advisoryLockKey(phoneFingerprint)}::bigint)`,
+      );
 
       if (!submission.requestToken) {
         const [exactDuplicate] = await tx
@@ -130,19 +254,14 @@ export function createReviewSubmissionService(options: {
           .orderBy(desc(customerReviewSubmissions.submittedAt))
           .limit(1);
         if (exactDuplicate) {
-          return {
-            publicReceiptCode: exactDuplicate.publicReceiptCode,
-            acceptedAt: exactDuplicate.submittedAt.toISOString(),
-            status: "pending_review",
-            replayed: true,
-          };
+          return replayResponse(exactDuplicate);
         }
       }
 
       const id = createReviewSubmissionId();
       const publicReceiptCode = createReviewReceiptCode(submittedAt);
       const phoneEncrypted = protection.encrypt(
-        submission.phone,
+        phone,
         `customer_review_submissions.phone:${id}`,
       );
       const contentEncrypted = protection.encrypt(
@@ -150,7 +269,7 @@ export function createReviewSubmissionService(options: {
         `customer_review_submissions.content:${id}`,
       );
       const piiFlags = detectReviewPiiFlags(
-        `${submission.authorDisplay}\n${submission.content}`,
+        `${authorDisplay}\n${submission.content}`,
       );
       const retentionExpiresAt = new Date(submittedAt);
       retentionExpiresAt.setUTCFullYear(
@@ -162,7 +281,7 @@ export function createReviewSubmissionService(options: {
         publicReceiptCode,
         source: submission.source,
         idempotencyKey: submission.idempotencyKey,
-        authorDisplay: submission.authorDisplay,
+        authorDisplay,
         practiceArea: submission.practiceArea,
         progressStage: submission.progressStage,
         experienceKeywords: submission.experienceKeywords,
@@ -186,62 +305,10 @@ export function createReviewSubmissionService(options: {
         updatedAt: submittedAt,
       });
 
-      let linkSource: "invitation" | "exact_phone" | null = null;
-      let reviewRequestId: string | null = null;
-      let target: ReviewDirectoryTarget | null = null;
-      if (submission.requestToken) {
-        reviewRequestId = verifyReviewRequestToken(
-          submission.requestToken,
-          protection,
-        );
-        if (!reviewRequestId) {
-          throw new ReviewSubmissionValidationError(
-            "후기 요청 링크가 올바르지 않습니다.",
-          );
-        }
-        const [requestRecord] = await tx
-          .select({
-            id: customerReviewRequests.id,
-            status: customerReviewRequests.status,
-            clientIdx: customerReviewRequests.directoryClientIdx,
-            caseIdx: customerReviewRequests.directoryCaseIdx,
-            expiresAt: customerReviewRequests.expiresAt,
-          })
-          .from(customerReviewRequests)
-          .where(eq(customerReviewRequests.id, reviewRequestId))
-          .limit(1)
-          .for("update");
-        if (
-          !requestRecord ||
-          requestRecord.status !== "sent" ||
-          requestRecord.expiresAt <= submittedAt
-        ) {
-          throw new ReviewSubmissionValidationError(
-            "후기 요청 링크가 만료됐거나 이미 사용되었습니다.",
-          );
-        }
-        target = await resolveReviewDirectoryTarget(
-          tx,
-          requestRecord.clientIdx,
-          requestRecord.caseIdx,
-        );
-        if (!target) {
-          throw new ReviewSubmissionValidationError(
-            "후기 요청에 연결된 고객 사건을 확인할 수 없습니다.",
-          );
-        }
-        if (
-          (target.phone ?? "").replace(/[^0-9]/g, "") !== submission.phone
-        ) {
-          throw new ReviewSubmissionValidationError(
-            "후기를 요청받은 휴대전화 번호와 입력한 번호가 일치하지 않습니다.",
-          );
-        }
-        linkSource = "invitation";
-      } else {
+      if (!submission.requestToken) {
         target = await resolveExactPhoneReviewDirectoryTarget(
           tx,
-          submission.phone,
+          phone,
         );
         if (target) linkSource = "exact_phone";
       }
@@ -284,7 +351,7 @@ export function createReviewSubmissionService(options: {
     });
   }
 
-  return { submit };
+  return { getRequestContext, submit };
 }
 
 export type ReviewSubmissionService = ReturnType<

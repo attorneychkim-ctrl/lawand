@@ -427,6 +427,13 @@
   border-top: 1px solid var(--line);
 }
 
+.review-template-list article > div > span {
+  align-self: center;
+  color: var(--muted);
+  font-size: .61rem;
+  font-weight: 800;
+}
+
 .review-template-form {
   display: grid;
   align-content: start;
@@ -459,6 +466,7 @@
 }
 
 .review-template-form input,
+.review-template-form select,
 .review-template-form textarea,
 .review-customer-picker input,
 .review-link-search input,
@@ -477,6 +485,7 @@
 }
 
 .review-template-form input,
+.review-template-form select,
 .review-customer-picker input,
 .review-link-search input,
 .review-moderation-panel select,
@@ -618,6 +627,89 @@
   font-size: .63rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.review-selected-customers {
+  border-top: 1px solid var(--line-strong);
+  background: var(--surface);
+}
+
+.review-selected-customers > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--line);
+  background: var(--brand-softer);
+}
+
+.review-selected-customers > header > div {
+  display: grid;
+  gap: 3px;
+}
+
+.review-selected-customers > header strong,
+.review-selected-customers > header b {
+  color: var(--brand-strong);
+  font-size: .75rem;
+}
+
+.review-selected-customers > header span {
+  color: var(--muted);
+  font-size: .62rem;
+}
+
+.review-selected-customers > div {
+  display: grid;
+}
+
+.review-selected-customers article {
+  display: grid;
+  min-height: 72px;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 22px;
+  border-bottom: 1px solid var(--line);
+  grid-template-columns: minmax(100px, .7fr) minmax(125px, .8fr) minmax(160px, 1fr) minmax(160px, 1fr) auto;
+}
+
+.review-selected-customers article > span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.review-selected-customers article small {
+  color: var(--muted);
+  font-size: .58rem;
+}
+
+.review-selected-customers article strong {
+  overflow: hidden;
+  font-size: .7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-selected-customers article button {
+  min-height: 34px;
+  padding: 0 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: .63rem;
+  font-weight: 800;
+}
+
+.review-selected-customers > p {
+  margin: 0;
+  padding: 24px;
+  color: var(--muted);
+  font-size: .68rem;
+  text-align: center;
 }
 
 .review-send-dock {
@@ -1547,6 +1639,15 @@
     grid-template-columns: 28px 1fr 1fr;
   }
 
+  .review-selected-customers article {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  }
+
+  .review-selected-customers article button {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+  }
+
   .review-customer-results > label > span:last-child {
     grid-column: 2 / -1;
   }
@@ -1616,6 +1717,20 @@
   .review-customer-results > label,
   .review-link-results article {
     grid-template-columns: 28px 1fr;
+  }
+
+  .review-selected-customers article {
+    grid-template-columns: 1fr auto;
+  }
+
+  .review-selected-customers article > span {
+    grid-column: 1;
+  }
+
+  .review-selected-customers article button {
+    align-self: start;
+    grid-column: 2;
+    grid-row: 1 / span 4;
   }
 
   .review-customer-results > label > span:not(.review-customer-check),
