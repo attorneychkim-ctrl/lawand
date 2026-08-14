@@ -31,6 +31,22 @@ const stateLabels: Record<string, string> = {
   closed: "종결",
 };
 
+function isInvalidConsultation(item: ConsultationListItem) {
+  return item.kakaoEntry?.status === "invalid";
+}
+
+function stateLabel(item: ConsultationListItem) {
+  if (isInvalidConsultation(item)) return "무효";
+  return stateLabels[item.state] ?? item.state;
+}
+
+function ownerLabel(item: ConsultationListItem) {
+  if (isInvalidConsultation(item)) return "무효";
+  return item.assigneeDisplayName
+    ? `담당 ${item.assigneeDisplayName}`
+    : "담당자 미배정";
+}
+
 const dedupeLabels: Record<ConsultationListItem["dedupeOutcome"], string> = {
   new: "신규",
   exact_duplicate: "동일 내용 재접수",
@@ -97,6 +113,8 @@ function searchText(item: ConsultationListItem) {
     item.publicReceiptCode,
     item.assigneeDisplayName,
     item.existingCustomer ? "기존고객" : null,
+    ...(item.existingCustomerStaffNames ?? []),
+    isInvalidConsultation(item) ? "무효" : null,
     item.legalFriendsRegistered ? "리걸프렌즈 등록 완료" : null,
     residenceRegionLabels[item.residenceRegion ?? ""],
     modeLabel(item),
@@ -190,6 +208,7 @@ function ChannelIcon({ tone }: { tone: ReturnType<typeof channelTone> }) {
 }
 
 function StatusBadges({ item }: { item: ConsultationListItem }) {
+  const existingCustomerStaffNames = item.existingCustomerStaffNames ?? [];
   return (
     <div className="consultation-flags">
       {item.groupMemberCount > 1 ? (
@@ -221,7 +240,12 @@ function StatusBadges({ item }: { item: ConsultationListItem }) {
         <span className="flag-badge is-danger">삭제됨</span>
       ) : null}
       {item.existingCustomer ? (
-        <span className="flag-badge is-existing">기존고객</span>
+        <span className="flag-badge is-existing">
+          기존고객
+          {existingCustomerStaffNames.length > 0
+            ? ` · 담당 ${existingCustomerStaffNames.join(" · ")}`
+            : ""}
+        </span>
       ) : null}
       {item.legalFriendsRegistered ? (
         <span className="flag-badge is-positive">리걸프렌즈 등록 완료</span>
@@ -533,16 +557,19 @@ export function ConsultationWorkspace({
           <ol className="consultation-list">
             {filtered.map((consultation) => {
               const tone = channelTone(consultation);
+              const invalid = isInvalidConsultation(consultation);
               return (
                 <li
-                  className={`consultation-row${consultation.softDeletedAt ? " is-soft-deleted" : ""}`}
+                  className={`consultation-row${consultation.softDeletedAt ? " is-soft-deleted" : ""}${invalid ? " is-invalid" : ""}`}
                   key={consultation.id}
                 >
                   <Link
                     aria-label={
                       consultation.softDeletedAt
                         ? "삭제된 상담 상세 보기"
-                        : `${consultation.displayName} 상담 상세 보기`
+                        : invalid
+                          ? "무효 상담 상세 보기"
+                          : `${consultation.displayName} 상담 상세 보기`
                     }
                     className="consultation-row-link"
                     href={`/consultations/${consultation.id}`}
@@ -551,8 +578,10 @@ export function ConsultationWorkspace({
                       <ChannelIcon tone={tone} />
                     </span>
                     <span className="consultation-row-main">
-                      <span className="consultation-row-title consultation-row-sensitive">
-                        <strong>{consultation.displayName}</strong>
+                      <span className="consultation-row-title">
+                        <strong className="consultation-row-sensitive">
+                          {consultation.displayName}
+                        </strong>
                         <span
                           className={`consultation-region-badge${
                             consultation.residenceRegion ? "" : " is-missing"
@@ -567,7 +596,7 @@ export function ConsultationWorkspace({
                             : "지역 미기록"}
                         </span>
                         <span className={`state-badge is-${consultation.state}`}>
-                          {stateLabels[consultation.state] ?? consultation.state}
+                          {stateLabel(consultation)}
                         </span>
                       </span>
                       <span className="consultation-row-contact consultation-row-sensitive">
@@ -580,11 +609,7 @@ export function ConsultationWorkspace({
                       <StatusBadges item={consultation} />
                     </span>
                     <span className="consultation-row-owner">
-                      <span>
-                        {consultation.assigneeDisplayName
-                          ? `담당 ${consultation.assigneeDisplayName}`
-                          : "담당자 미배정"}
-                      </span>
+                      <span>{ownerLabel(consultation)}</span>
                       <time dateTime={consultation.lastRequestedAt}>
                         {formatDate(consultation.lastRequestedAt)}
                       </time>

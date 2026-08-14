@@ -92,7 +92,9 @@ import type { StaffPrincipal } from "./auth.js";
 import {
   excludeOwnLegalFriendsCase,
   existingConsultationPhoneDirectoryCustomersQuery,
+  summarizeExistingConsultationPhoneDirectoryCustomers,
   type ConsultationPhoneDirectoryCandidate,
+  type ExistingConsultationPhoneDirectoryCustomerRow,
 } from "./phone-directory.js";
 import { legalFriendsResidenceRegion } from "./telephony-service.js";
 import {
@@ -580,7 +582,7 @@ export function createConsultationService(options: {
     };
   }
 
-  async function existingLegalFriendsCustomerConsultationIds(
+  async function existingLegalFriendsCustomersByConsultation(
     candidates: readonly ConsultationPhoneDirectoryCandidate[],
   ) {
     const normalizedCandidates = candidates
@@ -593,7 +595,9 @@ export function createConsultationService(options: {
         (candidate) =>
           candidate.phone.length >= 9 && candidate.phone.length <= 15,
       );
-    if (normalizedCandidates.length === 0) return new Set<string>();
+    if (normalizedCandidates.length === 0) {
+      return new Map<string, string[]>();
+    }
 
     try {
       const result = await db.execute(
@@ -601,10 +605,8 @@ export function createConsultationService(options: {
           normalizedCandidates,
         ),
       );
-      return new Set(
-        (result.rows as Array<{ consultation_id: string }>).map(
-          (row) => row.consultation_id,
-        ),
+      return summarizeExistingConsultationPhoneDirectoryCustomers(
+        result.rows as ExistingConsultationPhoneDirectoryCustomerRow[],
       );
     } catch {
       console.error(
@@ -614,7 +616,7 @@ export function createConsultationService(options: {
           occurredAt: new Date().toISOString(),
         }),
       );
-      return new Set<string>();
+      return new Map<string, string[]>();
     }
   }
 
@@ -4697,8 +4699,8 @@ export function createConsultationService(options: {
           lastRequestedAt: consultation.lastRequestedAt.toISOString(),
         };
       });
-    const existingCustomerConsultationIds =
-      await existingLegalFriendsCustomerConsultationIds(
+    const existingCustomersByConsultation =
+      await existingLegalFriendsCustomersByConsultation(
         items.flatMap((item) =>
           item.phone
             ? [
@@ -4722,10 +4724,12 @@ export function createConsultationService(options: {
         );
         const existingCustomer =
           item.phone !== null &&
-          existingCustomerConsultationIds.has(item.id);
+          existingCustomersByConsultation.has(item.id);
         return {
           ...publicItem,
           existingCustomer,
+          existingCustomerStaffNames:
+            existingCustomersByConsultation.get(item.id) ?? [],
           legalFriendsRegistered,
           requiresLegalFriendsReview:
             existingCustomer &&

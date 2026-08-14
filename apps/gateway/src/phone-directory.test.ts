@@ -8,6 +8,7 @@ import {
   existingConsultationPhoneDirectoryCustomersQuery,
   existingPhoneDirectoryCustomersQuery,
   phoneDirectoryCustomersQuery,
+  summarizeExistingConsultationPhoneDirectoryCustomers,
 } from "./phone-directory.js";
 
 const dialect = new PgDialect();
@@ -49,6 +50,10 @@ test("상담별 기존고객 조회는 같은 상담이 만든 사건을 제외�
   );
 
   assert.match(query.sql, /directory\.case_idx::text <> candidate\.own_case_idx/);
+  assert.match(query.sql, /directory\.primary_staff_name/);
+  assert.match(query.sql, /directory\.secondary_staff_name/);
+  assert.match(query.sql, /directory\.tertiary_staff_name/);
+  assert.match(query.sql, /cross join lateral/);
   assert.deepEqual(query.params, [
     "11111111-1111-4111-8111-111111111111",
     "01011112222",
@@ -68,6 +73,40 @@ test("이번 상담 사건만 일치하면 기존고객이 아니고 과거 사�
   assert.deepEqual(excludeOwnLegalFriendsCase([matches[1]!], "1234"), []);
   assert.deepEqual(excludeOwnLegalFriendsCase(matches, "1234"), [matches[0]]);
   assert.deepEqual(excludeOwnLegalFriendsCase(matches, null), matches);
+});
+
+test("기존고객 과거 사건 담당자명은 상담별로 중복 없이 모은다", () => {
+  const summary = summarizeExistingConsultationPhoneDirectoryCustomers([
+    {
+      consultation_id: "11111111-1111-4111-8111-111111111111",
+      primary_staff_name: "김담당",
+      secondary_staff_name: "박담당",
+      tertiary_staff_name: null,
+    },
+    {
+      consultation_id: "11111111-1111-4111-8111-111111111111",
+      primary_staff_name: "김담당",
+      secondary_staff_name: null,
+      tertiary_staff_name: null,
+    },
+    {
+      consultation_id: "22222222-2222-4222-8222-222222222222",
+      primary_staff_name: null,
+      secondary_staff_name: null,
+      tertiary_staff_name: null,
+    },
+  ]);
+
+  assert.deepEqual(
+    [...summary],
+    [
+      [
+        "11111111-1111-4111-8111-111111111111",
+        ["김담당", "박담당"],
+      ],
+      ["22222222-2222-4222-8222-222222222222", []],
+    ],
+  );
 });
 
 test("빈 전화번호 일괄조회는 잘못된 전체 조회를 만들지 않는다", () => {

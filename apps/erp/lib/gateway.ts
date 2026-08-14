@@ -36,6 +36,7 @@ export type ConsultationListItem = {
   softDeletedByUserId: string | null;
   staffCreated: boolean;
   existingCustomer: boolean;
+  existingCustomerStaffNames: string[];
   legalFriendsRegistered: boolean;
   nameMismatch: boolean;
   requiresLegalFriendsReview: boolean;
