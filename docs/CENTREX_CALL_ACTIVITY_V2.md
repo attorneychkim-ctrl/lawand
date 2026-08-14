@@ -407,3 +407,26 @@ relation과 감사 로그를 남기고 correlation을 확정하며, 선택된 �
 `0051_unknown_scalphunter.sql`은 내선 후처리와 pickup/resolution enum만 추가하고,
 `0052_centrex_pickup_terminal_recovery.sql`은 기존 exact 당겨받기와 mirrored consultation
 terminal만 복구한다. enum과 데이터 복구를 서로 다른 migration transaction으로 분리한다.
+
+## 12. 2026-08-14 대표번호 수신 관찰 계약
+
+대표 문자 수신함 7개는 직원 개인 회선과 분리된 `representative` endpoint지만, 이미 모두
+`userinfo` 검증을 거친 활성 endpoint와 암호화 인증정보를 갖는다. 전화 수신 관찰기의 기존
+활성 직원 binding inner join은 이 7개를 callback 등록과 `getinboundcall` 보정에서 제외해,
+대표번호 착신을 직원 내선에서 당겨받은 경우 고객번호 root가 전혀 생성되지 않을 수 있었다.
+
+수신 관찰 자격은 다음처럼 분리한다.
+
+1. provider가 Centrex이고 endpoint와 검증 인증정보가 모두 활성이어야 한다.
+2. `personal` endpoint는 기존처럼 활성 직원 binding이 있어야 한다.
+3. `representative` endpoint는 직원 binding 없이도 수신 callback과 최근 24시간 이력을
+   관찰한다.
+4. 대표 endpoint에 직원 binding이나 Windows bridge를 합성하지 않으며, 최종 통화자를
+   임의 지정하지 않는다.
+5. 당겨받기 자동 확정은 기존 exact provider root→adjacent channel 계약을 그대로 유지한다.
+
+실측 누락 건은 `02-555-7455`의 실제 underlying 회선 U+ 이력에 148초 `ANSWERED`로 존재했고,
+직원 내선 bridge의 `CHANNEL_LIST` 뒤 `CHANNELOUT` 종료시각과 같은 초에 끝났다. bridge 전송
+큐·dead-letter와 gateway DB 풀 대기는 0이었으므로 원인은 적체가 아니라 대표 endpoint 선택
+조건이었다. 이 변경은 migration 없이 gateway만 바꾸며, 운영 전환 첫 cycle에서는 최근
+24시간 대표번호 이력이 보정될 수 있으므로 생성 건수·중복 root·callback 등록 7건을 확인한다.

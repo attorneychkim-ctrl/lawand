@@ -9,6 +9,12 @@
 - 대표 수신함은 `042-484-0488`, 원번호 없는 `070-4607-0588`, `051-505-1909`,
   `051-502-1919`, `042-485-0488`, `02-555-7455`, `02-555-7465`다. 각 070 회선과 내선은
   migration에 보존하지만 비밀번호 원문·SHA-512·암호문은 Git과 migration에 넣지 않는다.
+- 2026-08-14 후속 후보부터 활성·인증된 대표 endpoint 7개는 문자 polling뿐 아니라 전화
+  수신 callback 등록과 최근 24시간 `getinboundcall` 보정에도 포함한다. 대표 endpoint에는
+  직원 binding이나 Windows bridge를 만들지 않고, 개인 endpoint에만 기존 활성 직원 binding
+  조건을 유지한다. 대표번호 착신 뒤 직원이 당겨받더라도 최소한 고객번호가 있는 외부 통화
+  root가 전화데스크에 남도록 하는 경계이며, exact provider 근거가 없는 최종 직원을 임의로
+  지정하지 않는다.
 - 배포 뒤 `centrex:link-representative --line-number <070번호>`를 TTY에서 실행해 현재
   비밀번호를 화면에 표시하지 않고 입력한다. U+ `userinfo`가 070 회선과 내선을 정확히
   반환한 계정만 AES-GCM 인증 원장을 만들고 endpoint를 활성화한다.
