@@ -2,10 +2,60 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  canCentrexChannelsAdvanceState,
   isConfirmedCallPickupEvidence,
   resolveCentrexRingingRoot,
   resolveCentrexRootAfterLegEnd,
+  shouldMirrorCentrexTerminalSibling,
 } from "./centrex-call-activity-service.js";
+
+test("내선·상담 양쪽 leg는 한쪽의 실제 종료 근거를 공유한다", () => {
+  assert.equal(
+    shouldMirrorCentrexTerminalSibling({
+      rootScope: "internal",
+      endedKind: "internal",
+    }),
+    true,
+  );
+  assert.equal(
+    shouldMirrorCentrexTerminalSibling({
+      rootScope: "external",
+      endedKind: "consultation",
+    }),
+    true,
+  );
+  assert.equal(
+    shouldMirrorCentrexTerminalSibling({
+      rootScope: "external",
+      endedKind: "customer",
+    }),
+    false,
+  );
+});
+
+test("종료된 leg나 root는 늦은 CHANNEL_LIST로 다시 연결되지 않는다", () => {
+  assert.equal(
+    canCentrexChannelsAdvanceState({
+      rootState: "ended",
+      legState: "ended",
+    }),
+    false,
+  );
+  assert.equal(
+    canCentrexChannelsAdvanceState({
+      rootState: "connected",
+      legState: "ended",
+    }),
+    false,
+  );
+  assert.equal(
+    canCentrexChannelsAdvanceState({
+      rootState: "ringing",
+      legState: "ringing",
+    }),
+    true,
+  );
+});
 
 test("당겨받기는 같은 외부 root의 다른 endpoint CHANNEL_LIST만 수용한다", () => {
   assert.equal(
@@ -60,6 +110,7 @@ test("무조건 호전환은 동일 외부 root의 엄격한 근거가 있을 �
       partyKind: "external",
       hasExactExternalRoot: true,
       hasContextExternalRoot: false,
+      hasActiveEndpointExternalRoot: false,
       incomingLineMatchesEndpoint: false,
     }),
     "pending_blind_transfer",
@@ -69,6 +120,7 @@ test("무조건 호전환은 동일 외부 root의 엄격한 근거가 있을 �
       partyKind: "external",
       hasExactExternalRoot: false,
       hasContextExternalRoot: false,
+      hasActiveEndpointExternalRoot: false,
       incomingLineMatchesEndpoint: false,
     }),
     "needs_confirmation",
@@ -81,6 +133,7 @@ test("활성 외부 통화 문맥의 내선 통화만 호전환 상담 leg가 �
       partyKind: "internal",
       hasExactExternalRoot: false,
       hasContextExternalRoot: true,
+      hasActiveEndpointExternalRoot: false,
       incomingLineMatchesEndpoint: true,
     }),
     "confirmed_consultation",
@@ -90,9 +143,23 @@ test("활성 외부 통화 문맥의 내선 통화만 호전환 상담 leg가 �
       partyKind: "internal",
       hasExactExternalRoot: false,
       hasContextExternalRoot: false,
+      hasActiveEndpointExternalRoot: false,
       incomingLineMatchesEndpoint: true,
     }),
     "standalone_internal",
+  );
+});
+
+test("bridge 문맥이 없어도 outbound endpoint의 유일한 연결 고객 leg는 상담 문맥 근거다", () => {
+  assert.equal(
+    resolveCentrexRingingRoot({
+      partyKind: "internal",
+      hasExactExternalRoot: false,
+      hasContextExternalRoot: false,
+      hasActiveEndpointExternalRoot: true,
+      incomingLineMatchesEndpoint: true,
+    }),
+    "confirmed_consultation",
   );
 });
 

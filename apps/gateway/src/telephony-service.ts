@@ -96,6 +96,7 @@ const DUPLICATE_COMMAND_WINDOW_MS = 30_000;
 const INBOUND_RINGING_SNAPSHOT_WINDOW_MS = 3 * 60_000;
 const INBOUND_CONNECTED_SNAPSHOT_WINDOW_MS = 12 * 60 * 60_000;
 const INBOUND_ENDED_SNAPSHOT_WINDOW_MS = 20_000;
+const INTERNAL_SINGLE_LEG_CONFIRMATION_WINDOW_MS = 3 * 60_000;
 const INBOUND_ANSWER_COMMAND_TTL_MS = 20_000;
 const INBOUND_ANSWER_EVENT_MAX_DELIVERY_DELAY_MS = 15_000;
 const INBOUND_ANSWER_DISPATCH_TIMEOUT_MS = 3 * 60_000;
@@ -264,6 +265,20 @@ export function phoneDeskItemMatchesFilter(
     return ["pending", "ringing", "connected"].includes(item.state);
   }
   return item.source === filter;
+}
+
+export function isStaleOneSidedInternalCall(input: {
+  scope: "external" | "internal";
+  state: "ringing" | "connected" | "transferring" | "needs_confirmation" | "ended";
+  lastEventAt: Date;
+  activeLegCount: number;
+  snapshotAt: Date;
+}): boolean {
+  return input.scope === "internal" &&
+    input.state !== "ended" &&
+    input.activeLegCount <= 1 &&
+    input.lastEventAt.getTime() <
+      input.snapshotAt.getTime() - INTERNAL_SINGLE_LEG_CONFIRMATION_WINDOW_MS;
 }
 
 type InboundAnswerCommandStatus =
@@ -1970,6 +1985,19 @@ export function createTelephonyService(options: {
           : [],
       );
       if (
+        isStaleOneSidedInternalCall({
+          scope: root.scope,
+          state: root.state,
+          lastEventAt: root.lastEventAt,
+          activeLegCount: participants.filter(
+            (participant) => participant.state !== "ended",
+          ).length,
+          snapshotAt,
+        })
+      ) {
+        continue;
+      }
+      if (
         root.scope === "internal" &&
         !participants.some(
           (participant) =>
@@ -2442,7 +2470,24 @@ export function createTelephonyService(options: {
       selectedFilter === "all" || selectedFilter === "internal"
         ? undefined
         : selectedFilter === "active"
-          ? ne(telephonyCallRoots.state, "ended")
+          ? and(
+              ne(telephonyCallRoots.state, "ended"),
+              or(
+                gte(
+                  telephonyCallRoots.lastEventAt,
+                  new Date(
+                    snapshotAt.getTime() -
+                      INTERNAL_SINGLE_LEG_CONFIRMATION_WINDOW_MS,
+                  ),
+                ),
+                sql<boolean>`(
+                  select count(*)
+                  from telephony_call_legs as active_internal_leg
+                  where active_internal_leg.root_id = ${telephonyCallRoots.id}
+                    and active_internal_leg.state in ('ringing', 'connected')
+                ) >= 2`,
+              ),
+            )
           : sql<boolean>`false`;
     const observedAssigneeCondition = selectedAssigneeUserId
       ? sql<boolean>`case
@@ -3315,6 +3360,15 @@ export function createTelephonyService(options: {
             ),
           )
         : null;
+      const staleOneSided = isStaleOneSidedInternalCall({
+        scope: "internal",
+        state: root.state,
+        lastEventAt: root.lastEventAt,
+        activeLegCount: participants.filter(
+          (participant) => participant.state !== "ended",
+        ).length,
+        snapshotAt,
+      });
       return [{
         id: root.id,
         observedCallId: null,
@@ -3323,14 +3377,18 @@ export function createTelephonyService(options: {
         direction: "internal" as const,
         receptionMode: null,
         source: "internal" as const,
-        state: root.state === "ended"
+        state: staleOneSided
+          ? ("unknown" as const)
+          : root.state === "ended"
           ? ("ended" as const)
           : root.state === "ringing"
             ? ("ringing" as const)
             : root.state === "needs_confirmation"
               ? ("unknown" as const)
               : ("connected" as const),
-        correlationStatus: root.correlationStatus,
+        correlationStatus: staleOneSided
+          ? ("needs_confirmation" as const)
+          : root.correlationStatus,
         remotePhone: null,
         occurredAt: root.startedAt.toISOString(),
         ringingAt: root.startedAt.toISOString(),
@@ -3946,11 +4004,22 @@ export function createTelephonyService(options: {
         .where(eq(telephonyCallRoots.id, callId))
         .limit(1);
       if (root) {
+        const staleOneSided = isStaleOneSidedInternalCall({
+          scope: call.scope,
+          state: root.state,
+          lastEventAt: root.lastEventAt,
+          activeLegCount: call.participants.filter(
+            (participant) => participant.state !== "ended",
+          ).length,
+          snapshotAt: new Date(snapshot.snapshotAt),
+        });
         call = {
           ...call,
           id: callId,
           state:
-            root.state === "ringing"
+            staleOneSided
+              ? "unknown"
+              : root.state === "ringing"
               ? "ringing"
               : root.state === "ended"
                 ? "ended"
@@ -3960,7 +4029,9 @@ export function createTelephonyService(options: {
           endedAt: root.endedAt?.toISOString() ?? null,
           lastEventAt: root.lastEventAt.toISOString(),
           finalStaffUserId: root.finalStaffUserId,
-          correlationStatus: root.correlationStatus,
+          correlationStatus: staleOneSided
+            ? "needs_confirmation"
+            : root.correlationStatus,
         };
       }
     }
