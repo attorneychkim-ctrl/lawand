@@ -88,6 +88,25 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-14 — ERP `LAW& OS` 브랜드·파비콘 후보
+- 직원용 ERP의 전면 제품명을 `LAW& OS`, 영문 설명을 정확히
+  `AI Operating System for LAW&`로 확정했다. 루트 metadata는 기본 제목과
+  `{페이지명} | LAW& OS` 템플릿, application name·Apple web app 이름을 제공하며 기존 하위
+  페이지의 `로앤 ERP` 접미사를 새 템플릿으로 통일했다. 저장소 앱 이름과 업무 출처 등
+  기술 문맥의 `ERP` 용어는 유지한다.
+- 연결을 뜻하는 앰퍼샌드와 OS 코어·궤도를 결합한 민트·오프화이트 심볼을 imagegen으로
+  만들고 배경을 제거해 512px 투명 원본으로 보존했다. 같은 원본에서 그래파이트 타일의
+  512px 앱 아이콘, 180px Apple 아이콘, 16/32/48px 파비콘과 192/96px 브라우저 알림
+  아이콘을 파생했다. 헤더·로그인·초대 화면은 이미지 심볼과 정확한 HTML 워드마크를
+  결합하고, 좁은 모바일 헤더에서는 심볼만 남긴다. 로그인 배경의 저대비 시스템 그리드와
+  라이트·다크 테마를 함께 확인했다.
+- ERP typecheck·ESLint, `@lawand/core` 의존성을 포함한 ERP production build와
+  `git diff --check`를 통과했다. Next build에서 `/icon.png`·`/apple-icon.png` 정적 route를
+  확인했고, 별도 로컬 서버의 `/login` HTML에서 제목·application name·favicon·Apple icon
+  링크와 모든 이미지 HTTP 200을 대조했다. headless Chrome 1440×1000, 390×844와 강제 다크
+  모드에서 레이아웃을 확인했다. DB migration·운영 데이터 변경·main 병합·운영 배포는
+  수행하지 않았다. `PROJECT_PLAN.md`는 v1.41이다.
+
 ### 2026-08-14 — 완료 worktree 8개 통합·세 앱/0058~0060 운영 배포·후기 API 핫픽스
 - HERDR worktree 9개와 원격 `origin/worktree/*` 46개를 전수 대조해 완료 브랜치 8개를 모두
   main에 병합했고, 모든 원격 HEAD가 main ancestor이며 제외·진행 중 브랜치는 없다. 통합 이미지

@@ -11,7 +11,7 @@ import { getOwnStaffProfile } from "../../lib/staff-auth";
 import { readStaffSessionToken, requireStaff } from "../../lib/session";
 
 export const metadata: Metadata = {
-  title: "내 정보 | 로앤 ERP",
+  title: "내 정보",
 };
 
 const roleLabels = {

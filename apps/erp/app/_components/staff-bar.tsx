@@ -5,6 +5,7 @@ import { logoutAction } from "../auth-actions";
 import { BrowserNotificationToggle } from "./browser-notification-toggle";
 import { ErpNav } from "./erp-nav";
 import { InboundCallIndicator } from "./inbound-call-indicator";
+import { LawandOsBrand } from "./lawand-os-brand";
 import { ReviewNotificationBridge } from "./review-notification-bridge";
 import { ThemeToggle } from "./theme-toggle";
 
@@ -13,9 +14,8 @@ export function StaffBar({ staff }: { staff: StaffPrincipal }) {
     <header className="app-header">
       <div className="staff-bar">
         <div className="staff-bar-leading">
-          <Link aria-label="로앤 ERP 상담 홈" className="staff-brand" href="/">
-            <span className="staff-brand-mark">LAW<span>&amp;</span></span>
-            <span className="staff-brand-product">ERP</span>
+          <Link aria-label="LAW& OS 상담 홈" className="staff-brand" href="/">
+            <LawandOsBrand />
           </Link>
           <ErpNav showStaff={staff.roles.includes("admin")} />
         </div>

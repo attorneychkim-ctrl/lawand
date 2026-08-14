@@ -1,4 +1,4 @@
-/* 로앤 ERP 네이티브 알림의 안전한 이동 액션만 처리한다. Web Push 수신은 별도 범위다. */
+/* LAW& OS 네이티브 알림의 안전한 이동 액션만 처리한다. Web Push 수신은 별도 범위다. */
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());
 });

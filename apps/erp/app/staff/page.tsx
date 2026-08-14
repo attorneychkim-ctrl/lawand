@@ -11,7 +11,7 @@ import {
 } from "../../lib/session";
 
 export const metadata: Metadata = {
-  title: "직원 관리 | 로앤 ERP",
+  title: "직원 관리",
 };
 
 export default async function StaffPage() {

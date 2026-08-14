@@ -11,7 +11,7 @@ import { MessageHubWorkspace } from "../_components/message-hub-workspace";
 import { StaffBar } from "../_components/staff-bar";
 
 export const metadata: Metadata = {
-  title: "문자 | 로앤 ERP",
+  title: "문자",
 };
 
 export const dynamic = "force-dynamic";
