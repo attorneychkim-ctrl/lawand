@@ -155,7 +155,7 @@ type ReviewListRow = {
   reply_status: ReviewManagementListItem["replyStatus"];
   linked: boolean;
   mine: boolean;
-  occurred_at: Date;
+  occurred_at: Date | string;
   total_count: string;
 };
 
@@ -199,6 +199,17 @@ function recordPath(recordType: ReviewRecordType, id: string) {
 
 function normalizePage(value: number) {
   return Number.isSafeInteger(value) && value > 0 ? Math.min(value, 10_000) : 1;
+}
+
+export function serializeReviewOccurredAt(value: Date | string) {
+  const occurredAt = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(occurredAt.getTime())) {
+    throw new ReviewManagementError(
+      "review_occurred_at_invalid",
+      "후기 등록 시각을 확인할 수 없습니다.",
+    );
+  }
+  return occurredAt.toISOString();
 }
 
 function filterSql(filter: ReviewListFilter) {
@@ -414,7 +425,7 @@ export function createReviewManagementService(options: {
         replyStatus: row.reply_status,
         linked: row.linked,
         mine: row.mine,
-        occurredAt: row.occurred_at.toISOString(),
+        occurredAt: serializeReviewOccurredAt(row.occurred_at),
       } satisfies ReviewManagementListItem;
     });
     return {
