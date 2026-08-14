@@ -97,6 +97,15 @@ test("직원 전체 회선번호는 같은 번호의 직원 정보와 내선으�
       jobTitle: "사원",
     },
     {
+      matchPhone: "07046074592",
+      lineNumber: "07046074595",
+      staffUserId: "staff-4425",
+      displayName: "직원 예시",
+      extension: "4425",
+      department: "송무팀",
+      jobTitle: "사원",
+    },
+    {
       lineNumber: null,
       staffUserId: "staff-unlinked",
       displayName: "미연결 직원",
@@ -119,7 +128,8 @@ test("직원 전체 회선번호는 같은 번호의 직원 정보와 내선으�
       },
     ],
   });
-  assert.equal(matches.size, 1);
+  assert.deepEqual(matches.get("07046074592"), matches.get("07046074595"));
+  assert.equal(matches.size, 2);
 });
 
 test("수신 알림의 받기 버튼은 본인 소유의 받기 가능한 벨에만 노출한다", () => {

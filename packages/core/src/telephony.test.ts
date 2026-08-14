@@ -16,8 +16,10 @@ import {
   messageTemplateUpdateSchema,
   phoneDeskAftercareSaveSchema,
   phoneDeskCallResolutionSchema,
+  phonebookContactSaveSchema,
   renderMessageTemplate,
   staffConsultationCreateSchema,
+  telephonyCallerDisplayName,
   telephonyCallDispositionConfirmationSchema,
   telephonyMessageSendSchema,
 } from "./telephony.js";
@@ -314,6 +316,47 @@ test("확인 필요 통화의 최종 통화자는 root 참여 leg로 지정한�
     phoneDeskCallResolutionSchema.safeParse({ finalLegId: "1208" }).success,
     false,
   );
+});
+
+test("전화번호부는 원번호와 선택 연결번호를 정규화하고 중복 번호를 거부한다", () => {
+  assert.deepEqual(
+    phonebookContactSaveSchema.parse({
+      displayName: " 서울회생법원 ",
+      originalPhone: "02-530-1953",
+      connectedPhone: "070-5301-1953",
+    }),
+    {
+      displayName: "서울회생법원",
+      originalPhone: "025301953",
+      connectedPhone: "07053011953",
+    },
+  );
+  assert.equal(
+    phonebookContactSaveSchema.safeParse({
+      displayName: "서울회생법원",
+      originalPhone: "02-530-1953",
+      connectedPhone: "02-530-1953",
+    }).success,
+    false,
+  );
+});
+
+test("브라우저 수신 알림은 직원과 전화번호부 발신자를 정보 없음으로 낮추지 않는다", () => {
+  assert.equal(
+    telephonyCallerDisplayName({
+      source: "staff",
+      staffMembers: [{ displayName: "공서아" }],
+    }),
+    "공서아",
+  );
+  assert.equal(
+    telephonyCallerDisplayName({
+      source: "phonebook",
+      contact: { displayName: "서울회생법원" },
+    }),
+    "서울회생법원",
+  );
+  assert.equal(telephonyCallerDisplayName(null), "발신자 정보 없음");
 });
 
 test("센트릭스 받기 명령과 결과는 전화번호 없는 최소 계약만 허용한다", () => {

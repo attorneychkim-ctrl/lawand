@@ -36,6 +36,7 @@ import {
   type MessageTemplateUpdate,
   type PhoneDeskAftercareSave,
   type PhoneDeskCallResolution,
+  type PhonebookContactSave,
   type TelephonyMessageSend,
   type TelephonyCallDisposition,
   type CentrexBridgeCommandResult,
@@ -79,6 +80,7 @@ import {
   telephonyMessageMailboxStates,
   telephonyMessages,
   telephonyFollowUpTasks,
+  telephonyPhonebookContacts,
 } from "@lawand/db";
 import type { createDatabaseClient } from "@lawand/db";
 
@@ -93,6 +95,9 @@ import {
 } from "./solapi.js";
 
 type Database = ReturnType<typeof createDatabaseClient>["db"];
+type DatabaseTransaction = Parameters<
+  Parameters<Database["transaction"]>[0]
+>[0];
 
 const DUPLICATE_COMMAND_WINDOW_MS = 30_000;
 const INBOUND_RINGING_SNAPSHOT_WINDOW_MS = 3 * 60_000;
@@ -458,6 +463,15 @@ export type PhoneCustomerMatch =
       }>;
     }
   | {
+      source: "phonebook";
+      contact: {
+        id: string;
+        displayName: string;
+        originalPhone: string;
+        connectedPhone: string | null;
+      };
+    }
+  | {
       source: "legal_friends";
       clientName: string;
       cases: Array<{
@@ -478,6 +492,15 @@ export type PhoneCustomerMatch =
     }
   | null;
 
+export type PhonebookContact = {
+  id: string;
+  displayName: string;
+  originalPhone: string;
+  connectedPhone: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type StaffPhoneCustomerMatch = Extract<
   PhoneCustomerMatch,
   { source: "staff" }
@@ -486,6 +509,7 @@ type StaffPhoneCustomerMatch = Extract<
 export function staffPhoneCustomerMatches(
   rows: ReadonlyArray<{
     lineNumber: string | null;
+    matchPhone?: string | null;
     staffUserId: string;
     displayName: string;
     extension: string | null;
@@ -498,8 +522,12 @@ export function staffPhoneCustomerMatches(
     StaffPhoneCustomerMatch["staffMembers"]
   >();
   for (const staff of rows) {
-    if (!staff.lineNumber || !staff.extension) continue;
-    const members = membersByPhone.get(staff.lineNumber) ?? [];
+    const matchPhone = staff.matchPhone ?? staff.lineNumber;
+    if (!matchPhone || !staff.lineNumber || !staff.extension) continue;
+    const members = membersByPhone.get(matchPhone) ?? [];
+    if (members.some((member) => member.staffUserId === staff.staffUserId)) {
+      continue;
+    }
     members.push({
       staffUserId: staff.staffUserId,
       displayName: staff.displayName,
@@ -508,7 +536,7 @@ export function staffPhoneCustomerMatches(
       department: staff.department,
       jobTitle: staff.jobTitle,
     });
-    membersByPhone.set(staff.lineNumber, members);
+    membersByPhone.set(matchPhone, members);
   }
   return new Map(
     [...membersByPhone].map(([phone, staffMembers]) => [
@@ -678,6 +706,10 @@ export class TelephonyCallError extends Error {
       | "staff_not_assignable"
       | "consultation_phone_mismatch"
       | "consultation_already_exists"
+      | "phonebook_contact_not_found"
+      | "phonebook_phone_conflict"
+      | "phonebook_call_phone_mismatch"
+      | "phonebook_not_allowed"
       | "message_not_found"
       | "message_thread_not_found"
       | "message_cursor_invalid"
@@ -857,6 +889,268 @@ export function createTelephonyService(options: {
     string,
     { expiresAt: number; value: Promise<PhoneCustomerMatch> }
   >();
+
+  function phonebookContactResponse(
+    contact: typeof telephonyPhonebookContacts.$inferSelect,
+  ): PhonebookContact {
+    return {
+      id: contact.id,
+      displayName: protection.decrypt(
+        {
+          ciphertext: contact.displayNameCiphertext,
+          nonce: contact.displayNameNonce,
+          keyVersion: contact.displayNameKeyVersion,
+        },
+        `telephony_phonebook_contacts.display_name:${contact.id}`,
+      ),
+      originalPhone: protection.decrypt(
+        {
+          ciphertext: contact.originalPhoneCiphertext,
+          nonce: contact.originalPhoneNonce,
+          keyVersion: contact.originalPhoneKeyVersion,
+        },
+        `telephony_phonebook_contacts.original_phone:${contact.id}`,
+      ),
+      connectedPhone:
+        contact.connectedPhoneCiphertext &&
+        contact.connectedPhoneNonce &&
+        contact.connectedPhoneKeyVersion
+          ? protection.decrypt(
+              {
+                ciphertext: contact.connectedPhoneCiphertext,
+                nonce: contact.connectedPhoneNonce,
+                keyVersion: contact.connectedPhoneKeyVersion,
+              },
+              `telephony_phonebook_contacts.connected_phone:${contact.id}`,
+            )
+          : null,
+      createdAt: contact.createdAt.toISOString(),
+      updatedAt: contact.updatedAt.toISOString(),
+    };
+  }
+
+  async function writePhonebookContact(
+    tx: DatabaseTransaction,
+    input: PhonebookContactSave,
+    actor: StaffPrincipal,
+    contactId: string | null,
+    changedAt: Date,
+  ): Promise<PhonebookContact> {
+    const id = contactId ?? createEventId();
+    let existing: typeof telephonyPhonebookContacts.$inferSelect | undefined;
+    if (contactId) {
+      [existing] = await tx
+        .select()
+        .from(telephonyPhonebookContacts)
+        .where(
+          and(
+            eq(telephonyPhonebookContacts.id, contactId),
+            eq(telephonyPhonebookContacts.isActive, true),
+          ),
+        )
+        .limit(1)
+        .for("update");
+      if (!existing) {
+        throw new TelephonyCallError(
+          "phonebook_contact_not_found",
+          "전화번호부 연락처를 찾을 수 없습니다.",
+        );
+      }
+    }
+
+    const originalFingerprint = protection.fingerprint(input.originalPhone);
+    const connectedFingerprint = input.connectedPhone
+      ? protection.fingerprint(input.connectedPhone)
+      : null;
+    const fingerprints = [originalFingerprint, connectedFingerprint]
+      .filter((value): value is Buffer => Boolean(value))
+      .sort((left, right) => left.compare(right));
+    for (const fingerprint of fingerprints) {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(cast(${protection.advisoryLockKey(fingerprint)} as bigint))`,
+      );
+    }
+    const numberConditions = fingerprints.flatMap((fingerprint) => [
+      eq(telephonyPhonebookContacts.originalPhoneFingerprint, fingerprint),
+      eq(telephonyPhonebookContacts.connectedPhoneFingerprint, fingerprint),
+    ]);
+    const [conflict] = await tx
+      .select({ id: telephonyPhonebookContacts.id })
+      .from(telephonyPhonebookContacts)
+      .where(
+        and(
+          eq(telephonyPhonebookContacts.isActive, true),
+          contactId ? ne(telephonyPhonebookContacts.id, contactId) : undefined,
+          or(...numberConditions),
+        ),
+      )
+      .limit(1);
+    if (conflict) {
+      throw new TelephonyCallError(
+        "phonebook_phone_conflict",
+        "원번호 또는 연결번호가 다른 전화번호부 연락처에 이미 등록되어 있습니다.",
+      );
+    }
+
+    const displayNameEncrypted = protection.encrypt(
+      input.displayName,
+      `telephony_phonebook_contacts.display_name:${id}`,
+    );
+    const originalPhoneEncrypted = protection.encrypt(
+      input.originalPhone,
+      `telephony_phonebook_contacts.original_phone:${id}`,
+    );
+    const connectedPhoneEncrypted = input.connectedPhone
+      ? protection.encrypt(
+          input.connectedPhone,
+          `telephony_phonebook_contacts.connected_phone:${id}`,
+        )
+      : null;
+    const values = {
+      displayNameCiphertext: displayNameEncrypted.ciphertext,
+      displayNameNonce: displayNameEncrypted.nonce,
+      displayNameKeyVersion: displayNameEncrypted.keyVersion,
+      originalPhoneFingerprint: originalFingerprint,
+      originalPhoneCiphertext: originalPhoneEncrypted.ciphertext,
+      originalPhoneNonce: originalPhoneEncrypted.nonce,
+      originalPhoneKeyVersion: originalPhoneEncrypted.keyVersion,
+      connectedPhoneFingerprint: connectedFingerprint,
+      connectedPhoneCiphertext: connectedPhoneEncrypted?.ciphertext ?? null,
+      connectedPhoneNonce: connectedPhoneEncrypted?.nonce ?? null,
+      connectedPhoneKeyVersion: connectedPhoneEncrypted?.keyVersion ?? null,
+      updatedByUserId: actor.id,
+      updatedAt: changedAt,
+    };
+    const [saved] = existing
+      ? await tx
+          .update(telephonyPhonebookContacts)
+          .set(values)
+          .where(eq(telephonyPhonebookContacts.id, id))
+          .returning()
+      : await tx
+          .insert(telephonyPhonebookContacts)
+          .values({
+            id,
+            ...values,
+            createdByUserId: actor.id,
+            createdAt: changedAt,
+          })
+          .returning();
+    if (!saved) throw new Error("phonebook_contact_not_saved");
+    await tx.insert(staffAuditLogs).values({
+      id: createEventId(),
+      actorUserId: actor.id,
+      action: existing
+        ? "telephony.phonebook.updated"
+        : "telephony.phonebook.created",
+      targetType: "telephony_phonebook_contact",
+      targetId: id,
+      metadata: {
+        originalPhoneLast4: input.originalPhone.slice(-4),
+        connectedPhoneLast4: input.connectedPhone?.slice(-4) ?? null,
+      },
+      occurredAt: changedAt,
+      createdAt: changedAt,
+    });
+    return phonebookContactResponse(saved);
+  }
+
+  async function listPhonebookContacts(actor: StaffPrincipal) {
+    const rows = await db
+      .select()
+      .from(telephonyPhonebookContacts)
+      .where(eq(telephonyPhonebookContacts.isActive, true))
+      .orderBy(desc(telephonyPhonebookContacts.updatedAt))
+      .limit(1_000);
+    const viewedAt = now();
+    const auditId = createEventId();
+    await db.insert(staffAuditLogs).values({
+      id: auditId,
+      actorUserId: actor.id,
+      action: "telephony.phonebook.viewed",
+      targetType: "telephony_phonebook",
+      targetId: auditId,
+      metadata: { resultCount: rows.length },
+      occurredAt: viewedAt,
+      createdAt: viewedAt,
+    });
+    return {
+      items: rows.map(phonebookContactResponse),
+      total: rows.length,
+    };
+  }
+
+  async function createPhonebookContact(
+    input: PhonebookContactSave,
+    actor: StaffPrincipal,
+  ) {
+    const result = await db.transaction((tx) =>
+      writePhonebookContact(tx, input, actor, null, now()),
+    );
+    phoneCustomerCache.clear();
+    return result;
+  }
+
+  async function updatePhonebookContact(
+    contactId: string,
+    input: PhonebookContactSave,
+    actor: StaffPrincipal,
+  ) {
+    const result = await db.transaction((tx) =>
+      writePhonebookContact(tx, input, actor, contactId, now()),
+    );
+    phoneCustomerCache.clear();
+    return result;
+  }
+
+  async function deactivatePhonebookContact(
+    contactId: string,
+    actor: StaffPrincipal,
+  ) {
+    const deactivatedAt = now();
+    const result = await db.transaction(async (tx) => {
+      const [contact] = await tx
+        .select({ id: telephonyPhonebookContacts.id })
+        .from(telephonyPhonebookContacts)
+        .where(
+          and(
+            eq(telephonyPhonebookContacts.id, contactId),
+            eq(telephonyPhonebookContacts.isActive, true),
+          ),
+        )
+        .limit(1)
+        .for("update");
+      if (!contact) {
+        throw new TelephonyCallError(
+          "phonebook_contact_not_found",
+          "전화번호부 연락처를 찾을 수 없습니다.",
+        );
+      }
+      await tx
+        .update(telephonyPhonebookContacts)
+        .set({
+          isActive: false,
+          updatedByUserId: actor.id,
+          deactivatedByUserId: actor.id,
+          deactivatedAt,
+          updatedAt: deactivatedAt,
+        })
+        .where(eq(telephonyPhonebookContacts.id, contactId));
+      await tx.insert(staffAuditLogs).values({
+        id: createEventId(),
+        actorUserId: actor.id,
+        action: "telephony.phonebook.deactivated",
+        targetType: "telephony_phonebook_contact",
+        targetId: contactId,
+        metadata: {},
+        occurredAt: deactivatedAt,
+        createdAt: deactivatedAt,
+      });
+      return { id: contactId, deactivated: true as const };
+    });
+    phoneCustomerCache.clear();
+    return result;
+  }
 
   async function resolveLegalFriendsPhones(phones: readonly string[]) {
     const normalizedPhones = [
@@ -1841,7 +2135,7 @@ export function createTelephonyService(options: {
     const unmatchedAfterConsultations = uniquePhones.filter(
       (phone) => !consultationMatchedPhones.has(phone),
     );
-    const staffRows = unmatchedAfterConsultations.length
+    const staffProfileRows = unmatchedAfterConsultations.length
       ? await db
           .select({
             lineNumber: staffProfiles.centrexLineNumber,
@@ -1874,13 +2168,136 @@ export function createTelephonyService(options: {
           )
           .orderBy(asc(staffProfiles.displayName))
       : [];
-    const staffMatches = staffPhoneCustomerMatches(staffRows);
+    const staffEndpointRows = unmatchedAfterConsultations.length
+      ? await db
+          .select({
+            lineNumber: telephonyEndpoints.lineNumber,
+            matchPhone: telephonyEndpoints.lineNumber,
+            staffUserId: staffUsers.id,
+            displayName: staffProfiles.displayName,
+            extension: telephonyEndpoints.extension,
+            department: staffMemberships.department,
+            jobTitle: staffMemberships.jobTitle,
+          })
+          .from(staffTelephonyBindings)
+          .innerJoin(
+            telephonyEndpoints,
+            eq(telephonyEndpoints.id, staffTelephonyBindings.endpointId),
+          )
+          .innerJoin(
+            staffUsers,
+            eq(staffUsers.id, staffTelephonyBindings.staffUserId),
+          )
+          .innerJoin(staffProfiles, eq(staffProfiles.userId, staffUsers.id))
+          .innerJoin(
+            staffMemberships,
+            and(
+              eq(staffMemberships.userId, staffUsers.id),
+              eq(staffMemberships.isPrimary, true),
+              eq(staffMemberships.isActive, true),
+            ),
+          )
+          .where(
+            and(
+              eq(staffUsers.status, "active"),
+              eq(staffTelephonyBindings.isActive, true),
+              eq(telephonyEndpoints.isActive, true),
+              inArray(
+                telephonyEndpoints.lineNumber,
+                unmatchedAfterConsultations,
+              ),
+            ),
+          )
+          .orderBy(asc(staffProfiles.displayName))
+      : [];
+    const staffMatches = staffPhoneCustomerMatches([
+      ...staffProfileRows,
+      ...staffEndpointRows,
+    ]);
     for (const [phone, staffMatch] of staffMatches) {
       matches.set(phone, staffMatch);
     }
 
-    const unmatchedPhones = unmatchedAfterConsultations.filter(
+    const unmatchedAfterStaff = unmatchedAfterConsultations.filter(
       (phone) => !staffMatches.has(phone),
+    );
+    const unmatchedFingerprints = unmatchedAfterStaff.map(
+      (phone) => fingerprintsByPhone.get(phone)!,
+    );
+    const phonebookRows = unmatchedFingerprints.length
+      ? await db
+          .select()
+          .from(telephonyPhonebookContacts)
+          .where(
+            and(
+              eq(telephonyPhonebookContacts.isActive, true),
+              or(
+                inArray(
+                  telephonyPhonebookContacts.originalPhoneFingerprint,
+                  unmatchedFingerprints,
+                ),
+                inArray(
+                  telephonyPhonebookContacts.connectedPhoneFingerprint,
+                  unmatchedFingerprints,
+                ),
+              ),
+            ),
+          )
+      : [];
+    const phonebookMatchedPhones = new Set<string>();
+    for (const contact of phonebookRows) {
+      const displayName = protection.decrypt(
+        {
+          ciphertext: contact.displayNameCiphertext,
+          nonce: contact.displayNameNonce,
+          keyVersion: contact.displayNameKeyVersion,
+        },
+        `telephony_phonebook_contacts.display_name:${contact.id}`,
+      );
+      const originalPhone = protection.decrypt(
+        {
+          ciphertext: contact.originalPhoneCiphertext,
+          nonce: contact.originalPhoneNonce,
+          keyVersion: contact.originalPhoneKeyVersion,
+        },
+        `telephony_phonebook_contacts.original_phone:${contact.id}`,
+      );
+      const connectedPhone =
+        contact.connectedPhoneCiphertext &&
+        contact.connectedPhoneNonce &&
+        contact.connectedPhoneKeyVersion
+          ? protection.decrypt(
+              {
+                ciphertext: contact.connectedPhoneCiphertext,
+                nonce: contact.connectedPhoneNonce,
+                keyVersion: contact.connectedPhoneKeyVersion,
+              },
+              `telephony_phonebook_contacts.connected_phone:${contact.id}`,
+            )
+          : null;
+      const match: NonNullable<PhoneCustomerMatch> = {
+        source: "phonebook",
+        contact: {
+          id: contact.id,
+          displayName,
+          originalPhone,
+          connectedPhone,
+        },
+      };
+      for (const fingerprint of [
+        contact.originalPhoneFingerprint,
+        contact.connectedPhoneFingerprint,
+      ]) {
+        if (!fingerprint) continue;
+        const phone = phoneByFingerprint.get(fingerprint.toString("hex"));
+        if (!phone) continue;
+        matches.set(phone, match);
+        phonebookMatchedPhones.add(phone);
+      }
+    }
+
+    const unmatchedPhones = unmatchedAfterStaff.filter(
+      (phone) => !phonebookMatchedPhones.has(phone),
     );
     const legalFriendsMatches = await resolveLegalFriendsPhones(
       unmatchedPhones,
@@ -4137,6 +4554,7 @@ export function createTelephonyService(options: {
             ? match.staffMembers.map((staff) => staff.displayName).join(" · ")
             : null) ??
           (match?.source === "legal_friends" ? match.clientName : null) ??
+          (match?.source === "phonebook" ? match.contact.displayName : null) ??
           "고객명 미확인";
         const contactTarget = task.consultationId && linkedConsultation
           ? {
@@ -4481,6 +4899,32 @@ export function createTelephonyService(options: {
       throw new TelephonyCallError(
         "external_aftercare_result_invalid",
         "고객 통화에 맞는 후처리 결과를 선택해 주세요.",
+      );
+    }
+    const phonebookInput = input.phonebook?.mode === "save"
+      ? {
+          displayName: input.phonebook.displayName,
+          originalPhone: input.phonebook.originalPhone,
+          connectedPhone: input.phonebook.connectedPhone ?? null,
+        }
+      : null;
+    if (phonebookInput && call.scope === "internal") {
+      throw new TelephonyCallError(
+        "phonebook_not_allowed",
+        "내선 통화는 공용 전화번호부에 저장하지 않습니다.",
+      );
+    }
+    if (
+      phonebookInput &&
+      (!call.remotePhone ||
+        ![
+          phonebookInput.originalPhone,
+          phonebookInput.connectedPhone,
+        ].includes(call.remotePhone))
+    ) {
+      throw new TelephonyCallError(
+        "phonebook_call_phone_mismatch",
+        "현재 통화 번호를 원번호 또는 연결번호에 포함해 주세요.",
       );
     }
     const callRootId = call.callRootId === callId ? callId : null;
@@ -4840,6 +5284,17 @@ export function createTelephonyService(options: {
           })
           .where(eq(telephonyFollowUpTasks.id, openTask.id));
       }
+      if (phonebookInput) {
+        await writePhonebookContact(
+          tx,
+          phonebookInput,
+          actor,
+          call.customerMatch?.source === "phonebook"
+            ? call.customerMatch.contact.id
+            : null,
+          confirmedAt,
+        );
+      }
       await tx.insert(staffAuditLogs).values({
         id: createEventId(),
         actorUserId: actor.id,
@@ -4854,11 +5309,13 @@ export function createTelephonyService(options: {
           followUpAssigneeUserId: input.followUp.enabled
             ? input.followUp.assigneeUserId
             : null,
+          phonebookSaved: Boolean(phonebookInput),
         },
         occurredAt: confirmedAt,
         createdAt: confirmedAt,
       });
     });
+    if (phonebookInput) phoneCustomerCache.clear();
     return getPhoneDeskCall(callId);
   }
 
@@ -7787,6 +8244,7 @@ export function createTelephonyService(options: {
     completePhoneDeskFollowUp,
     completeInboundAnswerCommand,
     confirmDisposition,
+    createPhonebookContact,
     createDirectoryConsultation,
     createStaffConsultation,
     createMessageTemplate,
@@ -7800,6 +8258,7 @@ export function createTelephonyService(options: {
     listMessageTemplates,
     getPhoneDeskCalls,
     getPhoneDeskCall,
+    listPhonebookContacts,
     pollInboundAnswerCommand,
     requestClickToCall,
     requestDirectoryClickToCall,
@@ -7810,7 +8269,9 @@ export function createTelephonyService(options: {
     requestMessage,
     resolvePhoneDeskCall,
     savePhoneDeskAftercare,
+    deactivatePhonebookContact,
     updateMessageTemplate,
+    updatePhonebookContact,
   };
 }
 

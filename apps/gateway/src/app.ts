@@ -38,6 +38,7 @@ import {
   phoneDeskAftercareSaveSchema,
   phoneDeskCallResolutionSchema,
   phoneDeskFollowUpCompletionSchema,
+  phonebookContactSaveSchema,
   legalFriendsDirectoryConsultationCreateSchema,
   legalFriendsDirectoryClickToCallSchema,
   legalFriendsDirectoryMessageSendSchema,
@@ -2258,6 +2259,120 @@ export function createGatewayServer(options?: {
         return;
       }
 
+      if (
+        (request.method === "GET" || request.method === "POST") &&
+        url.pathname === "/v1/phonebook"
+      ) {
+        if (
+          !options?.telephonyService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        if (request.method === "GET") {
+          sendJson(
+            response,
+            200,
+            await options.telephonyService.listPhonebookContacts(actor),
+          );
+          return;
+        }
+        const parsed = phonebookContactSaveSchema.safeParse(
+          await readJson(request),
+        );
+        if (!parsed.success) {
+          sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+          return;
+        }
+        sendJson(
+          response,
+          201,
+          await options.telephonyService.createPhonebookContact(
+            parsed.data,
+            actor,
+          ),
+        );
+        return;
+      }
+
+      const phonebookContactMatch = url.pathname.match(
+        /^\/v1\/phonebook\/([^/]+)$/,
+      );
+      if (
+        (request.method === "POST" || request.method === "DELETE") &&
+        phonebookContactMatch
+      ) {
+        if (
+          !options?.telephonyService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        const contactId = phonebookContactMatch[1];
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        if (!contactId || !validUuid(contactId)) {
+          sendJson(response, 400, { error: "invalid_phonebook_contact_id" });
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        if (request.method === "DELETE") {
+          sendJson(
+            response,
+            200,
+            await options.telephonyService.deactivatePhonebookContact(
+              contactId,
+              actor,
+            ),
+          );
+          return;
+        }
+        const parsed = phonebookContactSaveSchema.safeParse(
+          await readJson(request),
+        );
+        if (!parsed.success) {
+          sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+          return;
+        }
+        sendJson(
+          response,
+          200,
+          await options.telephonyService.updatePhonebookContact(
+            contactId,
+            parsed.data,
+            actor,
+          ),
+        );
+        return;
+      }
+
       const phoneDeskAftercareMatch = url.pathname.match(
         /^\/v1\/phone-desk\/calls\/([^/]+)\/aftercare$/,
       );
@@ -3358,7 +3473,8 @@ export function createGatewayServer(options?: {
           error.code === "inbound_command_not_found" ||
           error.code === "message_not_found" ||
           error.code === "message_thread_not_found" ||
-          error.code === "message_template_not_found"
+          error.code === "message_template_not_found" ||
+          error.code === "phonebook_contact_not_found"
             ? 404
             : error.code === "call_owned_by_other_staff" ||
                 error.code === "inbound_call_owned_by_other_staff" ||

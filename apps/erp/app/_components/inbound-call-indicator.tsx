@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { telephonyCallerDisplayName } from "@lawand/core";
 
 import type {
   PhoneDeskCallSnapshot,
@@ -65,6 +66,7 @@ type IndicatorToast = {
     lineLabel: "내 회선" | "다른 회선";
     answerCallId: string | null;
     myCustomer: boolean;
+    remotePhone: string | null;
   };
   consultationKind?:
     | "new"
@@ -288,6 +290,11 @@ function CustomerMatch({
       {members[0]?.extension ? ` · 내선 ${members[0].extension}` : ""}
     </span>;
   }
+  if (call.customerMatch.source === "phonebook") {
+    return <Link className="inbound-customer" href="/phonebook">
+      전화번호부 · {call.customerMatch.contact.displayName}
+    </Link>;
+  }
   const match = call.customerMatch;
   const latestCase = match.cases[0];
   return <span className="inbound-customer">
@@ -368,11 +375,7 @@ function telephonyNotificationSummary(
   staffUserId: string,
 ) {
   const customer = activity.customerMatch;
-  const customerName = customer?.source === "consultation"
-    ? customer.consultation.displayName
-    : customer?.source === "legal_friends"
-      ? customer.clientName
-      : "발신자 정보 없음";
+  const customerName = telephonyCallerDisplayName(customer);
   if (customer?.source === "consultation") {
     return {
       customerName,
@@ -409,6 +412,32 @@ function telephonyNotificationSummary(
       myCustomer: isMyCustomer(activity, staffUserId),
     };
   }
+  if (customer?.source === "staff") {
+    return {
+      customerName,
+      managerLabel: "직원 회선",
+      stateLabel: customer.staffMembers
+        .map((member) => `내선 ${member.extension}`)
+        .join(" · "),
+      lineLabel: activity.currentEndpointOwnedByActor
+        ? "내 회선" as const
+        : "다른 회선" as const,
+      answerCallId: activity.answerableInboundCallId,
+      myCustomer: false,
+    };
+  }
+  if (customer?.source === "phonebook") {
+    return {
+      customerName,
+      managerLabel: "전화번호부",
+      stateLabel: "저장된 발신자",
+      lineLabel: activity.currentEndpointOwnedByActor
+        ? "내 회선" as const
+        : "다른 회선" as const,
+      answerCallId: activity.answerableInboundCallId,
+      myCustomer: false,
+    };
+  }
   return {
     customerName,
     managerLabel: "담당 미확인",
@@ -431,7 +460,11 @@ function notificationCopy(
       title: summary.myCustomer
         ? `📞 내 담당 고객 전화 · ${summary.customerName}`
         : `📞 수신전화 · ${summary.customerName}`,
-      body: `${summary.managerLabel} · ${summary.stateLabel}`,
+      body: `${summary.managerLabel} · ${summary.stateLabel}\n${
+        activity.remotePhone
+          ? `전화 ${formatPhone(activity.remotePhone)}`
+          : "전화번호 확인 중"
+      }`,
     };
   }
   const kindLabel =
@@ -443,13 +476,7 @@ function notificationCopy(
           ? "내선 전화"
           : "고객 전화 수신";
   const customer = activity.customerMatch;
-  const customerName = customer?.source === "consultation"
-    ? customer.consultation.displayName
-    : customer?.source === "legal_friends"
-      ? customer.clientName
-      : customer?.source === "staff"
-        ? customer.staffMembers.map((member) => member.displayName).join(" · ")
-      : "발신자 정보 없음";
+  const customerName = telephonyCallerDisplayName(customer);
   const details: string[] = [];
   const myCustomer = isMyCustomer(activity, staffUserId);
   if (myCustomer) details.push("★ 내가 담당하는 고객입니다");
@@ -486,8 +513,10 @@ function notificationCopy(
         .map((member) => `${member.displayName} · 내선 ${member.extension}`)
         .join(" / ")}`,
     );
+  } else if (customer?.source === "phonebook") {
+    details.push(`전화번호부 · ${customer.contact.displayName}`);
   } else {
-    details.push("상담·리걸프렌즈 일치 고객 없음");
+    details.push("상담·직원·전화번호부·리걸프렌즈 일치 정보 없음");
   }
   details.push(
     activity.remotePhone
@@ -976,7 +1005,10 @@ export function InboundCallIndicator({
         continue;
       }
       seenTelephonyToastKeys.current.add(toastKey);
-      const summary = telephonyNotificationSummary(activity, staffUserId);
+      const summary = {
+        ...telephonyNotificationSummary(activity, staffUserId),
+        remotePhone: activity.remotePhone,
+      };
       enqueueToast({
         id: toastKey,
         resourceKind: "telephony",
@@ -984,7 +1016,11 @@ export function InboundCallIndicator({
         title: summary.myCustomer
           ? `📞 내 담당 고객 전화 · ${summary.customerName}`
           : `📞 수신전화 · ${summary.customerName}`,
-        body: `${summary.managerLabel} · ${summary.stateLabel}`,
+        body: `${summary.managerLabel} · ${summary.stateLabel} · ${
+          summary.remotePhone
+            ? formatPhone(summary.remotePhone)
+            : "전화번호 확인 중"
+        }`,
         href: `/phone-desk/${activity.id}`,
         telephony: summary,
       });
@@ -1807,6 +1843,12 @@ export function InboundCallIndicator({
                       <div>
                         <dt>진행상태</dt>
                         <dd>{telephony.stateLabel}</dd>
+                      </div>
+                      <div>
+                        <dt>전화번호</dt>
+                        <dd>{telephony.remotePhone
+                          ? formatPhone(telephony.remotePhone)
+                          : "확인 중"}</dd>
                       </div>
                     </dl>
                     {answerError ? (

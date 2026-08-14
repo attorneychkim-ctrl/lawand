@@ -69,6 +69,8 @@ export default async function PhoneDeskDetailPage({
           ? call.customerMatch.staffMembers
               .map((member) => member.displayName)
               .join(" · ")
+          : call.customerMatch?.source === "phonebook"
+            ? call.customerMatch.contact.displayName
           : "발신자 정보 없음");
 
   return (

@@ -262,6 +262,14 @@ function CustomerSummary({ call }: { call: PhoneDeskCall }) {
       </span>
     );
   }
+  if (call.customerMatch.source === "phonebook") {
+    return (
+      <Link className="phone-desk-customer-link" href="/phonebook">
+        <strong>{call.customerMatch.contact.displayName}</strong>
+        <span>전화번호부 · 저장된 발신자</span>
+      </Link>
+    );
+  }
   const latestCase = call.customerMatch.cases[0];
   return (
     <span className="phone-desk-customer">
