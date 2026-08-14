@@ -339,8 +339,8 @@ function notificationCopy(
     const summary = telephonyNotificationSummary(activity, staffUserId);
     return {
       title: summary.myCustomer
-        ? `★ 내 담당 고객 · ${summary.customerName}`
-        : `수신전화 · ${summary.customerName}`,
+        ? `📞 내 담당 고객 전화 · ${summary.customerName}`
+        : `📞 수신전화 · ${summary.customerName}`,
       body: `${summary.managerLabel} · ${summary.stateLabel}`,
     };
   }
@@ -905,8 +905,8 @@ export function InboundCallIndicator({
         resourceKind: "telephony",
         resourceId: activity.id,
         title: summary.myCustomer
-          ? `내 담당 고객 전화 · ${summary.customerName}`
-          : `수신전화 · ${summary.customerName}`,
+          ? `📞 내 담당 고객 전화 · ${summary.customerName}`
+          : `📞 수신전화 · ${summary.customerName}`,
         body: `${summary.managerLabel} · ${summary.stateLabel}`,
         href: `/phone-desk/${activity.id}`,
         telephony: summary,
@@ -1043,13 +1043,13 @@ export function InboundCallIndicator({
 
         const title = consultation
           ? payload.notificationKind === "repeat_assigned"
-            ? `담당 상담 재요청 · ${consultation.displayName}`
+            ? `📝 담당 상담 재요청 · ${consultation.displayName}`
             : payload.notificationKind === "assignment_transferred"
-              ? `새 담당 상담 · ${consultation.displayName}`
+              ? `📝 새 담당 상담 · ${consultation.displayName}`
             : payload.notificationKind === "repeat_unassigned"
-              ? `상담 재요청 · ${consultation.displayName}`
-              : `새 상담 · ${consultation.displayName}`
-          : "새 상담이 등록됐습니다";
+              ? `📝 상담 재요청 · ${consultation.displayName}`
+              : `📝 새 상담 · ${consultation.displayName}`
+          : "📝 새 상담이 등록됐습니다";
         const body = consultation
           ? `📍 ${consultationRegionLabel(consultation)} · ${consultationChannelLabels[consultation.contactChannel]}`
           : "상담 데스크에서 접수 내용을 확인해 주세요.";
@@ -1536,23 +1536,19 @@ export function InboundCallIndicator({
                   }`}
                   key={toast.id}
                 >
-                  <header className="consultation-alert-heading">
-                    <div>
-                      <span className="telephony-alert-kicker">
-                        <svg aria-hidden="true" viewBox="0 0 24 24">
-                          <path d="M7.8 3.8 10 8.5 7.5 10a14.3 14.3 0 0 0 6.5 6.5l1.5-2.5 4.7 2.2v3a1.8 1.8 0 0 1-1.8 1.8A15.4 15.4 0 0 1 3 5.6a1.8 1.8 0 0 1 1.8-1.8h3Z" />
-                        </svg>
-                        수신전화
-                      </span>
-                      {telephony.myCustomer ? (
-                        <span className="telephony-alert-priority">
-                          내 담당 고객
-                        </span>
-                      ) : null}
+                  <header className="telephony-alert-heading">
+                    <span aria-hidden="true" className="telephony-alert-signal">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M7.8 3.8 10 8.5 7.5 10a14.3 14.3 0 0 0 6.5 6.5l1.5-2.5 4.7 2.2v3a1.8 1.8 0 0 1-1.8 1.8A15.4 15.4 0 0 1 3 5.6a1.8 1.8 0 0 1 1.8-1.8h3Z" />
+                      </svg>
+                    </span>
+                    <div className="telephony-alert-heading-copy">
+                      <small>실시간 수신</small>
+                      <strong>전화가 오고 있어요</strong>
                     </div>
                     <button
                       aria-label="수신전화 알림 닫기"
-                      className="consultation-alert-close"
+                      className="telephony-alert-close"
                       onClick={() => dismissToast(toast.id)}
                       type="button"
                     >
@@ -1562,6 +1558,18 @@ export function InboundCallIndicator({
                     </button>
                   </header>
                   <div className="telephony-alert-body">
+                    <div className="telephony-alert-context">
+                      <span className={`telephony-alert-line is-${
+                        telephony.lineLabel === "내 회선" ? "mine" : "other"
+                      }`}>
+                        {telephony.lineLabel}
+                      </span>
+                      {telephony.myCustomer ? (
+                        <span className="telephony-alert-priority">
+                          내 담당 고객
+                        </span>
+                      ) : null}
+                    </div>
                     <div className="telephony-alert-identity">
                       <span aria-hidden="true" className="telephony-alert-avatar">
                         {telephony.customerName === "발신자 정보 없음"
@@ -1572,11 +1580,6 @@ export function InboundCallIndicator({
                         <small>고객</small>
                         <strong>{telephony.customerName}</strong>
                       </div>
-                      <span className={`telephony-alert-line is-${
-                        telephony.lineLabel === "내 회선" ? "mine" : "other"
-                      }`}>
-                        {telephony.lineLabel}
-                      </span>
                     </div>
                     <dl className="telephony-alert-facts">
                       <div>
@@ -1652,6 +1655,9 @@ export function InboundCallIndicator({
                 <header className="consultation-alert-heading">
                   <div>
                     <span className="consultation-alert-kicker">
+                      <svg aria-hidden="true" viewBox="0 0 24 24">
+                        <path d="M8 3.5h8M9 2.5h6v3H9zM7 4.5H5.5A1.5 1.5 0 0 0 4 6v14h16V6a1.5 1.5 0 0 0-1.5-1.5H17M8 11h8M8 15h5" />
+                      </svg>
                       {toast.consultationKind === "repeat_assigned"
                         ? "담당 상담 재요청"
                         : toast.consultationKind === "assignment_transferred"
