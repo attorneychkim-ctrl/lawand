@@ -43,11 +43,49 @@ async function focusOrOpen(targetUrl) {
   return self.clients.openWindow(targetUrl.href);
 }
 
+function safeActionUrl(value, pathPrefix, pathSuffix) {
+  const url = sameOriginUrl(value, "/");
+  return url.pathname.startsWith(pathPrefix) && url.pathname.endsWith(pathSuffix)
+    ? url
+    : null;
+}
+
+async function postActionThenOpen(actionUrl, targetUrl) {
+  if (actionUrl) {
+    try {
+      await fetch(actionUrl, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { accept: "application/json" },
+      });
+    } catch {
+      // 상세 화면에서 이미 처리됐거나 실패한 현재 상태를 다시 확인할 수 있다.
+    }
+  }
+  return focusOrOpen(targetUrl);
+}
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const data = event.notification.data ?? {};
-  const target = event.action === "consultation-desk" || event.action === "erp-desk"
-    ? sameOriginUrl(data.deskHref, "/")
-    : sameOriginUrl(data.href, "/");
+  const target = sameOriginUrl(data.href, "/");
+  if (event.action === "consultation-claim") {
+    event.waitUntil(postActionThenOpen(
+      safeActionUrl(data.claimHref, "/api/consultations/", "/claim"),
+      target,
+    ));
+    return;
+  }
+  if (event.action === "telephony-answer") {
+    event.waitUntil(postActionThenOpen(
+      safeActionUrl(
+        data.answerHref,
+        "/api/telephony-inbound-calls/",
+        "/answer",
+      ),
+      target,
+    ));
+    return;
+  }
   event.waitUntil(focusOrOpen(target));
 });

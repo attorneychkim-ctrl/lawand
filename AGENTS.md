@@ -88,6 +88,27 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-14 — ERP 상담·수신 알림 핵심 카드·20초 상태 연동 후보
+- 새 상담 알림 전용 응답과 ERP/네이티브 카드에서 접수번호·전화번호를 제거하고 고객명·광역
+  지역을 크게, 접수 채널을 한 개 배지로 표시한다. ERP 카드의 행동은 배정 가능할 때
+  `상담하기`, 이미 배정된 재요청이면 같은 한 자리에 `상담 확인`만 둔다. 서비스 워커를
+  지원하는 네이티브 알림의 `상담하기`도 인증된 same-origin claim API를 실행한 뒤 상세로
+  이동한다. 기본 만료는 10초에서 20초로 늘렸고 다른 직원이 먼저 `consultation.assigned`를
+  만들면 열린 카드와 persistent/page Notification을 즉시 닫는다.
+- 외부 수신은 전역 ERP에 고객명·고객 담당자·상담/리걸프렌즈 진행상태와 `내 회선/다른 회선`
+  한 개 배지만 표시하는 20초 카드로 축약했다. 로그인 직원 소유의 answer 가능한 office
+  bridge 벨에만 ERP 카드와 네이티브 알림의 `수신하기`를 제공하며 gateway snapshot과 기존
+  answer API가 소유권·bridge·ringing을 각각 확인한다. 현재 센트릭스 계약에는 다른 직원
+  회선의 원격 당겨받기 명령이 없고 기존 `당겨받기`는 사후 관측이므로 가짜 동작을 만들지
+  않았다. 누군가 받아 root가 connected가 되거나 종료되면 두 알림을 즉시 닫는다.
+- 내비게이션 알림 제어는 브라우저 권한과 별도인 ERP 로컬 설정으로 `알림 켜짐 ↔ 알림 꺼짐`
+  전환을 지원한다. 끌 때 열린 LAW& 알림을 닫고 이후 네이티브 알림 생성을 중단하되 ERP 내부
+  실시간 카드는 유지한다. 전체 5패키지 typecheck·lint·production build, core 83개·gateway
+  139개 테스트, ERP 서비스 워커 syntax와 `git diff --check`를 통과했다. 새 회귀 테스트는
+  본인 소유·ringing·endpoint/bridge 일치일 때만 수신 버튼 ID가 노출됨을 확인한다.
+  `PROJECT_PLAN.md`는 v1.37이다. DB migration·운영 배포·운영 데이터 변경·실제 상담/수신
+  canary는 수행하지 않았으며, 이 워크트리에서는 브랜치 commit·push까지만 수행한다.
+
 ### 2026-08-13 — 완료 워크트리 전수 통합·ARM64 ECR 불변 이미지 첫 운영 배포
 - 완료 worktree 7개를 `main`에 병합하고 HERDR worktree 9개와 원격 `origin/worktree/*` 38개를
   전수 대조해 모든 원격 HEAD가 `main` ancestor임을 확인했다. 상담 묶음·직원 설정 접기·
