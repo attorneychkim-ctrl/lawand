@@ -88,6 +88,25 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-14 — 대표번호 7개 전화 수신 관찰 후보
+- 고객 `***0182` 전화는 대표번호 `02-555-7455`의 underlying 회선에서 11:51:57 KST 시작,
+  148초 `ANSWERED`, 11:54:25 종료로 U+ 이력에 존재했다. 황찬호 내선 9560 bridge도
+  11:52:34 `CHANNEL_LIST`와 같은 11:54:25 `CHANNELOUT`을 gateway에 즉시 201로 보냈지만,
+  source 전화 root는 없고 두 관측은 rootless `needs_confirmation`으로 남았다. 요청 풀
+  waiting, bridge queue/dead-letter는 모두 0이어서 적체가 아니었다.
+- 운영 대표 문자 endpoint 7개는 모두 활성·인증·최근 문자 동기화 정상이고 직원 binding은
+  모두 0건이다. 수신 관찰기의 직원 binding inner join 때문에 callback 등록과 24시간
+  `getinboundcall` 보정에서 전부 제외된 것이 원인이었다. 활성·인증 `representative`는 직원
+  binding 없이 관찰하고, `personal`은 기존 활성 직원 binding을 계속 요구하도록 gateway를
+  수정했다. 문자 polling·직원 binding·Windows bridge는 변경하지 않고 exact provider 근거가
+  없는 최종 직원을 추정하지 않는다. 운영 설정에 새 정책을 읽기 전용 적용하면 기존과 같은
+  개인 회선 41개에 대표 회선 7개만 더해지고, binding 없는 개인 endpoint 1개는 계속 제외된다.
+- migration·운영 데이터 변경은 없다. 대표번호 7개 callback 등록과 최근 24시간 이력 보정은
+  gateway 운영 배포 뒤 시작되므로, 첫 cycle의 등록 성공 7건·보정 생성 건수·중복 root와
+  실제 대표번호 수신→직원 착신/당겨받기→전화데스크 상세·신건상담 후처리를 확인해야 한다.
+  `PROJECT_PLAN.md`는 v1.37이다. 이 워크트리에서는 운영 배포·원장 보정·실제 전화 canary를
+  수행하지 않는다.
+
 ### 2026-08-13 — 완료 워크트리 전수 통합·ARM64 ECR 불변 이미지 첫 운영 배포
 - 완료 worktree 7개를 `main`에 병합하고 HERDR worktree 9개와 원격 `origin/worktree/*` 38개를
   전수 대조해 모든 원격 HEAD가 `main` ancestor임을 확인했다. 상담 묶음·직원 설정 접기·

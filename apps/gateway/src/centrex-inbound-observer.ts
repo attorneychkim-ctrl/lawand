@@ -17,6 +17,7 @@ import {
   telephonyCallLegs,
   telephonyCallProviderIdentifiers,
   telephonyCallRoots,
+  telephonyEndpointCredentials,
   telephonyEndpoints,
   telephonyInboundCalls,
   telephonyInboundEvents,
@@ -117,6 +118,24 @@ type Endpoint = {
   apiLoginId: string;
   credentialKey: string;
 };
+
+export function shouldObserveCentrexInboundEndpoint(input: {
+  provider: string;
+  endpointType: "personal" | "representative";
+  isActive: boolean;
+  hasStoredCredential: boolean;
+  hasFallbackCredential: boolean;
+  hasActiveStaffBinding: boolean;
+}) {
+  if (
+    input.provider !== "centrex" ||
+    !input.isActive ||
+    (!input.hasStoredCredential && !input.hasFallbackCredential)
+  ) {
+    return false;
+  }
+  return input.endpointType === "representative" || input.hasActiveStaffBinding;
+}
 
 export class CentrexRingCallbackError extends Error {
   constructor(
@@ -584,16 +603,25 @@ export function createCentrexInboundObserver(options: {
   }
 
   async function activeEndpoints(): Promise<Endpoint[]> {
-    return db
+    const rows = await db
       .selectDistinct({
         id: telephonyEndpoints.id,
+        provider: telephonyEndpoints.provider,
+        endpointType: telephonyEndpoints.endpointType,
         lineNumber: telephonyEndpoints.lineNumber,
         extension: telephonyEndpoints.extension,
         apiLoginId: telephonyEndpoints.apiLoginId,
         credentialKey: telephonyEndpoints.credentialKey,
+        isActive: telephonyEndpoints.isActive,
+        credentialEndpointId: telephonyEndpointCredentials.endpointId,
+        bindingEndpointId: staffTelephonyBindings.endpointId,
       })
       .from(telephonyEndpoints)
-      .innerJoin(
+      .leftJoin(
+        telephonyEndpointCredentials,
+        eq(telephonyEndpointCredentials.endpointId, telephonyEndpoints.id),
+      )
+      .leftJoin(
         staffTelephonyBindings,
         and(
           eq(staffTelephonyBindings.endpointId, telephonyEndpoints.id),
@@ -606,6 +634,26 @@ export function createCentrexInboundObserver(options: {
           eq(telephonyEndpoints.isActive, true),
         ),
       );
+    return rows.flatMap((row) =>
+      shouldObserveCentrexInboundEndpoint({
+        provider: row.provider,
+        endpointType: row.endpointType,
+        isActive: row.isActive,
+        hasStoredCredential: Boolean(row.credentialEndpointId),
+        hasFallbackCredential: credentialVault.hasFallback(row.credentialKey),
+        hasActiveStaffBinding: Boolean(row.bindingEndpointId),
+      })
+        ? [
+            {
+              id: row.id,
+              lineNumber: row.lineNumber,
+              extension: row.extension,
+              apiLoginId: row.apiLoginId,
+              credentialKey: row.credentialKey,
+            },
+          ]
+        : [],
+    );
   }
 
   async function ingest(searchParams: URLSearchParams) {
@@ -639,14 +687,24 @@ export function createCentrexInboundObserver(options: {
       );
     }
 
-    const [endpoint] = await db
+    const endpointRows = await db
       .select({
         id: telephonyEndpoints.id,
+        provider: telephonyEndpoints.provider,
+        endpointType: telephonyEndpoints.endpointType,
         lineNumber: telephonyEndpoints.lineNumber,
         extension: telephonyEndpoints.extension,
+        credentialKey: telephonyEndpoints.credentialKey,
+        isActive: telephonyEndpoints.isActive,
+        credentialEndpointId: telephonyEndpointCredentials.endpointId,
+        bindingEndpointId: staffTelephonyBindings.endpointId,
       })
       .from(telephonyEndpoints)
-      .innerJoin(
+      .leftJoin(
+        telephonyEndpointCredentials,
+        eq(telephonyEndpointCredentials.endpointId, telephonyEndpoints.id),
+      )
+      .leftJoin(
         staffTelephonyBindings,
         and(
           eq(staffTelephonyBindings.endpointId, telephonyEndpoints.id),
@@ -660,7 +718,17 @@ export function createCentrexInboundObserver(options: {
           eq(telephonyEndpoints.isActive, true),
         ),
       )
-      .limit(1);
+      .limit(2);
+    const endpoint = endpointRows.find((row) =>
+      shouldObserveCentrexInboundEndpoint({
+        provider: row.provider,
+        endpointType: row.endpointType,
+        isActive: row.isActive,
+        hasStoredCredential: Boolean(row.credentialEndpointId),
+        hasFallbackCredential: credentialVault.hasFallback(row.credentialKey),
+        hasActiveStaffBinding: Boolean(row.bindingEndpointId),
+      }),
+    );
     if (!endpoint) {
       throw new CentrexRingCallbackError(
         "endpoint_not_found",

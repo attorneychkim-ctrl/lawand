@@ -5,7 +5,70 @@ import { selectCentrexSyntheticInboundCall } from "./centrex-bridge-service.js";
 import {
   normalizeCentrexInboundHistoryTimeline,
   reconcileCentrexInboundHistoryBatch,
+  shouldObserveCentrexInboundEndpoint,
 } from "./centrex-inbound-observer.js";
+
+test("인증된 대표 문자함은 직원 배정 없이도 수신전화 관찰 대상이다", () => {
+  assert.equal(
+    shouldObserveCentrexInboundEndpoint({
+      provider: "centrex",
+      endpointType: "representative",
+      isActive: true,
+      hasStoredCredential: true,
+      hasFallbackCredential: false,
+      hasActiveStaffBinding: false,
+    }),
+    true,
+  );
+});
+
+test("개인 회선은 활성 직원 배정이 있어야 수신전화 관찰 대상이다", () => {
+  assert.equal(
+    shouldObserveCentrexInboundEndpoint({
+      provider: "centrex",
+      endpointType: "personal",
+      isActive: true,
+      hasStoredCredential: true,
+      hasFallbackCredential: false,
+      hasActiveStaffBinding: false,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldObserveCentrexInboundEndpoint({
+      provider: "centrex",
+      endpointType: "personal",
+      isActive: true,
+      hasStoredCredential: false,
+      hasFallbackCredential: true,
+      hasActiveStaffBinding: true,
+    }),
+    true,
+  );
+});
+
+test("비활성 또는 미인증 회선은 종류와 무관하게 수신전화 관찰에서 제외한다", () => {
+  for (const input of [
+    {
+      provider: "centrex",
+      endpointType: "representative" as const,
+      isActive: false,
+      hasStoredCredential: true,
+      hasFallbackCredential: false,
+      hasActiveStaffBinding: false,
+    },
+    {
+      provider: "centrex",
+      endpointType: "representative" as const,
+      isActive: true,
+      hasStoredCredential: false,
+      hasFallbackCredential: false,
+      hasActiveStaffBinding: false,
+    },
+  ]) {
+    assert.equal(shouldObserveCentrexInboundEndpoint(input), false);
+  }
+});
 
 test("늦은 bridge 수신은 같은 시각의 종료된 U+ 이력 원장을 재사용한다", () => {
   const history = {
