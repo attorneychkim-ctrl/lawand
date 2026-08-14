@@ -88,6 +88,34 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-14 — 최근 worktree 6개 main 통합·0061~0063 운영 배포 준비
+- 재부팅 뒤 `HERDR_ENV=1`의 main과 HERDR worktree 6개, 원격
+  `origin/worktree/*` 52개를 다시 전수 대조했다. `quiet-cloud-1d0d`,
+  `calm-harbor-a821`, `calm-stone-4531`, `calm-meadow-7e29`,
+  `brave-valley-f438`, `silver-harbor-4027`의 완료 커밋 7개가 모두 clean 상태로
+  main `2d31a049c190d95711c8ceb69d675a195e9a4d41`에 병합돼 있고, 모든 로컬·원격
+  worktree HEAD가 main ancestor다. 명시적 제외·진행 중 브랜치는 없다.
+- 묶음 카카오 리걸프렌즈 이름 복호화, 문자 좌·우 독립 스크롤, `LAW& OS` 브랜드,
+  수신 발신자/공용 전화번호부, 미확정 통화 수동 담당자 확정, 후기 요청 기본 슬롯·
+  고객별 무입력 링크·개인 템플릿 소프트삭제를 하나의 통합 후보로 묶었다. 영향 앱은
+  홈페이지·ERP·gateway이고 Windows bridge와 기프티쇼 외부 API는 변경하지 않는다.
+  migration은 `0061_telephony_phonebook.sql` → `0062_review_request_defaults.sql` →
+  `0063_review_request_template_soft_delete.sql` 순서이며 SHA-256은 각각
+  `583609c13440495d8ff48a16f23b340aaccd30e2c6aad3bd245113c445de392e`,
+  `cdcb6c854e5ee0c8c4fc17f27db1b1431880c59ebbfe48c1416b3415fe2b81af`,
+  `c90859301c6c865e70d20520e2ad84f2d4ee72a9c2a521f5483e039a4c68abca`다.
+- 전체 5패키지 typecheck·lint·직접 production build, core 90개·gateway 166개 테스트,
+  DB schema check, 배포 스크립트/서비스 워커 syntax와 `git diff --check`를 통과했다.
+  Turbo `--force`는 이 WSL의 기존 child-process spawn 오류로 시작 전 중단돼 동일 5패키지
+  build를 직접 실행했다. 비식별 `CB` schema-only 원천을 둔 임시 PostgreSQL에서 migration
+  `0000..0063` 64개를 두 번 적용해 64→64 멱등성과 `0061..0063` 객체 생성을 확인하고
+  임시 DB를 삭제해 잔존 0을 확인했다. `PROJECT_PLAN.md`는 v1.43이다.
+- 이 기록 시점에는 `origin/main`이 기존 운영 기록 `32b9552`에 있어 main push, GitHub
+  Actions ARM64 이미지 게시, 운영 RDS snapshot/migration, 앱 전환, 운영 데이터 변경과
+  외부 호출을 시작하지 않았다. 표준 반영은 검증한 main 단일 commit을 push한 뒤 세 앱
+  digest를 확인하고, gateway digest 선행 pull → 암호화 snapshot → 같은 digest로
+  `0061..0063` 적용 → 홈페이지·ERP·gateway를 같은 릴리스 ID로 전환하는 순서만 사용한다.
+
 ### 2026-08-14 — 묶음 카카오 상담 리걸프렌즈 등록 실패 수정 후보
 - 12:41 KST의 유일한 리걸프렌즈 `invalid_stored_data` dead 원장을 운영 RDS와 gateway에서
   읽기 전용으로 대조했다. 외부 실행 aggregate는 대표 상담이지만 event `requestId`는 활성
