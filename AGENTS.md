@@ -169,6 +169,31 @@
   `PROJECT_PLAN.md`는 v1.37이다. 이 워크트리에서는 운영 배포·원장 보정·실제 전화 canary를
   수행하지 않는다.
 
+### 2026-08-14 — 전화 실시간 E2E 지연 계측 후보
+- 최근 1~2시간 통화 로그에서 정상 Windows v2 ring의 gateway 유입은 p50 약 0.08초·p95
+  약 0.17초였고, 직원 PC의 기존 IQ200이 같은 센트릭스 계정으로 로그인해 bridge와 충돌한
+  것이 반복 로그인 공백의 원인임을 사용자 확인으로 특정했다. 직원에게 IQ200 삭제를 요청한
+  운영 조치를 우선하므로 bridge 재로그인 동작은 변경하지 않았다.
+- 전화데스크의 `observed_call`·click-to-call·통합 call activity SSE에 개인정보 없는 단기
+  delivery ID와 gateway 전송 시각을 추가했다. 기존 다중 탭 notification leader가 최신 통화
+  snapshot을 읽은 뒤, 전화데스크 다음 paint 또는 브라우저 Notification 표시 완료 시점에
+  delivery ID·browser monotonic 처리시간·call state·표시 방식만 same-origin ACK한다.
+  전화번호·고객명·직원/회선/endpoint 식별자는 SSE trace, ACK, metric과 구조화 로그에 없다.
+- gateway는 delivery를 메모리에서 10분만 보존하고 한 번만 ACK할 수 있게 한다. ACK는 ERP
+  내부 API 키·세션 cookie 존재·미사용 delivery capability를 확인하지만 직원별 세션 DB를
+  다시 읽지 않아 실제 수신 한 건이 전 직원 DB query fan-out으로 바뀌지 않는다. browser
+  leader만 보내므로 같은 브라우저의 여러 탭도 중복 표본을 만들지 않는다.
+- `Lawand/Gateway`에는 원천→gateway SSE, SSE→browser ready, 원천→browser ready,
+  browser processing의 원시 millisecond 표본을 1분 단위로 묶어 보낸다. EventType·Direction·
+  CallState·DisplayMode별 p50·p95·max 구조화 summary와 2초 이상 첫 slow 표본도 남긴다.
+  해석·Logs Insights query·운영 acceptance는 `docs/TELEPHONY_REALTIME_LATENCY.md`에 정리했고
+  `PROJECT_PLAN.md`는 병행 0058 후보 다음 번호인 v1.38이다.
+- gateway 테스트 141개, 전체 5패키지 typecheck·lint·production build와 `git diff --check`를
+  통과했다. DB migration·운영 DB·앱·Windows bridge·통화 원장은 변경하지 않았다. 이 브랜치는
+  병행 내선 종료 복구 `843cbe7`을 포함하지 않으므로 메인 통합 세션에서 두 브랜치를 모두
+  병합하고 RDS snapshot→`0058`→gateway·ERP 단일 릴리스 순서로 반영한다. 배포 뒤 실제 수신·
+  발신을 각각 관측하고 1분 summary를 1~2시간 수집해야 실제 지연 분포가 나온다.
+
 ### 2026-08-13 — 완료 워크트리 전수 통합·ARM64 ECR 불변 이미지 첫 운영 배포
 - 완료 worktree 7개를 `main`에 병합하고 HERDR worktree 9개와 원격 `origin/worktree/*` 38개를
   전수 대조해 모든 원격 HEAD가 `main` ancestor임을 확인했다. 상담 묶음·직원 설정 접기·

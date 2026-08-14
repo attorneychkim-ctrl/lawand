@@ -1668,12 +1668,28 @@ test("전화데스크 통화자 확정·후처리·재통화 완료 API는 통�
 
 test("직원 전화데스크 SSE는 전화번호 없이 수신·발신 변경을 전달한다", async (context) => {
   const entityId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2f2";
+  const deliveryId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2f3";
+  let deliveryEntityId: string | null = null;
+  let acknowledgedDeliveryId: string | null = null;
   const authService = {
     authorize: async () => realtimeActor,
   } as unknown as StaffAuthService;
   const server = createGatewayServer({
     authService,
     internalApiKey: "test-internal-key",
+    telephonyRealtimeMonitor: {
+      createDelivery: (input) => {
+        deliveryEntityId = input.entityId;
+        return {
+          deliveryId,
+          gatewaySentAt: "2026-08-06T06:00:00.100Z",
+        };
+      },
+      acknowledge: (input) => {
+        acknowledgedDeliveryId = input.deliveryId;
+        return { status: "recorded" };
+      },
+    },
     telephonyDeskEvents: {
       subscribe: (listener) => {
         queueMicrotask(() => {
@@ -1722,7 +1738,31 @@ test("직원 전화데스크 SSE는 전화번호 없이 수신·발신 변경을
   assert.match(received, /event: telephony\.desk\.sync/);
   assert.match(received, /event: telephony\.desk\.changed/);
   assert.match(received, new RegExp(entityId));
+  assert.match(received, new RegExp(deliveryId));
+  assert.match(received, /gatewaySentAt/);
   assert.doesNotMatch(received, /remotePhone|callerNumber|01012345678/);
+  assert.equal(deliveryEntityId, entityId);
+
+  const acknowledged = await fetch(
+    `http://127.0.0.1:${address.port}/v1/telephony-realtime/ack`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-lawand-internal-key": "test-internal-key",
+        "x-lawand-staff-session": "test-session",
+      },
+      body: JSON.stringify({
+        deliveryId,
+        clientElapsedMs: 175.5,
+        callState: "ringing",
+        displayMode: "notification",
+      }),
+    },
+  );
+  assert.equal(acknowledged.status, 202);
+  assert.deepEqual(await acknowledged.json(), { status: "recorded" });
+  assert.equal(acknowledgedDeliveryId, deliveryId);
   await reader.cancel();
   controller.abort();
 });

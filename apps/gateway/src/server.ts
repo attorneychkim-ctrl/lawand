@@ -25,6 +25,7 @@ import { createConsultationService } from "./service.js";
 import { createTelephonyService } from "./telephony-service.js";
 import { createPostgresTelephonyInboundEventSource } from "./telephony-inbound-events.js";
 import { createPostgresTelephonyDeskEventSource } from "./telephony-desk-events.js";
+import { createTelephonyRealtimeMonitor } from "./telephony-realtime-monitor.js";
 import { createReviewSubmissionService } from "./review-service.js";
 import { createSolapiClient } from "./solapi.js";
 
@@ -67,6 +68,10 @@ const databasePoolMonitor = createDatabasePoolMonitor({
       maxConnections: config.databaseListenerPoolMax,
     },
   ],
+  metricsEnabled: config.cloudWatchMetricsEnabled,
+  region: config.awsRegion,
+});
+const telephonyRealtimeMonitor = createTelephonyRealtimeMonitor({
   metricsEnabled: config.cloudWatchMetricsEnabled,
   region: config.awsRegion,
 });
@@ -171,6 +176,7 @@ const server = createGatewayServer({
   consultationEvents,
   telephonyInboundEvents,
   telephonyDeskEvents,
+  telephonyRealtimeMonitor,
   databasePoolHealth: databasePoolMonitor.snapshot,
   service,
   telephonyService,
@@ -247,6 +253,7 @@ await Promise.all([
   telephonyDeskEvents.start(),
 ]);
 databasePoolMonitor.start();
+telephonyRealtimeMonitor.start();
 
 server.listen(port, host, () => {
   console.log(`lawand-gateway listening on http://${host}:${port}`);
@@ -312,7 +319,10 @@ function shutdown(signal: string) {
         centrexInboundObserver?.stop(),
       ]);
       centrexBridgeProvisioning?.stop();
-      await databasePoolMonitor.stop();
+      await Promise.all([
+        databasePoolMonitor.stop(),
+        telephonyRealtimeMonitor.stop(),
+      ]);
       await Promise.all([database.pool.end(), listenerPool.end()]);
       if (error) {
         console.error(error);

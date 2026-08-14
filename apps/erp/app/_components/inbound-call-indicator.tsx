@@ -11,6 +11,7 @@ import type {
   TelephonyCallActivitySnapshot,
   TelephonyInboundCall,
   TelephonyInboundCallSnapshot,
+  TelephonyRealtimeAck,
 } from "../../lib/gateway";
 import {
   prepareBrowserNotifications,
@@ -22,6 +23,19 @@ import { subscribeConsultationRealtime } from "./consultation-realtime";
 import { PhoneAftercareDialog } from "./phone-aftercare-form";
 
 type ConnectionState = "connecting" | "connected" | "disconnected";
+
+type TelephonyRealtimeDeliveryEnvelope = {
+  eventType:
+    | "observed_call.changed"
+    | "click_to_call.changed"
+    | "click_to_call.linked"
+    | "call_activity.changed";
+  entityId: string;
+  realtime: {
+    deliveryId: string;
+    gatewaySentAt: string;
+  };
+};
 
 type ConsultationNotificationSummary = {
   id: string;
@@ -87,6 +101,75 @@ const consultationStateLabels: Record<string, string> = {
   engaged: "계약",
   closed: "종결",
 };
+
+const realtimeEventTypes = new Set<TelephonyRealtimeDeliveryEnvelope["eventType"]>([
+  "observed_call.changed",
+  "click_to_call.changed",
+  "click_to_call.linked",
+  "call_activity.changed",
+]);
+
+function parseTelephonyRealtimeDelivery(
+  event: Event,
+): TelephonyRealtimeDeliveryEnvelope | null {
+  if (!(event instanceof MessageEvent) || typeof event.data !== "string") {
+    return null;
+  }
+  try {
+    const value = JSON.parse(event.data) as Record<string, unknown>;
+    const realtime = value.realtime;
+    if (
+      typeof value.eventType !== "string" ||
+      !realtimeEventTypes.has(
+        value.eventType as TelephonyRealtimeDeliveryEnvelope["eventType"],
+      ) ||
+      typeof value.entityId !== "string" ||
+      !realtime ||
+      typeof realtime !== "object" ||
+      Array.isArray(realtime)
+    ) {
+      return null;
+    }
+    const trace = realtime as Record<string, unknown>;
+    if (
+      typeof trace.deliveryId !== "string" ||
+      typeof trace.gatewaySentAt !== "string" ||
+      !Number.isFinite(Date.parse(trace.gatewaySentAt))
+    ) {
+      return null;
+    }
+    return {
+      eventType:
+        value.eventType as TelephonyRealtimeDeliveryEnvelope["eventType"],
+      entityId: value.entityId,
+      realtime: {
+        deliveryId: trace.deliveryId,
+        gatewaySentAt: trace.gatewaySentAt,
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
+function afterNextPaint() {
+  return new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
+}
+
+function acknowledgeRealtimeDelivery(input: TelephonyRealtimeAck) {
+  return fetch("/api/telephony-realtime/ack", {
+    method: "POST",
+    cache: "no-store",
+    keepalive: true,
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+}
 
 const stateCopy: Record<
   TelephonyInboundCall["state"],
@@ -694,14 +777,15 @@ export function InboundCallIndicator({
       typeof activitySnapshot.snapshotAt !== "string" ||
       sequence !== deskRequestSequence.current
     ) {
-      if (sequence !== deskRequestSequence.current) return;
+      if (sequence !== deskRequestSequence.current) return null;
       throw new Error("telephony_call_activity_sync_invalid");
     }
     setActivities(activitySnapshot.items);
+    return activitySnapshot;
   }, []);
 
   const refreshCurrentDeskCalls = useCallback(async () => {
-    if (!showPhoneDeskStatus) return;
+    if (!showPhoneDeskStatus) return null;
     const from = new Date(Date.now() - 12 * 60 * 60_000).toISOString();
     const response = await fetch(
       `/api/phone-desk/calls?pageSize=20&filter=active&from=${encodeURIComponent(from)}&to=${encodeURIComponent(new Date().toISOString())}`,
@@ -738,35 +822,17 @@ export function InboundCallIndicator({
       candidates.push(call.id);
     }
     enqueueAftercareCalls(candidates);
+    return snapshot;
   }, [enqueueAftercareCalls, showPhoneDeskStatus, staffUserId]);
 
-  useEffect(() => {
-    deskStartedAt.current = Date.now();
-    void refreshCallActivities().catch(() => undefined);
-    if (showPhoneDeskStatus) {
-      void refreshCurrentDeskCalls().catch(() => undefined);
-    }
-    const stream = new EventSource("/api/phone-desk/stream");
-    const handleChange = () => {
-      void refreshCallActivities().catch(() => undefined);
-      if (showPhoneDeskStatus) {
-        void refreshCurrentDeskCalls().catch(() => undefined);
-      }
-    };
-    stream.addEventListener("telephony.desk.sync", handleChange);
-    stream.addEventListener("telephony.desk.changed", handleChange);
-    return () => {
-      deskRequestSequence.current += 1;
-      stream.removeEventListener("telephony.desk.sync", handleChange);
-      stream.removeEventListener("telephony.desk.changed", handleChange);
-      stream.close();
-    };
-  }, [refreshCallActivities, refreshCurrentDeskCalls, showPhoneDeskStatus]);
-
-  useEffect(() => {
-    if (!notificationLeader.current) return;
+  const showTelephonyNotifications = useCallback(async (
+    items: TelephonyCallActivity[],
+    realtimeEntityId?: string,
+  ) => {
+    if (!notificationLeader.current) return false;
     const current = Date.now();
-    for (const activity of activities) {
+    let matchedNotificationShown = false;
+    for (const activity of items) {
       if (
         !activity.notificationKind ||
         !activity.notificationTargetUserIds.includes(staffUserId) ||
@@ -794,17 +860,108 @@ export function InboundCallIndicator({
       }
       if (alreadyNotified) continue;
       const copy = notificationCopy(activity, staffUserId);
-      if (notificationPermission === "granted") {
-        void showTelephonyBrowserNotification({
-          ...copy,
-          notificationId: notificationKey,
-          callId: activity.id,
-          href: `/phone-desk/${activity.id}`,
-          occurredAt: activity.lastEventAt,
-        });
+      if (notificationPermission !== "granted") continue;
+      const shown = await showTelephonyBrowserNotification({
+        ...copy,
+        notificationId: notificationKey,
+        callId: activity.id,
+        href: `/phone-desk/${activity.id}`,
+        occurredAt: activity.lastEventAt,
+      });
+      if (
+        shown &&
+        realtimeEntityId &&
+        (activity.id === realtimeEntityId ||
+          activity.observedCallId === realtimeEntityId)
+      ) {
+        matchedNotificationShown = true;
       }
     }
-  }, [activities, notificationPermission, staffUserId]);
+    return matchedNotificationShown;
+  }, [notificationPermission, staffUserId]);
+
+  useEffect(() => {
+    deskStartedAt.current = Date.now();
+    void refreshCallActivities().catch(() => undefined);
+    if (showPhoneDeskStatus) {
+      void refreshCurrentDeskCalls().catch(() => undefined);
+    }
+    const stream = new EventSource("/api/phone-desk/stream");
+    const handleChange = (event: Event) => {
+      const realtime = parseTelephonyRealtimeDelivery(event);
+      const browserStartedAt = window.performance.now();
+      void (async () => {
+        const [activitySnapshot, deskSnapshot] = await Promise.all([
+          refreshCallActivities().catch(() => null),
+          showPhoneDeskStatus
+            ? refreshCurrentDeskCalls().catch(() => null)
+            : Promise.resolve(null),
+        ]);
+        if (
+          !realtime ||
+          !activitySnapshot ||
+          !notificationLeader.current
+        ) {
+          return;
+        }
+        const activity = activitySnapshot.items.find(
+          (item) =>
+            item.id === realtime.entityId ||
+            item.observedCallId === realtime.entityId,
+        );
+        const deskCall = deskSnapshot?.items.find(
+          (item) =>
+            item.id === realtime.entityId ||
+            item.observedCallId === realtime.entityId ||
+            item.callRootId === realtime.entityId,
+        );
+        const notificationResult = showTelephonyNotifications(
+          activitySnapshot.items,
+          realtime.entityId,
+        ).catch(() => false);
+        let displayMode: TelephonyRealtimeAck["displayMode"] = "snapshot";
+        if (
+          showPhoneDeskStatus &&
+          document.visibilityState === "visible" &&
+          (activity || deskCall)
+        ) {
+          await afterNextPaint();
+          displayMode = "phone_desk";
+          void notificationResult;
+        } else if (await notificationResult) {
+          displayMode = "notification";
+        }
+        const callState: TelephonyRealtimeAck["callState"] =
+          activity?.state ?? deskCall?.state ?? "unknown";
+        await acknowledgeRealtimeDelivery({
+          deliveryId: realtime.realtime.deliveryId,
+          clientElapsedMs: Math.max(
+            0,
+            window.performance.now() - browserStartedAt,
+          ),
+          callState,
+          displayMode,
+        }).catch(() => undefined);
+      })();
+    };
+    stream.addEventListener("telephony.desk.sync", handleChange);
+    stream.addEventListener("telephony.desk.changed", handleChange);
+    return () => {
+      deskRequestSequence.current += 1;
+      stream.removeEventListener("telephony.desk.sync", handleChange);
+      stream.removeEventListener("telephony.desk.changed", handleChange);
+      stream.close();
+    };
+  }, [
+    refreshCallActivities,
+    refreshCurrentDeskCalls,
+    showPhoneDeskStatus,
+    showTelephonyNotifications,
+  ]);
+
+  useEffect(() => {
+    void showTelephonyNotifications(activities);
+  }, [activities, showTelephonyNotifications]);
 
   useEffect(() => {
     const activity = activities

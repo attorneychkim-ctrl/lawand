@@ -1014,6 +1014,21 @@ export type PhoneDeskListFilter =
   | "internal"
   | "active";
 
+export type TelephonyRealtimeAck = {
+  deliveryId: string;
+  clientElapsedMs: number;
+  callState:
+    | "ringing"
+    | "connected"
+    | "transferring"
+    | "needs_confirmation"
+    | "ended"
+    | "pending"
+    | "failed"
+    | "unknown";
+  displayMode: "phone_desk" | "notification" | "snapshot";
+};
+
 export type PhoneDeskCallResolutionInput = {
   finalLegId: string;
 };
@@ -1121,6 +1136,29 @@ export async function openPhoneDeskEventStream(
     signal,
     streaming: true,
   });
+}
+
+export async function acknowledgeTelephonyRealtime(
+  input: TelephonyRealtimeAck,
+): Promise<{ status: "recorded" | "replayed" | "expired" }> {
+  const response = await gatewayFetch("/v1/telephony-realtime/ack", {
+    method: "POST",
+    body: input,
+    timeoutMs: 3_000,
+  });
+  const body = (await response.json().catch(() => null)) as {
+    status?: "recorded" | "replayed" | "expired";
+  } | null;
+  if (
+    ![200, 202, 410].includes(response.status) ||
+    !body?.status
+  ) {
+    throw new ConsultationGatewayError(
+      response.status,
+      `전화 실시간 지연 기록 실패 (${response.status})`,
+    );
+  }
+  return { status: body.status };
 }
 
 export async function getConsultation(

@@ -825,6 +825,25 @@
 > `0058_centrex_internal_terminal_recovery.sql`은 같은 internal root/provider의 종료 leg가 있는
 > 기존 분리 상태만 복구하고 한쪽짜리 원장은 건드리지 않는다. 이 변경은 아직 운영에 배포하지
 > 않았으며 gateway와 ERP를 같은 릴리스로 전환하기 전에 `0058`을 먼저 적용한다.
+>
+> 2026-08-14 최근 통화의 체감 지연을 gateway·RDS·Windows bridge 로그로 대조했다. 정상
+> Windows v2 ring의 gateway 유입은 p50 약 0.08초·p95 약 0.17초였고 요청 DB pool 대기는
+> 일부 1초 구간에만 최고 26개로 나타난 뒤 다음 표본에서 회복됐다. 반복된 센트릭스 로그인
+> 공백은 직원 PC의 기존 IQ200이 같은 센트릭스 계정으로 로그인해 bridge와 충돌한 원인임을
+> 사용자 확인으로 특정했고, 직원에게 IQ200 삭제를 요청했으므로 이번 코드 범위에서는 별도
+> 재로그인 변경을 하지 않는다.
+> 대신 전화 실시간 경로는 provider `occurredAt`부터 gateway SSE write, ERP snapshot과
+> 전화데스크 다음 paint 또는 브라우저 Notification 표시 완료까지 비식별 E2E 지연을 잰다.
+> 인증된 SSE 연결마다 10분짜리 무작위 delivery ID만 발급하고 기존 다중 탭 leader가 전화
+> snapshot을 갱신한 뒤 call state·표시 방식·브라우저 monotonic 처리시간만 ACK한다. 전화번호·
+> 고객·직원·회선 식별자는 payload·metric·구조화 로그에 넣지 않는다. ACK는 delivery ID
+> capability와 내부 API 키·ERP 세션 cookie 존재를 확인하되 세션 DB를 다시 조회하지 않아
+> 직원 수만큼 DB query가 증폭되지 않는다. gateway는 원천→SSE, SSE→브라우저 준비,
+> 원천→브라우저 준비, 브라우저 내부 처리의 원시 millisecond 표본을 1분 단위 CloudWatch
+> `Lawand/Gateway` metric으로 묶고, p50·p95·max 구조화 summary와 2초 이상 첫 slow 표본을
+> 개인정보 없이 남긴다. 상세 해석과 운영 query는 `docs/TELEPHONY_REALTIME_LATENCY.md`가
+> 기준이다. 이 계측 후보에는 DB migration이 없으며 gateway와 ERP를 같은 릴리스로 배포한
+> 뒤 실제 수신·발신으로 표본을 확보한다.
 > 같은 날 후속 구현에서는 직원 `신규등록`도 홈페이지와 같은 7일 중복 판정을 적용했다.
 > 일반 신규도 v1.33부터 이름과 관계없이 같은 정규화 전화의 활성 상담에 요청을 붙인다.
 > 새 상담에만 최초 접수 알림톡을 만들며 반복 요청에는 중복 발송하지 않는다.
@@ -2039,6 +2058,9 @@ Manager와 별도 역할·보안그룹·TLS 기준을 적용한다.
   실시간 상담 목록 갱신과 재연결 동기화
 - [x] gateway DB 연결 풀 안정화: 요청/LISTEN 분리·풀 대기 CloudWatch 지표/경보·bridge 유휴
   DB 폴링 억제·ERP 동시 조회 single-flight·전화 고객/명령 일괄 조회·안전한 VALUES 후보 SQL
+- [x] 전화 실시간 E2E 지연 계측 후보: 전화 SSE의 단기 비식별 delivery ID → 다중 탭 leader의
+  snapshot·전화데스크 paint/Notification ACK → 원천·gateway·브라우저 구간별 CloudWatch
+  원시 표본과 1분 p50·p95·max 구조화 로그, ACK의 DB 세션 재조회 fan-out 차단
 - [x] 상담 최초 등록 전 직원 알림: 전역 `consultation.requested` SSE → 보이는 페이지
   단일 공유 스트림 → 인증 후 고객명·전화·지역 조회 → 10초 카드 토스트·브라우저 Notification·
   채널·접수번호·브랜드 아이콘/배지·지원 브라우저의 안전한 이동 액션·다중 탭 중복 방지·
@@ -2209,3 +2231,6 @@ Manager와 별도 역할·보안그룹·TLS 기준을 적용한다.
 18. 기준점 이후 신규 네이버 예약 확정 메일 → IMAP 전용 ERP 접수 실제 canary
 19. 운영 고객찾기에서 소개자 1건과 기존 고객 본인 신건 1건을 통제 등록해 지역 기본값 수정·
     상세 문맥을 확인한다. 실제 `상담하기`와 리걸프렌즈 신건 생성은 별도 승인 canary로 분리한다.
+20. 전화 실시간 E2E 지연 계측을 gateway·ERP 같은 릴리스로 운영 반영한 뒤 실제 수신·발신
+    표본을 1~2시간 모아 event→gateway, gateway→browser, browser processing의 p50·p95·max를
+    확인한다. IQ200 삭제 이후에도 원천→gateway 지연이 반복될 때만 bridge 계정 상태를 다시 본다.
