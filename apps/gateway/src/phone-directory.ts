@@ -16,6 +16,13 @@ export type ConsultationPhoneDirectoryCandidate = {
   ownCaseIdx: string | null;
 };
 
+export type ExistingConsultationPhoneDirectoryCustomerRow = {
+  consultation_id: string;
+  primary_staff_name: string | null;
+  secondary_staff_name: string | null;
+  tertiary_staff_name: string | null;
+};
+
 function consultationCandidateValues(
   candidates: readonly ConsultationPhoneDirectoryCandidate[],
 ): SQL {
@@ -61,19 +68,47 @@ export function existingPhoneDirectoryCustomersQuery(
 export function existingConsultationPhoneDirectoryCustomersQuery(
   candidates: readonly ConsultationPhoneDirectoryCandidate[],
 ) {
-  return sql<{ consultation_id: string }>`
+  return sql<ExistingConsultationPhoneDirectoryCustomerRow>`
     with candidate(consultation_id, phone, own_case_idx) as (
       values ${consultationCandidateValues(candidates)}
     )
-    select candidate.consultation_id
+    select
+      candidate.consultation_id,
+      directory.primary_staff_name,
+      directory.secondary_staff_name,
+      directory.tertiary_staff_name
     from candidate
-    where exists (
-      select 1
-      from public.resolve_inbound_phone_directory(candidate.phone) as directory
-      where candidate.own_case_idx is null
-        or directory.case_idx::text <> candidate.own_case_idx
-    )
+    cross join lateral
+      public.resolve_inbound_phone_directory(candidate.phone) as directory
+    where candidate.own_case_idx is null
+      or directory.case_idx::text <> candidate.own_case_idx
   `;
+}
+
+export function summarizeExistingConsultationPhoneDirectoryCustomers(
+  rows: readonly ExistingConsultationPhoneDirectoryCustomerRow[],
+) {
+  const staffNamesByConsultation = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const staffNames =
+      staffNamesByConsultation.get(row.consultation_id) ?? new Set<string>();
+    for (const staffName of [
+      row.primary_staff_name,
+      row.secondary_staff_name,
+      row.tertiary_staff_name,
+    ]) {
+      if (staffName) staffNames.add(staffName);
+    }
+    staffNamesByConsultation.set(row.consultation_id, staffNames);
+  }
+  return new Map(
+    [...staffNamesByConsultation].map(([consultationId, staffNames]) => [
+      consultationId,
+      [...staffNames].sort((left, right) =>
+        left.localeCompare(right, "ko-KR"),
+      ),
+    ]),
+  );
 }
 
 export function phoneDirectoryCustomersQuery(phones: readonly string[]) {

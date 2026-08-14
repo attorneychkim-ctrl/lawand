@@ -3124,11 +3124,21 @@ a.inbound-customer:hover { text-decoration: underline; }
   background: color-mix(in srgb, var(--danger-soft) 34%, var(--surface));
 }
 
-.consultation-row.is-soft-deleted .consultation-row-sensitive {
+.consultation-row.is-invalid {
+  background: color-mix(in srgb, var(--surface-muted) 70%, var(--surface));
+}
+
+.consultation-row.is-soft-deleted .consultation-row-sensitive,
+.consultation-row.is-invalid .consultation-row-sensitive {
   filter: blur(5px);
   opacity: .62;
   pointer-events: none;
   user-select: none;
+}
+
+.consultation-row.is-invalid .consultation-channel-icon {
+  filter: grayscale(1);
+  opacity: .52;
 }
 
 .consultation-row-link {
@@ -3268,6 +3278,15 @@ a.inbound-customer:hover { text-decoration: underline; }
 .state-badge.is-engaged {
   background: var(--info-soft);
   color: var(--info);
+}
+
+.consultation-row.is-invalid .state-badge {
+  background: var(--surface-muted);
+  color: var(--muted);
+}
+
+.consultation-row.is-invalid .consultation-row-owner > span {
+  color: var(--muted);
 }
 
 .consultation-row-contact {
