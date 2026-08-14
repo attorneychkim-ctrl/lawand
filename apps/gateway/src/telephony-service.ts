@@ -31,6 +31,7 @@ import {
   type DedupeOutcome,
   type ExistingConsultationCandidate,
   type LegalFriendsDirectoryConsultationCreate,
+  type ManualTelephonyMessageSend,
   type MessageTemplateCreate,
   type MessageTemplateUpdate,
   type PhoneDeskAftercareSave,
@@ -74,6 +75,7 @@ import {
   telephonyInboundEvents,
   telephonyInboundMessages,
   telephonyMessageDirectoryTargets,
+  telephonyMessageManualContacts,
   telephonyMessageMailboxStates,
   telephonyMessages,
   telephonyFollowUpTasks,
@@ -103,11 +105,66 @@ const PHONE_DESK_DEFAULT_LIMIT = 20;
 const PHONE_DESK_MAX_LIMIT = 100;
 const PHONE_CUSTOMER_CACHE_TTL_MS = 15_000;
 const PHONE_CUSTOMER_CACHE_MAX_ENTRIES = 500;
+const MESSAGE_PAGE_DEFAULT_LIMIT = 50;
+const MESSAGE_PAGE_MAX_LIMIT = 50;
 const callRootCurrentEndpoint = alias(
   telephonyEndpoints,
   "call_root_current_endpoint",
 );
 const callLegEndpoint = alias(telephonyEndpoints, "call_leg_endpoint");
+
+type MessagePageCursor = {
+  occurredAt: string;
+  id: string;
+  direction?: "outbound" | "inbound";
+};
+
+function encodeMessagePageCursor(cursor: MessagePageCursor) {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+function decodeMessagePageCursor(value: string | undefined) {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(value, "base64url").toString("utf8"),
+    ) as Partial<MessagePageCursor>;
+    if (
+      typeof parsed.occurredAt !== "string" ||
+      Number.isNaN(new Date(parsed.occurredAt).getTime()) ||
+      typeof parsed.id !== "string" ||
+      parsed.id.length < 1 ||
+      (parsed.direction !== undefined &&
+        parsed.direction !== "outbound" &&
+        parsed.direction !== "inbound")
+    ) {
+      return null;
+    }
+    return parsed as MessagePageCursor;
+  } catch {
+    return null;
+  }
+}
+
+function messagePageLimit(value: number | undefined) {
+  if (!Number.isInteger(value) || !value) return MESSAGE_PAGE_DEFAULT_LIMIT;
+  return Math.min(Math.max(value, 1), MESSAGE_PAGE_MAX_LIMIT);
+}
+
+function isMessageThreadKey(value: string) {
+  return (
+    /^case:[1-9][0-9]{0,99}$/.test(value) ||
+    /^(?:consultation|manual|unmatched):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      value,
+    )
+  );
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    value,
+  );
+}
 
 function normalizeConsultationName(value: string) {
   return value
@@ -503,6 +560,7 @@ export class TelephonyCallError extends Error {
       | "consultation_already_exists"
       | "message_not_found"
       | "message_thread_not_found"
+      | "message_cursor_invalid"
       | "message_owned_by_other_staff"
       | "message_template_not_found"
       | "message_template_inactive"
@@ -513,6 +571,7 @@ export class TelephonyCallError extends Error {
       | "mms_feature_disabled"
       | "message_idempotency_conflict"
       | "message_body_invalid"
+      | "manual_message_contact_not_found"
       | "inbound_call_not_found"
       | "inbound_call_not_ringing"
       | "inbound_call_answer_unavailable"
@@ -603,8 +662,9 @@ function callResponse(call: {
 
 function messageResponse(message: {
   id: string;
-  targetSource: "consultation" | "legal_friends_directory";
+  targetSource: "consultation" | "legal_friends_directory" | "manual";
   consultationId: string | null;
+  manualContactId: string | null;
   endpointId: string;
   templateId: string | null;
   templateNameSnapshot: string | null;
@@ -626,6 +686,7 @@ function messageResponse(message: {
     id: message.id,
     targetSource: message.targetSource,
     consultationId: message.consultationId,
+    manualContactId: message.manualContactId,
     endpointId: message.endpointId,
     templateId: message.templateId,
     templateName: message.templateNameSnapshot,
@@ -5031,21 +5092,42 @@ export function createTelephonyService(options: {
 
   type MessageThreadIdentity = {
     key: string;
+    targetSource:
+      | "consultation"
+      | "legal_friends_directory"
+      | "manual"
+      | null;
     caseIdx: string | null;
     clientIdx: number | null;
     consultationId: string | null;
+    manualContactId: string | null;
     customerName: string;
     phone: string;
     receiptCode?: string | null;
   };
 
-  async function loadMessageHubRows() {
+  async function loadMessageHubRows(input?: {
+    outgoingIds?: readonly string[];
+    incomingIds?: readonly string[];
+    includeMailboxes?: boolean;
+  }) {
+    const outgoingIds = input?.outgoingIds;
+    const incomingIds = input?.incomingIds;
     const outgoing = await db
       .select({
         id: telephonyMessages.id,
         targetSource: telephonyMessages.targetSource,
         consultationId: telephonyMessages.consultationId,
         consultationRequestId: telephonyMessages.consultationRequestId,
+        manualContactId: telephonyMessages.manualContactId,
+        manualPhoneCiphertext: telephonyMessageManualContacts.phoneCiphertext,
+        manualPhoneNonce: telephonyMessageManualContacts.phoneNonce,
+        manualPhoneKeyVersion: telephonyMessageManualContacts.phoneKeyVersion,
+        manualDisplayNameCiphertext:
+          telephonyMessageManualContacts.displayNameCiphertext,
+        manualDisplayNameNonce: telephonyMessageManualContacts.displayNameNonce,
+        manualDisplayNameKeyVersion:
+          telephonyMessageManualContacts.displayNameKeyVersion,
         directoryClientIdx: telephonyMessageDirectoryTargets.clientIdx,
         directoryCaseIdx: telephonyMessageDirectoryTargets.caseIdx,
         directoryClientNameCiphertext:
@@ -5104,6 +5186,13 @@ export function createTelephonyService(options: {
         ),
       )
       .leftJoin(
+        telephonyMessageManualContacts,
+        eq(
+          telephonyMessageManualContacts.id,
+          telephonyMessages.manualContactId,
+        ),
+      )
+      .leftJoin(
         consultations,
         eq(consultations.id, telephonyMessages.consultationId),
       )
@@ -5115,8 +5204,14 @@ export function createTelephonyService(options: {
         legalFriendsCaseLinks,
         eq(legalFriendsCaseLinks.consultationId, telephonyMessages.consultationId),
       )
-      .orderBy(desc(telephonyMessages.requestedAt))
-      .limit(500);
+      .where(
+        outgoingIds
+          ? outgoingIds.length > 0
+            ? inArray(telephonyMessages.id, [...outgoingIds])
+            : sql<boolean>`false`
+          : undefined,
+      )
+      .orderBy(desc(telephonyMessages.requestedAt));
 
     const incoming = await db
       .select({
@@ -5125,6 +5220,15 @@ export function createTelephonyService(options: {
           telephonyInboundMessages.matchedOutboundMessageId,
         targetSource: telephonyInboundMessages.targetSource,
         consultationId: telephonyInboundMessages.consultationId,
+        manualContactId: telephonyInboundMessages.manualContactId,
+        manualPhoneCiphertext: telephonyMessageManualContacts.phoneCiphertext,
+        manualPhoneNonce: telephonyMessageManualContacts.phoneNonce,
+        manualPhoneKeyVersion: telephonyMessageManualContacts.phoneKeyVersion,
+        manualDisplayNameCiphertext:
+          telephonyMessageManualContacts.displayNameCiphertext,
+        manualDisplayNameNonce: telephonyMessageManualContacts.displayNameNonce,
+        manualDisplayNameKeyVersion:
+          telephonyMessageManualContacts.displayNameKeyVersion,
         directoryClientIdx: telephonyInboundMessages.directoryClientIdx,
         directoryCaseIdx: telephonyInboundMessages.directoryCaseIdx,
         matchStrategy: telephonyInboundMessages.matchStrategy,
@@ -5168,6 +5272,13 @@ export function createTelephonyService(options: {
         ),
       )
       .leftJoin(
+        telephonyMessageManualContacts,
+        eq(
+          telephonyMessageManualContacts.id,
+          telephonyInboundMessages.manualContactId,
+        ),
+      )
+      .leftJoin(
         consultations,
         eq(consultations.id, telephonyInboundMessages.consultationId),
       )
@@ -5175,10 +5286,16 @@ export function createTelephonyService(options: {
         legalFriendsCaseLinks,
         eq(legalFriendsCaseLinks.consultationId, telephonyInboundMessages.consultationId),
       )
-      .orderBy(desc(telephonyInboundMessages.receivedAt))
-      .limit(500);
+      .where(
+        incomingIds
+          ? incomingIds.length > 0
+            ? inArray(telephonyInboundMessages.id, [...incomingIds])
+            : sql<boolean>`false`
+          : undefined,
+      )
+      .orderBy(desc(telephonyInboundMessages.receivedAt));
 
-    const mailboxes = await db
+    const mailboxes = input?.includeMailboxes === false ? [] : await db
       .select({
         id: telephonyEndpoints.id,
         label: telephonyEndpoints.label,
@@ -5213,6 +5330,34 @@ export function createTelephonyService(options: {
   function outgoingThreadIdentity(
     row: Awaited<ReturnType<typeof loadMessageHubRows>>["outgoing"][number],
   ): MessageThreadIdentity | null {
+    if (row.targetSource === "manual" && row.manualContactId) {
+      const customerName = decryptedOptional(
+        {
+          ciphertext: row.manualDisplayNameCiphertext,
+          nonce: row.manualDisplayNameNonce,
+          keyVersion: row.manualDisplayNameKeyVersion,
+        },
+        `telephony_message_manual_contacts/${row.manualContactId}/display_name`,
+      );
+      const phone = decryptedOptional(
+        {
+          ciphertext: row.manualPhoneCiphertext,
+          nonce: row.manualPhoneNonce,
+          keyVersion: row.manualPhoneKeyVersion,
+        },
+        `telephony_message_manual_contacts/${row.manualContactId}/phone`,
+      );
+      return {
+        key: `manual:${row.manualContactId}`,
+        targetSource: "manual",
+        caseIdx: null,
+        clientIdx: null,
+        consultationId: null,
+        manualContactId: row.manualContactId,
+        customerName: customerName ?? "직접 입력 고객",
+        phone: phone ? messagePhoneDisplay(phone) : "번호 미확인",
+      };
+    }
     if (
       row.targetSource === "legal_friends_directory" &&
       row.directoryCaseIdx &&
@@ -5236,9 +5381,11 @@ export function createTelephonyService(options: {
       );
       return {
         key: `case:${row.directoryCaseIdx}`,
+        targetSource: "legal_friends_directory",
         caseIdx: String(row.directoryCaseIdx),
         clientIdx: row.directoryClientIdx,
         consultationId: null,
+        manualContactId: null,
         customerName: customerName ?? "리걸프렌즈 고객",
         phone: phone ?? "번호 미확인",
       };
@@ -5267,9 +5414,11 @@ export function createTelephonyService(options: {
       key: row.legalFriendsCaseIdx
         ? `case:${row.legalFriendsCaseIdx}`
         : `consultation:${row.consultationId}`,
+      targetSource: "consultation",
       caseIdx: row.legalFriendsCaseIdx ?? null,
       clientIdx: null,
       consultationId: row.consultationId,
+      manualContactId: null,
       customerName,
       phone: phone ?? "번호 미확인",
       receiptCode: row.consultationReceiptCode,
@@ -5287,6 +5436,26 @@ export function createTelephonyService(options: {
       },
       `telephony_inbound_messages/${row.id}/remote_phone`,
     );
+    if (row.targetSource === "manual" && row.manualContactId) {
+      const customerName = decryptedOptional(
+        {
+          ciphertext: row.manualDisplayNameCiphertext,
+          nonce: row.manualDisplayNameNonce,
+          keyVersion: row.manualDisplayNameKeyVersion,
+        },
+        `telephony_message_manual_contacts/${row.manualContactId}/display_name`,
+      );
+      return {
+        key: `manual:${row.manualContactId}`,
+        targetSource: "manual",
+        caseIdx: null,
+        clientIdx: null,
+        consultationId: null,
+        manualContactId: row.manualContactId,
+        customerName: customerName ?? "직접 입력 고객",
+        phone: messagePhoneDisplay(phone),
+      };
+    }
     if (
       row.targetSource === "legal_friends_directory" &&
       row.directoryCaseIdx &&
@@ -5303,9 +5472,11 @@ export function createTelephonyService(options: {
       );
       return {
         key: `case:${row.directoryCaseIdx}`,
+        targetSource: "legal_friends_directory",
         caseIdx: String(row.directoryCaseIdx),
         clientIdx: row.directoryClientIdx,
         consultationId: null,
+        manualContactId: null,
         customerName: customerName ?? "리걸프렌즈 고객",
         phone: messagePhoneDisplay(phone),
       };
@@ -5324,9 +5495,11 @@ export function createTelephonyService(options: {
         key: row.legalFriendsCaseIdx
           ? `case:${row.legalFriendsCaseIdx}`
           : `consultation:${row.consultationId}`,
+        targetSource: "consultation",
         caseIdx: row.legalFriendsCaseIdx ?? null,
         clientIdx: null,
         consultationId: row.consultationId,
+        manualContactId: null,
         customerName,
         phone: messagePhoneDisplay(phone),
         receiptCode: row.consultationReceiptCode,
@@ -5334,11 +5507,205 @@ export function createTelephonyService(options: {
     }
     return {
       key: `unmatched:${row.id}`,
+      targetSource: null,
       caseIdx: null,
       clientIdx: null,
       consultationId: null,
+      manualContactId: null,
       customerName: "고객 연결 확인 필요",
       phone: messagePhoneDisplay(phone),
+    };
+  }
+
+  const messageRecordUnion = sql`
+    select
+      case
+        when message.target_source = 'legal_friends_directory'
+          and directory_target.case_idx is not null
+          then 'case:' || directory_target.case_idx::text
+        when message.target_source = 'manual'
+          and message.manual_contact_id is not null
+          then 'manual:' || message.manual_contact_id::text
+        when message.target_source = 'consultation'
+          and case_link.case_idx is not null
+          then 'case:' || case_link.case_idx::text
+        when message.target_source = 'consultation'
+          and message.consultation_id is not null
+          then 'consultation:' || message.consultation_id::text
+        else null
+      end as thread_key,
+      message.id as message_id,
+      'outbound'::text as direction,
+      message.message_kind::text as message_kind,
+      message.requested_at as occurred_at,
+      false as needs_connection
+    from telephony_messages as message
+    left join telephony_message_directory_targets as directory_target
+      on directory_target.telephony_message_id = message.id
+    left join legalfriends_case_links as case_link
+      on case_link.consultation_id = message.consultation_id
+
+    union all
+
+    select
+      case
+        when inbound.target_source = 'legal_friends_directory'
+          and inbound.directory_case_idx is not null
+          then 'case:' || inbound.directory_case_idx::text
+        when inbound.target_source = 'manual'
+          and inbound.manual_contact_id is not null
+          then 'manual:' || inbound.manual_contact_id::text
+        when inbound.target_source = 'consultation'
+          and case_link.case_idx is not null
+          then 'case:' || case_link.case_idx::text
+        when inbound.target_source = 'consultation'
+          and inbound.consultation_id is not null
+          then 'consultation:' || inbound.consultation_id::text
+        else 'unmatched:' || inbound.id::text
+      end as thread_key,
+      inbound.id as message_id,
+      'inbound'::text as direction,
+      inbound.message_kind::text as message_kind,
+      inbound.received_at as occurred_at,
+      inbound.match_strategy = 'unmatched' as needs_connection
+    from telephony_inbound_messages as inbound
+    left join legalfriends_case_links as case_link
+      on case_link.consultation_id = inbound.consultation_id
+  `;
+
+  type MessageHubPageRow = {
+    thread_key: string;
+    message_id: string;
+    direction: "outbound" | "inbound";
+    message_kind: "sms" | "lms" | "mms";
+    occurred_at: Date | string;
+    message_count: number;
+    needs_connection: boolean;
+    total_threads: number;
+    needs_connection_total: number;
+  };
+
+  type MessageTimelinePageRow = {
+    thread_key: string;
+    message_id: string;
+    direction: "outbound" | "inbound";
+    occurred_at: Date | string;
+  };
+
+  async function loadMessageHubPage(input?: {
+    cursor?: string;
+    limit?: number;
+  }) {
+    const limit = messagePageLimit(input?.limit);
+    const cursor = decodeMessagePageCursor(input?.cursor);
+    if (input?.cursor && (!cursor || !isMessageThreadKey(cursor.id))) {
+      throw new TelephonyCallError(
+        "message_cursor_invalid",
+        "문자 목록을 이어 불러올 위치가 올바르지 않습니다.",
+      );
+    }
+    const cursorCondition = cursor
+      ? sql`and (occurred_at, thread_key) < (${new Date(cursor.occurredAt)}, ${cursor.id})`
+      : sql``;
+    const result = await db.execute(sql<MessageHubPageRow>`
+      with message_records as (${messageRecordUnion}),
+      ranked as (
+        select
+          message_records.*,
+          row_number() over (
+            partition by thread_key
+            order by occurred_at desc, message_id desc, direction desc
+          ) as thread_rank,
+          count(*) over (partition by thread_key)::int as message_count,
+          bool_or(needs_connection) over (
+            partition by thread_key
+          ) as thread_needs_connection
+        from message_records
+        where thread_key is not null
+      ),
+      thread_heads as (
+        select
+          thread_key,
+          message_id,
+          direction,
+          message_kind,
+          occurred_at,
+          message_count,
+          thread_needs_connection as needs_connection
+        from ranked
+        where thread_rank = 1
+      )
+      select
+        thread_heads.*,
+        (select count(*)::int from thread_heads) as total_threads,
+        (
+          select count(*)::int
+          from thread_heads
+          where needs_connection
+        ) as needs_connection_total
+      from thread_heads
+      where true ${cursorCondition}
+      order by occurred_at desc, thread_key desc
+      limit ${limit + 1}
+    `);
+    const rows = result.rows as MessageHubPageRow[];
+    const hasMore = rows.length > limit;
+    const items = rows.slice(0, limit);
+    const last = items.at(-1);
+    return {
+      items,
+      total: rows[0]?.total_threads ?? 0,
+      needsConnectionTotal: rows[0]?.needs_connection_total ?? 0,
+      nextCursor:
+        hasMore && last
+          ? encodeMessagePageCursor({
+              occurredAt: new Date(last.occurred_at).toISOString(),
+              id: last.thread_key,
+            })
+          : null,
+    };
+  }
+
+  async function loadMessageTimelinePage(
+    threadKey: string,
+    input?: { cursor?: string; limit?: number },
+  ) {
+    const limit = messagePageLimit(input?.limit);
+    const cursor = decodeMessagePageCursor(input?.cursor);
+    if (
+      input?.cursor &&
+      (!cursor || !cursor.direction || !isUuid(cursor.id))
+    ) {
+      throw new TelephonyCallError(
+        "message_cursor_invalid",
+        "이전 문자를 이어 불러올 위치가 올바르지 않습니다.",
+      );
+    }
+    const cursorCondition = cursor
+      ? sql`and (occurred_at, message_id, direction) < (${new Date(cursor.occurredAt)}, ${cursor.id}::uuid, ${cursor.direction})`
+      : sql``;
+    const result = await db.execute(sql<MessageTimelinePageRow>`
+      with message_records as (${messageRecordUnion})
+      select thread_key, message_id, direction, occurred_at
+      from message_records
+      where thread_key = ${threadKey} ${cursorCondition}
+      order by occurred_at desc, message_id desc, direction desc
+      limit ${limit + 1}
+    `);
+    const rows = result.rows as MessageTimelinePageRow[];
+    const hasMore = rows.length > limit;
+    const items = rows.slice(0, limit);
+    const last = items.at(-1);
+    return {
+      items,
+      nextCursor:
+        hasMore && last
+          ? encodeMessagePageCursor({
+              occurredAt: new Date(last.occurred_at).toISOString(),
+              id: last.message_id,
+              direction: last.direction,
+            })
+          : null,
     };
   }
 
@@ -5377,9 +5744,24 @@ export function createTelephonyService(options: {
     });
   }
 
-  async function getMessageHub(actor: StaffPrincipal) {
-    const { outgoing, incoming, mailboxes } = await loadMessageHubRows();
-    type ThreadSummary = MessageThreadIdentity & {
+  async function getMessageHub(
+    actor: StaffPrincipal,
+    query?: { cursor?: string; limit?: number },
+  ) {
+    const page = await loadMessageHubPage(query);
+    const outgoingIds = page.items
+      .filter((item) => item.direction === "outbound")
+      .map((item) => item.message_id);
+    const incomingIds = page.items
+      .filter((item) => item.direction === "inbound")
+      .map((item) => item.message_id);
+    const { outgoing, incoming, mailboxes } = await loadMessageHubRows({
+      outgoingIds,
+      incomingIds,
+    });
+    const outgoingById = new Map(outgoing.map((row) => [row.id, row]));
+    const incomingById = new Map(incoming.map((row) => [row.id, row]));
+    type MessageThreadSummary = MessageThreadIdentity & {
       messageCount: number;
       lastDirection: "outbound" | "inbound";
       lastMessageKind: "sms" | "lms" | "mms";
@@ -5387,92 +5769,66 @@ export function createTelephonyService(options: {
       lastMessageAt: string;
       needsConnection: boolean;
     };
-    const threads = new Map<string, ThreadSummary>();
-    const add = (
-      identity: MessageThreadIdentity,
-      message: {
-        direction: "outbound" | "inbound";
-        kind: "sms" | "lms" | "mms";
-        body: string;
-        occurredAt: Date;
-        needsConnection: boolean;
-      },
-    ) => {
-      const current = threads.get(identity.key);
-      const lastMessageAt = message.occurredAt.toISOString();
-      if (!current) {
-        threads.set(identity.key, {
-          ...identity,
-          messageCount: 1,
-          lastDirection: message.direction,
-          lastMessageKind: message.kind,
-          lastMessagePreview: message.body.slice(0, 90),
-          lastMessageAt,
-          needsConnection: message.needsConnection,
-        });
-        return;
-      }
-      current.messageCount += 1;
-      current.needsConnection ||= message.needsConnection;
-      if (lastMessageAt > current.lastMessageAt) {
-        Object.assign(current, {
-          ...identity,
-          lastDirection: message.direction,
-          lastMessageKind: message.kind,
-          lastMessagePreview: message.body.slice(0, 90),
-          lastMessageAt,
-        });
-      }
-    };
-    for (const row of outgoing) {
-      const identity = outgoingThreadIdentity(row);
-      if (!identity) continue;
-      add(identity, {
-        direction: "outbound",
-        kind: row.messageKind,
-        body: protection.decrypt(
+    const items = page.items.flatMap<MessageThreadSummary>((record) => {
+      if (record.direction === "outbound") {
+        const row = outgoingById.get(record.message_id);
+        if (!row) return [];
+        const identity = outgoingThreadIdentity(row);
+        if (!identity) return [];
+        const body = protection.decrypt(
           {
             ciphertext: row.bodyCiphertext,
             nonce: row.bodyNonce,
             keyVersion: row.bodyKeyVersion,
           },
           `telephony_messages/${row.id}/body`,
-        ),
-        occurredAt: row.requestedAt,
-        needsConnection: false,
-      });
-    }
-    for (const row of incoming) {
-      add(incomingThreadIdentity(row), {
-        direction: "inbound",
-        kind: row.messageKind,
-        body: protection.decrypt(
-          {
-            ciphertext: row.bodyCiphertext,
-            nonce: row.bodyNonce,
-            keyVersion: row.bodyKeyVersion,
-          },
-          `telephony_inbound_messages/${row.id}/body`,
-        ),
-        occurredAt: row.receivedAt,
-        needsConnection: row.matchStrategy === "unmatched",
-      });
-    }
-    const items = [...threads.values()].sort((left, right) =>
-      right.lastMessageAt.localeCompare(left.lastMessageAt),
-    );
+        );
+        return [{
+          ...identity,
+          messageCount: record.message_count,
+          lastDirection: record.direction,
+          lastMessageKind: row.messageKind,
+          lastMessagePreview: body.slice(0, 90),
+          lastMessageAt: row.requestedAt.toISOString(),
+          needsConnection: record.needs_connection,
+        }];
+      }
+      const row = incomingById.get(record.message_id);
+      if (!row) return [];
+      const body = protection.decrypt(
+        {
+          ciphertext: row.bodyCiphertext,
+          nonce: row.bodyNonce,
+          keyVersion: row.bodyKeyVersion,
+        },
+        `telephony_inbound_messages/${row.id}/body`,
+      );
+      return [{
+        ...incomingThreadIdentity(row),
+        messageCount: record.message_count,
+        lastDirection: record.direction,
+        lastMessageKind: row.messageKind,
+        lastMessagePreview: body.slice(0, 90),
+        lastMessageAt: row.receivedAt.toISOString(),
+        needsConnection: record.needs_connection,
+      }];
+    });
     await auditMessageView({
       actor,
       action: "telephony.message_hub.viewed",
       targetType: "telephony_message_hub",
       targetId: actor.id,
       metadata: {
-        threadCount: items.length,
-        unmatchedCount: items.filter((item) => item.needsConnection).length,
+        threadCount: page.total,
+        unmatchedCount: page.needsConnectionTotal,
+        pageSize: items.length,
       },
     });
     return {
       items,
+      total: page.total,
+      needsConnectionTotal: page.needsConnectionTotal,
+      nextCursor: page.nextCursor,
       mailboxes: mailboxes.map((mailbox) => ({
         id: mailbox.id,
         label: mailbox.label,
@@ -5488,18 +5844,31 @@ export function createTelephonyService(options: {
     };
   }
 
-  async function getMessageThread(threadKey: string, actor: StaffPrincipal) {
-    if (
-      !/^case:[1-9][0-9]{0,99}$/.test(threadKey) &&
-      !/^consultation:[0-9a-f-]{36}$/i.test(threadKey) &&
-      !/^unmatched:[0-9a-f-]{36}$/i.test(threadKey)
-    ) {
+  async function getMessageThread(
+    threadKey: string,
+    actor: StaffPrincipal,
+    query?: { cursor?: string; limit?: number },
+  ) {
+    if (!isMessageThreadKey(threadKey)) {
       throw new TelephonyCallError(
         "message_thread_not_found",
         "문자 대화를 찾을 수 없습니다.",
       );
     }
-    const { outgoing, incoming } = await loadMessageHubRows();
+    const page = await loadMessageTimelinePage(threadKey, query);
+    const outgoingIds = page.items
+      .filter((item) => item.direction === "outbound")
+      .map((item) => item.message_id);
+    const incomingIds = page.items
+      .filter((item) => item.direction === "inbound")
+      .map((item) => item.message_id);
+    const { outgoing, incoming } = await loadMessageHubRows({
+      outgoingIds,
+      incomingIds,
+      includeMailboxes: false,
+    });
+    const outgoingById = new Map(outgoing.map((row) => [row.id, row]));
+    const incomingById = new Map(incoming.map((row) => [row.id, row]));
     const timeline: Array<{
       id: string;
       direction: "outbound" | "inbound";
@@ -5523,44 +5892,49 @@ export function createTelephonyService(options: {
       matchStrategy: string | null;
     }> = [];
     let target: MessageThreadIdentity | null = null;
-    for (const row of outgoing) {
-      const identity = outgoingThreadIdentity(row);
-      if (!identity || identity.key !== threadKey) continue;
-      target ??= identity;
-      timeline.push({
-        id: row.id,
-        direction: "outbound",
-        provider: row.provider,
-        messageKind: row.messageKind,
-        body: protection.decrypt(
-          {
-            ciphertext: row.bodyCiphertext,
-            nonce: row.bodyNonce,
-            keyVersion: row.bodyKeyVersion,
+    for (const record of page.items) {
+      if (record.direction === "outbound") {
+        const row = outgoingById.get(record.message_id);
+        if (!row) continue;
+        const identity = outgoingThreadIdentity(row);
+        if (!identity || identity.key !== threadKey) continue;
+        target ??= identity;
+        timeline.push({
+          id: row.id,
+          direction: "outbound",
+          provider: row.provider,
+          messageKind: row.messageKind,
+          body: protection.decrypt(
+            {
+              ciphertext: row.bodyCiphertext,
+              nonce: row.bodyNonce,
+              keyVersion: row.bodyKeyVersion,
+            },
+            `telephony_messages/${row.id}/body`,
+          ),
+          bodyByteLength: row.bodyByteLength,
+          occurredAt: row.requestedAt.toISOString(),
+          status: row.commandStatus,
+          staffDisplayName: row.staffDisplayName,
+          imageAttached: Boolean(row.imageFileId),
+          imageUrl: row.imageUrl,
+          imageName: row.imageName,
+          endpoint: {
+            id: row.endpointId,
+            label: row.endpointLabel,
+            lineNumber: row.endpointLineNumber,
+            publicNumber:
+              row.provider === "solapi"
+                ? solapiMmsSender ?? null
+                : row.endpointPublicNumber,
+            extension: row.endpointExtension,
           },
-          `telephony_messages/${row.id}/body`,
-        ),
-        bodyByteLength: row.bodyByteLength,
-        occurredAt: row.requestedAt.toISOString(),
-        status: row.commandStatus,
-        staffDisplayName: row.staffDisplayName,
-        imageAttached: Boolean(row.imageFileId),
-        imageUrl: row.imageUrl,
-        imageName: row.imageName,
-        endpoint: {
-          id: row.endpointId,
-          label: row.endpointLabel,
-          lineNumber: row.endpointLineNumber,
-          publicNumber:
-            row.provider === "solapi"
-              ? solapiMmsSender ?? null
-              : row.endpointPublicNumber,
-          extension: row.endpointExtension,
-        },
-        matchStrategy: null,
-      });
-    }
-    for (const row of incoming) {
+          matchStrategy: null,
+        });
+        continue;
+      }
+      const row = incomingById.get(record.message_id);
+      if (!row) continue;
       const identity = incomingThreadIdentity(row);
       if (identity.key !== threadKey) continue;
       target ??= identity;
@@ -5600,7 +5974,7 @@ export function createTelephonyService(options: {
         "문자 대화를 찾을 수 없습니다.",
       );
     }
-    timeline.sort((left, right) => left.occurredAt.localeCompare(right.occurredAt));
+    timeline.reverse();
     await auditMessageView({
       actor,
       action: "telephony.message_thread.viewed",
@@ -5609,9 +5983,10 @@ export function createTelephonyService(options: {
       metadata: {
         caseIdx: target.caseIdx,
         messageCount: timeline.length,
+        hasOlder: Boolean(page.nextCursor),
       },
     });
-    return { thread: target, timeline };
+    return { thread: target, timeline, nextCursor: page.nextCursor };
   }
 
   async function listMessageTemplates(actor: StaffPrincipal) {
@@ -5906,6 +6281,9 @@ export function createTelephonyService(options: {
         "문자 내용은 센트릭스 LMS 기준 720바이트 이하여야 합니다.",
       );
     }
+    const directImage = input.image
+      ? await uploadTemplateImage(input.image)
+      : null;
     const requestedAt = now();
     return db.transaction(async (tx) => {
       const [existing] = await tx
@@ -6038,6 +6416,11 @@ export function createTelephonyService(options: {
         imageUrl = template.imageUrl;
         imageOriginalName = template.imageOriginalName;
       }
+      if (directImage) {
+        imageFileId = directImage.imageFileId;
+        imageUrl = directImage.imageUrl;
+        imageOriginalName = directImage.imageOriginalName;
+      }
 
       const provider = imageFileId ? ("solapi" as const) : ("centrex" as const);
       const messageKind = imageFileId ? ("mms" as const) : textKind;
@@ -6162,6 +6545,9 @@ export function createTelephonyService(options: {
         "문자 내용은 센트릭스 LMS 기준 720바이트 이하여야 합니다.",
       );
     }
+    const directImage = input.image
+      ? await uploadTemplateImage(input.image)
+      : null;
     const requestedAt = now();
     return db.transaction(async (tx) => {
       const [existing] = await tx
@@ -6272,6 +6658,11 @@ export function createTelephonyService(options: {
         imageFileId = template.imageFileId;
         imageUrl = template.imageUrl;
         imageOriginalName = template.imageOriginalName;
+      }
+      if (directImage) {
+        imageFileId = directImage.imageFileId;
+        imageUrl = directImage.imageUrl;
+        imageOriginalName = directImage.imageOriginalName;
       }
 
       const provider = imageFileId ? ("solapi" as const) : ("centrex" as const);
@@ -6389,6 +6780,297 @@ export function createTelephonyService(options: {
         metadata: {
           messageId,
           caseIdx: targetInput.caseIdx,
+          endpointId: endpoint.id,
+          templateId: input.templateId,
+          messageKind,
+          bodyByteLength,
+        },
+        occurredAt: requestedAt,
+        createdAt: requestedAt,
+      });
+      return { ...messageResponse(message), replayed: false };
+    });
+  }
+
+  async function requestManualMessage(
+    input: ManualTelephonyMessageSend,
+    actor: StaffPrincipal,
+  ) {
+    if (!dispatchEnabled) {
+      throw new TelephonyCallError(
+        "feature_disabled",
+        "센트릭스 문자 발송이 아직 활성화되지 않았습니다.",
+      );
+    }
+    const textKind = centrexMessageKind(input.body);
+    if (textKind === "too_long") {
+      throw new TelephonyCallError(
+        "message_body_invalid",
+        "문자 내용은 센트릭스 LMS 기준 720바이트 이하여야 합니다.",
+      );
+    }
+    const directImage = input.image
+      ? await uploadTemplateImage(input.image)
+      : null;
+    const requestedAt = now();
+    const inputPhoneFingerprint = input.phone
+      ? protection.fingerprint(input.phone)
+      : null;
+
+    return db.transaction(async (tx) => {
+      const [existing] = await tx
+        .select()
+        .from(telephonyMessages)
+        .where(eq(telephonyMessages.idempotencyKey, input.idempotencyKey))
+        .limit(1);
+      if (existing) {
+        const targetMatches = input.contactId
+          ? existing.manualContactId === input.contactId
+          : inputPhoneFingerprint
+            ? existing.remotePhoneFingerprint.equals(inputPhoneFingerprint)
+            : false;
+        if (
+          existing.targetSource !== "manual" ||
+          existing.staffUserId !== actor.id ||
+          !targetMatches
+        ) {
+          throw new TelephonyCallError(
+            "message_idempotency_conflict",
+            "문자 발송 재시도 식별자가 다른 요청과 충돌했습니다.",
+          );
+        }
+        return { ...messageResponse(existing), replayed: true };
+      }
+
+      let contact = input.contactId
+        ? (
+            await tx
+              .select()
+              .from(telephonyMessageManualContacts)
+              .where(eq(telephonyMessageManualContacts.id, input.contactId))
+              .limit(1)
+          )[0]
+        : inputPhoneFingerprint
+          ? (
+              await tx
+                .select()
+                .from(telephonyMessageManualContacts)
+                .where(
+                  eq(
+                    telephonyMessageManualContacts.phoneFingerprint,
+                    inputPhoneFingerprint,
+                  ),
+                )
+                .limit(1)
+            )[0]
+          : undefined;
+
+      if (!contact && input.phone && inputPhoneFingerprint) {
+        const contactId = createEventId();
+        const displayName = input.customerName?.trim() || input.phone;
+        const encryptedPhone = protection.encrypt(
+          input.phone,
+          `telephony_message_manual_contacts/${contactId}/phone`,
+        );
+        const encryptedDisplayName = protection.encrypt(
+          displayName,
+          `telephony_message_manual_contacts/${contactId}/display_name`,
+        );
+        [contact] = await tx
+          .insert(telephonyMessageManualContacts)
+          .values({
+            id: contactId,
+            phoneFingerprint: inputPhoneFingerprint,
+            phoneCiphertext: encryptedPhone.ciphertext,
+            phoneNonce: encryptedPhone.nonce,
+            phoneKeyVersion: encryptedPhone.keyVersion,
+            displayNameCiphertext: encryptedDisplayName.ciphertext,
+            displayNameNonce: encryptedDisplayName.nonce,
+            displayNameKeyVersion: encryptedDisplayName.keyVersion,
+            createdByUserId: actor.id,
+            createdAt: requestedAt,
+            updatedAt: requestedAt,
+          })
+          .onConflictDoNothing({
+            target: telephonyMessageManualContacts.phoneFingerprint,
+          })
+          .returning();
+        if (!contact) {
+          [contact] = await tx
+            .select()
+            .from(telephonyMessageManualContacts)
+            .where(
+              eq(
+                telephonyMessageManualContacts.phoneFingerprint,
+                inputPhoneFingerprint,
+              ),
+            )
+            .limit(1);
+        }
+      }
+      if (!contact) {
+        throw new TelephonyCallError(
+          "manual_message_contact_not_found",
+          "직접 입력 문자 대상을 찾을 수 없습니다.",
+        );
+      }
+
+      const [endpoint] = await tx
+        .select({ id: telephonyEndpoints.id })
+        .from(staffTelephonyBindings)
+        .innerJoin(
+          telephonyEndpoints,
+          eq(telephonyEndpoints.id, staffTelephonyBindings.endpointId),
+        )
+        .where(
+          and(
+            eq(staffTelephonyBindings.staffUserId, actor.id),
+            eq(staffTelephonyBindings.isActive, true),
+            eq(staffTelephonyBindings.isPrimary, true),
+            eq(telephonyEndpoints.provider, "centrex"),
+            eq(telephonyEndpoints.isActive, true),
+          ),
+        )
+        .limit(1);
+      if (!endpoint) {
+        throw new TelephonyCallError(
+          "centrex_endpoint_not_linked",
+          "직원 계정에 활성 센트릭스 회선이 연결되지 않았습니다.",
+        );
+      }
+
+      let templateName: string | null = null;
+      let imageFileId: string | null = null;
+      let imageUrl: string | null = null;
+      let imageOriginalName: string | null = null;
+      if (input.templateId) {
+        const [template] = await tx
+          .select({
+            name: messageTemplates.name,
+            ownerUserId: messageTemplates.ownerUserId,
+            imageFileId: messageTemplates.imageFileId,
+            imageUrl: messageTemplates.imageUrl,
+            imageOriginalName: messageTemplates.imageOriginalName,
+          })
+          .from(messageTemplates)
+          .where(eq(messageTemplates.id, input.templateId))
+          .limit(1)
+          .for("key share");
+        if (!template) {
+          throw new TelephonyCallError(
+            "message_template_not_found",
+            "선택한 문자 템플릿을 찾을 수 없습니다.",
+          );
+        }
+        if (template.ownerUserId !== actor.id) {
+          throw new TelephonyCallError(
+            "message_template_owned_by_other_staff",
+            "다른 직원의 개인 템플릿은 사용할 수 없습니다.",
+          );
+        }
+        templateName = template.name;
+        imageFileId = template.imageFileId;
+        imageUrl = template.imageUrl;
+        imageOriginalName = template.imageOriginalName;
+      }
+      if (directImage) {
+        imageFileId = directImage.imageFileId;
+        imageUrl = directImage.imageUrl;
+        imageOriginalName = directImage.imageOriginalName;
+      }
+
+      const provider = imageFileId ? ("solapi" as const) : ("centrex" as const);
+      const messageKind = imageFileId ? ("mms" as const) : textKind;
+      if (provider === "solapi" && (!solapiClient || !solapiMmsSender)) {
+        throw new TelephonyCallError(
+          "mms_feature_disabled",
+          "이미지 문자를 보내려면 솔라피 MMS 발신번호 설정이 필요합니다.",
+        );
+      }
+
+      const messageId = createTelephonyMessageId();
+      const eventId = createEventId();
+      const encryptedBody = protection.encrypt(
+        input.body,
+        `telephony_messages/${messageId}/body`,
+      );
+      const bodyByteLength = centrexMessageByteLength(input.body);
+      const event: PlatformEvent = {
+        eventId,
+        eventType: "telephony.message.requested",
+        eventVersion: 1,
+        occurredAt: requestedAt.toISOString(),
+        producer: "lawand.gateway",
+        correlationId: contact.id,
+        data:
+          provider === "solapi"
+            ? {
+                messageId,
+                targetSource: "manual",
+                manualContactId: contact.id,
+                endpointId: endpoint.id,
+                staffUserId: actor.id,
+                provider: "solapi",
+                channel: "mms",
+                command: "send-many",
+                contentRef: `telephony_messages/${messageId}/body`,
+              }
+            : {
+                messageId,
+                targetSource: "manual",
+                manualContactId: contact.id,
+                endpointId: endpoint.id,
+                staffUserId: actor.id,
+                provider: "centrex",
+                channel: "sms",
+                command: "smssend",
+                contentRef: `telephony_messages/${messageId}/body`,
+              },
+      };
+      assertPlatformEvent(event);
+      await tx.insert(outboxEvents).values(
+        eventRow(event, messageId, "telephony_message"),
+      );
+      const [message] = await tx
+        .insert(telephonyMessages)
+        .values({
+          id: messageId,
+          provider,
+          endpointId: endpoint.id,
+          staffUserId: actor.id,
+          targetSource: "manual",
+          consultationId: null,
+          consultationRequestId: null,
+          manualContactId: contact.id,
+          templateId: input.templateId,
+          templateNameSnapshot: templateName,
+          imageFileIdSnapshot: imageFileId,
+          imageUrlSnapshot: imageUrl,
+          imageOriginalNameSnapshot: imageOriginalName,
+          outboxEventId: eventId,
+          idempotencyKey: input.idempotencyKey,
+          remotePhoneFingerprint: contact.phoneFingerprint,
+          bodyCiphertext: encryptedBody.ciphertext,
+          bodyNonce: encryptedBody.nonce,
+          bodyKeyVersion: encryptedBody.keyVersion,
+          bodyFingerprint: protection.fingerprint(input.body),
+          messageKind,
+          bodyByteLength,
+          commandStatus: "queued",
+          requestedAt,
+          createdAt: requestedAt,
+          updatedAt: requestedAt,
+        })
+        .returning();
+      if (!message) throw new Error("telephony_message_not_created");
+      await tx.insert(staffAuditLogs).values({
+        id: createEventId(),
+        actorUserId: actor.id,
+        action: "telephony.manual_message.requested",
+        targetType: "telephony_message_manual_contact",
+        targetId: contact.id,
+        metadata: {
+          messageId,
           endpointId: endpoint.id,
           templateId: input.templateId,
           messageKind,
@@ -6880,6 +7562,7 @@ export function createTelephonyService(options: {
     requestDirectoryClickToCall,
     requestDirectoryMessage,
     requestInboundAnswer,
+    requestManualMessage,
     searchLegalFriendsClients,
     requestMessage,
     resolvePhoneDeskCall,

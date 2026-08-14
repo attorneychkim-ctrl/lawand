@@ -8,9 +8,17 @@ import {
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  const key = new URL(request.url).searchParams.get("key") ?? "";
+  const searchParams = new URL(request.url).searchParams;
+  const key = searchParams.get("key") ?? "";
+  const cursor = searchParams.get("cursor")?.trim() || undefined;
+  const limit = Number(searchParams.get("limit") ?? "50");
   try {
-    return NextResponse.json(await getMessageThread(key));
+    return NextResponse.json(
+      await getMessageThread(key, {
+        ...(cursor ? { cursor } : {}),
+        ...(Number.isFinite(limit) ? { limit } : {}),
+      }),
+    );
   } catch (error) {
     if (error instanceof ConsultationGatewayError) {
       return NextResponse.json(

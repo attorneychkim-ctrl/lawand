@@ -407,6 +407,13 @@
       "when": 1786601268066,
       "tag": "0057_consultation_groups",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1786674075155,
+      "tag": "0058_message_conversation_composer",
+      "breakpoints": true
     }
   ]
 }

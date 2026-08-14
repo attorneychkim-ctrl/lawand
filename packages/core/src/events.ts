@@ -256,6 +256,12 @@ const legalFriendsDirectoryTelephonyMessageReferenceFields = {
   directoryCaseIdx: z.number().int().positive(),
 };
 
+const manualTelephonyMessageReferenceFields = {
+  ...telephonyMessageReferenceFields,
+  targetSource: z.literal("manual"),
+  manualContactId: z.uuid(),
+};
+
 const telephonyMessageReferenceDataSchema = z.union([
   z
     .object({
@@ -284,6 +290,22 @@ const telephonyMessageReferenceDataSchema = z.union([
   z
     .object({
       ...legalFriendsDirectoryTelephonyMessageReferenceFields,
+      provider: z.literal("solapi"),
+      channel: z.literal("mms"),
+      command: z.literal("send-many"),
+    })
+    .strict(),
+  z
+    .object({
+      ...manualTelephonyMessageReferenceFields,
+      provider: z.literal("centrex"),
+      channel: z.literal("sms"),
+      command: z.literal("smssend"),
+    })
+    .strict(),
+  z
+    .object({
+      ...manualTelephonyMessageReferenceFields,
       provider: z.literal("solapi"),
       channel: z.literal("mms"),
       command: z.literal("send-many"),

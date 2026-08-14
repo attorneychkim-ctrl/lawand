@@ -211,6 +211,11 @@ export const telephonyCallTargetSourceEnum = pgEnum(
   ["consultation", "legal_friends_directory"],
 );
 
+export const telephonyMessageTargetSourceEnum = pgEnum(
+  "telephony_message_target_source",
+  ["consultation", "legal_friends_directory", "manual"],
+);
+
 export const telephonyCommandStatusEnum = pgEnum(
   "telephony_command_status",
   ["queued", "dispatching", "succeeded", "failed", "unknown"],
@@ -2543,6 +2548,41 @@ export const messageTemplates = pgTable(
   ],
 );
 
+export const telephonyMessageManualContacts = pgTable(
+  "telephony_message_manual_contacts",
+  {
+    id: uuid("id").primaryKey(),
+    phoneFingerprint: bytea("phone_fingerprint").notNull(),
+    phoneCiphertext: bytea("phone_ciphertext").notNull(),
+    phoneNonce: bytea("phone_nonce").notNull(),
+    phoneKeyVersion: varchar("phone_key_version", { length: 50 }).notNull(),
+    displayNameCiphertext: bytea("display_name_ciphertext").notNull(),
+    displayNameNonce: bytea("display_name_nonce").notNull(),
+    displayNameKeyVersion: varchar("display_name_key_version", {
+      length: 50,
+    }).notNull(),
+    createdByUserId: uuid("created_by_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "restrict" }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("telephony_message_manual_contacts_phone_uidx").on(
+      table.phoneFingerprint,
+    ),
+    check(
+      "telephony_message_manual_contacts_crypto",
+      sql`octet_length(${table.phoneFingerprint}) = 32
+        AND octet_length(${table.phoneCiphertext}) >= 17
+        AND octet_length(${table.phoneNonce}) = 12
+        AND length(btrim(${table.phoneKeyVersion})) > 0
+        AND octet_length(${table.displayNameCiphertext}) >= 17
+        AND octet_length(${table.displayNameNonce}) = 12
+        AND length(btrim(${table.displayNameKeyVersion})) > 0`,
+    ),
+  ],
+);
+
 export const telephonyMessages = pgTable(
   "telephony_messages",
   {
@@ -2556,7 +2596,7 @@ export const telephonyMessages = pgTable(
     staffUserId: uuid("staff_user_id")
       .notNull()
       .references(() => staffUsers.id, { onDelete: "restrict" }),
-    targetSource: telephonyCallTargetSourceEnum("target_source")
+    targetSource: telephonyMessageTargetSourceEnum("target_source")
       .default("consultation")
       .notNull(),
     consultationId: uuid("consultation_id").references(
@@ -2565,6 +2605,10 @@ export const telephonyMessages = pgTable(
     ),
     consultationRequestId: uuid("consultation_request_id").references(
       () => consultationRequests.id,
+      { onDelete: "restrict" },
+    ),
+    manualContactId: uuid("manual_contact_id").references(
+      () => telephonyMessageManualContacts.id,
       { onDelete: "restrict" },
     ),
     templateId: uuid("template_id").references(() => messageTemplates.id, {
@@ -2614,6 +2658,11 @@ export const telephonyMessages = pgTable(
     ),
     index("telephony_messages_status_requested_idx").on(
       table.commandStatus,
+      table.requestedAt,
+    ),
+    index("telephony_messages_requested_idx").on(table.requestedAt),
+    index("telephony_messages_manual_contact_requested_idx").on(
+      table.manualContactId,
       table.requestedAt,
     ),
     check(
@@ -2684,10 +2733,17 @@ export const telephonyMessages = pgTable(
         ${table.targetSource} = 'consultation'
         AND ${table.consultationId} IS NOT NULL
         AND ${table.consultationRequestId} IS NOT NULL
+        AND ${table.manualContactId} IS NULL
       ) OR (
         ${table.targetSource} = 'legal_friends_directory'
         AND ${table.consultationId} IS NULL
         AND ${table.consultationRequestId} IS NULL
+        AND ${table.manualContactId} IS NULL
+      ) OR (
+        ${table.targetSource} = 'manual'
+        AND ${table.consultationId} IS NULL
+        AND ${table.consultationRequestId} IS NULL
+        AND ${table.manualContactId} IS NOT NULL
       )`,
     ),
     check(
@@ -2779,13 +2835,17 @@ export const telephonyInboundMessages = pgTable(
       () => telephonyMessages.id,
       { onDelete: "restrict" },
     ),
-    targetSource: telephonyCallTargetSourceEnum("target_source"),
+    targetSource: telephonyMessageTargetSourceEnum("target_source"),
     consultationId: uuid("consultation_id").references(
       () => consultations.id,
       { onDelete: "restrict" },
     ),
     directoryClientIdx: integer("directory_client_idx"),
     directoryCaseIdx: integer("directory_case_idx"),
+    manualContactId: uuid("manual_contact_id").references(
+      () => telephonyMessageManualContacts.id,
+      { onDelete: "restrict" },
+    ),
     matchStrategy: varchar("match_strategy", { length: 30 })
       .default("unmatched")
       .notNull(),
@@ -2814,6 +2874,11 @@ export const telephonyInboundMessages = pgTable(
       table.consultationId,
       table.receivedAt,
     ),
+    index("telephony_inbound_messages_manual_contact_received_idx").on(
+      table.manualContactId,
+      table.receivedAt,
+    ),
+    index("telephony_inbound_messages_received_idx").on(table.receivedAt),
     check(
       "telephony_inbound_messages_provider",
       sql`${table.provider} = 'centrex'`,
@@ -2855,6 +2920,7 @@ export const telephonyInboundMessages = pgTable(
         AND ${table.consultationId} IS NULL
         AND ${table.directoryClientIdx} IS NULL
         AND ${table.directoryCaseIdx} IS NULL
+        AND ${table.manualContactId} IS NULL
       ) OR (
         ${table.matchStrategy} = 'latest_outbound'
         AND ${table.matchedOutboundMessageId} IS NOT NULL
@@ -2862,6 +2928,7 @@ export const telephonyInboundMessages = pgTable(
         AND ${table.consultationId} IS NOT NULL
         AND ${table.directoryClientIdx} IS NULL
         AND ${table.directoryCaseIdx} IS NULL
+        AND ${table.manualContactId} IS NULL
       ) OR (
         ${table.matchStrategy} = 'latest_outbound'
         AND ${table.matchedOutboundMessageId} IS NOT NULL
@@ -2869,6 +2936,15 @@ export const telephonyInboundMessages = pgTable(
         AND ${table.consultationId} IS NULL
         AND ${table.directoryClientIdx} > 0
         AND ${table.directoryCaseIdx} > 0
+        AND ${table.manualContactId} IS NULL
+      ) OR (
+        ${table.matchStrategy} = 'latest_outbound'
+        AND ${table.matchedOutboundMessageId} IS NOT NULL
+        AND ${table.targetSource} = 'manual'
+        AND ${table.consultationId} IS NULL
+        AND ${table.directoryClientIdx} IS NULL
+        AND ${table.directoryCaseIdx} IS NULL
+        AND ${table.manualContactId} IS NOT NULL
       )`,
     ),
     check(

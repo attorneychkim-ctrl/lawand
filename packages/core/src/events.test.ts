@@ -536,6 +536,45 @@ test("문자 발송 이벤트는 전화번호와 본문 대신 암호화 원장 
     }).success,
     true,
   );
+  const manualMessageEvent = {
+    ...messageEvent,
+    correlationId: "01984c7d-8500-7000-8000-000000000031",
+    data: {
+      messageId: "01984c7d-8500-7000-8000-000000000030",
+      targetSource: "manual",
+      manualContactId: "01984c7d-8500-7000-8000-000000000031",
+      endpointId: "01984c7d-8500-7000-8000-000000000021",
+      staffUserId: "01984c7d-8500-7000-8000-000000000006",
+      provider: "centrex",
+      channel: "sms",
+      command: "smssend",
+      contentRef:
+        "telephony_messages/01984c7d-8500-7000-8000-000000000030/body",
+    },
+  } as const;
+  assert.equal(
+    telephonyMessageRequestedEventSchema.safeParse(manualMessageEvent).success,
+    true,
+  );
+  assert.equal(
+    telephonyMessageRequestedEventSchema.safeParse({
+      ...manualMessageEvent,
+      data: {
+        ...manualMessageEvent.data,
+        provider: "solapi",
+        channel: "mms",
+        command: "send-many",
+      },
+    }).success,
+    true,
+  );
+  assert.equal(
+    telephonyMessageRequestedEventSchema.safeParse({
+      ...manualMessageEvent,
+      data: { ...manualMessageEvent.data, phone: "01012345678" },
+    }).success,
+    false,
+  );
 });
 
 test("귀속 입력은 허용된 광고값과 내부 경로만 받는다", () => {

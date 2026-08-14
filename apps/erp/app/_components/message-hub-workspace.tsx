@@ -16,7 +16,13 @@ import type {
   MessageTemplate,
   MessageThread,
   MessageThreadSummary,
+  TelephonyMessage,
 } from "../../lib/gateway";
+import {
+  MessageConversationComposer,
+  NewMessageDialog,
+  type MessageRecipient,
+} from "./message-conversation-composer";
 import { MessageTemplateWorkspace } from "./message-template-workspace";
 
 function formatKst(value: string) {
@@ -99,12 +105,93 @@ function threadSearchText(thread: MessageThreadSummary) {
     .toLocaleLowerCase("ko-KR");
 }
 
+function mergeHubItems(
+  leading: MessageThreadSummary[],
+  trailing: MessageThreadSummary[],
+) {
+  const seen = new Set<string>();
+  return [...leading, ...trailing].filter((item) => {
+    if (seen.has(item.key)) return false;
+    seen.add(item.key);
+    return true;
+  });
+}
+
+function mergeTimeline(
+  left: MessageThread["timeline"],
+  right: MessageThread["timeline"],
+) {
+  const seen = new Set<string>();
+  return [...left, ...right]
+    .filter((item) => {
+      const key = `${item.direction}:${item.id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) =>
+      a.occurredAt === b.occurredAt
+        ? `${a.direction}:${a.id}`.localeCompare(`${b.direction}:${b.id}`)
+        : a.occurredAt.localeCompare(b.occurredAt),
+    );
+}
+
+function recipientFromThread(
+  target: MessageThread["thread"] | MessageThreadSummary | undefined,
+): MessageRecipient | null {
+  if (!target) return null;
+  if (target.targetSource === "consultation" && target.consultationId) {
+    return {
+      kind: "consultation",
+      consultationId: target.consultationId,
+      customerName: target.customerName,
+      phone: target.phone,
+      receiptCode: target.receiptCode ?? "ERP 상담",
+    };
+  }
+  if (
+    target.targetSource === "legal_friends_directory" &&
+    target.clientIdx &&
+    target.caseIdx
+  ) {
+    return {
+      kind: "directory",
+      clientIdx: target.clientIdx,
+      caseIdx: Number(target.caseIdx),
+      customerName: target.customerName,
+      phone: target.phone,
+      receiptCode: `Case_idx ${target.caseIdx}`,
+    };
+  }
+  if (target.targetSource === "manual" && target.manualContactId) {
+    return {
+      kind: "manual",
+      contactId: target.manualContactId,
+      customerName: target.customerName,
+      phone: target.phone,
+      receiptCode: "직접 입력",
+    };
+  }
+  const phone = target.phone.replace(/[^0-9]/g, "");
+  if (/^01\d{8,9}$/.test(phone)) {
+    return {
+      kind: "manual",
+      phone,
+      customerName: target.customerName,
+      receiptCode: "미연결 수신",
+    };
+  }
+  return null;
+}
+
 export function MessageHubWorkspace({
   initialHub,
   initialTemplates,
+  staffName,
 }: {
   initialHub: MessageHub;
   initialTemplates: MessageTemplate[];
+  staffName: string;
 }) {
   const router = useRouter();
   const [hub, setHub] = useState(initialHub);
@@ -116,9 +203,15 @@ export function MessageHubWorkspace({
   const [threadLoading, setThreadLoading] = useState(
     Boolean(initialHub.items[0]),
   );
+  const [hubLoadingMore, setHubLoadingMore] = useState(false);
+  const [threadLoadingOlder, setThreadLoadingOlder] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [templateOpen, setTemplateOpen] = useState(false);
+  const [newMessageOpen, setNewMessageOpen] = useState(false);
   const latestThreadRequest = useRef(0);
+  const hubLoadingMoreRef = useRef(false);
+  const threadLoadingOlderRef = useRef(false);
+  const timelineRef = useRef<HTMLDivElement>(null);
 
   const filteredThreads = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase("ko-KR");
@@ -128,6 +221,12 @@ export function MessageHubWorkspace({
   }, [hub.items, query]);
 
   const selectedSummary = hub.items.find((item) => item.key === selectedKey);
+  const currentThreadTarget =
+    thread?.thread.key === selectedKey ? thread.thread : selectedSummary;
+  const selectedRecipient = useMemo(
+    () => recipientFromThread(currentThreadTarget),
+    [currentThreadTarget],
+  );
   const configuredMailboxCount = hub.mailboxes.filter(
     (item) => item.isActive && item.credentialConfigured,
   ).length;
@@ -135,52 +234,157 @@ export function MessageHubWorkspace({
     (item) => item.isActive && item.lastSyncedAt && !item.lastErrorCode,
   ).length;
 
-  const loadHub = useCallback(async () => {
-    const response = await fetch("/api/messages", { cache: "no-store" });
+  const fetchHubPage = useCallback(async (cursor?: string) => {
+    const params = new URLSearchParams({ limit: "50" });
+    if (cursor) params.set("cursor", cursor);
+    const response = await fetch(`/api/messages?${params.toString()}`, {
+      cache: "no-store",
+    });
     const result = (await response.json().catch(() => null)) as
       | (MessageHub & { message?: string })
       | null;
     if (!response.ok || !result) {
       throw new Error(result?.message ?? "문자 내역을 새로고침하지 못했습니다.");
     }
-    setHub(result);
-    setSelectedKey((current) =>
-      current && result.items.some((item) => item.key === current)
-        ? current
-        : result.items[0]?.key ?? null,
-    );
+    return result;
   }, []);
 
-  const loadThread = useCallback(async (key: string) => {
-    const requestSequence = ++latestThreadRequest.current;
+  const refreshHub = useCallback(async () => {
+    const result = await fetchHubPage();
+    setHub((current) => ({
+      ...result,
+      items: mergeHubItems(result.items, current.items),
+    }));
+    setSelectedKey((current) => current ?? result.items[0]?.key ?? null);
+    return result;
+  }, [fetchHubPage]);
+
+  const loadMoreHub = useCallback(async () => {
+    if (!hub.nextCursor || hubLoadingMoreRef.current || query.trim()) return;
+    hubLoadingMoreRef.current = true;
+    setHubLoadingMore(true);
     try {
-      const response = await fetch(
-        `/api/messages/thread?key=${encodeURIComponent(key)}`,
-        { cache: "no-store" },
-      );
-      const result = (await response.json().catch(() => null)) as
-        | (MessageThread & { message?: string })
-        | null;
-      if (!response.ok || !result) {
-        throw new Error(result?.message ?? "문자 대화를 불러오지 못했습니다.");
-      }
-      if (requestSequence !== latestThreadRequest.current) return;
-      setThread(result);
-      setLoadError("");
+      const result = await fetchHubPage(hub.nextCursor);
+      setHub((current) => ({
+        ...current,
+        items: mergeHubItems(current.items, result.items),
+        nextCursor: result.nextCursor,
+      }));
     } catch (error) {
-      if (requestSequence !== latestThreadRequest.current) return;
-      setThread(null);
       setLoadError(
         error instanceof Error
           ? error.message
-          : "문자 대화를 불러오지 못했습니다.",
+          : "이전 문자 대화를 불러오지 못했습니다.",
       );
     } finally {
-      if (requestSequence === latestThreadRequest.current) {
-        setThreadLoading(false);
-      }
+      hubLoadingMoreRef.current = false;
+      setHubLoadingMore(false);
     }
+  }, [fetchHubPage, hub.nextCursor, query]);
+
+  const fetchThreadPage = useCallback(async (key: string, cursor?: string) => {
+    const params = new URLSearchParams({ key, limit: "50" });
+    if (cursor) params.set("cursor", cursor);
+    const response = await fetch(`/api/messages/thread?${params.toString()}`, {
+      cache: "no-store",
+    });
+    const result = (await response.json().catch(() => null)) as
+      | (MessageThread & { message?: string })
+      | null;
+    if (!response.ok || !result) {
+      throw new Error(result?.message ?? "문자 대화를 불러오지 못했습니다.");
+    }
+    return result;
   }, []);
+
+  const loadLatestThread = useCallback(
+    async (key: string, polling = false) => {
+      const requestSequence = ++latestThreadRequest.current;
+      const timeline = timelineRef.current;
+      const shouldStickToBottom =
+        !polling ||
+        !timeline ||
+        timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight < 80;
+      try {
+        const result = await fetchThreadPage(key);
+        if (requestSequence !== latestThreadRequest.current) return;
+        setThread((current) =>
+          current?.thread.key === key
+            ? {
+                ...result,
+                timeline: mergeTimeline(current.timeline, result.timeline),
+              }
+            : result,
+        );
+        setLoadError("");
+        if (shouldStickToBottom) {
+          window.requestAnimationFrame(() => {
+            const element = timelineRef.current;
+            if (element) element.scrollTop = element.scrollHeight;
+          });
+        }
+      } catch (error) {
+        if (requestSequence !== latestThreadRequest.current) return;
+        setThread((current) =>
+          current?.thread.key === key ? current : null,
+        );
+        setLoadError(
+          error instanceof Error
+            ? error.message
+            : "문자 대화를 불러오지 못했습니다.",
+        );
+      } finally {
+        if (requestSequence === latestThreadRequest.current) {
+          setThreadLoading(false);
+        }
+      }
+    },
+    [fetchThreadPage],
+  );
+
+  const loadOlderMessages = useCallback(async () => {
+    if (
+      !selectedKey ||
+      thread?.thread.key !== selectedKey ||
+      !thread.nextCursor ||
+      threadLoadingOlderRef.current
+    ) {
+      return;
+    }
+    const element = timelineRef.current;
+    const previousHeight = element?.scrollHeight ?? 0;
+    const previousTop = element?.scrollTop ?? 0;
+    threadLoadingOlderRef.current = true;
+    setThreadLoadingOlder(true);
+    try {
+      const result = await fetchThreadPage(selectedKey, thread.nextCursor);
+      setThread((current) =>
+        current?.thread.key === selectedKey
+          ? {
+              ...current,
+              timeline: mergeTimeline(result.timeline, current.timeline),
+              nextCursor: result.nextCursor,
+            }
+          : current,
+      );
+      window.requestAnimationFrame(() => {
+        const currentElement = timelineRef.current;
+        if (currentElement) {
+          currentElement.scrollTop =
+            previousTop + currentElement.scrollHeight - previousHeight;
+        }
+      });
+    } catch (error) {
+      setLoadError(
+        error instanceof Error
+          ? error.message
+          : "이전 문자를 불러오지 못했습니다.",
+      );
+    } finally {
+      threadLoadingOlderRef.current = false;
+      setThreadLoadingOlder(false);
+    }
+  }, [fetchThreadPage, selectedKey, thread]);
 
   useEffect(() => {
     latestThreadRequest.current += 1;
@@ -188,23 +392,23 @@ export function MessageHubWorkspace({
     const initialTimer = window.setTimeout(() => {
       setLoadError("");
       setThreadLoading(true);
-      void loadThread(selectedKey);
+      void loadLatestThread(selectedKey);
     }, 0);
     const timer = window.setInterval(() => {
-      void loadThread(selectedKey);
+      void loadLatestThread(selectedKey, true);
     }, 15_000);
     return () => {
       window.clearTimeout(initialTimer);
       window.clearInterval(timer);
     };
-  }, [loadThread, selectedKey]);
+  }, [loadLatestThread, selectedKey]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      void loadHub().catch(() => undefined);
+      void refreshHub().catch(() => undefined);
     }, 30_000);
     return () => window.clearInterval(timer);
-  }, [loadHub]);
+  }, [refreshHub]);
 
   useEffect(() => {
     if (!templateOpen) return;
@@ -223,14 +427,41 @@ export function MessageHubWorkspace({
   async function refreshAll() {
     setLoadError("");
     try {
-      await loadHub();
-      if (selectedKey) await loadThread(selectedKey);
+      await refreshHub();
+      if (selectedKey) await loadLatestThread(selectedKey);
     } catch (error) {
       setLoadError(
         error instanceof Error
           ? error.message
           : "문자 내역을 새로고침하지 못했습니다.",
       );
+    }
+  }
+
+  async function handleSent(
+    message: TelephonyMessage,
+    recipient: MessageRecipient,
+  ) {
+    try {
+      const result = await refreshHub();
+      const nextKey =
+        recipient.kind === "directory"
+          ? `case:${recipient.caseIdx}`
+          : message.targetSource === "manual" && message.manualContactId
+            ? `manual:${message.manualContactId}`
+            : result.items.find(
+                (item) =>
+                  recipient.kind === "consultation" &&
+                  item.consultationId === recipient.consultationId,
+              )?.key ?? selectedKey;
+      if (nextKey) {
+        setSelectedKey(nextKey);
+        setThreadLoading(true);
+        await loadLatestThread(nextKey);
+      }
+      setNewMessageOpen(false);
+    } catch {
+      if (selectedKey) void loadLatestThread(selectedKey);
     }
   }
 
@@ -269,10 +500,7 @@ export function MessageHubWorkspace({
                   ×
                 </button>
               </header>
-              <MessageTemplateWorkspace
-                embedded
-                initialItems={initialTemplates}
-              />
+              <MessageTemplateWorkspace embedded initialItems={initialTemplates} />
             </section>
           </div>,
           document.body,
@@ -284,17 +512,15 @@ export function MessageHubWorkspace({
       <section className="message-hub-metrics" aria-label="문자 현황">
         <div>
           <span>고객 대화</span>
-          <strong>{hub.items.length}</strong>
+          <strong>{hub.total}</strong>
         </div>
         <div>
           <span>연결 확인 필요</span>
-          <strong>{hub.items.filter((item) => item.needsConnection).length}</strong>
+          <strong>{hub.needsConnectionTotal}</strong>
         </div>
         <div>
           <span>대표 수신함</span>
-          <strong>
-            {configuredMailboxCount}/{hub.mailboxes.length}
-          </strong>
+          <strong>{configuredMailboxCount}/{hub.mailboxes.length}</strong>
         </div>
         <div className={healthyMailboxCount === configuredMailboxCount ? "is-healthy" : ""}>
           <span>정상 동기화</span>
@@ -316,9 +542,7 @@ export function MessageHubWorkspace({
               />
               <div>
                 <strong>{formatPhone(mailbox.publicNumber ?? mailbox.lineNumber)}</strong>
-                <small>
-                  {formatPhone(mailbox.lineNumber)} · 내선 {mailbox.extension}
-                </small>
+                <small>{formatPhone(mailbox.lineNumber)} · 내선 {mailbox.extension}</small>
               </div>
               <em>
                 {!mailbox.credentialConfigured
@@ -339,6 +563,13 @@ export function MessageHubWorkspace({
       <section className="erp-panel message-hub-panel">
         <aside className="message-thread-sidebar">
           <header>
+            <button
+              className="primary-button message-new-button"
+              onClick={() => setNewMessageOpen(true)}
+              type="button"
+            >
+              + 새 메시지
+            </button>
             <label className="message-thread-search">
               <span className="sr-only">고객 문자 대화 검색</span>
               <svg aria-hidden="true" viewBox="0 0 24 24">
@@ -353,17 +584,28 @@ export function MessageHubWorkspace({
               />
             </label>
             <button
-              className="secondary-button"
+              aria-label="문자 목록 새로고침"
+              className="secondary-button message-refresh-button"
               onClick={() => void refreshAll()}
               type="button"
             >
-              새로고침
+              ↻
             </button>
           </header>
-          <div className="message-thread-list">
+          <div
+            className="message-thread-list"
+            onScroll={(event) => {
+              const element = event.currentTarget;
+              if (
+                element.scrollHeight - element.scrollTop - element.clientHeight < 120
+              ) {
+                void loadMoreHub();
+              }
+            }}
+          >
             {filteredThreads.length === 0 ? (
               <p className="message-thread-empty">
-                {query ? "검색 결과가 없습니다." : "아직 문자 내역이 없습니다."}
+                {query ? "불러온 대화에서 검색 결과가 없습니다." : "아직 문자 내역이 없습니다."}
               </p>
             ) : (
               filteredThreads.map((item) => (
@@ -372,7 +614,9 @@ export function MessageHubWorkspace({
                   key={item.key}
                   onClick={() => {
                     if (item.key === selectedKey) return;
+                    latestThreadRequest.current += 1;
                     setSelectedKey(item.key);
+                    setThread(null);
                     setThreadLoading(true);
                     setLoadError("");
                   }}
@@ -387,19 +631,30 @@ export function MessageHubWorkspace({
                       ? `Case_idx ${item.caseIdx}`
                       : item.receiptCode
                         ? `상담 ${item.receiptCode}`
-                        : "고객 연결 확인 필요"}
+                        : item.targetSource === "manual"
+                          ? "직접 입력"
+                          : "고객 연결 확인 필요"}
                     {item.needsConnection ? <i>미연결</i> : null}
                   </span>
                   <span className="message-thread-preview">
                     <b>{item.lastDirection === "inbound" ? "수신" : "발신"}</b>
                     {item.lastMessagePreview}
                   </span>
-                  <small>
-                    {formatPhone(item.phone)} · {item.messageCount}건
-                  </small>
+                  <small>{formatPhone(item.phone)} · {item.messageCount}건</small>
                 </button>
               ))
             )}
+            {hubLoadingMore ? (
+              <p className="message-thread-loading">이전 대화를 불러오는 중…</p>
+            ) : !query && hub.nextCursor ? (
+              <button
+                className="message-thread-load-more"
+                onClick={() => void loadMoreHub()}
+                type="button"
+              >
+                이전 대화 더 보기
+              </button>
+            ) : null}
           </div>
         </aside>
 
@@ -413,14 +668,16 @@ export function MessageHubWorkspace({
                   ? `Case_idx ${selectedSummary.caseIdx}`
                   : selectedSummary?.receiptCode
                     ? `상담 ${selectedSummary.receiptCode}`
-                    : selectedSummary?.needsConnection
-                      ? "발신 맥락이 없어 고객 연결을 확인해야 합니다."
-                      : "왼쪽에서 고객 대화를 선택해 주세요."}
+                    : selectedSummary?.targetSource === "manual"
+                      ? "직접 입력한 연락처"
+                      : selectedSummary?.needsConnection
+                        ? "발신 맥락이 없어 고객 연결을 확인해야 합니다."
+                        : "왼쪽에서 고객 대화를 선택해 주세요."}
                 {selectedSummary ? ` · ${formatPhone(selectedSummary.phone)}` : ""}
               </p>
             </div>
             <button
-              className="primary-button"
+              className="secondary-button"
               onClick={() => setTemplateOpen(true)}
               type="button"
             >
@@ -428,15 +685,33 @@ export function MessageHubWorkspace({
             </button>
           </header>
 
-          {loadError ? (
-            <p className="error-banner" role="alert">{loadError}</p>
-          ) : null}
+          {loadError ? <p className="error-banner" role="alert">{loadError}</p> : null}
 
-          <div className="message-timeline" aria-live="polite">
+          <div
+            className="message-timeline"
+            aria-live="polite"
+            onScroll={(event) => {
+              if (event.currentTarget.scrollTop < 100) {
+                void loadOlderMessages();
+              }
+            }}
+            ref={timelineRef}
+          >
+            {threadLoadingOlder ? (
+              <p className="message-timeline-loading">이전 문자를 불러오는 중…</p>
+            ) : thread?.thread.key === selectedKey && thread.nextCursor ? (
+              <button
+                className="message-timeline-load-more"
+                onClick={() => void loadOlderMessages()}
+                type="button"
+              >
+                이전 문자 더 보기
+              </button>
+            ) : null}
             {!selectedKey ? (
               <p className="message-conversation-empty">표시할 문자 대화가 없습니다.</p>
             ) : threadLoading || (!loadError && thread?.thread.key !== selectedKey) ? (
-              <p className="message-conversation-empty">대화를 불러오는 중입니다…</p>
+              <p className="message-conversation-empty">최근 대화를 불러오는 중입니다…</p>
             ) : !thread ? (
               <p className="message-conversation-empty">대화를 불러오지 못했습니다.</p>
             ) : (
@@ -470,12 +745,36 @@ export function MessageHubWorkspace({
               ))
             )}
           </div>
-          <p className="message-match-note">
-            수신 문자는 같은 휴대전화번호의 직전 발신 건을 기준으로 Case_idx에 연결됩니다.
-          </p>
+
+          {selectedRecipient ? (
+            <MessageConversationComposer
+              key={selectedRecipient.kind === "manual"
+                ? selectedRecipient.contactId ?? selectedRecipient.phone
+                : selectedRecipient.kind === "consultation"
+                  ? selectedRecipient.consultationId
+                  : `${selectedRecipient.clientIdx}:${selectedRecipient.caseIdx}`}
+              onSent={(message, recipient) => void handleSent(message, recipient)}
+              recipient={selectedRecipient}
+              staffName={staffName}
+              templates={initialTemplates}
+            />
+          ) : (
+            <p className="message-composer-unavailable">
+              이 수신 건은 고객 연결을 확인한 뒤 새 메시지에서 번호를 선택해 보내세요.
+            </p>
+          )}
         </div>
       </section>
       {templateModal}
+      {newMessageOpen ? (
+        <NewMessageDialog
+          onClose={() => setNewMessageOpen(false)}
+          onSent={(message, recipient) => void handleSent(message, recipient)}
+          open
+          staffName={staffName}
+          templates={initialTemplates}
+        />
+      ) : null}
     </div>
   );
 }

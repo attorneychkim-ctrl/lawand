@@ -35,6 +35,7 @@ import {
   legalFriendsDirectoryConsultationCreateSchema,
   legalFriendsDirectoryClickToCallSchema,
   legalFriendsDirectoryMessageSendSchema,
+  manualTelephonyMessageSendSchema,
   staffConsultationCreateSchema,
   telephonyCallDispositionConfirmationSchema,
   telephonyMessageSendSchema,
@@ -1734,7 +1735,7 @@ export function createGatewayServer(options?: {
           return;
         }
         const parsed = legalFriendsDirectoryMessageSendSchema.safeParse(
-          await readJson(request),
+          await readJson(request, MAX_MESSAGE_TEMPLATE_BODY_BYTES),
         );
         if (!parsed.success) {
           sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
@@ -1962,10 +1963,17 @@ export function createGatewayServer(options?: {
         const actor = await options.authService.authorize(sessionToken, [
           ...consultationAccessRoles,
         ]);
+        const cursor = url.searchParams.get("cursor")?.trim() || undefined;
+        const requestedLimit = Number(url.searchParams.get("limit") ?? "50");
         sendJson(
           response,
           200,
-          await options.telephonyService.getMessageHub(actor),
+          await options.telephonyService.getMessageHub(actor, {
+            ...(cursor ? { cursor } : {}),
+            ...(Number.isFinite(requestedLimit)
+              ? { limit: requestedLimit }
+              : {}),
+          }),
         );
         return;
       }
@@ -1993,14 +2001,61 @@ export function createGatewayServer(options?: {
           return;
         }
         const threadKey = url.searchParams.get("key") ?? "";
+        const cursor = url.searchParams.get("cursor")?.trim() || undefined;
+        const requestedLimit = Number(url.searchParams.get("limit") ?? "50");
         const actor = await options.authService.authorize(sessionToken, [
           ...consultationAccessRoles,
         ]);
         sendJson(
           response,
           200,
-          await options.telephonyService.getMessageThread(threadKey, actor),
+          await options.telephonyService.getMessageThread(threadKey, actor, {
+            ...(cursor ? { cursor } : {}),
+            ...(Number.isFinite(requestedLimit)
+              ? { limit: requestedLimit }
+              : {}),
+          }),
         );
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        url.pathname === "/v1/messages/manual"
+      ) {
+        if (
+          !options?.telephonyService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const parsed = manualTelephonyMessageSendSchema.safeParse(
+          await readJson(request, MAX_MESSAGE_TEMPLATE_BODY_BYTES),
+        );
+        if (!parsed.success) {
+          sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        const result = await options.telephonyService.requestManualMessage(
+          parsed.data,
+          actor,
+        );
+        sendJson(response, result.replayed ? 200 : 201, result);
         return;
       }
 
@@ -2420,7 +2475,7 @@ export function createGatewayServer(options?: {
           return;
         }
         const parsed = telephonyMessageSendSchema.safeParse(
-          await readJson(request),
+          await readJson(request, MAX_MESSAGE_TEMPLATE_BODY_BYTES),
         );
         if (!parsed.success) {
           sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
@@ -2790,6 +2845,7 @@ export function createGatewayServer(options?: {
               ? 403
               : error.code === "follow_up_due_invalid" ||
                   error.code === "directory_query_invalid" ||
+                  error.code === "message_cursor_invalid" ||
                   error.code === "message_body_invalid" ||
                   error.code === "message_image_invalid"
                 ? 400

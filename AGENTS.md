@@ -88,6 +88,32 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-14 — ERP 문자 대화형 직접 발송·50건 무한 로딩 후보
+- ERP `/messages`를 휴대전화형 대화 UI로 확장했다. 왼쪽 대화와 오른쪽 말풍선은 각각 최신
+  50건을 먼저 표시하고 목록 하단·대화 상단 스크롤에서 cursor로 50건씩 이어 읽는다. 첫 진입은
+  최신 대화·최신 말풍선을 보여주며, 과거 내용을 읽는 중에는 15초 polling이 스크롤을 강제로
+  내리지 않는다. 선택 대화 하단에는 개인 템플릿/직접 입력, JPG 미리보기·제거, SMS/LMS/MMS
+  byte와 상태 확인을 포함한 고정 작성창을 추가했다.
+- `새 메시지` 모달은 휴대전화 번호 직접 입력, 로그인 직원의 최근 담당 ERP 상담 100건 안의
+  이름·전화·접수번호 필터, 기존 리걸프렌즈 고객 검색을 제공하고 같은 작성창에서 문자와 JPG
+  MMS를 보낸다. migration `0058_message_conversation_composer.sql`은 직접 번호 HMAC과 번호·
+  표시명 AES-GCM 원장, 수·발신 대상 연결·제약·최소 권한을 추가한다. 동일 번호는 같은 직접
+  대화로 재사용하고 대표 수신함의 최신 발신 매칭도 해당 대화를 상속한다. outbox·SSE·로그에는
+  개인정보·본문을 넣지 않으며 직원 주 회선·개인 템플릿·센트릭스/SOLAPI 설정을 gateway에서
+  다시 검증한다. migration SHA-256은
+  `a1fba32716f153765c3471454635a57a5c8861f767e08174dfb6ac774c98f195`이고
+  `PROJECT_PLAN.md`는 v1.37이다.
+- gateway 목록 쿼리는 과거 수·발신 500건을 모두 조인·복호화하던 경계를 없애고, SQL CTE에서
+  대화 최신 원장·건수와 선택 대화 ID를 cursor 처리한 뒤 선택된 50건만 조인·복호화한다.
+  합성 `CB` 스키마가 있는 임시 PostgreSQL에 migration `0000..0058` 59개를 두 번 적용하고,
+  암호화 직접 대화 55개와 한 대화의 문자 56개로 목록 50+5·말풍선 50+6, 중복 0·enum·제약·
+  역할별 권한을 실제 서비스 경계에서 확인했다. 임시 DB와 검증용 역할은 삭제했다.
+- core 84개·gateway 138개 테스트, DB schema check, 전체 5패키지 typecheck·lint·production
+  build와 `git diff --check`를 통과했다. 이 워크트리에서는 main 병합·운영 migration·gateway/
+  ERP 배포·실제 SMS/MMS와 모바일 Chrome 실기기 canary를 수행하지 않는다. 운영 반영 시
+  암호화 RDS snapshot 뒤 `0058`을 먼저 적용하고 gateway와 ERP를 같은 릴리스 ID로 전환한 뒤,
+  직접 SMS/JPG MMS·대표 회신 연결·모바일 새로고침 hydration 경고 0을 통제 확인한다.
+
 ### 2026-08-13 — 완료 워크트리 전수 통합·ARM64 ECR 불변 이미지 첫 운영 배포
 - 완료 worktree 7개를 `main`에 병합하고 HERDR worktree 9개와 원격 `origin/worktree/*` 38개를
   전수 대조해 모든 원격 HEAD가 `main` ancestor임을 확인했다. 상담 묶음·직원 설정 접기·
