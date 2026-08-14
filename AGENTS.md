@@ -88,6 +88,25 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-14 — ERP 문자 좌·우 독립 스크롤·최신 하단 정렬 보강 후보
+- `/messages`의 좌측 목록과 우측 대화에 overflow는 있었지만 중간 Grid 자식의 기본
+  `min-height: auto`와 overflow 경계 누락 때문에 콘텐츠가 부모 높이 아래로 줄지 못하고
+  잘렸다. 우측은 오류 배너가 없을 때 말풍선이 `minmax(0, 1fr)`이 아니라 두 번째 auto 행에
+  자동 배치되는 문제도 함께 있었다. 좌·우 중간 자식에 `min-height: 0`·`overflow: hidden`,
+  실제 목록/말풍선에 독립 세로 스크롤·touch pan을 명시하고 우측 header/error/timeline/
+  composer의 Grid 행을 고정했다.
+- 데스크톱 문자 패널은 820~960px, 모바일 대화는 약 9:19.5 비율의 780~900px로 늘리고
+  모바일 좌측 목록도 460~560px로 확보했다. 첫 선택·대화 전환·발송 뒤의 하단 이동과 이전
+  50건 prepend 뒤 위치 복원을 React DOM commit 이후 layout effect에서 실행한다. MMS 이미지가
+  늦게 로드돼도 최신 영역에 있던 경우만 하단을 유지하며, 과거 열람 중 polling은 기존처럼
+  강제 이동하지 않는다.
+- `getMessageHub/getMessageThread`는 모든 직원 역할에 같은 회사 전체 수·발신 원장을 반환하고
+  actor별 message filter가 없음을 재확인했다. 개인 템플릿 소유권과 실제 발송 직원·열람 감사는
+  유지하며 화면 하단에도 전체 직원 공유 정책을 명시했다. ERP typecheck·lint, 전체 5패키지
+  production build, `git diff --check`와 headless Chrome 1440×1080·390×844 계산 레이아웃에서
+  좌·우 `scrollHeight > clientHeight`, 하단 `scrollTop > 0` 검증을 통과했다. migration·gateway·
+  운영 데이터·운영 배포는 변경하지 않았다. `PROJECT_PLAN.md`는 v1.41이다.
+
 ### 2026-08-14 — 완료 worktree 8개 통합·세 앱/0058~0060 운영 배포·후기 API 핫픽스
 - HERDR worktree 9개와 원격 `origin/worktree/*` 46개를 전수 대조해 완료 브랜치 8개를 모두
   main에 병합했고, 모든 원격 HEAD가 main ancestor이며 제외·진행 중 브랜치는 없다. 통합 이미지

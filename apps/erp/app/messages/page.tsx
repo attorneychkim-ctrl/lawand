@@ -66,7 +66,8 @@ export default async function MessagesPage() {
           />
         )}
         <p className="security-note">
-          전체 문자 본문과 고객 연결 정보는 인증된 직원 화면에서만 복호화됩니다.
+          회사에서 주고받은 전체 문자 내역은 인증된 모든 직원이 함께 보며, 열람과 발송
+          직원은 감사 원장에 기록됩니다.
         </p>
       </main>
     </>
