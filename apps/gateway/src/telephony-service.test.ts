@@ -5,11 +5,46 @@ import {
   canonicalizePhoneDeskObservedCalls,
   externalInboundNotificationTargetUserIds,
   isCentrexInboundAnswerDeliveryDelayed,
+  isStaleOneSidedInternalCall,
   legalFriendsResidenceRegion,
   phoneDeskItemAssignees,
   phoneDeskItemMatchesAssignee,
   phoneDeskItemMatchesFilter,
 } from "./telephony-service.js";
+
+test("상대 leg 없는 내선만 3분 뒤 확인 필요 대상으로 낮춘다", () => {
+  const snapshotAt = new Date("2026-08-14T01:10:00.000Z");
+  assert.equal(
+    isStaleOneSidedInternalCall({
+      scope: "internal",
+      state: "connected",
+      lastEventAt: new Date("2026-08-14T01:06:59.999Z"),
+      activeLegCount: 1,
+      snapshotAt,
+    }),
+    true,
+  );
+  assert.equal(
+    isStaleOneSidedInternalCall({
+      scope: "internal",
+      state: "connected",
+      lastEventAt: new Date("2026-08-14T01:00:00.000Z"),
+      activeLegCount: 2,
+      snapshotAt,
+    }),
+    false,
+  );
+  assert.equal(
+    isStaleOneSidedInternalCall({
+      scope: "external",
+      state: "connected",
+      lastEventAt: new Date("2026-08-14T01:00:00.000Z"),
+      activeLegCount: 1,
+      snapshotAt,
+    }),
+    false,
+  );
+});
 
 test("외부 수신전화 알림은 담당 여부와 무관하게 활성 직원 전체를 대상으로 한다", () => {
   assert.deepEqual(

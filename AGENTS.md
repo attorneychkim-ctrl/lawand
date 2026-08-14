@@ -88,6 +88,29 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-14 — 일반 내선 종료 동기화·호전환 문맥 보강 후보
+- 운영 DB와 Windows bridge 로그를 읽기 전용으로 대조했다. 비종료 internal root 6건 중 5건은
+  같은 provider root의 수신 leg에 `HCAUSE=16` 종료가 기록됐지만 발신 leg와 root만
+  `connected`로 남았고, 1건은 발신 endpoint의 ring/channel만 있어 종료 근거가 없었다. 관련
+  bridge는 모두 online이고 heartbeat 0~13초, queue/dead-letter 0이라 전역 전달 지연이 아니라
+  gateway의 일반 내선 sibling 종료 동기화 누락이 주원인이다. 외부 고객 통화와 겹친 3건은
+  bridge의 `contextProviderCallId`가 null이어서 별도 내선으로 저장된 호전환 상담 후보였다.
+- 일반 내선·상담 leg는 같은 root·kind·provider call ID 한쪽의 exact terminal cause를 반대쪽에도
+  동기화하고, 종료된 leg/root는 늦은 `CHANNEL_LIST`로 다시 connected가 되지 않게 했다. bridge
+  문맥이 없어도 내선을 건 outbound endpoint에 유일한 active connected customer leg가 있으면
+  상담 통화로 귀속하되, 시간 근접만으로는 합치지 않는다. 종료 관측이 전혀 없는 단일 활성
+  internal leg는 DB에서 추정 종료하지 않고 3분 뒤 실시간 카드에서 제외하며 전화데스크에는
+  `확인 필요`로 표시한다.
+- migration `0058_centrex_internal_terminal_recovery.sql`은 기존 internal root에서 실제 종료 leg와
+  같은 provider인 활성 sibling만 닫고 모든 leg가 종료된 root만 종료한다. 합성 PostgreSQL에
+  `0000..0058`을 적용한 뒤 분리 종료 1건은 정확히 복구되고 종료 근거 없는 한쪽짜리 1건은
+  유지되는지와 migration 2회 적용 멱등성을 검증했다. gateway 142개 테스트, 전체 5패키지
+  typecheck·lint·production build, DB schema check와 `git diff --check`를 통과했다.
+  `PROJECT_PLAN.md`는 v1.37이다.
+- 운영 DB·Windows bridge·앱·통화 원장은 변경하거나 재시작하지 않았다. 이 워크트리에서는
+  main 병합·운영 migration·배포를 하지 않으며, 운영 반영 시 RDS snapshot 뒤 `0058`을 먼저
+  적용하고 gateway와 ERP를 같은 릴리스로 전환한 다음 실제 내선·호전환 종료를 통제 확인한다.
+
 ### 2026-08-13 — 완료 워크트리 전수 통합·ARM64 ECR 불변 이미지 첫 운영 배포
 - 완료 worktree 7개를 `main`에 병합하고 HERDR worktree 9개와 원격 `origin/worktree/*` 38개를
   전수 대조해 모든 원격 HEAD가 `main` ancestor임을 확인했다. 상담 묶음·직원 설정 접기·

@@ -53,6 +53,7 @@ export function resolveCentrexRingingRoot(input: {
   partyKind: "external" | "internal" | "unknown";
   hasExactExternalRoot: boolean;
   hasContextExternalRoot: boolean;
+  hasActiveEndpointExternalRoot: boolean;
   incomingLineMatchesEndpoint: boolean;
 }): CentrexRootResolution {
   if (input.partyKind === "external") {
@@ -62,7 +63,7 @@ export function resolveCentrexRingingRoot(input: {
       : "needs_confirmation";
   }
   if (input.partyKind === "internal") {
-    return input.hasContextExternalRoot
+    return input.hasContextExternalRoot || input.hasActiveEndpointExternalRoot
       ? "confirmed_consultation"
       : "standalone_internal";
   }
@@ -105,6 +106,21 @@ export function isConfirmedCallPickupEvidence(input: {
     input.sourceEndpointId !== input.targetEndpointId &&
     !input.hasTargetLeg &&
     !input.hasTransferRelation;
+}
+
+export function shouldMirrorCentrexTerminalSibling(input: {
+  rootScope: "external" | "internal";
+  endedKind: "customer" | "consultation" | "internal";
+}): boolean {
+  return input.endedKind === "consultation" ||
+    (input.rootScope === "internal" && input.endedKind === "internal");
+}
+
+export function canCentrexChannelsAdvanceState(input: {
+  rootState: "ringing" | "connected" | "transferring" | "needs_confirmation" | "ended";
+  legState: "ringing" | "connected" | "ended";
+}): boolean {
+  return input.rootState !== "ended" && input.legState !== "ended";
 }
 
 function maskedParty(value: string) {
@@ -214,6 +230,41 @@ export function createCentrexCallActivityService(options: {
     const rootIds = new Set(rows.map((row) => row.root.id));
     if (rootIds.size !== 1) return null;
     return rows.find((row) => row.leg.state !== "ended") ?? rows[0] ?? null;
+  }
+
+  /**
+   * bridge가 호전환 직전 외부 provider 문맥을 지운 경우에도, 내선을 건 outbound endpoint에서
+   * 그 시점에 실제 연결 중인 고객 leg가 정확히 하나면 그 root를 상담 통화 문맥으로 사용한다.
+   * 시간 근접만으로는 후보를 만들지 않고, 여러 활성 외부 root가 있으면 귀속하지 않는다.
+   */
+  async function activeExternalContextByEndpoint(
+    tx: Transaction,
+    endpointId: string,
+    occurredAt: Date,
+  ): Promise<{ root: RootRow; leg: LegRow } | null> {
+    const rows = await tx
+      .select({ root: telephonyCallRoots, leg: telephonyCallLegs })
+      .from(telephonyCallRoots)
+      .innerJoin(
+        telephonyCallLegs,
+        eq(telephonyCallLegs.rootId, telephonyCallRoots.id),
+      )
+      .where(
+        and(
+          eq(telephonyCallRoots.scope, "external"),
+          ne(telephonyCallRoots.state, "ended"),
+          eq(telephonyCallLegs.endpointId, endpointId),
+          eq(telephonyCallLegs.kind, "customer"),
+          eq(telephonyCallLegs.state, "connected"),
+          lte(telephonyCallRoots.startedAt, occurredAt),
+          lte(telephonyCallLegs.startedAt, occurredAt),
+        ),
+      )
+      .orderBy(desc(telephonyCallLegs.lastEventAt))
+      .limit(2)
+      .for("update");
+    const rootIds = new Set(rows.map((row) => row.root.id));
+    return rootIds.size === 1 ? rows[0] ?? null : null;
   }
 
   async function legByAnyProviderValue(
@@ -581,7 +632,7 @@ export function createCentrexCallActivityService(options: {
         }
       }
     }
-    const contextRoot = event.contextProviderCallId
+    const explicitContextRoot = event.contextProviderCallId
       ? await rootByProviderValue(
           tx,
           event.contextProviderCallId,
@@ -589,6 +640,20 @@ export function createCentrexCallActivityService(options: {
           true,
         )
       : null;
+    const endpointContextRoot =
+      event.remotePartyKind === "internal" &&
+      event.direction === "outbound" &&
+      explicitContextRoot?.root.scope !== "external"
+        ? await activeExternalContextByEndpoint(
+            tx,
+            event.endpointId,
+            occurredAt,
+          )
+        : null;
+    const contextRoot =
+      explicitContextRoot?.root.scope === "external"
+        ? explicitContextRoot
+        : endpointContextRoot;
     const exactExternalRoot =
       event.remotePartyKind === "external" &&
       sharedRoot?.root.scope === "external" &&
@@ -602,7 +667,9 @@ export function createCentrexCallActivityService(options: {
     const resolution = resolveCentrexRingingRoot({
       partyKind: event.remotePartyKind,
       hasExactExternalRoot: Boolean(exactExternalRoot),
-      hasContextExternalRoot: contextRoot?.root.scope === "external",
+      hasContextExternalRoot:
+        explicitContextRoot?.root.scope === "external",
+      hasActiveEndpointExternalRoot: Boolean(endpointContextRoot),
       incomingLineMatchesEndpoint:
         event.direction !== "inbound" ||
         event.incomingLineNumber === endpoint.lineNumber,
@@ -650,7 +717,9 @@ export function createCentrexCallActivityService(options: {
           correlationStatus: "confirmed",
           correlationKey: `consultation:${contextRoot.root.id}:${event.providerCallId}`,
           evidence: {
-            bridgeContext: true,
+            bridgeContext:
+              explicitContextRoot?.root.scope === "external",
+            activeEndpointCustomerLeg: Boolean(endpointContextRoot),
             sharedInternalProviderRoot: Boolean(sharedRoot),
           },
           occurredAt,
@@ -913,6 +982,24 @@ export function createCentrexCallActivityService(options: {
       }
     }
     if (!found) return null;
+    await recordIdentifier(tx, {
+      rootId: found.root.id,
+      legId: found.leg.id,
+      endpointId: found.leg.endpointId,
+      role: "channel",
+      providerValue: event.relatedProviderCallId,
+      occurredAt,
+    });
+    // terminal 상태는 단조 증가한다. 지연 도착한 CHANNEL_LIST가 이미 종료된 leg/root를
+    // 다시 connected로 열어 전화데스크에 유령 통화를 만들 수 없다.
+    if (
+      !canCentrexChannelsAdvanceState({
+        rootState: found.root.state,
+        legState: found.leg.state,
+      })
+    ) {
+      return found;
+    }
     const connectedAt = found.leg.connectedAt
       ? earliest(found.leg.connectedAt, occurredAt)
       : occurredAt;
@@ -933,15 +1020,6 @@ export function createCentrexCallActivityService(options: {
       .where(eq(telephonyCallLegs.id, found.leg.id))
       .returning();
     if (!leg) return null;
-
-    await recordIdentifier(tx, {
-      rootId: found.root.id,
-      legId: leg.id,
-      endpointId: leg.endpointId,
-      role: "channel",
-      providerValue: event.relatedProviderCallId,
-      occurredAt,
-    });
 
     const transferConfirmed =
       leg.kind === "customer" && found.leg.correlationStatus === "pending";
@@ -1030,7 +1108,10 @@ export function createCentrexCallActivityService(options: {
       .returning();
     if (!leg) return null;
 
-    if (leg.kind === "consultation") {
+    if (shouldMirrorCentrexTerminalSibling({
+      rootScope: found.root.scope,
+      endedKind: leg.kind,
+    })) {
       await tx
         .update(telephonyCallLegs)
         .set({
@@ -1044,7 +1125,7 @@ export function createCentrexCallActivityService(options: {
           and(
             eq(telephonyCallLegs.rootId, found.root.id),
             ne(telephonyCallLegs.id, leg.id),
-            eq(telephonyCallLegs.kind, "consultation"),
+            eq(telephonyCallLegs.kind, leg.kind),
             eq(telephonyCallLegs.providerCallId, leg.providerCallId),
             inArray(telephonyCallLegs.state, ["ringing", "connected"]),
           ),
@@ -1243,6 +1324,33 @@ export function createCentrexCallActivityService(options: {
       .where(eq(telephonyCallLegs.id, linked.leg.id))
       .returning();
     if (!endedLeg) return;
+
+    if (shouldMirrorCentrexTerminalSibling({
+      rootScope: linked.root.scope,
+      endedKind: endedLeg.kind,
+    })) {
+      await tx
+        .update(telephonyCallLegs)
+        .set({
+          state: "ended",
+          endedAt,
+          providerEndCause: input.providerEndCause ?? "legacy_unknown",
+          lastEventAt: sql`greatest(${telephonyCallLegs.lastEventAt}, ${input.lastEventAt})`,
+          updatedAt: input.receivedAt,
+        })
+        .where(
+          and(
+            eq(telephonyCallLegs.rootId, linked.root.id),
+            ne(telephonyCallLegs.id, endedLeg.id),
+            eq(telephonyCallLegs.kind, endedLeg.kind),
+            eq(
+              telephonyCallLegs.providerCallId,
+              endedLeg.providerCallId,
+            ),
+            inArray(telephonyCallLegs.state, ["ringing", "connected"]),
+          ),
+        );
+    }
 
     const activeLegs = await tx
       .select({
