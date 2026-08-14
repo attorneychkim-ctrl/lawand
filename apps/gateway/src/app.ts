@@ -48,6 +48,10 @@ import type { ConsultationEventSource } from "./consultation-events.js";
 import type { TelephonyInboundEventSource } from "./telephony-inbound-events.js";
 import type { TelephonyDeskEventSource } from "./telephony-desk-events.js";
 import {
+  parseTelephonyRealtimeAck,
+  type TelephonyRealtimeMonitor,
+} from "./telephony-realtime-monitor.js";
+import {
   CENTREX_BRIDGE_COMMAND_NEXT_PATH,
   CENTREX_BRIDGE_COMMAND_RESULT_PREFIX,
   CENTREX_BRIDGE_CLOCK_SKEW_SECONDS,
@@ -258,6 +262,10 @@ export function createGatewayServer(options?: {
   consultationEvents?: ConsultationEventSource;
   telephonyInboundEvents?: TelephonyInboundEventSource;
   telephonyDeskEvents?: TelephonyDeskEventSource;
+  telephonyRealtimeMonitor?: Pick<
+    TelephonyRealtimeMonitor,
+    "createDelivery" | "acknowledge"
+  >;
   databasePoolHealth?: () => Record<
     "request" | "listener",
     {
@@ -515,6 +523,48 @@ export function createGatewayServer(options?: {
       }
 
       if (
+        request.method === "POST" &&
+        url.pathname === "/v1/telephony-realtime/ack"
+      ) {
+        if (
+          !options?.telephonyRealtimeMonitor ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          )
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        // deliveryId는 권한 확인을 통과한 SSE 연결에만 발급되는 단기 capability다.
+        // ACK마다 세션 DB를 다시 읽으면 한 통화가 전 직원 탭의 DB 조회 fan-out으로
+        // 바뀌므로, 내부 API 키·세션 cookie 존재·미사용 deliveryId를 함께 확인한다.
+        const parsed = parseTelephonyRealtimeAck(await readJson(request));
+        if (!parsed) {
+          sendJson(response, 400, { error: "invalid_realtime_ack" });
+          return;
+        }
+        const result = options.telephonyRealtimeMonitor.acknowledge(parsed);
+        sendJson(
+          response,
+          result.status === "recorded"
+            ? 202
+            : result.status === "replayed"
+              ? 200
+              : 410,
+          result,
+        );
+        return;
+      }
+
+      if (
         request.method === "GET" &&
         url.pathname === "/v1/consultation-events/stream"
       ) {
@@ -712,10 +762,15 @@ export function createGatewayServer(options?: {
               });
               return;
             }
+            const realtime = options.telephonyRealtimeMonitor?.createDelivery(
+              message.notification,
+            );
             sendSseEvent(
               response,
               "telephony.desk.changed",
-              message.notification,
+              realtime
+                ? { ...message.notification, realtime }
+                : message.notification,
             );
           },
         );
