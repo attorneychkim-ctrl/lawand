@@ -87,7 +87,33 @@ type LegalFriendsAssignee = {
   memberIdx: number;
 };
 
+type StoredRegistrationName = {
+  consultationId: string;
+  anonymousLabel: string;
+  preferredNameCiphertext: Buffer | null;
+  preferredNameNonce: Buffer | null;
+  preferredNameKeyVersion: string | null;
+};
+
 class LegalFriendsDependencyPendingError extends Error {}
+
+export function resolveStoredRegistrationName(
+  protection: Pick<DataProtection, "decrypt">,
+  request: StoredRegistrationName,
+): string {
+  return request.preferredNameCiphertext &&
+    request.preferredNameNonce &&
+    request.preferredNameKeyVersion
+    ? protection.decrypt(
+        {
+          ciphertext: request.preferredNameCiphertext,
+          nonce: request.preferredNameNonce,
+          keyVersion: request.preferredNameKeyVersion,
+        },
+        `consultations.preferred_name:${request.consultationId}`,
+      )
+    : request.anonymousLabel;
+}
 
 function deliveryFailure(error: unknown): DeliveryFailure {
   if (error instanceof LegalFriendsDependencyPendingError) {
@@ -395,6 +421,7 @@ export function createOutboxWorker(options: {
     const [request] = await db
       .select({
         id: consultationRequests.id,
+        consultationId: consultationRequests.consultationId,
         mode: consultationRequests.mode,
         contactChannel: consultationRequests.contactChannel,
         phoneCiphertext: consultationRequests.phoneCiphertext,
@@ -483,19 +510,7 @@ export function createOutboxWorker(options: {
             concern: "카카오 채팅방에서 상담 내용을 확인",
           }
         : consultationIntakeAnswersSchema.parse(storedIntake);
-    const name =
-      request.preferredNameCiphertext &&
-      request.preferredNameNonce &&
-      request.preferredNameKeyVersion
-        ? protection.decrypt(
-            {
-              ciphertext: request.preferredNameCiphertext,
-              nonce: request.preferredNameNonce,
-              keyVersion: request.preferredNameKeyVersion,
-            },
-            `consultations.preferred_name:${event.aggregateId}`,
-          )
-        : request.anonymousLabel;
+    const name = resolveStoredRegistrationName(protection, request);
 
     const assignee = "registrationTarget" in envelope.data
       ? {

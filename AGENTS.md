@@ -88,6 +88,22 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-14 — 묶음 카카오 상담 리걸프렌즈 등록 실패 수정 후보
+- 12:41 KST의 유일한 리걸프렌즈 `invalid_stored_data` dead 원장을 운영 RDS와 gateway에서
+  읽기 전용으로 대조했다. 외부 실행 aggregate는 대표 상담이지만 event `requestId`는 활성
+  묶음의 카카오 선택 전화 구성 상담을 가리켰고, 구성 상담의 선호 이름 암호문을 대표 상담
+  ID AAD로 복호화해 인증 태그 검증이 실패한 것이 원인이다. 구성 상담 ID로는 이름 복호화와
+  리걸프렌즈 payload 생성이 모두 성공했고 전화 형식·거주지역·담당 `member_idx`도 정상이다.
+  같은 경계의 운영 등록은 이 한 건뿐이며 사건 연결과 외부 API 호출은 생성되지 않았다.
+- 리걸프렌즈 워커가 `consultation_requests.consultation_id`를 함께 읽고 암호문 소유 상담
+  ID로 선호 이름을 복호화하도록 수정했다. 대표와 구성 상담 ID가 다른 AES-GCM fixture 및
+  선호 이름 없는 fallback 회귀 테스트를 추가했다. gateway 160개 테스트, 전체 5패키지
+  typecheck·lint·production build, DB schema check와 `git diff --check`를 통과했고
+  `PROJECT_PLAN.md`는 v1.41이다.
+- migration·운영 데이터 변경·외부 호출·main 병합·운영 배포는 수행하지 않았다. 운영 반영은
+  gateway 새 digest로 전환한 뒤 사건 연결이 없는 이 dead event 하나만 기존 시도 원장을
+  보존한 채 2차 시도로 재대기시키고, 리걸프렌즈 사건 연결·ERP 완료 표시·새 dead 0을 확인한다.
+
 ### 2026-08-14 — 완료 worktree 8개 통합·세 앱/0058~0060 운영 배포·후기 API 핫픽스
 - HERDR worktree 9개와 원격 `origin/worktree/*` 46개를 전수 대조해 완료 브랜치 8개를 모두
   main에 병합했고, 모든 원격 HEAD가 main ancestor이며 제외·진행 중 브랜치는 없다. 통합 이미지
