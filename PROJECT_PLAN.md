@@ -1,4 +1,4 @@
-# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.39)
+# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.40)
 
 > 이 문서는 새 로앤 홈페이지 + 새 ERP + 리걸플로/리걸프렌즈 연동을 하나의 플랫폼으로
 > 묶기 위한 **저장소 구조·아키텍처 설계 초안**이다. 코덱스/클로드코드 세션이 번갈아
@@ -1037,6 +1037,14 @@
 > digest로 순서대로 적용하고, 전화·문자·후기 경계를 함께 쓰는 gateway·ERP와 공개 답글을
 > 표시하는 홈페이지를 같은 릴리스 ID로 전환한다. Windows bridge와 기프티쇼 외부 API는 이번
 > 릴리스 대상이 아니다.
+> 2026-08-14 릴리스 `20260814T044148Z-integrated-telephony-messaging-reviews-v1`로 이
+> 통합 경계를 운영 반영했다. GitHub Actions가 검증한 `main`에서 세 `linux/arm64` 이미지를
+> private ECR에 게시했고, 암호화 RDS snapshot 뒤 같은 gateway digest로 `0058..0060`을 적용해
+> migration 원장 61개와 새 테이블 6개를 확인했다. 홈페이지·ERP·gateway는 tag가 아닌 digest로
+> 전환했다. 인증 smoke에서 발견한 후기 목록 raw SQL 시각의 문자열 반환 경계는 커밋
+> `d6e0022b142bcf9b282a1ea25fcbe5f345379d32`와 gateway 전용 핫픽스 릴리스
+> `20260814T052158Z-review-list-timestamp-hotfix-v1`로 보정했다. 실제 상담·리걸프렌즈·문자·
+> MMS canary를 새로 만들지는 않았고 통화 원장도 강제 종료·보정하지 않았다.
 
 ---
 
@@ -2180,8 +2188,9 @@ Manager와 별도 역할·보안그룹·TLS 기준을 적용한다.
 - [x] `/messages` 대화형 작성 로컬 출시 후보: 대화·말풍선 각 50건 cursor 무한 로딩,
   최신 말풍선 기본 정렬·과거 열람 중 스크롤 보존, 선택 대화 하단 직접 입력/JPG 작성창,
   ERP·리걸프렌즈·직접 번호 새 메시지 모달, `0059` 암호화 직접 대상 원장·비식별 outbox
-- [ ] 운영 migration `0058..0060`·homepage/gateway/ERP 통합 배포 → 기존 Case_idx/상담 대화 보존,
-  직접 대상 권한·암호화와 통제 SMS/JPG MMS·대표 수신 회신 연결·50건 cursor canary
+- [x] 운영 migration `0058..0060`·homepage/gateway/ERP 통합 배포 → 기존 Case_idx/상담 대화 보존,
+  직접 대상 권한·암호화, 후기관리·답글·요청 경계와 인증 화면/API 운영 smoke
+- [ ] `/messages` 통제 SMS/JPG MMS·대표 수신 회신 연결·50건 cursor canary
 - [x] 운영 migration `0044`·gateway/ERP 통합 배포 → `/messages`와 대표 mailbox 7개 비활성
   상태·권한·기존 대화 운영 검증
 - [x] 대표 계정 7개 TTY `userinfo` 검증 연결

@@ -88,6 +88,55 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-14 — 완료 worktree 8개 통합·세 앱/0058~0060 운영 배포·후기 API 핫픽스
+- HERDR worktree 9개와 원격 `origin/worktree/*` 46개를 전수 대조해 완료 브랜치 8개를 모두
+  main에 병합했고, 모든 원격 HEAD가 main ancestor이며 제외·진행 중 브랜치는 없다. 통합 이미지
+  소스 `53812080d7cae06a9e53bd15ede10ff1898d7d1e`와 후기 API 핫픽스 소스
+  `d6e0022b142bcf9b282a1ea25fcbe5f345379d32`는 각각 배포 시점 `origin/main`과 일치한다.
+  GitHub Actions 실행 `31770031030`과 `31772177143`은 모두 성공했다. 전체 5패키지 typecheck·
+  lint·production build, core 86개·최종 gateway 158개 테스트, DB schema check, 서비스 워커·
+  배포 스크립트 syntax와 `git diff --check`를 통과했다.
+- 통합 릴리스 `20260814T044148Z-integrated-telephony-messaging-reviews-v1`의 ECR digest는 홈페이지
+  `sha256:5687c693cce41204f5cca18ffbfc6e422a278b86e230165bbd0eb90bbc1d30cc`, ERP
+  `sha256:fe5749a7edf7e424da812c1e4c5badb892b32b5be64fe48734b6e48fcdab60d4`, gateway
+  `sha256:56447346970457374ff47cd694468387425795647ff9b73d51fb48971f03d665`다. 모두
+  `linux/arm64`와 커밋을 대조한 뒤 tag가 아닌 digest로 전환했다. ECR scan은 세 앱과 핫픽스
+  gateway 모두 기존과 같은 CRITICAL 3·HIGH 10·MEDIUM 8·LOW 1이며 새 탐지는 없다.
+- 변경 전 암호화 RDS snapshot
+  `lawand-prod-pre-integrated-telephony-messaging-reviews-20260814t044148z`은 available·100%다.
+  같은 gateway digest로 `0058..0060`을 적용해 운영 migration 원장 61개와 새 테이블 6개,
+  후기 함수 앱 실행 권한·PUBLIC grant 0을 확인했다. 해시는 순서대로
+  `506683223a6a0680de75c9a533b05779047d0f76b13c156c0b9c06a7847866fe`,
+  `a1fba32716f153765c3471454635a57a5c8861f767e08174dfb6ac774c98f195`,
+  `6f4780749d74e769e74cba3b96d2c4a6d7f0f1dfd6ef2ed5c4099ec77830152c`로 Git과 일치한다.
+  `0058`은 실제 종료 근거가 있던 stale internal leg 5건만 닫고 근거 없는 1건은 보존했다.
+- 인증 smoke에서 후기 목록 raw SQL의 `occurred_at`이 문자열인데 `Date`로 가정해
+  `/api/reviews`가 500인 경계를 발견했다. 문자열·Date를 모두 검증해 ISO로 직렬화하는 회귀
+  테스트를 추가하고 핫픽스 릴리스 `20260814T052158Z-review-list-timestamp-hotfix-v1`로 gateway만
+  새 digest `sha256:eb013dc28b17fdde5e6b2fb255eecc14509a451203d2f3e80a47bcbd52357bf3`에
+  전환했다. 최종 image ID는 gateway
+  `sha256:37d880601772e37e4a5f835f2ff26763dc73a0686016896ac75e1e1c14a879c1`, 홈페이지
+  `sha256:d95d28089e99e3c7f502541679b35281c561862493d88121ec4ac5358366c6b5`, ERP
+  `sha256:d0eac77e0d067cbb1e91718d96c2c3cbcf87942daddb8cb984db0a6e04ce3458`다.
+- health 뒤 gateway rollback은 `sha256:597be0d81989911180c5e51a22577550537bd9623f8b34f291f774ad44d78434`,
+  `sha256:873a9123b65a1c69ebf9faa939ec0b4e166446d2210285f9286201964a63d49b`이고,
+  홈페이지 rollback은 `sha256:00cdfc9f487b95ee977a35e3b430a70540ea5f0e5ceaf1728fbaf1464f853483`,
+  `sha256:d88958347f469b7580fcc7d80d448bed7821468962249dfd13a7127bf2d8f89e`, ERP rollback은
+  `sha256:a5de4f57e318fcfce82c7076ff6dd187aa1259ca1977314557f33960df4ec6c7`,
+  `sha256:ad228da490f8bbf04049d9e76530264c3106e592899741c91cdbecaed716e5c4`다.
+  BuildKit cache는 홈페이지 1.421GB·ERP 1.429GB·gateway 1.381GB로 모두 4 GiB 아래다. 각 서버
+  source release는 2개, 현재·rollback 2개만 보존했고 정리 원장은 서버
+  `/var/log/lawand/deployments.log`에 기록했다. 세 앱과 Caddy active, restart 0, 환경파일 600,
+  bridge key 51, 핫픽스 뒤 error journal·CloudWatch ALARM 0이다.
+- 정식·EIP HTTPS health와 홈페이지 `/bank`·후기 목록/작성, ERP 로그인·알림 자산이 200이다.
+  임시 5분 인증 세션으로 ERP 상담·문자·후기·전화데스크·고객·직원 화면과 관련 API를 모두
+  200으로 확인하고 세션을 삭제했다. gateway 풀은 request waiting 0/20, LISTEN 4/4다. 사용자
+  승인에 따라 활성 통화는 전환 차단 조건에서 제외했고 원장을 강제 종료·보정하지 않았다.
+  최종 활성 root는 외부 1·내부 1, leg 2·수신 1이며 배포 구간 발신·받기 명령은 0, 실제 직원
+  문자 3건은 모두 성공했다. 새 릴리스에서 생성된 dead outbox는 0이다. 기존 dead 6건은 배포
+  전 생성된 문자 5건(8월 10~11일)과 리걸프렌즈 등록 1건(12:41 KST)으로 별도 보존했다.
+  실제 상담·리걸프렌즈·알림톡·문자/MMS·전화 canary는 새로 만들지 않았다.
+
 ### 2026-08-14 — 완료 worktree 8개 main 통합·ARM64 ECR 운영 배포 준비
 - `HERDR_ENV=1`에서 main과 HERDR worktree 9개, 원격 `origin/worktree/*` 46개를 전수 대조했다.
   미반영이던 `brave-forest-cdd8`, `green-valley-74fb`, `lucky-field-cb94`,

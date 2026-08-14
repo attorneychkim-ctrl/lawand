@@ -1113,6 +1113,45 @@ x86 OCX 프로세스 하나를 격리해 실행하고, 배정된 회선과 제�
   `Caddyfile.pre-domain-cutover-20260812T004900Z`에 있고 Cafe24 구 zone·호스팅·SSL과
   직전 홈페이지 이미지도 보존했다.
 
+## 2026-08-14 전화·문자·후기 통합 릴리스
+
+완료 worktree 8개를 모두 main에 통합하고 HERDR worktree 9개·원격 worktree 브랜치 46개가
+전부 main ancestor임을 확인했다. 통합 소스
+`53812080d7cae06a9e53bd15ede10ff1898d7d1e`와 후기 API 핫픽스 소스
+`d6e0022b142bcf9b282a1ea25fcbe5f345379d32`는 각 배포 시점 `origin/main`과 일치한다.
+
+- GitHub Actions `31770031030`이 통합 소스의 세 `linux/arm64` 이미지를 private ECR에
+  게시했다. 릴리스 `20260814T044148Z-integrated-telephony-messaging-reviews-v1`의 digest는
+  홈페이지 `sha256:5687c693cce41204f5cca18ffbfc6e422a278b86e230165bbd0eb90bbc1d30cc`,
+  ERP `sha256:fe5749a7edf7e424da812c1e4c5badb892b32b5be64fe48734b6e48fcdab60d4`,
+  gateway `sha256:56447346970457374ff47cd694468387425795647ff9b73d51fb48971f03d665`다.
+- 암호화 snapshot
+  `lawand-prod-pre-integrated-telephony-messaging-reviews-20260814t044148z`을 available까지
+  확보한 뒤 같은 gateway digest로 migration `0058..0060`을 적용했다. 운영 원장은 61개,
+  새 테이블은 6개이며 세 해시는 각각
+  `506683223a6a0680de75c9a533b05779047d0f76b13c156c0b9c06a7847866fe`,
+  `a1fba32716f153765c3471454635a57a5c8861f767e08174dfb6ac774c98f195`,
+  `6f4780749d74e769e74cba3b96d2c4a6d7f0f1dfd6ef2ed5c4099ec77830152c`다. 종료 근거가 있는
+  stale internal leg 5개만 복구했고 근거 없는 1개는 유지했다.
+- 인증 smoke에서 후기 목록 raw SQL 시각이 문자열로 반환돼 `/api/reviews`가 500인 경계를
+  발견했다. 문자열과 `Date`를 함께 검증·직렬화하는 테스트를 추가하고 Actions
+  `31772177143`이 게시한 gateway digest
+  `sha256:eb013dc28b17fdde5e6b2fb255eecc14509a451203d2f3e80a47bcbd52357bf3`를 릴리스
+  `20260814T052158Z-review-list-timestamp-hotfix-v1`로 전환했다. 최종 gateway image ID는
+  `sha256:37d880601772e37e4a5f835f2ff26763dc73a0686016896ac75e1e1c14a879c1`이고 rollback은
+  직전 통합 이미지와 그 이전 이미지 2개다.
+- 정식·EIP HTTPS와 인증 ERP의 상담·문자·후기·전화데스크·고객·직원 화면 및 관련 API가
+  모두 200이다. 임시 5분 세션은 삭제했다. 세 앱과 Caddy active, restart 0, 환경파일 600,
+  bridge key 51, error journal과 CloudWatch ALARM은 0이다. gateway request pool은 waiting
+  0/20, LISTEN은 4/4이며 RDS는 `db.t4g.xlarge` available이다.
+- 최종 BuildKit cache는 홈페이지 1.421GB, ERP 1.429GB, gateway 1.381GB이고 각 source
+  release directory와 현재/rollback 이미지는 정책대로 2개씩 보존했다. 정리 전후 가용 바이트·
+  회수량·image ID는 각 서버 `/var/log/lawand/deployments.log`에 남겼다.
+- 사용자가 활성 통화를 전환 차단 조건에서 명시적으로 제외했다. 통화 원장을 종료·보정하지
+  않았고 최종 활성 외부 root 1·내부 root 1, leg 2·수신 1이다. 배포 구간 발신·받기 명령은
+  0이고 실제 직원 문자 3건은 모두 성공했다. 새 릴리스 dead outbox는 0이며 기존 dead 6건은
+  배포 전 생성된 문자 5건과 리걸프렌즈 등록 1건이다. 실제 외부 canary는 새로 만들지 않았다.
+
 ## 도메인 전환 체크리스트
 
 도메인 이름과 대상은 아래 값으로 확정·적용했다.
