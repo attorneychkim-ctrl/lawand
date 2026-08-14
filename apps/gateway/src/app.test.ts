@@ -844,6 +844,7 @@ test("일반 직원은 자신의 문자 템플릿을 만들고 상담 고객에�
   let messageActorId = "";
   let deletedTemplateId = "";
   let deleteActorId = "";
+  let manualMessageInput: Record<string, unknown> | null = null;
   const telephonyService = {
     createMessageTemplate: async (
       input: { name: string; body: string },
@@ -897,6 +898,20 @@ test("일반 직원은 자신의 문자 템플릿을 만들고 상담 고객에�
         replayed: false,
       };
     },
+    requestManualMessage: async (
+      input: Record<string, unknown>,
+      actor: StaffPrincipal,
+    ) => {
+      manualMessageInput = input;
+      messageActorId = actor.id;
+      return {
+        id: "019fa6a4-6834-7782-aa0b-4e71ffb8a2dd",
+        targetSource: "manual" as const,
+        consultationId: null,
+        manualContactId: "019fa6a4-6834-7782-aa0b-4e71ffb8a2de",
+        replayed: false,
+      };
+    },
   } as unknown as TelephonyService;
   const authService = {
     authorize: async () => realtimeActor,
@@ -943,6 +958,31 @@ test("일반 직원은 자신의 문자 템플릿을 만들고 상담 고객에�
   assert.equal(messageResponse.status, 201);
   assert.equal(messageActorId, realtimeActor.id);
 
+  const manualResponse = await fetch(
+    `http://127.0.0.1:${address.port}/v1/messages/manual`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        idempotencyKey: "019fa6a4-6834-7782-aa0b-4e71ffb8a2df",
+        templateId: null,
+        body: "직접 입력 안내입니다.",
+        phone: "010-9876-5432",
+        customerName: "직접 입력 고객",
+        image: { originalName: "안내.jpg", fileBase64: "AAEC" },
+      }),
+    },
+  );
+  assert.equal(manualResponse.status, 201);
+  assert.deepEqual(manualMessageInput, {
+    idempotencyKey: "019fa6a4-6834-7782-aa0b-4e71ffb8a2df",
+    templateId: null,
+    body: "직접 입력 안내입니다.",
+    phone: "01098765432",
+    customerName: "직접 입력 고객",
+    image: { originalName: "안내.jpg", fileBase64: "AAEC" },
+  });
+
   const deleteResponse = await fetch(
     `http://127.0.0.1:${address.port}/v1/message-templates/${templateId}`,
     { method: "DELETE", headers },
@@ -956,16 +996,24 @@ test("인증된 직원은 Case_idx 문자 목록과 통합 대화를 조회한�
   let hubActorId = "";
   let threadActorId = "";
   let receivedThreadKey = "";
+  let receivedHubQuery: { cursor?: string; limit?: number } | undefined;
+  let receivedThreadQuery: { cursor?: string; limit?: number } | undefined;
   const telephonyService = {
-    getMessageHub: async (actor: StaffPrincipal) => {
+    getMessageHub: async (
+      actor: StaffPrincipal,
+      query?: { cursor?: string; limit?: number },
+    ) => {
       hubActorId = actor.id;
+      receivedHubQuery = query;
       return {
         items: [
           {
             key: "case:456",
+            targetSource: "legal_friends_directory" as const,
             caseIdx: "456",
             clientIdx: 123,
             consultationId: null,
+            manualContactId: null,
             customerName: "테스트 고객",
             phone: "01012345678",
             messageCount: 2,
@@ -976,22 +1024,33 @@ test("인증된 직원은 Case_idx 문자 목록과 통합 대화를 조회한�
             needsConnection: false,
           },
         ],
+        total: 1,
+        needsConnectionTotal: 0,
+        nextCursor: null,
         mailboxes: [],
       };
     },
-    getMessageThread: async (threadKey: string, actor: StaffPrincipal) => {
+    getMessageThread: async (
+      threadKey: string,
+      actor: StaffPrincipal,
+      query?: { cursor?: string; limit?: number },
+    ) => {
       receivedThreadKey = threadKey;
       threadActorId = actor.id;
+      receivedThreadQuery = query;
       return {
         thread: {
           key: threadKey,
+          targetSource: "legal_friends_directory" as const,
           caseIdx: "456",
           clientIdx: 123,
           consultationId: null,
+          manualContactId: null,
           customerName: "테스트 고객",
           phone: "01012345678",
         },
         timeline: [],
+        nextCursor: null,
       };
     },
   } as unknown as TelephonyService;
@@ -1014,7 +1073,7 @@ test("인증된 직원은 Case_idx 문자 목록과 통합 대화를 조회한�
   };
 
   const hubResponse = await fetch(
-    `http://127.0.0.1:${address.port}/v1/messages`,
+    `http://127.0.0.1:${address.port}/v1/messages?cursor=hub-cursor&limit=50`,
     { headers },
   );
   assert.equal(hubResponse.status, 200);
@@ -1024,14 +1083,19 @@ test("인증된 직원은 Case_idx 문자 목록과 통합 대화를 조회한�
   assert.equal(hubBody.items[0]?.key, "case:456");
   assert.equal(hubBody.items[0]?.phone, "01012345678");
   assert.equal(hubActorId, realtimeActor.id);
+  assert.deepEqual(receivedHubQuery, { cursor: "hub-cursor", limit: 50 });
 
   const threadResponse = await fetch(
-    `http://127.0.0.1:${address.port}/v1/messages/thread?key=case%3A456`,
+    `http://127.0.0.1:${address.port}/v1/messages/thread?key=case%3A456&cursor=thread-cursor&limit=50`,
     { headers },
   );
   assert.equal(threadResponse.status, 200);
   assert.equal(receivedThreadKey, "case:456");
   assert.equal(threadActorId, realtimeActor.id);
+  assert.deepEqual(receivedThreadQuery, {
+    cursor: "thread-cursor",
+    limit: 50,
+  });
 });
 
 test("통화 결과 API는 허용된 분류와 현재 직원을 서비스에 전달한다", async (context) => {

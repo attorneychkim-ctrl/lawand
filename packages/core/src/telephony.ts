@@ -83,6 +83,33 @@ const messageTemplateImageSchema = z
   })
   .strict();
 
+const messageSendFields = {
+  idempotencyKey: z.uuid(),
+  templateId: z.uuid().nullable(),
+  body: z.string().trim().min(1).max(CENTREX_LMS_MAX_BYTES),
+  image: messageTemplateImageSchema.nullable().optional(),
+};
+
+function validateMessageSend(
+  value: { body: string },
+  context: z.RefinementCtx,
+): void {
+  if (templateVariables(value.body).length > 0) {
+    context.addIssue({
+      code: "custom",
+      message: "치환되지 않은 템플릿 변수가 남아 있습니다.",
+      path: ["body"],
+    });
+  }
+  if (centrexMessageByteLength(value.body) > CENTREX_LMS_MAX_BYTES) {
+    context.addIssue({
+      code: "custom",
+      message: "문자 내용은 센트릭스 LMS 기준 720바이트 이하여야 합니다.",
+      path: ["body"],
+    });
+  }
+}
+
 export const messageTemplateCreateSchema = z
   .object({
     name: messageTemplateNameSchema,
@@ -101,28 +128,9 @@ export const messageTemplateUpdateSchema = z
   .strict();
 
 export const telephonyMessageSendSchema = z
-  .object({
-    idempotencyKey: z.uuid(),
-    templateId: z.uuid().nullable(),
-    body: z.string().trim().min(1).max(CENTREX_LMS_MAX_BYTES),
-  })
+  .object(messageSendFields)
   .strict()
-  .superRefine((value, context) => {
-    if (templateVariables(value.body).length > 0) {
-      context.addIssue({
-        code: "custom",
-        message: "치환되지 않은 템플릿 변수가 남아 있습니다.",
-        path: ["body"],
-      });
-    }
-    if (centrexMessageByteLength(value.body) > CENTREX_LMS_MAX_BYTES) {
-      context.addIssue({
-        code: "custom",
-        message: "문자 내용은 센트릭스 LMS 기준 720바이트 이하여야 합니다.",
-        path: ["body"],
-      });
-    }
-  });
+  .superRefine(validateMessageSend);
 
 export function renderMessageTemplate(
   body: string,
@@ -171,27 +179,55 @@ export const legalFriendsDirectoryMessageSendSchema = z
   .object({
     clientIdx: z.number().int().positive(),
     caseIdx: z.number().int().positive(),
-    idempotencyKey: z.uuid(),
-    templateId: z.uuid().nullable(),
-    body: z.string().trim().min(1).max(CENTREX_LMS_MAX_BYTES),
+    ...messageSendFields,
+  })
+  .strict()
+  .superRefine(validateMessageSend);
+
+const manualMessagePhoneSchema = z
+  .string()
+  .trim()
+  .transform((value) => value.replace(/\D/g, ""))
+  .pipe(
+    z
+      .string()
+      .regex(
+        /^01\d{8,9}$/,
+        "문자를 받을 휴대전화 번호를 정확히 입력해 주세요.",
+      ),
+  );
+
+export const manualTelephonyMessageSendSchema = z
+  .object({
+    ...messageSendFields,
+    contactId: z.uuid().nullable().optional(),
+    phone: manualMessagePhoneSchema.nullable().optional(),
+    customerName: z.string().trim().min(1).max(50).nullable().optional(),
   })
   .strict()
   .superRefine((value, context) => {
-    if (templateVariables(value.body).length > 0) {
+    validateMessageSend(value, context);
+    const hasContact = Boolean(value.contactId);
+    const hasPhone = Boolean(value.phone);
+    if (hasContact === hasPhone) {
       context.addIssue({
         code: "custom",
-        message: "치환되지 않은 템플릿 변수가 남아 있습니다.",
-        path: ["body"],
+        message: "기존 직접 입력 대화 또는 새 휴대전화 번호 하나를 선택해 주세요.",
+        path: ["phone"],
       });
     }
-    if (centrexMessageByteLength(value.body) > CENTREX_LMS_MAX_BYTES) {
+    if (hasContact && value.customerName) {
       context.addIssue({
         code: "custom",
-        message: "문자 내용은 센트릭스 LMS 기준 720바이트 이하여야 합니다.",
-        path: ["body"],
+        message: "기존 직접 입력 대화의 고객명은 발송할 때 변경할 수 없습니다.",
+        path: ["customerName"],
       });
     }
   });
+
+export type ManualTelephonyMessageSend = z.infer<
+  typeof manualTelephonyMessageSendSchema
+>;
 
 export const legalFriendsDirectoryConsultationCreateSchema = z
   .object({

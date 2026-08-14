@@ -16,7 +16,13 @@ export const metadata: Metadata = {
 
 export const dynamic = "force-dynamic";
 
-const emptyHub: MessageHub = { items: [], mailboxes: [] };
+const emptyHub: MessageHub = {
+  items: [],
+  total: 0,
+  needsConnectionTotal: 0,
+  nextCursor: null,
+  mailboxes: [],
+};
 
 export default async function MessagesPage() {
   const staff = await requireStaff();
@@ -56,6 +62,7 @@ export default async function MessagesPage() {
           <MessageHubWorkspace
             initialHub={hub}
             initialTemplates={templates}
+            staffName={staff.displayName}
           />
         )}
         <p className="security-note">

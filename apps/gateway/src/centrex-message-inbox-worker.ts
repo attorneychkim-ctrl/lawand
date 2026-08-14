@@ -184,6 +184,7 @@ export function createCentrexMessageInboxWorker(options: {
         consultationId: telephonyMessages.consultationId,
         directoryClientIdx: telephonyMessageDirectoryTargets.clientIdx,
         directoryCaseIdx: telephonyMessageDirectoryTargets.caseIdx,
+        manualContactId: telephonyMessages.manualContactId,
       })
       .from(telephonyMessages)
       .leftJoin(
@@ -210,6 +211,9 @@ export function createCentrexMessageInboxWorker(options: {
       return null;
     }
     if (match.targetSource === "consultation" && !match.consultationId) {
+      return null;
+    }
+    if (match.targetSource === "manual" && !match.manualContactId) {
       return null;
     }
     return match;
@@ -299,6 +303,10 @@ export function createCentrexMessageInboxWorker(options: {
         directoryCaseIdx:
           match?.targetSource === "legal_friends_directory"
             ? match.directoryCaseIdx
+            : null,
+        manualContactId:
+          match?.targetSource === "manual"
+            ? match.manualContactId
             : null,
         matchStrategy: match ? "latest_outbound" : "unmatched",
         receivedAt,

@@ -11,6 +11,7 @@ import {
   legalFriendsDirectoryClickToCallSchema,
   legalFriendsDirectoryConsultationCreateSchema,
   legalFriendsDirectoryMessageSendSchema,
+  manualTelephonyMessageSendSchema,
   messageTemplateCreateSchema,
   messageTemplateUpdateSchema,
   phoneDeskAftercareSaveSchema,
@@ -195,6 +196,47 @@ test("센트릭스 SMS/LMS 바이트와 템플릿 변수를 검증한다", () =>
       templateId: null,
       body: "{{고객명}}님께 보내는 미치환 문구",
     }).success,
+    false,
+  );
+});
+
+test("문자 직접 입력은 휴대전화 또는 기존 연락처 하나와 JPG 첨부만 허용한다", () => {
+  const base = {
+    idempotencyKey: "01980000-0000-7000-8000-000000000045",
+    templateId: null,
+    body: "직접 입력 문자",
+  };
+  assert.deepEqual(
+    manualTelephonyMessageSendSchema.parse({
+      ...base,
+      phone: "010-1234-5678",
+      customerName: " 직접 입력 고객 ",
+      image: { originalName: "안내.jpg", fileBase64: "AAEC" },
+    }),
+    {
+      ...base,
+      phone: "01012345678",
+      customerName: "직접 입력 고객",
+      image: { originalName: "안내.jpg", fileBase64: "AAEC" },
+    },
+  );
+  assert.equal(
+    manualTelephonyMessageSendSchema.safeParse({
+      ...base,
+      contactId: "01980000-0000-7000-8000-000000000046",
+    }).success,
+    true,
+  );
+  assert.equal(
+    manualTelephonyMessageSendSchema.safeParse({
+      ...base,
+      contactId: "01980000-0000-7000-8000-000000000046",
+      phone: "01012345678",
+    }).success,
+    false,
+  );
+  assert.equal(
+    manualTelephonyMessageSendSchema.safeParse(base).success,
     false,
   );
 });

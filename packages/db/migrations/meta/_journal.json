@@ -414,6 +414,13 @@
       "when": 1786672602727,
       "tag": "0058_centrex_internal_terminal_recovery",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1786674075155,
+      "tag": "0059_message_conversation_composer",
+      "breakpoints": true
     }
   ]
 }

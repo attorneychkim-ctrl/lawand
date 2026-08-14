@@ -137,9 +137,15 @@ export type MessageTemplate = {
 
 export type MessageThreadSummary = {
   key: string;
+  targetSource:
+    | "consultation"
+    | "legal_friends_directory"
+    | "manual"
+    | null;
   caseIdx: string | null;
   clientIdx: number | null;
   consultationId: string | null;
+  manualContactId: string | null;
   customerName: string;
   phone: string;
   receiptCode?: string | null;
@@ -166,6 +172,9 @@ export type MessageMailbox = {
 
 export type MessageHub = {
   items: MessageThreadSummary[];
+  total: number;
+  needsConnectionTotal: number;
+  nextCursor: string | null;
   mailboxes: MessageMailbox[];
 };
 
@@ -176,6 +185,8 @@ export type MessageThread = {
     | "caseIdx"
     | "clientIdx"
     | "consultationId"
+    | "manualContactId"
+    | "targetSource"
     | "customerName"
     | "phone"
     | "receiptCode"
@@ -202,12 +213,14 @@ export type MessageThread = {
     };
     matchStrategy: string | null;
   }>;
+  nextCursor: string | null;
 };
 
 export type TelephonyMessage = {
   id: string;
-  targetSource: "consultation" | "legal_friends_directory";
+  targetSource: "consultation" | "legal_friends_directory" | "manual";
   consultationId: string | null;
+  manualContactId: string | null;
   endpointId: string;
   templateId: string | null;
   templateName: string | null;
@@ -1352,13 +1365,26 @@ export async function getMessageTemplates(): Promise<MessageTemplate[]> {
   return body.items;
 }
 
-export async function getMessageHub(): Promise<MessageHub> {
-  return messageResponse(await gatewayFetch("/v1/messages"));
+export async function getMessageHub(input?: {
+  cursor?: string;
+  limit?: number;
+}): Promise<MessageHub> {
+  const searchParams = new URLSearchParams();
+  if (input?.cursor) searchParams.set("cursor", input.cursor);
+  if (input?.limit) searchParams.set("limit", String(input.limit));
+  const query = searchParams.size ? `?${searchParams.toString()}` : "";
+  return messageResponse(await gatewayFetch(`/v1/messages${query}`));
 }
 
-export async function getMessageThread(key: string): Promise<MessageThread> {
+export async function getMessageThread(
+  key: string,
+  input?: { cursor?: string; limit?: number },
+): Promise<MessageThread> {
+  const searchParams = new URLSearchParams({ key });
+  if (input?.cursor) searchParams.set("cursor", input.cursor);
+  if (input?.limit) searchParams.set("limit", String(input.limit));
   return messageResponse(
-    await gatewayFetch(`/v1/messages/thread?key=${encodeURIComponent(key)}`),
+    await gatewayFetch(`/v1/messages/thread?${searchParams.toString()}`),
   );
 }
 
@@ -1405,7 +1431,12 @@ export async function deleteMessageTemplate(
 
 export async function requestConsultationMessage(
   consultationId: string,
-  input: { idempotencyKey: string; templateId: string | null; body: string },
+  input: {
+    idempotencyKey: string;
+    templateId: string | null;
+    body: string;
+    image?: { originalName: string; fileBase64: string } | null;
+  },
 ): Promise<TelephonyMessage> {
   return messageResponse(
     await gatewayFetch(`/v1/consultations/${consultationId}/messages`, {
@@ -1421,11 +1452,30 @@ export async function requestDirectoryMessage(input: {
   idempotencyKey: string;
   templateId: string | null;
   body: string;
+  image?: { originalName: string; fileBase64: string } | null;
 }): Promise<TelephonyMessage> {
   return messageResponse(
     await gatewayFetch("/v1/client-directory/messages", {
       method: "POST",
       body: input,
+    }),
+  );
+}
+
+export async function requestManualMessage(input: {
+  idempotencyKey: string;
+  templateId: string | null;
+  body: string;
+  contactId?: string | null;
+  phone?: string | null;
+  customerName?: string | null;
+  image?: { originalName: string; fileBase64: string } | null;
+}): Promise<TelephonyMessage> {
+  return messageResponse(
+    await gatewayFetch("/v1/messages/manual", {
+      method: "POST",
+      body: input,
+      timeoutMs: 20_000,
     }),
   );
 }

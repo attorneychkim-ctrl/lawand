@@ -24,6 +24,7 @@ import {
   telephonyCalls,
   telephonyEndpoints,
   telephonyMessageDirectoryTargets,
+  telephonyMessageManualContacts,
   telephonyMessages,
 } from "@lawand/db";
 import type { createDatabaseClient } from "@lawand/db";
@@ -509,6 +510,11 @@ export function createCentrexWorker(options: {
         directoryPhoneNonce: telephonyMessageDirectoryTargets.phoneNonce,
         directoryPhoneKeyVersion:
           telephonyMessageDirectoryTargets.phoneKeyVersion,
+        manualContactId: telephonyMessages.manualContactId,
+        manualPhoneCiphertext:
+          telephonyMessageManualContacts.phoneCiphertext,
+        manualPhoneNonce: telephonyMessageManualContacts.phoneNonce,
+        manualPhoneKeyVersion: telephonyMessageManualContacts.phoneKeyVersion,
       })
       .from(telephonyMessages)
       .innerJoin(
@@ -533,6 +539,13 @@ export function createCentrexWorker(options: {
           telephonyMessages.id,
         ),
       )
+      .leftJoin(
+        telephonyMessageManualContacts,
+        eq(
+          telephonyMessageManualContacts.id,
+          telephonyMessages.manualContactId,
+        ),
+      )
       .where(eq(telephonyMessages.id, event.messageId))
       .limit(1);
     if (!row || row.endpointId !== envelope.data.endpointId) {
@@ -546,6 +559,7 @@ export function createCentrexWorker(options: {
     let phoneCiphertext: Buffer | null = null;
     let phoneNonce: Buffer | null = null;
     let phoneKeyVersion: string | null = null;
+    let phoneContext = "";
     if (
       "targetSource" in envelope.data &&
       envelope.data.targetSource === "legal_friends_directory"
@@ -558,6 +572,18 @@ export function createCentrexWorker(options: {
       phoneCiphertext = row.directoryPhoneCiphertext;
       phoneNonce = row.directoryPhoneNonce;
       phoneKeyVersion = row.directoryPhoneKeyVersion;
+      phoneContext = `telephony_message_directory_targets/${row.messageId}/phone`;
+    } else if (
+      "targetSource" in envelope.data &&
+      envelope.data.targetSource === "manual"
+    ) {
+      referenceMatches =
+        row.targetSource === "manual" &&
+        row.manualContactId === envelope.data.manualContactId;
+      phoneCiphertext = row.manualPhoneCiphertext;
+      phoneNonce = row.manualPhoneNonce;
+      phoneKeyVersion = row.manualPhoneKeyVersion;
+      phoneContext = `telephony_message_manual_contacts/${envelope.data.manualContactId}/phone`;
     } else {
       const requestPhoneFingerprint = row.requestPhoneFingerprint;
       referenceMatches =
@@ -568,6 +594,7 @@ export function createCentrexWorker(options: {
       phoneCiphertext = row.phoneCiphertext;
       phoneNonce = row.phoneNonce;
       phoneKeyVersion = row.phoneKeyVersion;
+      phoneContext = `consultation_requests.phone:${row.requestId}`;
     }
     if (!referenceMatches || !phoneCiphertext || !phoneNonce || !phoneKeyVersion) {
       throw new Error("telephony_message_reference_not_found");
@@ -578,12 +605,10 @@ export function createCentrexWorker(options: {
         nonce: phoneNonce,
         keyVersion: phoneKeyVersion,
       },
-      directoryEvent
-        ? `telephony_message_directory_targets/${row.messageId}/phone`
-        : `consultation_requests.phone:${row.requestId}`,
+      phoneContext,
     );
     if (
-      directoryEvent &&
+      (directoryEvent || row.targetSource === "manual") &&
       !row.remotePhoneFingerprint.equals(protection.fingerprint(destination))
     ) {
       throw new Error("telephony_message_reference_not_found");
