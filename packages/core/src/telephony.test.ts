@@ -307,15 +307,23 @@ test("전화데스크 후처리는 기타 설명과 재통화 담당·일시를 
   );
 });
 
-test("확인 필요 통화의 최종 통화자는 root 참여 leg로 지정한다", () => {
-  const input = {
+test("확인 필요 통화의 최종 통화자는 참여 leg 또는 활성 직원으로 지정한다", () => {
+  const legacyInput = {
     finalLegId: "01980000-0000-7000-8000-000000000001",
   };
-  assert.deepEqual(phoneDeskCallResolutionSchema.parse(input), input);
+  const staffInput = {
+    finalStaffUserId: "01980000-0000-7000-8000-000000000002",
+  };
+  assert.deepEqual(
+    phoneDeskCallResolutionSchema.parse(legacyInput),
+    legacyInput,
+  );
+  assert.deepEqual(phoneDeskCallResolutionSchema.parse(staffInput), staffInput);
   assert.equal(
     phoneDeskCallResolutionSchema.safeParse({ finalLegId: "1208" }).success,
     false,
   );
+  assert.equal(phoneDeskCallResolutionSchema.safeParse({}).success, false);
 });
 
 test("전화번호부는 원번호와 선택 연결번호를 정규화하고 중복 번호를 거부한다", () => {

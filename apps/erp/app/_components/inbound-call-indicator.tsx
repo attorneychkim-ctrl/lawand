@@ -209,7 +209,11 @@ function ownerLabel(call: TelephonyInboundCall, staffUserId: string) {
   ) {
     return "내 전화";
   }
-  if (call.owners.length === 0) return "담당 회선 미지정";
+  if (call.owners.length === 0) {
+    return call.endpointType === "representative"
+      ? "대표번호 공용 회선"
+      : "담당 회선 미지정";
+  }
   return `${call.owners.map((owner) => owner.displayName).join(" · ")}님 전화`;
 }
 
@@ -324,9 +328,16 @@ function activityCopy(
     return { label: "호전환 중", description: "고객 전화를 전달하고 있어요" };
   }
   if (activity.state === "needs_confirmation") {
+    const transferNeedsConfirmation =
+      activity.transfer?.state === "transfer_attempted" ||
+      activity.transfer?.state === "transfer_unresolved";
     return {
-      label: "호전환 확인 필요",
-      description: "마지막 고객 연결 근거를 확인해 주세요",
+      label: transferNeedsConfirmation
+        ? "호전환 확인 필요"
+        : `${prefix} 상태 확인 필요`,
+      description: transferNeedsConfirmation
+        ? "마지막 고객 연결과 담당자를 확인해 주세요"
+        : "통화 종료 상태와 담당자를 확인해 주세요",
     };
   }
   if (activity.state === "ended") {
@@ -336,6 +347,13 @@ function activityCopy(
     return { label: `${prefix} 통화 중`, description: `${prefix} 통화가 연결됐어요` };
   }
   return { label: `${prefix} 중`, description: `${prefix} 연결을 기다리고 있어요` };
+}
+
+function formatActivityTime(value: string) {
+  const milliseconds = Date.parse(value);
+  if (!Number.isFinite(milliseconds)) return "시간 확인 중";
+  const kst = new Date(milliseconds + 9 * 60 * 60_000).toISOString();
+  return `${kst.slice(5, 7)}.${kst.slice(8, 10)} ${kst.slice(11, 16)}`;
 }
 
 function outboundCopy(call: PhoneDeskCall) {
@@ -1560,6 +1578,12 @@ export function InboundCallIndicator({
                   {participantNames.length ? (
                     <span>{participantNames.join(" · ")}</span>
                   ) : null}
+                  <span>시작 {formatActivityTime(activity.startedAt)}</span>
+                  {activity.state === "needs_confirmation" ? (
+                    <span>
+                      마지막 신호 {formatActivityTime(activity.lastEventAt)}
+                    </span>
+                  ) : null}
                 </span>
                 {activity.scope === "external" ? (
                   <CustomerMatch call={activity} />
@@ -1582,6 +1606,14 @@ export function InboundCallIndicator({
                 ) : null}
               </span>
               <span className="inbound-call-actions">
+                {activity.correlationStatus === "needs_confirmation" ? (
+                  <Link
+                    className="inbound-aftercare-button"
+                    href={`/phone-desk/${activity.id}`}
+                  >
+                    담당자 확인
+                  </Link>
+                ) : null}
                 {canAnswer && legacyCall ? (
                   <button
                     className="inbound-answer-button"

@@ -6888,6 +6888,9 @@ a.inbound-customer:hover { text-decoration: underline; }
 .phone-call-resolution-options label > span { display: grid; gap: 2px; }
 .phone-call-resolution-options strong { font-size: .75rem; }
 .phone-call-resolution-options small { color: var(--muted); font-size: .65rem; }
+.phone-call-resolution-select { display: grid; gap: 7px; max-width: 520px; }
+.phone-call-resolution-select > span { color: var(--ink-soft); font-size: .7rem; font-weight: 800; }
+.phone-call-resolution-select select { width: 100%; min-height: 44px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); font: inherit; font-size: .76rem; }
 .phone-call-resolution > button { justify-self: start; }
 .phone-aftercare-section { display: grid; gap: 15px; margin: 0; padding: 0; border: 0; }
 .phone-aftercare-section > legend,
@@ -7236,7 +7239,7 @@ a.inbound-customer:hover { text-decoration: underline; }
 .phone-aftercare-dialog > header p:last-child { margin: 0; color: var(--muted); font-size: .7rem; }
 .phone-aftercare-dialog > header > button { border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 1.6rem; line-height: 1; }
 .phone-aftercare-loading { margin: 20px 0; color: var(--muted); text-align: center; }
-.inbound-aftercare-button { min-height: 34px; padding: 0 11px; border: 1px solid var(--brand); border-radius: 9px; background: var(--brand); color: white; cursor: pointer; font: inherit; font-size: .68rem; font-weight: 820; }
+.inbound-aftercare-button { display: inline-flex; min-height: 34px; align-items: center; padding: 0 11px; border: 1px solid var(--brand); border-radius: 9px; background: var(--brand); color: white; cursor: pointer; font: inherit; font-size: .68rem; font-weight: 820; text-decoration: none; }
 
 /* 개인 문자 템플릿 · SMS/MMS 작성 */
 .message-button {

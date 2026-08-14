@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   answerableInboundCallForActor,
+  canResolvePhoneDeskFinalParticipant,
   canonicalizePhoneDeskObservedCalls,
   externalInboundNotificationTargetUserIds,
   isCentrexInboundAnswerDeliveryDelayed,
@@ -15,6 +16,43 @@ import {
   shouldAutoOpenConnectedAftercare,
   staffPhoneCustomerMatches,
 } from "./telephony-service.js";
+
+test("종료 고객 leg만 남은 확인 필요 통화는 2분 뒤 직원이 수동 확정할 수 있다", () => {
+  const resolutionAt = new Date("2026-08-14T07:45:00.000Z");
+  const staleTransfer = {
+    scope: "external" as const,
+    state: "needs_confirmation" as const,
+    correlationStatus: "needs_confirmation" as const,
+    hasEndedCustomerLeg: true,
+    hasActiveCustomerLeg: false,
+    lastEventAt: new Date("2026-08-14T07:42:57.000Z"),
+    resolutionAt,
+  };
+
+  assert.equal(canResolvePhoneDeskFinalParticipant(staleTransfer), true);
+  assert.equal(
+    canResolvePhoneDeskFinalParticipant({
+      ...staleTransfer,
+      lastEventAt: new Date("2026-08-14T07:43:00.001Z"),
+    }),
+    false,
+  );
+  assert.equal(
+    canResolvePhoneDeskFinalParticipant({
+      ...staleTransfer,
+      hasActiveCustomerLeg: true,
+    }),
+    false,
+  );
+  assert.equal(
+    canResolvePhoneDeskFinalParticipant({
+      ...staleTransfer,
+      state: "ended",
+      lastEventAt: resolutionAt,
+    }),
+    true,
+  );
+});
 
 test("상대 leg 없는 내선만 3분 뒤 확인 필요 대상으로 낮춘다", () => {
   const snapshotAt = new Date("2026-08-14T01:10:00.000Z");
