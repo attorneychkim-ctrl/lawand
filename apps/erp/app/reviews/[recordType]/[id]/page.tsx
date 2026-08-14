@@ -7,7 +7,7 @@ import { ReviewDetailWorkspace } from "../../../_components/review-detail-worksp
 import { StaffBar } from "../../../_components/staff-bar";
 
 export const metadata: Metadata = {
-  title: "후기 상세 | 로앤 ERP",
+  title: "후기 상세",
 };
 
 export default async function ReviewDetailPage({

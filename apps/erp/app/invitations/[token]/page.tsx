@@ -2,13 +2,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { InvitationForm } from "../../_components/invitation-form";
+import { LawandOsBrand } from "../../_components/lawand-os-brand";
 import {
   inspectStaffInvitation,
   StaffGatewayError,
 } from "../../../lib/staff-auth";
 
 export const metadata: Metadata = {
-  title: "직원 초대 | 로앤 ERP",
+  title: "직원 초대",
 };
 
 export default async function InvitationPage({
@@ -28,7 +29,8 @@ export default async function InvitationPage({
     return (
       <main className="auth-shell">
         <section className="auth-card">
-          <p className="eyebrow">LAWAND ERP · INVITATION</p>
+          <LawandOsBrand className="auth-brand-lockup" />
+          <p className="eyebrow">STAFF INVITATION</p>
           <h1>초대 링크를 사용할 수 없습니다</h1>
           <p className="auth-lead">{message}</p>
           <Link className="primary-link" href="/login">
@@ -42,7 +44,8 @@ export default async function InvitationPage({
   return (
     <main className="auth-shell">
       <section className="auth-card invitation-card">
-        <p className="eyebrow">LAWAND ERP · INVITATION</p>
+        <LawandOsBrand className="auth-brand-lockup" />
+        <p className="eyebrow">STAFF INVITATION</p>
         <h1>직원 계정 만들기</h1>
         <p className="auth-lead">
           이름과 로그인 이메일을 확인한 뒤 비밀번호를 설정해 주세요. 업무 정보와

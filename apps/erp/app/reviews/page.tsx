@@ -11,7 +11,7 @@ import { ReviewWorkspace } from "../_components/review-workspace";
 import { StaffBar } from "../_components/staff-bar";
 
 export const metadata: Metadata = {
-  title: "후기관리 | 로앤 ERP",
+  title: "후기관리",
 };
 
 const emptySnapshot: ReviewManagementSnapshot = {

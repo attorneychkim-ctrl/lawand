@@ -5,7 +5,7 @@ import { ClientDirectoryWorkspace } from "../_components/client-directory-worksp
 import { StaffBar } from "../_components/staff-bar";
 
 export const metadata: Metadata = {
-  title: "고객 찾기 | 로앤 ERP",
+  title: "고객 찾기",
 };
 
 export default async function ClientsPage() {

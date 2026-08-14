@@ -93,7 +93,7 @@ export function BrowserNotificationToggle() {
     <button
       aria-label={
         permission === "denied"
-          ? "브라우저 설정에서 로앤 ERP 알림을 허용해 주세요"
+          ? "브라우저 설정에서 LAW& OS 알림을 허용해 주세요"
           : permission === "enabled"
             ? "브라우저 알림 끄기"
             : permission === "disabled"

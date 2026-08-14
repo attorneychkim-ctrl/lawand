@@ -4,8 +4,17 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "로앤 ERP",
-  description: "법무법인 로앤 내부 상담 운영 화면",
+  title: {
+    default: "LAW& OS — AI Operating System for LAW&",
+    template: "%s | LAW& OS",
+  },
+  description: "AI Operating System for LAW& — 법무법인 로앤 통합 운영 시스템",
+  applicationName: "LAW& OS",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "LAW& OS",
+  },
   robots: {
     index: false,
     follow: false,

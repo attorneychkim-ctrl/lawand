@@ -1832,29 +1832,80 @@ svg {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 9px;
   text-decoration: none;
 }
 
-.staff-brand-mark {
-  color: var(--ink);
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 1.17rem;
-  font-weight: 800;
-  letter-spacing: -.055em;
+.lawand-os-brand {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
 }
 
-.staff-brand-mark span {
+.lawand-os-symbol {
+  position: relative;
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgb(99 230 167 / 24%);
+  border-radius: 10px;
+  background:
+    radial-gradient(circle at 50% 15%, rgb(99 230 167 / 12%), transparent 58%),
+    #101815;
+  box-shadow:
+    0 7px 18px rgb(12 48 34 / 13%),
+    inset 0 0 0 1px rgb(255 255 255 / 3%);
+}
+
+.lawand-os-symbol img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  transform: scale(1.09);
+}
+
+.lawand-os-copy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+  white-space: nowrap;
+}
+
+.lawand-os-name {
+  color: var(--ink);
+  font-size: .84rem;
+  font-weight: 880;
+  letter-spacing: -.045em;
+  line-height: 1.05;
+}
+
+.lawand-os-name > span,
+.lawand-os-name > strong {
   color: var(--brand);
 }
 
-.staff-brand-product {
-  padding-left: 9px;
-  border-left: 1px solid var(--line-strong);
+.lawand-os-name > strong {
+  font-size: .72rem;
+  letter-spacing: .08em;
+}
+
+.lawand-os-copy small {
   color: var(--muted);
-  font-size: .68rem;
-  font-weight: 850;
-  letter-spacing: .14em;
+  font-size: .5rem;
+  font-weight: 720;
+  letter-spacing: .045em;
+  line-height: 1.2;
+}
+
+.staff-brand:hover .lawand-os-symbol,
+.staff-brand:focus-visible .lawand-os-symbol {
+  border-color: rgb(99 230 167 / 52%);
+  box-shadow:
+    0 8px 24px rgb(43 169 111 / 18%),
+    inset 0 0 0 1px rgb(255 255 255 / 5%);
 }
 
 .staff-primary-nav {
@@ -5212,6 +5263,10 @@ a.inbound-customer:hover { text-decoration: underline; }
   min-height: 100vh;
   place-items: center;
   padding: 32px 20px;
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--brand) 4%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--brand) 4%, transparent) 1px, transparent 1px);
+  background-size: 32px 32px;
 }
 
 .auth-card {
@@ -5227,6 +5282,30 @@ a.inbound-customer:hover { text-decoration: underline; }
   margin-bottom: 10px;
   font-size: clamp(2rem, 8vw, 2.8rem);
   letter-spacing: -.05em;
+}
+
+.auth-brand-lockup {
+  margin-bottom: 32px;
+}
+
+.auth-brand-lockup .lawand-os-symbol {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+}
+
+.auth-brand-lockup .lawand-os-name {
+  font-size: 1.08rem;
+}
+
+.auth-brand-lockup .lawand-os-name > strong {
+  font-size: .92rem;
+}
+
+.auth-brand-lockup .lawand-os-copy small {
+  margin-top: 2px;
+  font-size: .57rem;
+  letter-spacing: .065em;
 }
 
 .auth-lead {
@@ -7812,6 +7891,7 @@ a.inbound-customer:hover { text-decoration: underline; }
 
 @media (max-width: 1040px) {
   .staff-bar-leading { gap: 20px; }
+  .staff-brand .lawand-os-copy small { display: none; }
   .browser-notification-toggle { width: 38px; padding: 0; justify-content: center; }
   .browser-notification-toggle span { display: none; }
   .queue-controls { grid-template-columns: minmax(220px, 310px) minmax(0, 1fr); }
@@ -8246,9 +8326,8 @@ a.inbound-customer:hover { text-decoration: underline; }
 @media (max-width: 480px) {
   .staff-bar-leading { flex: 1 1 auto; }
   .staff-actions { flex: 0 0 auto; margin-left: auto; }
-  .staff-brand { gap: 6px; }
-  .staff-brand-mark { font-size: 1rem; }
-  .staff-brand-product { padding-left: 6px; font-size: .6rem; }
+  .staff-brand .lawand-os-copy { display: none; }
+  .staff-brand .lawand-os-symbol { width: 31px; height: 31px; border-radius: 9px; }
   .staff-primary-nav a { padding-inline: 7px; }
   .staff-primary-nav a span { display: none; }
   .staff-identity { display: flex; padding-left: 0; }
