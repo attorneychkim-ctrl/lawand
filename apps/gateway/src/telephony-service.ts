@@ -223,6 +223,26 @@ export function isPhoneDeskAftercareWritableState(
   return state === "connected" || state === "ended";
 }
 
+export function shouldAutoOpenConnectedAftercare(input: {
+  scope: "external" | "internal";
+  state:
+    | "ringing"
+    | "connected"
+    | "transferring"
+    | "needs_confirmation"
+    | "ended";
+  actorUserId: string;
+  currentEndpointOwnerUserIds: readonly string[];
+  participantUserIds: readonly (string | null)[];
+}): boolean {
+  return (
+    input.scope === "external" &&
+    input.state === "connected" &&
+    (input.currentEndpointOwnerUserIds.includes(input.actorUserId) ||
+      input.participantUserIds.includes(input.actorUserId))
+  );
+}
+
 export function canonicalizePhoneDeskObservedCalls<
   T extends {
     id: string;
@@ -2179,6 +2199,16 @@ export function createTelephonyService(options: {
         customerMatch,
         notificationKind,
         notificationTargetUserIds,
+        canOpenLiveAftercare: shouldAutoOpenConnectedAftercare({
+          scope: root.scope,
+          state: root.state,
+          actorUserId: actor.id,
+          currentEndpointOwnerUserIds:
+            ownersByActivityEndpoint.get(root.currentEndpointId!) ?? [],
+          participantUserIds: participants.map(
+            (participant) => participant.staffUserId,
+          ),
+        }),
         canOpenAftercare:
           root.state === "ended" &&
           root.correlationStatus === "confirmed" &&

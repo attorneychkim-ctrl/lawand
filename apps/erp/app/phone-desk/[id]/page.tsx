@@ -156,7 +156,7 @@ export default async function PhoneDeskDetailPage({
             ) : null}
             <PhoneAftercareForm
               detail={detail}
-              returnTo="/phone-desk"
+              returnTo={call.state === "ended" ? "/phone-desk" : undefined}
               staffName={staff.displayName}
             />
           </section>

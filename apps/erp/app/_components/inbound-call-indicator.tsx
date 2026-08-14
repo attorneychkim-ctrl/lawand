@@ -807,6 +807,53 @@ export function InboundCallIndicator({
   }, [activities, notificationPermission, staffUserId]);
 
   useEffect(() => {
+    const activity = activities
+      .filter((item) => item.canOpenLiveAftercare)
+      .sort(
+        (left, right) =>
+          new Date(right.connectedAt ?? right.lastEventAt).getTime() -
+          new Date(left.connectedAt ?? left.lastEventAt).getTime(),
+      )[0];
+    if (!activity) return;
+
+    const detailPath = `/phone-desk/${activity.id}`;
+    const storageKey = `lawand:phone-aftercare-live:${activity.id}`;
+    const openLiveAftercare = () => {
+      if (document.visibilityState !== "visible") return;
+      if (pathname === detailPath || aftercareCallId === activity.id) {
+        try {
+          window.localStorage.setItem(
+            storageKey,
+            activity.connectedAt ?? "connected",
+          );
+        } catch {
+          // 저장소가 막혀도 이미 열린 상세/팝업 사용에는 영향이 없다.
+        }
+        return;
+      }
+
+      let alreadyOpened = false;
+      try {
+        alreadyOpened = Boolean(window.localStorage.getItem(storageKey));
+        if (!alreadyOpened) {
+          window.localStorage.setItem(
+            storageKey,
+            activity.connectedAt ?? "connected",
+          );
+        }
+      } catch {
+        // 저장소가 막힌 경우에도 현재 보이는 탭에는 팝업을 연다.
+      }
+      if (!alreadyOpened) enqueueAftercareCalls([activity.id]);
+    };
+    openLiveAftercare();
+    document.addEventListener("visibilitychange", openLiveAftercare);
+    return () => {
+      document.removeEventListener("visibilitychange", openLiveAftercare);
+    };
+  }, [activities, aftercareCallId, enqueueAftercareCalls, pathname]);
+
+  useEffect(() => {
     let active = true;
     const unsubscribe = subscribeConsultationRealtime((message) => {
       if (message.kind !== "changed") return;
@@ -956,10 +1003,14 @@ export function InboundCallIndicator({
     const [nextCallId] = pendingAftercareCallIds;
     setPendingAftercareCallIds((current) => current.slice(1));
     const key = `lawand:phone-aftercare:${nextCallId}`;
+    if (pathname === `/phone-desk/${nextCallId}`) {
+      window.sessionStorage.setItem(key, "opened");
+      return;
+    }
     if (window.sessionStorage.getItem(key)) return;
     window.sessionStorage.setItem(key, "opened");
     setAftercareCallId(nextCallId);
-  }, [aftercareCallId, pendingAftercareCallIds]);
+  }, [aftercareCallId, pathname, pendingAftercareCallIds]);
 
   const activityObservedIds = new Set(
     activities.flatMap((activity) =>

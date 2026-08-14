@@ -10,6 +10,7 @@ import {
   phoneDeskItemAssignees,
   phoneDeskItemMatchesAssignee,
   phoneDeskItemMatchesFilter,
+  shouldAutoOpenConnectedAftercare,
   staffPhoneCustomerMatches,
 } from "./telephony-service.js";
 
@@ -20,6 +21,33 @@ test("후처리는 통화 연결 시점부터 종료 뒤까지 작성할 수 있
   assert.equal(isPhoneDeskAftercareWritableState("ended"), true);
   assert.equal(isPhoneDeskAftercareWritableState("failed"), false);
   assert.equal(isPhoneDeskAftercareWritableState("unknown"), false);
+});
+
+test("연결된 외부 통화 후처리 팝업은 실제 회선 소유자나 참여 직원에게만 연다", () => {
+  const connected = {
+    scope: "external" as const,
+    state: "connected" as const,
+    actorUserId: "staff-1208",
+    currentEndpointOwnerUserIds: ["staff-1208"],
+    participantUserIds: ["staff-4425", "staff-1208"],
+  };
+
+  assert.equal(shouldAutoOpenConnectedAftercare(connected), true);
+  assert.equal(
+    shouldAutoOpenConnectedAftercare({
+      ...connected,
+      actorUserId: "staff-unrelated",
+    }),
+    false,
+  );
+  assert.equal(
+    shouldAutoOpenConnectedAftercare({ ...connected, state: "ringing" }),
+    false,
+  );
+  assert.equal(
+    shouldAutoOpenConnectedAftercare({ ...connected, scope: "internal" }),
+    false,
+  );
 });
 
 test("직원 전체 회선번호는 같은 번호의 직원 정보와 내선으로 식별한다", () => {

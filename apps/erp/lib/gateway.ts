@@ -362,6 +362,7 @@ export type TelephonyCallActivity = {
     | "transfer_returned"
     | null;
   notificationTargetUserIds: string[];
+  canOpenLiveAftercare: boolean;
   canOpenAftercare: boolean;
 };
 
