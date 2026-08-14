@@ -14,6 +14,6 @@ const ReviewForm = dynamic(
   },
 );
 
-export function ReviewFormLoader() {
-  return <ReviewForm />;
+export function ReviewFormLoader({ requestToken }: { requestToken?: string }) {
+  return <ReviewForm requestToken={requestToken} />;
 }

@@ -163,6 +163,31 @@ export const reviewSubmissionStatusEnum = pgEnum("review_submission_status", [
   "withdrawn",
 ]);
 
+export const reviewRestrictionReasonEnum = pgEnum(
+  "review_restriction_reason",
+  [
+    "privacy",
+    "unverified",
+    "abusive_or_manipulated",
+    "customer_request",
+    "duplicate",
+    "other",
+  ],
+);
+
+export const reviewCustomerLinkSourceEnum = pgEnum(
+  "review_customer_link_source",
+  ["invitation", "exact_phone", "manual"],
+);
+
+export const reviewRequestStatusEnum = pgEnum("review_request_status", [
+  "queued",
+  "sent",
+  "failed",
+  "redeemed",
+  "cancelled",
+]);
+
 export const caseStudyPracticeAreaEnum = pgEnum("case_study_practice_area", [
   "personal_rehabilitation",
   "personal_bankruptcy",
@@ -953,9 +978,9 @@ export const customerReviews = pgTable(
   {
     id: uuid("id").primaryKey(),
     sourceKey: varchar("source_key", { length: 100 }).notNull(),
-    legacyId: bigint("legacy_id", { mode: "number" }).notNull(),
+    legacyId: bigint("legacy_id", { mode: "number" }),
     legacyContentId: bigint("legacy_content_id", { mode: "number" }),
-    legacyUrl: text("legacy_url").notNull(),
+    legacyUrl: text("legacy_url"),
     authorDisplay: varchar("author_display", { length: 100 }).notNull(),
     title: text("title").notNull(),
     content: text("content").notNull(),
@@ -976,9 +1001,8 @@ export const customerReviews = pgTable(
       .array()
       .default(sql`ARRAY[]::text[]`)
       .notNull(),
-    sourceHash: bytea("source_hash").notNull(),
+    sourceHash: bytea("source_hash"),
     importBatchId: uuid("import_batch_id")
-      .notNull()
       .references(() => reviewImportBatches.id, { onDelete: "restrict" }),
     originalCreatedAt: timestamp("original_created_at", {
       withTimezone: true,
@@ -987,6 +1011,13 @@ export const customerReviews = pgTable(
       withTimezone: true,
     }),
     publishedAt: timestamp("published_at", { withTimezone: true }),
+    restrictionReason: reviewRestrictionReasonEnum("restriction_reason"),
+    restrictionNote: varchar("restriction_note", { length: 500 }),
+    restrictedByUserId: uuid("restricted_by_user_id").references(
+      () => staffUsers.id,
+      { onDelete: "restrict" },
+    ),
+    restrictedAt: timestamp("restricted_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
@@ -1007,7 +1038,7 @@ export const customerReviews = pgTable(
     index("customer_reviews_import_batch_idx").on(table.importBatchId),
     check(
       "customer_reviews_legacy_id_positive",
-      sql`${table.legacyId} > 0`,
+      sql`${table.legacyId} IS NULL OR ${table.legacyId} > 0`,
     ),
     check(
       "customer_reviews_nonempty_text",
@@ -1021,7 +1052,22 @@ export const customerReviews = pgTable(
     ),
     check(
       "customer_reviews_source_hash_length",
-      sql`octet_length(${table.sourceHash}) = 32`,
+      sql`${table.sourceHash} IS NULL OR octet_length(${table.sourceHash}) = 32`,
+    ),
+    check(
+      "customer_reviews_source_provenance",
+      sql`(
+        ${table.importBatchId} IS NOT NULL
+        AND ${table.legacyId} IS NOT NULL
+        AND ${table.legacyUrl} IS NOT NULL
+        AND ${table.sourceHash} IS NOT NULL
+      ) OR (
+        ${table.importBatchId} IS NULL
+        AND ${table.legacyId} IS NULL
+        AND ${table.legacyContentId} IS NULL
+        AND ${table.legacyUrl} IS NULL
+        AND ${table.sourceHash} IS NULL
+      )`,
     ),
     check(
       "customer_reviews_publication_consistent",
@@ -1032,6 +1078,31 @@ export const customerReviews = pgTable(
       ) OR (
         ${table.publicationStatus} <> 'published'
         AND ${table.publishedAt} IS NULL
+      )`,
+    ),
+    check(
+      "customer_reviews_restriction_consistent",
+      sql`(
+        ${table.publicationStatus} = 'withheld'
+        AND (
+          (
+            ${table.importBatchId} IS NOT NULL
+            AND ${table.restrictionReason} IS NULL
+            AND ${table.restrictionNote} IS NULL
+            AND ${table.restrictedAt} IS NULL
+            AND ${table.restrictedByUserId} IS NULL
+          ) OR (
+            ${table.restrictionReason} IS NOT NULL
+            AND ${table.restrictedAt} IS NOT NULL
+            AND ${table.restrictedByUserId} IS NOT NULL
+          )
+        )
+      ) OR (
+        ${table.publicationStatus} <> 'withheld'
+        AND ${table.restrictionReason} IS NULL
+        AND ${table.restrictionNote} IS NULL
+        AND ${table.restrictedAt} IS NULL
+        AND ${table.restrictedByUserId} IS NULL
       )`,
     ),
   ],
@@ -1081,6 +1152,12 @@ export const customerReviewSubmissions = pgTable(
       withTimezone: true,
     }).notNull(),
     moderatedAt: timestamp("moderated_at", { withTimezone: true }),
+    moderatedByUserId: uuid("moderated_by_user_id").references(
+      () => staffUsers.id,
+      { onDelete: "restrict" },
+    ),
+    decisionReason: reviewRestrictionReasonEnum("decision_reason"),
+    decisionNote: varchar("decision_note", { length: 500 }),
     publishedReviewId: uuid("published_review_id").references(
       () => customerReviews.id,
       { onDelete: "restrict" },
@@ -1142,11 +1219,129 @@ export const customerReviewSubmissions = pgTable(
       sql`(
         ${table.status} = 'published'
         AND ${table.moderatedAt} IS NOT NULL
+        AND ${table.moderatedByUserId} IS NOT NULL
         AND ${table.publishedReviewId} IS NOT NULL
+        AND ${table.decisionReason} IS NULL
+        AND ${table.decisionNote} IS NULL
       ) OR (
-        ${table.status} <> 'published'
+        ${table.status} IN ('rejected', 'withdrawn')
+        AND ${table.moderatedAt} IS NOT NULL
+        AND ${table.moderatedByUserId} IS NOT NULL
         AND ${table.publishedReviewId} IS NULL
+        AND ${table.decisionReason} IS NOT NULL
+      ) OR (
+        ${table.status} = 'pending_review'
+        AND ${table.moderatedAt} IS NULL
+        AND ${table.moderatedByUserId} IS NULL
+        AND ${table.publishedReviewId} IS NULL
+        AND ${table.decisionReason} IS NULL
+        AND ${table.decisionNote} IS NULL
       )`,
+    ),
+  ],
+);
+
+export const customerReviewLinks = pgTable(
+  "customer_review_links",
+  {
+    id: uuid("id").primaryKey(),
+    reviewId: uuid("review_id").references(() => customerReviews.id, {
+      onDelete: "restrict",
+    }),
+    submissionId: uuid("submission_id").references(
+      () => customerReviewSubmissions.id,
+      { onDelete: "restrict" },
+    ),
+    directoryClientIdx: integer("directory_client_idx").notNull(),
+    directoryCaseIdx: integer("directory_case_idx").notNull(),
+    source: reviewCustomerLinkSourceEnum("source").notNull(),
+    linkedByUserId: uuid("linked_by_user_id").references(
+      () => staffUsers.id,
+      { onDelete: "restrict" },
+    ),
+    linkedAt: timestamp("linked_at", { withTimezone: true }).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("customer_review_links_review_uidx")
+      .on(table.reviewId)
+      .where(sql`${table.reviewId} IS NOT NULL`),
+    uniqueIndex("customer_review_links_submission_uidx")
+      .on(table.submissionId)
+      .where(sql`${table.submissionId} IS NOT NULL`),
+    index("customer_review_links_directory_idx").on(
+      table.directoryClientIdx,
+      table.directoryCaseIdx,
+    ),
+    check(
+      "customer_review_links_subject_present",
+      sql`${table.reviewId} IS NOT NULL OR ${table.submissionId} IS NOT NULL`,
+    ),
+    check(
+      "customer_review_links_directory_positive",
+      sql`${table.directoryClientIdx} > 0 AND ${table.directoryCaseIdx} > 0`,
+    ),
+    check(
+      "customer_review_links_actor_consistent",
+      sql`(${table.source} = 'manual' AND ${table.linkedByUserId} IS NOT NULL)
+        OR (${table.source} <> 'manual' AND ${table.linkedByUserId} IS NULL)`,
+    ),
+  ],
+);
+
+export const customerReviewLinkManagers = pgTable(
+  "customer_review_link_managers",
+  {
+    id: uuid("id").primaryKey(),
+    linkId: uuid("link_id")
+      .notNull()
+      .references(() => customerReviewLinks.id, { onDelete: "cascade" }),
+    staffUserId: uuid("staff_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "restrict" }),
+    externalMemberIdx: integer("external_member_idx").notNull(),
+    position: integer("position").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("customer_review_link_managers_link_staff_uidx").on(
+      table.linkId,
+      table.staffUserId,
+    ),
+    index("customer_review_link_managers_staff_idx").on(
+      table.staffUserId,
+      table.linkId,
+    ),
+    check(
+      "customer_review_link_managers_values_positive",
+      sql`${table.externalMemberIdx} > 0 AND ${table.position} BETWEEN 1 AND 3`,
+    ),
+  ],
+);
+
+export const customerReviewReplies = pgTable(
+  "customer_review_replies",
+  {
+    id: uuid("id").primaryKey(),
+    reviewId: uuid("review_id")
+      .notNull()
+      .references(() => customerReviews.id, { onDelete: "restrict" }),
+    content: text("content").notNull(),
+    createdByUserId: uuid("created_by_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "restrict" }),
+    updatedByUserId: uuid("updated_by_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "restrict" }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("customer_review_replies_review_uidx").on(table.reviewId),
+    check(
+      "customer_review_replies_content_length",
+      sql`length(btrim(${table.content})) BETWEEN 2 AND 3000`,
     ),
   ],
 );
@@ -2583,6 +2778,53 @@ export const telephonyMessageManualContacts = pgTable(
   ],
 );
 
+export const customerReviewRequestTemplates = pgTable(
+  "customer_review_request_templates",
+  {
+    id: uuid("id").primaryKey(),
+    ownerUserId: uuid("owner_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "restrict" }),
+    name: varchar("name", { length: 80 }).notNull(),
+    body: text("body").notNull(),
+    bodyByteLength: integer("body_byte_length").notNull(),
+    createdByUserId: uuid("created_by_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "restrict" }),
+    updatedByUserId: uuid("updated_by_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "restrict" }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("customer_review_request_templates_owner_name_lower_uidx").on(
+      table.ownerUserId,
+      sql`lower(${table.name})`,
+    ),
+    check(
+      "customer_review_request_templates_name_nonempty",
+      sql`length(btrim(${table.name})) > 0`,
+    ),
+    check(
+      "customer_review_request_templates_body_nonempty",
+      sql`length(btrim(${table.body})) > 0`,
+    ),
+    check(
+      "customer_review_request_templates_body_byte_length",
+      sql`${table.bodyByteLength} BETWEEN 1 AND 500`,
+    ),
+    check(
+      "customer_review_request_templates_link_variable",
+      sql`position('{{후기작성링크}}' in ${table.body}) > 0`,
+    ),
+    check(
+      "customer_review_request_templates_owner_audit_consistent",
+      sql`${table.createdByUserId} = ${table.ownerUserId}
+        AND ${table.updatedByUserId} = ${table.ownerUserId}`,
+    ),
+  ],
+);
+
 export const telephonyMessages = pgTable(
   "telephony_messages",
   {
@@ -2801,6 +3043,108 @@ export const telephonyMessageDirectoryTargets = pgTable(
         AND octet_length(${table.clientNameCiphertext}) >= 17
         AND octet_length(${table.phoneNonce}) = 12
         AND octet_length(${table.phoneCiphertext}) >= 17`,
+    ),
+  ],
+);
+
+export const customerReviewRequests = pgTable(
+  "customer_review_requests",
+  {
+    id: uuid("id").primaryKey(),
+    idempotencyKey: uuid("idempotency_key").notNull(),
+    directoryClientIdx: integer("directory_client_idx").notNull(),
+    directoryCaseIdx: integer("directory_case_idx").notNull(),
+    requestedByUserId: uuid("requested_by_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "restrict" }),
+    templateId: uuid("template_id")
+      .notNull()
+      .references(() => customerReviewRequestTemplates.id, {
+        onDelete: "restrict",
+      }),
+    telephonyMessageId: uuid("telephony_message_id").references(
+      () => telephonyMessages.id,
+      { onDelete: "restrict" },
+    ),
+    status: reviewRequestStatusEnum("status").default("queued").notNull(),
+    requestedAt: timestamp("requested_at", { withTimezone: true }).notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    redeemedSubmissionId: uuid("redeemed_submission_id").references(
+      () => customerReviewSubmissions.id,
+      { onDelete: "restrict" },
+    ),
+    redeemedAt: timestamp("redeemed_at", { withTimezone: true }),
+    failedAt: timestamp("failed_at", { withTimezone: true }),
+    lastErrorCode: varchar("last_error_code", { length: 100 }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("customer_review_requests_idempotency_uidx").on(
+      table.idempotencyKey,
+    ),
+    uniqueIndex("customer_review_requests_message_uidx")
+      .on(table.telephonyMessageId)
+      .where(sql`${table.telephonyMessageId} IS NOT NULL`),
+    uniqueIndex("customer_review_requests_submission_uidx")
+      .on(table.redeemedSubmissionId)
+      .where(sql`${table.redeemedSubmissionId} IS NOT NULL`),
+    index("customer_review_requests_target_requested_idx").on(
+      table.directoryClientIdx,
+      table.directoryCaseIdx,
+      table.requestedAt,
+    ),
+    index("customer_review_requests_staff_requested_idx").on(
+      table.requestedByUserId,
+      table.requestedAt,
+    ),
+    check(
+      "customer_review_requests_directory_positive",
+      sql`${table.directoryClientIdx} > 0 AND ${table.directoryCaseIdx} > 0`,
+    ),
+    check(
+      "customer_review_requests_expiry_order",
+      sql`${table.expiresAt} > ${table.requestedAt}`,
+    ),
+    check(
+      "customer_review_requests_status_consistent",
+      sql`(
+        ${table.status} = 'queued'
+        AND ${table.telephonyMessageId} IS NULL
+        AND ${table.sentAt} IS NULL
+        AND ${table.redeemedSubmissionId} IS NULL
+        AND ${table.redeemedAt} IS NULL
+        AND ${table.failedAt} IS NULL
+        AND ${table.lastErrorCode} IS NULL
+      ) OR (
+        ${table.status} = 'sent'
+        AND ${table.telephonyMessageId} IS NOT NULL
+        AND ${table.sentAt} IS NOT NULL
+        AND ${table.redeemedSubmissionId} IS NULL
+        AND ${table.redeemedAt} IS NULL
+        AND ${table.failedAt} IS NULL
+        AND ${table.lastErrorCode} IS NULL
+      ) OR (
+        ${table.status} = 'redeemed'
+        AND ${table.telephonyMessageId} IS NOT NULL
+        AND ${table.sentAt} IS NOT NULL
+        AND ${table.redeemedSubmissionId} IS NOT NULL
+        AND ${table.redeemedAt} IS NOT NULL
+        AND ${table.failedAt} IS NULL
+        AND ${table.lastErrorCode} IS NULL
+      ) OR (
+        ${table.status} = 'failed'
+        AND ${table.telephonyMessageId} IS NULL
+        AND ${table.sentAt} IS NULL
+        AND ${table.redeemedSubmissionId} IS NULL
+        AND ${table.redeemedAt} IS NULL
+        AND ${table.failedAt} IS NOT NULL
+        AND ${table.lastErrorCode} IS NOT NULL
+      ) OR (
+        ${table.status} = 'cancelled'
+        AND ${table.redeemedSubmissionId} IS NULL
+        AND ${table.redeemedAt} IS NULL
+      )`,
     ),
   ],
 );

@@ -544,6 +544,12 @@ export default async function BankHomePage() {
                       “
                     </div>
                     <blockquote>{review.content}</blockquote>
+                    {review.reply ? (
+                      <div className="review-official-reply review-card-reply">
+                        <strong>법무법인 로앤의 답글</strong>
+                        <p>{review.reply.content}</p>
+                      </div>
+                    ) : null}
                     <figcaption>
                       <span>{review.authorDisplay}</span>
                       <span>

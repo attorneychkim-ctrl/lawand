@@ -5,6 +5,7 @@ import { logoutAction } from "../auth-actions";
 import { BrowserNotificationToggle } from "./browser-notification-toggle";
 import { ErpNav } from "./erp-nav";
 import { InboundCallIndicator } from "./inbound-call-indicator";
+import { ReviewNotificationBridge } from "./review-notification-bridge";
 import { ThemeToggle } from "./theme-toggle";
 
 export function StaffBar({ staff }: { staff: StaffPrincipal }) {
@@ -47,6 +48,7 @@ export function StaffBar({ staff }: { staff: StaffPrincipal }) {
         staffDisplayName={staff.displayName}
         staffUserId={staff.id}
       />
+      <ReviewNotificationBridge />
     </header>
   );
 }

@@ -135,6 +135,123 @@ export type MessageTemplate = {
   updatedAt: string;
 };
 
+export type ReviewRecordType = "review" | "submission";
+export type ReviewListFilter =
+  | "all"
+  | "reply_needed"
+  | "pending"
+  | "published"
+  | "restricted"
+  | "mine";
+export type ReviewRestrictionReason =
+  | "privacy"
+  | "unverified"
+  | "abusive_or_manipulated"
+  | "customer_request"
+  | "duplicate"
+  | "other";
+
+export type ReviewManagementListItem = {
+  id: string;
+  recordType: ReviewRecordType;
+  receiptCode: string | null;
+  authorDisplay: string;
+  contentPreview: string;
+  practiceArea: "personal_rehabilitation" | "personal_bankruptcy" | "other";
+  progressStage: "consultation" | "commencement" | "discharge" | "other";
+  status: "pending" | "published" | "restricted";
+  restrictionReason: ReviewRestrictionReason | null;
+  replyStatus: "waiting" | "answered" | "not_applicable";
+  linked: boolean;
+  mine: boolean;
+  occurredAt: string;
+};
+
+export type ReviewManagementSnapshot = {
+  items: ReviewManagementListItem[];
+  total: number;
+  page: number;
+  pageSize: 20;
+  pageCount: number;
+  filter: ReviewListFilter;
+  summary: Record<ReviewListFilter, number>;
+};
+
+export type ReviewManagementDetail = {
+  id: string;
+  recordType: ReviewRecordType;
+  receiptCode: string | null;
+  authorDisplay: string;
+  content: string;
+  submittedPhone: string | null;
+  practiceArea: ReviewManagementListItem["practiceArea"];
+  progressStage: ReviewManagementListItem["progressStage"];
+  experienceKeywords: string[];
+  piiStatus: "clear" | "flagged" | "reviewed";
+  piiFlags: string[];
+  status: ReviewManagementListItem["status"];
+  restrictionReason: ReviewRestrictionReason | null;
+  restrictionNote: string | null;
+  occurredAt: string;
+  publishedAt: string | null;
+  linkedCustomer: {
+    clientIdx: number;
+    caseIdx: number;
+    clientName: string;
+    phone: string | null;
+    livingPlace: string | null;
+    caseType: number;
+    caseCategory: number;
+    caseState: number;
+    maxState: number;
+    isClosed: boolean;
+    isRepealed: boolean;
+    courtName: string | null;
+    caseNumber: string | null;
+    caseName: string | null;
+    staff: Array<{
+      name: string;
+      externalMemberIdx: number;
+      position: 1 | 2 | 3;
+    }>;
+    caseCreatedOn: string;
+    caseUpdatedOn: string;
+    dutyManagerUserIds: string[];
+  } | null;
+  linkSource: "invitation" | "exact_phone" | "manual" | null;
+  reply: {
+    id: string;
+    content: string;
+    createdByName: string;
+    updatedByName: string;
+    createdAt: string;
+    updatedAt: string;
+  } | null;
+  canReply: boolean;
+};
+
+export type ReviewRequestTemplate = {
+  id: string;
+  name: string;
+  body: string;
+  bodyByteLength: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ReviewRequestBatchResult = {
+  items: Array<{
+    clientIdx: number;
+    caseIdx: number;
+    status: "sent" | "failed";
+    messageId: string | null;
+    errorCode: string | null;
+    replayed: boolean;
+  }>;
+  sentCount: number;
+  failedCount: number;
+};
+
 export type MessageThreadSummary = {
   key: string;
   targetSource:
@@ -1356,6 +1473,181 @@ async function messageResponse<T>(response: Response): Promise<T> {
     );
   }
   return (await response.json()) as T;
+}
+
+async function reviewResponse<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      message?: string;
+    } | null;
+    throw new ConsultationGatewayError(
+      response.status,
+      body?.message ?? `후기 처리 실패 (${response.status})`,
+    );
+  }
+  return (await response.json()) as T;
+}
+
+export async function getReviews(input: {
+  page?: number;
+  filter?: ReviewListFilter;
+} = {}): Promise<ReviewManagementSnapshot> {
+  const params = new URLSearchParams({
+    page: String(input.page ?? 1),
+    filter: input.filter ?? "all",
+  });
+  return reviewResponse(
+    await gatewayFetch(`/v1/reviews?${params.toString()}`),
+  );
+}
+
+export async function getReviewDetail(
+  recordType: ReviewRecordType,
+  id: string,
+): Promise<ReviewManagementDetail | null> {
+  const response = await gatewayFetch(`/v1/reviews/${recordType}/${id}`);
+  if (response.status === 404) return null;
+  return reviewResponse(response);
+}
+
+export async function getReviewDutyCount(): Promise<{ count: number }> {
+  return reviewResponse(await gatewayFetch("/v1/reviews/duty-count"));
+}
+
+export async function getReviewNotification(
+  recordType: ReviewRecordType,
+  id: string,
+): Promise<{
+  id: string;
+  recordType: ReviewRecordType;
+  href: string;
+  customerName: string;
+  receiptCode: string | null;
+  caseNumber: string | null;
+  caseName: string | null;
+  managerNames: string[];
+  status: ReviewManagementListItem["status"];
+} | null> {
+  const response = await gatewayFetch(
+    `/v1/reviews/${recordType}/${id}/notification`,
+  );
+  if (response.status === 404) return null;
+  return reviewResponse(response);
+}
+
+export async function openReviewEventStream(
+  signal: AbortSignal,
+): Promise<Response> {
+  return gatewayFetch("/v1/review-events/stream", {
+    signal,
+    streaming: true,
+  });
+}
+
+export async function linkReviewCustomer(
+  recordType: ReviewRecordType,
+  id: string,
+  input: { clientIdx: number; caseIdx: number },
+): Promise<ReviewManagementDetail> {
+  return reviewResponse(
+    await gatewayFetch(`/v1/reviews/${recordType}/${id}/link`, {
+      method: "POST",
+      body: input,
+    }),
+  );
+}
+
+export async function moderateReview(
+  recordType: ReviewRecordType,
+  id: string,
+  input: {
+    action: "publish" | "restrict";
+    reason: ReviewRestrictionReason | null;
+    note: string | null;
+  },
+): Promise<{
+  recordType: ReviewRecordType;
+  id: string;
+  detail: ReviewManagementDetail;
+}> {
+  return reviewResponse(
+    await gatewayFetch(`/v1/reviews/${recordType}/${id}/moderation`, {
+      method: "POST",
+      body: input,
+    }),
+  );
+}
+
+export async function upsertReviewReply(
+  reviewId: string,
+  input: { content: string },
+): Promise<ReviewManagementDetail> {
+  return reviewResponse(
+    await gatewayFetch(`/v1/reviews/review/${reviewId}/reply`, {
+      method: "POST",
+      body: input,
+    }),
+  );
+}
+
+export async function getReviewRequestTemplates(): Promise<
+  ReviewRequestTemplate[]
+> {
+  const body = await reviewResponse<{ items: ReviewRequestTemplate[] }>(
+    await gatewayFetch("/v1/review-request-templates"),
+  );
+  return body.items;
+}
+
+export async function createReviewRequestTemplate(input: {
+  name: string;
+  body: string;
+}): Promise<ReviewRequestTemplate> {
+  return reviewResponse(
+    await gatewayFetch("/v1/review-request-templates", {
+      method: "POST",
+      body: input,
+    }),
+  );
+}
+
+export async function updateReviewRequestTemplate(
+  templateId: string,
+  input: { name: string; body: string },
+): Promise<ReviewRequestTemplate> {
+  return reviewResponse(
+    await gatewayFetch(`/v1/review-request-templates/${templateId}`, {
+      method: "POST",
+      body: input,
+    }),
+  );
+}
+
+export async function deleteReviewRequestTemplate(
+  templateId: string,
+): Promise<{ id: string; deleted: true }> {
+  return reviewResponse(
+    await gatewayFetch(`/v1/review-request-templates/${templateId}`, {
+      method: "DELETE",
+    }),
+  );
+}
+
+export async function sendReviewRequests(input: {
+  templateId: string;
+  targets: Array<{
+    clientIdx: number;
+    caseIdx: number;
+    idempotencyKey: string;
+  }>;
+}): Promise<ReviewRequestBatchResult> {
+  return reviewResponse(
+    await gatewayFetch("/v1/review-requests/send", {
+      method: "POST",
+      body: input,
+      timeoutMs: 60_000,
+    }),
+  );
 }
 
 export async function getMessageTemplates(): Promise<MessageTemplate[]> {

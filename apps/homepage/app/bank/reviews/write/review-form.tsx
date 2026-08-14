@@ -130,7 +130,7 @@ function validate(form: ReviewFormData): string | null {
   return null;
 }
 
-export function ReviewForm() {
+export function ReviewForm({ requestToken }: { requestToken?: string }) {
   const [form, setForm] = useState<ReviewFormData>(initialForm);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -203,6 +203,7 @@ export function ReviewForm() {
       consentAgreedAt: submittedAt,
       privacyConsent: true,
       publicationConsent: true,
+      ...(requestToken ? { requestToken } : {}),
       website: form.website as "",
     };
 
@@ -313,6 +314,12 @@ export function ReviewForm() {
               </ul>
             </div>
           </div>
+          {requestToken ? (
+            <p className="review-request-arrival" role="status">
+              로앤 담당자가 보내드린 전용 링크로 들어오셨습니다. 작성하신
+              후기는 해당 고객 사건과 안전하게 연결되어 담당자가 확인합니다.
+            </p>
+          ) : null}
         </div>
       </section>
 

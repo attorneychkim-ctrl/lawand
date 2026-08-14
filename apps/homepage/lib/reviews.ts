@@ -46,6 +46,10 @@ export type PublicReview = {
   originalCreatedAt: Date;
   practiceArea: Exclude<ReviewArea, "all"> | "other";
   progressStage: Exclude<ReviewStage, "all"> | "other";
+  reply: {
+    content: string;
+    updatedAt: Date;
+  } | null;
 };
 
 export type ReviewPageData = {
@@ -190,7 +194,17 @@ const PUBLIC_REVIEW_COLUMNS = `
   practice_area,
   progress_stage,
   experience_keywords,
-  original_created_at`;
+  original_created_at,
+  (
+    SELECT reply.content
+    FROM customer_review_replies reply
+    WHERE reply.review_id = customer_reviews.id
+  ) AS reply_content,
+  (
+    SELECT reply.updated_at
+    FROM customer_review_replies reply
+    WHERE reply.review_id = customer_reviews.id
+  ) AS reply_updated_at`;
 
 type PublicReviewRow = {
   author_display: string;
@@ -200,6 +214,8 @@ type PublicReviewRow = {
   original_created_at: Date;
   practice_area: PublicReview["practiceArea"];
   progress_stage: PublicReview["progressStage"];
+  reply_content: string | null;
+  reply_updated_at: Date | null;
 };
 
 function toPublicReview(row: PublicReviewRow): PublicReview {
@@ -211,6 +227,10 @@ function toPublicReview(row: PublicReviewRow): PublicReview {
     originalCreatedAt: row.original_created_at,
     practiceArea: row.practice_area,
     progressStage: row.progress_stage,
+    reply:
+      row.reply_content && row.reply_updated_at
+        ? { content: row.reply_content, updatedAt: row.reply_updated_at }
+        : null,
   };
 }
 
