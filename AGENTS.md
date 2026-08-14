@@ -88,6 +88,33 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-14 — 완료 worktree 8개 main 통합·ARM64 ECR 운영 배포 준비
+- `HERDR_ENV=1`에서 main과 HERDR worktree 9개, 원격 `origin/worktree/*` 46개를 전수 대조했다.
+  미반영이던 `brave-forest-cdd8`, `green-valley-74fb`, `lucky-field-cb94`,
+  `lucky-valley-a7bc`, `quiet-cloud-b24d`, `quiet-cloud-bd8d`, `silver-cloud-f2cf`,
+  `silver-harbor-2267`을 모두 main에 병합했고, 현재 모든 로컬·원격 worktree HEAD가 main
+  ancestor다. 명시적 제외·진행 중 브랜치는 없다.
+- 일반 내선 종료 복구와 호전환 문맥, 직원 회선 식별·전 직원 연락/후처리, 대표 수신 회선 7개
+  관찰, 전화 E2E 지연 계측, `/messages` 대화형 작성, 후기관리·공개 답글·후기 요청 문자,
+  기존고객 담당자·무효 상담 시각화, 상담/수신전화 알림 구분·20초 표시·안전한 받기 동작을
+  통합했다. 영향 앱은 홈페이지·ERP·gateway이며 Windows bridge와 기프티쇼 외부 API는 제외한다.
+- 세 브랜치에서 겹치던 migration 번호는 `0058_centrex_internal_terminal_recovery.sql` →
+  `0059_message_conversation_composer.sql` → `0060_tranquil_dark_phoenix.sql` 단일 journal
+  체인으로 정리했다. SHA-256은 각각
+  `506683223a6a0680de75c9a533b05779047d0f76b13c156c0b9c06a7847866fe`,
+  `a1fba32716f153765c3471454635a57a5c8861f767e08174dfb6ac774c98f195`,
+  `6f4780749d74e769e74cba3b96d2c4a6d7f0f1dfd6ef2ed5c4099ec77830152c`다.
+- 전체 5패키지 typecheck·lint·production build, core 86개·gateway 156개 테스트, DB schema
+  check, ERP 서비스 워커와 표준 ECR 배포 스크립트 Bash syntax, `git diff --check`를 통과했다.
+  합성한 비식별 `CB` 원천의 빈 PostgreSQL에 migration `0000..0060` 61개를 두 번 적용해 최신
+  해시, 새 테이블 6개, 후기 디렉터리 함수와 앱 실행 권한, PUBLIC grant 0을 확인한 뒤 임시
+  DB·역할을 삭제했다. `PROJECT_PLAN.md`는 v1.39다.
+- 이 항목 작성 시점에는 `main` 원격 push, GitHub Actions ARM64 이미지 빌드, 운영 RDS snapshot·
+  migration·앱 전환·운영 데이터 변경을 시작하지 않았다. 운영 반영은 검증한 main을 push한 뒤
+  앱별 private ECR의 `linux/arm64` digest를 확보하고, gateway digest 선행 pull → 암호화 RDS
+  snapshot → 같은 digest로 `0058..0060` 적용 → 세 앱을 같은 릴리스 ID로 전환하는 표준 경로만
+  사용한다.
+
 ### 2026-08-14 — 일반 내선 종료 동기화·호전환 문맥 보강 후보
 - 운영 DB와 Windows bridge 로그를 읽기 전용으로 대조했다. 비종료 internal root 6건 중 5건은
   같은 provider root의 수신 leg에 `HCAUSE=16` 종료가 기록됐지만 발신 leg와 root만

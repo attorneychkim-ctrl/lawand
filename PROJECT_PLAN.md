@@ -1,4 +1,4 @@
-# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.38)
+# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.39)
 
 > 이 문서는 새 로앤 홈페이지 + 새 ERP + 리걸플로/리걸프렌즈 연동을 하나의 플랫폼으로
 > 묶기 위한 **저장소 구조·아키텍처 설계 초안**이다. 코덱스/클로드코드 세션이 번갈아
@@ -1030,6 +1030,13 @@
 > 원장과 공개 제한 감사 필드를 추가한다. 같은 상세에는 기프티쇼 비즈 상용 Key 심사용
 > 모바일쿠폰 발송 UI를 실제 적용했지만 상품 조회·발송 API, 과금, 외부 전송은 승인 전까지
 > 연결하지 않고 버튼을 잠갔다. 제출용 소개서·적용 화면 PNG는 `docs/submissions`에 둔다.
+> 2026-08-14 완료 worktree 8개를 통합하면서 서로 겹치던 migration 번호는 일반 내선
+> 종료 복구 `0058_centrex_internal_terminal_recovery.sql`, 문자 대화 직접 대상
+> `0059_message_conversation_composer.sql`, 후기관리 `0060_tranquil_dark_phoenix.sql`의
+> 단일 journal 체인으로 확정했다. 세 migration은 하나의 암호화 RDS snapshot 뒤 같은 gateway
+> digest로 순서대로 적용하고, 전화·문자·후기 경계를 함께 쓰는 gateway·ERP와 공개 답글을
+> 표시하는 홈페이지를 같은 릴리스 ID로 전환한다. Windows bridge와 기프티쇼 외부 API는 이번
+> 릴리스 대상이 아니다.
 
 ---
 
