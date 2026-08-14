@@ -445,6 +445,8 @@ export type TelephonyInboundCallSnapshot = {
 export type TelephonyCallActivity = {
   id: string;
   observedCallId: string | null;
+  currentEndpointOwnedByActor: boolean;
+  answerableInboundCallId: string | null;
   scope: "external" | "internal";
   direction: "inbound" | "outbound" | null;
   state:

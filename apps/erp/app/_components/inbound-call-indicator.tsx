@@ -14,6 +14,10 @@ import type {
   TelephonyRealtimeAck,
 } from "../../lib/gateway";
 import {
+  browserNotificationSettingChangedEvent,
+  browserNotificationsEnabled,
+  closeConsultationBrowserNotification,
+  closeTelephonyBrowserNotification,
   prepareBrowserNotifications,
   showConsultationBrowserNotification,
   showTelephonyBrowserNotification,
@@ -39,10 +43,8 @@ type TelephonyRealtimeDeliveryEnvelope = {
 
 type ConsultationNotificationSummary = {
   id: string;
-  publicReceiptCode: string;
   displayName: string;
   contactChannel: "phone" | "kakao_channel" | "naver_booking";
-  phone: string | null;
   residenceRegion: string | null;
   assigneeUserId: string | null;
   canClaim: boolean;
@@ -50,10 +52,20 @@ type ConsultationNotificationSummary = {
 
 type IndicatorToast = {
   id: string;
+  resourceKind: "consultation" | "telephony";
+  resourceId: string;
   title: string;
   body: string;
   href?: string;
   consultation?: ConsultationNotificationSummary;
+  telephony?: {
+    customerName: string;
+    managerLabel: string;
+    stateLabel: string;
+    lineLabel: "내 회선" | "다른 회선";
+    answerCallId: string | null;
+    myCustomer: boolean;
+  };
   consultationKind?:
     | "new"
     | "repeat_unassigned"
@@ -216,14 +228,6 @@ function formatPhone(phone: string) {
   return phone;
 }
 
-function consultationPhoneLabel(
-  consultation: ConsultationNotificationSummary,
-) {
-  return consultation.phone
-    ? formatPhone(consultation.phone)
-    : "010-0000-0000 · 미수집";
-}
-
 function consultationRegionLabel(
   consultation: ConsultationNotificationSummary,
 ) {
@@ -242,12 +246,10 @@ function isConsultationNotificationSummary(
   const record = value as Record<string, unknown>;
   return (
     typeof record.id === "string" &&
-    typeof record.publicReceiptCode === "string" &&
     typeof record.displayName === "string" &&
     ["phone", "kakao_channel", "naver_booking"].includes(
       String(record.contactChannel),
     ) &&
-    (typeof record.phone === "string" || record.phone === null) &&
     (typeof record.residenceRegion === "string" ||
       record.residenceRegion === null) &&
     (typeof record.assigneeUserId === "string" ||
@@ -361,10 +363,77 @@ function isMyCustomer(
     : false;
 }
 
+function telephonyNotificationSummary(
+  activity: TelephonyCallActivity,
+  staffUserId: string,
+) {
+  const customer = activity.customerMatch;
+  const customerName = customer?.source === "consultation"
+    ? customer.consultation.displayName
+    : customer?.source === "legal_friends"
+      ? customer.clientName
+      : "발신자 정보 없음";
+  if (customer?.source === "consultation") {
+    return {
+      customerName,
+      managerLabel: customer.consultation.assigneeDisplayName
+        ? `담당 ${customer.consultation.assigneeDisplayName}`
+        : "담당 미배정",
+      stateLabel:
+        consultationStateLabels[customer.consultation.state] ??
+        customer.consultation.state,
+      lineLabel: activity.currentEndpointOwnedByActor
+        ? "내 회선" as const
+        : "다른 회선" as const,
+      answerCallId: activity.answerableInboundCallId,
+      myCustomer: isMyCustomer(activity, staffUserId),
+    };
+  }
+  if (customer?.source === "legal_friends") {
+    const latestCase = customer.cases[0];
+    const managers = [
+      ...new Set(customer.cases.flatMap((item) => item.staffNames)),
+    ];
+    return {
+      customerName,
+      managerLabel: managers.length
+        ? `담당 ${managers.join(" · ")}`
+        : "담당 미확인",
+      stateLabel: latestCase
+        ? `${caseTypeLabel(latestCase.caseType)} · ${caseStateLabel(latestCase.caseType, latestCase.caseState)}`
+        : "사건 정보 확인 중",
+      lineLabel: activity.currentEndpointOwnedByActor
+        ? "내 회선" as const
+        : "다른 회선" as const,
+      answerCallId: activity.answerableInboundCallId,
+      myCustomer: isMyCustomer(activity, staffUserId),
+    };
+  }
+  return {
+    customerName,
+    managerLabel: "담당 미확인",
+    stateLabel: "고객 정보 미확인",
+    lineLabel: activity.currentEndpointOwnedByActor
+      ? "내 회선" as const
+      : "다른 회선" as const,
+    answerCallId: activity.answerableInboundCallId,
+    myCustomer: false,
+  };
+}
+
 function notificationCopy(
   activity: TelephonyCallActivity,
   staffUserId: string,
 ) {
+  if (activity.notificationKind === "external_inbound") {
+    const summary = telephonyNotificationSummary(activity, staffUserId);
+    return {
+      title: summary.myCustomer
+        ? `📞 내 담당 고객 전화 · ${summary.customerName}`
+        : `📞 수신전화 · ${summary.customerName}`,
+      body: `${summary.managerLabel} · ${summary.stateLabel}`,
+    };
+  }
   const kindLabel =
     activity.notificationKind === "transferred_customer"
       ? "전달된 고객 전화"
@@ -463,6 +532,7 @@ export function InboundCallIndicator({
   const [notificationPermission, setNotificationPermission] = useState<
     "default" | "denied" | "granted" | "unsupported"
   >("default");
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [connection, setConnection] =
     useState<ConnectionState>("connecting");
   const [answeringCallIds, setAnsweringCallIds] = useState<Set<string>>(
@@ -471,6 +541,9 @@ export function InboundCallIndicator({
   const [answerErrors, setAnswerErrors] = useState<Record<string, string>>(
     {},
   );
+  const [answerRequestedCallIds, setAnswerRequestedCallIds] = useState<
+    Set<string>
+  >(() => new Set());
   const [aftercareCallId, setAftercareCallId] = useState<string | null>(null);
   const [pendingAftercareCallIds, setPendingAftercareCallIds] = useState<
     string[]
@@ -480,7 +553,9 @@ export function InboundCallIndicator({
   const deskStartedAt = useRef(0);
   const seenDeskEndedCallIds = useRef<Set<string>>(new Set());
   const seenNotificationKeys = useRef<Set<string>>(new Set());
+  const seenTelephonyToastKeys = useRef<Set<string>>(new Set());
   const seenConsultationEventIds = useRef<Set<string>>(new Set());
+  const consultationAssignmentTimes = useRef<Map<string, number>>(new Map());
   const notificationLeader = useRef(false);
   const notificationTabId = useRef("");
   const toastTimers = useRef<Map<string, number>>(new Map());
@@ -490,6 +565,11 @@ export function InboundCallIndicator({
       setNotificationPermission(
         "Notification" in window ? Notification.permission : "unsupported",
       );
+      setNotificationsEnabled(
+        "Notification" in window &&
+          Notification.permission === "granted" &&
+          browserNotificationsEnabled(),
+      );
     };
     synchronizeNotificationPermission();
     void prepareBrowserNotifications()?.catch(() => undefined);
@@ -497,6 +577,11 @@ export function InboundCallIndicator({
       notificationPermissionChangedEvent,
       synchronizeNotificationPermission,
     );
+    window.addEventListener(
+      browserNotificationSettingChangedEvent,
+      synchronizeNotificationPermission,
+    );
+    window.addEventListener("storage", synchronizeNotificationPermission);
     notificationTabId.current = window.crypto.randomUUID();
     const leaseKey = "lawand:telephony-notification-leader";
     const claimLeadership = () => {
@@ -537,6 +622,11 @@ export function InboundCallIndicator({
         notificationPermissionChangedEvent,
         synchronizeNotificationPermission,
       );
+      window.removeEventListener(
+        browserNotificationSettingChangedEvent,
+        synchronizeNotificationPermission,
+      );
+      window.removeEventListener("storage", synchronizeNotificationPermission);
       window.clearInterval(timer);
       try {
         const lease = JSON.parse(
@@ -567,6 +657,24 @@ export function InboundCallIndicator({
     setToasts((items) => items.filter((item) => item.id !== toastId));
   }, []);
 
+  const dismissResourceToasts = useCallback((
+    resourceKind: IndicatorToast["resourceKind"],
+    resourceId: string,
+  ) => {
+    setToasts((items) => items.filter((item) => {
+      if (
+        item.resourceKind !== resourceKind ||
+        item.resourceId !== resourceId
+      ) {
+        return true;
+      }
+      const timer = toastTimers.current.get(item.id);
+      if (timer !== undefined) window.clearTimeout(timer);
+      toastTimers.current.delete(item.id);
+      return false;
+    }));
+  }, []);
+
   const enqueueToast = useCallback((toast: IndicatorToast) => {
     const existingTimer = toastTimers.current.get(toast.id);
     if (existingTimer !== undefined) window.clearTimeout(existingTimer);
@@ -577,7 +685,7 @@ export function InboundCallIndicator({
     const timer = window.setTimeout(() => {
       setToasts((items) => items.filter((item) => item.id !== toast.id));
       toastTimers.current.delete(toast.id);
-    }, 10_000);
+    }, 20_000);
     toastTimers.current.set(toast.id, timer);
   }, []);
 
@@ -704,12 +812,20 @@ export function InboundCallIndicator({
       if (!response.ok || !body?.id) {
         throw new Error(body?.message ?? "전화 받기 요청에 실패했습니다.");
       }
+      setAnswerRequestedCallIds((current) =>
+        new Set(current).add(callId)
+      );
       setCalls((current) => current.map((call) =>
         call.id === callId
           ? { ...call, answerCommand: body }
           : call,
       ));
     } catch (error) {
+      setAnswerRequestedCallIds((current) => {
+        const next = new Set(current);
+        next.delete(callId);
+        return next;
+      });
       setAnswerErrors((current) => ({
         ...current,
         [callId]: error instanceof Error
@@ -825,11 +941,70 @@ export function InboundCallIndicator({
     return snapshot;
   }, [enqueueAftercareCalls, showPhoneDeskStatus, staffUserId]);
 
+  useEffect(() => {
+    const current = Date.now();
+    for (const activity of activities) {
+      if (
+        activity.notificationKind === "external_inbound" &&
+        activity.state !== "ringing"
+      ) {
+        dismissResourceToasts("telephony", activity.id);
+        void closeTelephonyBrowserNotification(activity.id);
+        if (activity.observedCallId) {
+          setAnswerRequestedCallIds((requested) => {
+            if (!requested.has(activity.observedCallId!)) return requested;
+            const next = new Set(requested);
+            next.delete(activity.observedCallId!);
+            return next;
+          });
+        }
+        continue;
+      }
+      if (
+        activity.notificationKind !== "external_inbound" ||
+        activity.state !== "ringing" ||
+        !activity.notificationTargetUserIds.includes(staffUserId) ||
+        current - new Date(activity.lastEventAt).getTime() > 2 * 60_000
+      ) {
+        continue;
+      }
+      const toastKey = `telephony:${activity.id}`;
+      if (
+        document.visibilityState !== "visible" ||
+        seenTelephonyToastKeys.current.has(toastKey)
+      ) {
+        continue;
+      }
+      seenTelephonyToastKeys.current.add(toastKey);
+      const summary = telephonyNotificationSummary(activity, staffUserId);
+      enqueueToast({
+        id: toastKey,
+        resourceKind: "telephony",
+        resourceId: activity.id,
+        title: summary.myCustomer
+          ? `📞 내 담당 고객 전화 · ${summary.customerName}`
+          : `📞 수신전화 · ${summary.customerName}`,
+        body: `${summary.managerLabel} · ${summary.stateLabel}`,
+        href: `/phone-desk/${activity.id}`,
+        telephony: summary,
+      });
+    }
+  }, [
+    activities,
+    dismissResourceToasts,
+    enqueueToast,
+    staffUserId,
+  ]);
+
   const showTelephonyNotifications = useCallback(async (
     items: TelephonyCallActivity[],
     realtimeEntityId?: string,
   ) => {
-    if (!notificationLeader.current) return false;
+    if (
+      !notificationLeader.current ||
+      notificationPermission !== "granted" ||
+      !notificationsEnabled
+    ) return false;
     const current = Date.now();
     let matchedNotificationShown = false;
     for (const activity of items) {
@@ -860,13 +1035,13 @@ export function InboundCallIndicator({
       }
       if (alreadyNotified) continue;
       const copy = notificationCopy(activity, staffUserId);
-      if (notificationPermission !== "granted") continue;
       const shown = await showTelephonyBrowserNotification({
         ...copy,
         notificationId: notificationKey,
         callId: activity.id,
         href: `/phone-desk/${activity.id}`,
         occurredAt: activity.lastEventAt,
+        answerCallId: activity.answerableInboundCallId,
       });
       if (
         shown &&
@@ -878,7 +1053,7 @@ export function InboundCallIndicator({
       }
     }
     return matchedNotificationShown;
-  }, [notificationPermission, staffUserId]);
+  }, [notificationPermission, notificationsEnabled, staffUserId]);
 
   useEffect(() => {
     deskStartedAt.current = Date.now();
@@ -1016,6 +1191,15 @@ export function InboundCallIndicator({
       if (message.kind !== "changed") return;
       const payload = message.payload;
       const isRequestedEvent = payload.eventType === "consultation.requested";
+      if (payload.eventType === "consultation.assigned") {
+        consultationAssignmentTimes.current.set(
+          payload.consultationId,
+          Date.parse(payload.occurredAt),
+        );
+        dismissResourceToasts("consultation", payload.consultationId);
+        void closeConsultationBrowserNotification(payload.consultationId);
+        return;
+      }
       if (
         (!isRequestedEvent && payload.notificationKind === null) ||
         seenConsultationEventIds.current.has(payload.eventId)
@@ -1029,6 +1213,7 @@ export function InboundCallIndicator({
       const visibleAtEvent = document.visibilityState === "visible";
       const shouldShowNotification =
         notificationPermission === "granted" &&
+        notificationsEnabled &&
         (visibleAtEvent || notificationLeader.current);
       if (!visibleAtEvent && !shouldShowNotification) return;
 
@@ -1054,6 +1239,13 @@ export function InboundCallIndicator({
           consultation = null;
         }
         if (!active) return;
+        const assignedAt = consultationAssignmentTimes.current.get(
+          payload.consultationId,
+        );
+        if (
+          assignedAt !== undefined &&
+          assignedAt >= Date.parse(payload.occurredAt)
+        ) return;
 
         if (!isRequestedEvent && !consultation) return;
         if (
@@ -1066,23 +1258,22 @@ export function InboundCallIndicator({
 
         const title = consultation
           ? payload.notificationKind === "repeat_assigned"
-            ? `담당 상담 재요청 · ${consultation.displayName}`
+            ? `📝 담당 상담 재요청 · ${consultation.displayName}`
             : payload.notificationKind === "assignment_transferred"
-              ? `새 담당 상담 · ${consultation.displayName}`
+              ? `📝 새 담당 상담 · ${consultation.displayName}`
             : payload.notificationKind === "repeat_unassigned"
-              ? `상담 재요청 · ${consultation.displayName}`
-              : `새 상담 · ${consultation.displayName}`
-          : "새 상담이 등록됐습니다";
+              ? `📝 상담 재요청 · ${consultation.displayName}`
+              : `📝 새 상담 · ${consultation.displayName}`
+          : "📝 새 상담이 등록됐습니다";
         const body = consultation
-          ? [
-              `${consultationChannelLabels[consultation.contactChannel]} · ${consultation.publicReceiptCode}`,
-              `${consultationPhoneLabel(consultation)} · ${consultationRegionLabel(consultation)}`,
-            ].join("\n")
+          ? `📍 ${consultationRegionLabel(consultation)} · ${consultationChannelLabels[consultation.contactChannel]}`
           : "상담 데스크에서 접수 내용을 확인해 주세요.";
 
         if (visibleAtEvent) {
           enqueueToast({
             id: notificationKey,
+            resourceKind: "consultation",
+            resourceId: payload.consultationId,
             title,
             body,
             href,
@@ -1115,6 +1306,7 @@ export function InboundCallIndicator({
           consultationId: payload.consultationId,
           href,
           occurredAt: payload.occurredAt,
+          canClaim: consultation?.canClaim ?? false,
         });
       })();
     });
@@ -1122,7 +1314,13 @@ export function InboundCallIndicator({
       active = false;
       unsubscribe();
     };
-  }, [enqueueToast, notificationPermission, staffUserId]);
+  }, [
+    dismissResourceToasts,
+    enqueueToast,
+    notificationPermission,
+    notificationsEnabled,
+    staffUserId,
+  ]);
 
   useEffect(() => {
     if (!showPhoneDeskStatus) return;
@@ -1537,6 +1735,116 @@ export function InboundCallIndicator({
         <aside aria-live="assertive" className="telephony-toast-stack">
           {toasts.map((toast) => {
             const consultation = toast.consultation;
+            const telephony = toast.telephony;
+            if (telephony) {
+              const answerCallId = telephony.answerCallId;
+              const isAnswering = answerCallId
+                ? answeringCallIds.has(answerCallId)
+                : false;
+              const answerRequested = answerCallId
+                ? answerRequestedCallIds.has(answerCallId)
+                : false;
+              const answerError = answerCallId
+                ? answerErrors[answerCallId]
+                : undefined;
+              return (
+                <article
+                  className={`telephony-alert-toast${
+                    telephony.myCustomer ? " is-my-customer" : ""
+                  }`}
+                  key={toast.id}
+                >
+                  <header className="telephony-alert-heading">
+                    <span aria-hidden="true" className="telephony-alert-signal">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M7.8 3.8 10 8.5 7.5 10a14.3 14.3 0 0 0 6.5 6.5l1.5-2.5 4.7 2.2v3a1.8 1.8 0 0 1-1.8 1.8A15.4 15.4 0 0 1 3 5.6a1.8 1.8 0 0 1 1.8-1.8h3Z" />
+                      </svg>
+                    </span>
+                    <div className="telephony-alert-heading-copy">
+                      <small>실시간 수신</small>
+                      <strong>전화가 오고 있어요</strong>
+                    </div>
+                    <button
+                      aria-label="수신전화 알림 닫기"
+                      className="telephony-alert-close"
+                      onClick={() => dismissToast(toast.id)}
+                      type="button"
+                    >
+                      <svg aria-hidden="true" viewBox="0 0 24 24">
+                        <path d="m6 6 12 12M18 6 6 18" />
+                      </svg>
+                    </button>
+                  </header>
+                  <div className="telephony-alert-body">
+                    <div className="telephony-alert-context">
+                      <span className={`telephony-alert-line is-${
+                        telephony.lineLabel === "내 회선" ? "mine" : "other"
+                      }`}>
+                        {telephony.lineLabel}
+                      </span>
+                      {telephony.myCustomer ? (
+                        <span className="telephony-alert-priority">
+                          내 담당 고객
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="telephony-alert-identity">
+                      <span aria-hidden="true" className="telephony-alert-avatar">
+                        {telephony.customerName === "발신자 정보 없음"
+                          ? "?"
+                          : telephony.customerName.slice(0, 1)}
+                      </span>
+                      <div>
+                        <small>고객</small>
+                        <strong>{telephony.customerName}</strong>
+                      </div>
+                    </div>
+                    <dl className="telephony-alert-facts">
+                      <div>
+                        <dt>담당자</dt>
+                        <dd>{telephony.managerLabel.replace(/^담당\s*/, "")}</dd>
+                      </div>
+                      <div>
+                        <dt>진행상태</dt>
+                        <dd>{telephony.stateLabel}</dd>
+                      </div>
+                    </dl>
+                    {answerError ? (
+                      <p className="consultation-alert-error" role="alert">
+                        {answerError}
+                      </p>
+                    ) : null}
+                    {answerCallId ? (
+                      <button
+                        className="telephony-alert-answer"
+                        disabled={isAnswering || answerRequested}
+                        onClick={() => void answerCall(answerCallId)}
+                        type="button"
+                      >
+                        <svg aria-hidden="true" viewBox="0 0 24 24">
+                          <path d="M7.8 3.8 10 8.5 7.5 10a14.3 14.3 0 0 0 6.5 6.5l1.5-2.5 4.7 2.2v3a1.8 1.8 0 0 1-1.8 1.8A15.4 15.4 0 0 1 3 5.6a1.8 1.8 0 0 1 1.8-1.8h3Z" />
+                        </svg>
+                        {isAnswering
+                          ? "수신 요청 중…"
+                          : answerRequested
+                            ? "전화 연결 중…"
+                            : "수신하기"}
+                      </button>
+                    ) : (
+                      <span className="telephony-alert-passive">
+                        {telephony.lineLabel === "내 회선"
+                          ? "연결된 전화기에서 받아 주세요"
+                          : "다른 회선 수신 중"}
+                      </span>
+                    )}
+                  </div>
+                  <span
+                    aria-hidden="true"
+                    className="consultation-alert-timer"
+                  />
+                </article>
+              );
+            }
             if (!consultation) {
               return (
                 <button
@@ -1565,6 +1873,9 @@ export function InboundCallIndicator({
                 <header className="consultation-alert-heading">
                   <div>
                     <span className="consultation-alert-kicker">
+                      <svg aria-hidden="true" viewBox="0 0 24 24">
+                        <path d="M8 3.5h8M9 2.5h6v3H9zM7 4.5H5.5A1.5 1.5 0 0 0 4 6v14h16V6a1.5 1.5 0 0 0-1.5-1.5H17M8 11h8M8 15h5" />
+                      </svg>
                       {toast.consultationKind === "repeat_assigned"
                         ? "담당 상담 재요청"
                         : toast.consultationKind === "assignment_transferred"
@@ -1591,38 +1902,23 @@ export function InboundCallIndicator({
                 <div className="consultation-alert-body">
                   <div className="consultation-alert-identity">
                     <strong>{consultation.displayName}</strong>
-                    <span>{consultation.publicReceiptCode}</span>
                   </div>
-                  <dl className="consultation-alert-facts">
-                    <div className="is-region">
-                      <dt>
-                        <svg aria-hidden="true" viewBox="0 0 24 24">
-                          <path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z" />
-                          <circle cx="12" cy="10" r="2.5" />
-                        </svg>
-                        거주지역
-                      </dt>
-                      <dd>{consultationRegionLabel(consultation)}</dd>
-                    </div>
-                    <div>
-                      <dt>휴대전화</dt>
-                      <dd>{consultationPhoneLabel(consultation)}</dd>
-                    </div>
-                  </dl>
+                  <div className="consultation-alert-region">
+                    <svg aria-hidden="true" viewBox="0 0 24 24">
+                      <path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z" />
+                      <circle cx="12" cy="10" r="2.5" />
+                    </svg>
+                    <span>거주지역</span>
+                    <strong>{consultationRegionLabel(consultation)}</strong>
+                  </div>
                   {toast.claimError ? (
                     <p className="consultation-alert-error" role="alert">
                       {toast.claimError}
                     </p>
                   ) : null}
                   <div className="consultation-alert-actions">
-                    <a
-                      className="consultation-alert-detail"
-                      href={`/consultations/${consultation.id}`}
-                      onClick={() => dismissToast(toast.id)}
-                    >
-                      상세 보기
-                    </a>
-                    {consultation.canClaim ? (
+                    {consultation.canClaim
+                      ? (
                       <button
                         className="consultation-alert-claim"
                         disabled={toast.claimStatus === "claiming"}
@@ -1635,7 +1931,16 @@ export function InboundCallIndicator({
                             ? "상담하기 재시도"
                             : "상담하기"}
                       </button>
-                    ) : null}
+                        )
+                      : (
+                        <a
+                          className="consultation-alert-claim"
+                          href={`/consultations/${consultation.id}`}
+                          onClick={() => dismissToast(toast.id)}
+                        >
+                          상담 확인
+                        </a>
+                      )}
                   </div>
                 </div>
                 <span

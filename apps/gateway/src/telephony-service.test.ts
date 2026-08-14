@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  answerableInboundCallForActor,
   canonicalizePhoneDeskObservedCalls,
   externalInboundNotificationTargetUserIds,
   isCentrexInboundAnswerDeliveryDelayed,
@@ -119,6 +120,49 @@ test("직원 전체 회선번호는 같은 번호의 직원 정보와 내선으�
     ],
   });
   assert.equal(matches.size, 1);
+});
+
+test("수신 알림의 받기 버튼은 본인 소유의 받기 가능한 벨에만 노출한다", () => {
+  const observedCall = {
+    observedCallId: "call-1",
+    endpointId: "endpoint-1",
+    bridgeId: "bridge-1",
+    state: "ringing" as const,
+  };
+  const input = {
+    rootState: "ringing" as const,
+    currentEndpointId: "endpoint-1",
+    currentEndpointOwnedByActor: true,
+    observedCall,
+    answerableBridgeIds: new Set(["bridge-1"]),
+  };
+
+  assert.equal(answerableInboundCallForActor(input), "call-1");
+  assert.equal(
+    answerableInboundCallForActor({
+      ...input,
+      currentEndpointOwnedByActor: false,
+    }),
+    null,
+  );
+  assert.equal(
+    answerableInboundCallForActor({
+      ...input,
+      currentEndpointId: "endpoint-picked-up",
+    }),
+    null,
+  );
+  assert.equal(
+    answerableInboundCallForActor({
+      ...input,
+      answerableBridgeIds: new Set(),
+    }),
+    null,
+  );
+  assert.equal(
+    answerableInboundCallForActor({ ...input, rootState: "connected" }),
+    null,
+  );
 });
 
 test("외부 수신전화 알림은 담당 여부와 무관하게 활성 직원 전체를 대상으로 한다", () => {

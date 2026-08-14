@@ -1937,10 +1937,16 @@ svg {
   cursor: default;
 }
 
-.browser-notification-toggle.is-granted {
+.browser-notification-toggle.is-enabled {
   border-color: color-mix(in srgb, var(--brand) 28%, var(--line));
   background: var(--brand-soft);
   color: var(--brand-strong);
+}
+
+.browser-notification-toggle.is-disabled {
+  border-color: color-mix(in srgb, var(--warning) 28%, var(--line));
+  background: var(--warning-soft);
+  color: var(--warning);
 }
 
 .browser-notification-toggle.is-denied {
@@ -2158,17 +2164,36 @@ a.inbound-customer:hover { text-decoration: underline; }
   white-space: pre-line;
 }
 
-.consultation-alert-toast {
+.consultation-alert-toast,
+.telephony-alert-toast {
   position: relative;
   overflow: hidden;
+  color: var(--ink);
+  animation: consultation-alert-enter 220ms ease-out both;
+}
+
+.consultation-alert-toast {
   border: 1px solid color-mix(in srgb, var(--brand) 42%, var(--line));
   border-radius: 20px;
   background:
     radial-gradient(circle at 100% 0, color-mix(in srgb, var(--brand-soft) 78%, transparent), transparent 42%),
     var(--surface);
-  box-shadow: 0 24px 70px rgb(15 23 42 / 24%);
-  color: var(--ink);
-  animation: consultation-alert-enter 220ms ease-out both;
+  box-shadow:
+    inset 4px 0 0 var(--brand),
+    0 24px 70px rgb(15 23 42 / 24%);
+}
+
+.telephony-alert-toast {
+  border: 1px solid color-mix(in srgb, var(--info) 58%, var(--line));
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--info) 13%, transparent),
+    0 26px 76px rgb(2 55 114 / 30%);
+}
+
+.telephony-alert-toast.is-my-customer {
+  border-color: color-mix(in srgb, var(--warning) 72%, var(--info));
 }
 
 @keyframes consultation-alert-enter {
@@ -2179,7 +2204,8 @@ a.inbound-customer:hover { text-decoration: underline; }
 .consultation-alert-heading,
 .consultation-alert-heading > div,
 .consultation-alert-actions,
-.consultation-alert-identity {
+.consultation-alert-identity,
+.telephony-alert-context {
   display: flex;
   align-items: center;
 }
@@ -2193,16 +2219,35 @@ a.inbound-customer:hover { text-decoration: underline; }
 .consultation-alert-heading > div { gap: 8px; }
 
 .consultation-alert-kicker,
-.consultation-alert-channel {
+.consultation-alert-channel,
+.telephony-alert-priority {
   border-radius: 999px;
   font-size: .68rem;
   font-weight: 850;
   letter-spacing: .02em;
 }
 
+.telephony-alert-priority {
+  padding: 5px 9px;
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
 .consultation-alert-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--brand-strong);
   text-transform: uppercase;
+}
+
+.consultation-alert-kicker svg {
+  width: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.75;
 }
 
 .consultation-alert-channel {
@@ -2237,110 +2282,174 @@ a.inbound-customer:hover { text-decoration: underline; }
   stroke-width: 1.8;
 }
 
+.telephony-alert-heading {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: 11px;
+  padding: 15px 14px 15px 16px;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--info) 92%, #0b3f79),
+    color-mix(in srgb, var(--info) 72%, #111b3f)
+  );
+  color: white;
+}
+
+.telephony-alert-signal {
+  position: relative;
+  display: grid;
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgb(255 255 255 / 38%);
+  border-radius: 50%;
+  place-items: center;
+  background: rgb(255 255 255 / 15%);
+}
+
+.telephony-alert-signal::after {
+  position: absolute;
+  inset: -4px;
+  border: 1px solid rgb(255 255 255 / 54%);
+  border-radius: inherit;
+  content: "";
+  animation: telephony-alert-ring 1.4s ease-out infinite;
+}
+
+.telephony-alert-signal svg {
+  width: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.9;
+}
+
+.telephony-alert-heading-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.telephony-alert-heading-copy small {
+  color: rgb(255 255 255 / 74%);
+  font-size: .61rem;
+  font-weight: 800;
+  letter-spacing: .12em;
+}
+
+.telephony-alert-heading-copy strong {
+  overflow: hidden;
+  font-size: .98rem;
+  letter-spacing: -.015em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.telephony-alert-close {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  place-items: center;
+  background: rgb(255 255 255 / 12%);
+  color: rgb(255 255 255 / 78%);
+  cursor: pointer;
+}
+
+.telephony-alert-close:hover {
+  background: rgb(255 255 255 / 23%);
+  color: white;
+}
+
+.telephony-alert-close svg {
+  width: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-width: 1.8;
+}
+
+@keyframes telephony-alert-ring {
+  0% { opacity: .75; transform: scale(.88); }
+  70%, 100% { opacity: 0; transform: scale(1.2); }
+}
+
 .consultation-alert-body {
   display: grid;
-  gap: 12px;
-  padding: 14px 16px 16px;
+  gap: 14px;
+  padding: 17px 18px 18px;
 }
 
 .consultation-alert-identity {
-  justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
 }
 
 .consultation-alert-identity strong {
   min-width: 0;
   overflow: hidden;
   color: var(--ink);
-  font-size: 1.02rem;
+  font-size: 1.28rem;
+  letter-spacing: -.025em;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.consultation-alert-identity span {
-  flex: 0 0 auto;
-  color: var(--muted);
-  font-size: .68rem;
-  font-weight: 700;
-}
-
-.consultation-alert-facts {
+.consultation-alert-region {
   display: grid;
-  grid-template-columns: .8fr 1.2fr;
-  gap: 8px;
-  margin: 0;
-}
-
-.consultation-alert-facts > div {
+  grid-template-columns: 22px auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
   min-width: 0;
-  padding: 10px 11px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--surface-muted) 78%, transparent);
-}
-
-.consultation-alert-facts > div.is-region {
-  border-color: color-mix(in srgb, var(--brand) 40%, var(--line));
+  padding: 13px 14px;
+  border: 1px solid color-mix(in srgb, var(--brand) 40%, var(--line));
+  border-radius: 14px;
   background: color-mix(in srgb, var(--brand-soft) 72%, var(--surface));
 }
 
-.consultation-alert-facts dt {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-bottom: 4px;
-  color: var(--muted);
-  font-size: .64rem;
-  font-weight: 750;
-}
-
-.consultation-alert-facts dt svg {
-  width: 13px;
+.consultation-alert-region svg {
+  width: 19px;
   fill: none;
-  stroke: currentColor;
+  stroke: var(--brand-strong);
   stroke-width: 1.8;
 }
 
-.consultation-alert-facts dd {
+.consultation-alert-region span {
+  color: var(--muted);
+  font-size: .68rem;
+  font-weight: 750;
+}
+
+.consultation-alert-region strong {
+  min-width: 0;
   overflow: hidden;
-  margin: 0;
-  color: var(--ink);
-  font-size: .79rem;
-  font-weight: 850;
+  color: var(--brand-strong);
+  font-size: 1rem;
+  text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.consultation-alert-facts .is-region dd {
-  color: var(--brand-strong);
-  font-size: .9rem;
-}
-
 .consultation-alert-actions {
-  justify-content: flex-end;
-  gap: 8px;
+  display: grid;
 }
 
-.consultation-alert-detail,
 .consultation-alert-claim {
-  min-height: 38px;
-  padding: 9px 14px;
-  border-radius: 10px;
-  font-size: .74rem;
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 16px;
+  border: 1px solid var(--brand);
+  border-radius: 12px;
+  background: var(--brand);
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--brand) 25%, transparent);
+  color: white;
+  font-size: .8rem;
   font-weight: 850;
   text-decoration: none;
-}
-
-.consultation-alert-detail {
-  border: 1px solid var(--line-strong);
-  background: var(--surface);
-  color: var(--ink);
-}
-
-.consultation-alert-claim {
-  border: 1px solid var(--brand);
-  background: var(--brand);
-  color: white;
   cursor: pointer;
 }
 
@@ -2362,6 +2471,155 @@ a.inbound-customer:hover { text-decoration: underline; }
   line-height: 1.45;
 }
 
+.telephony-alert-body {
+  display: grid;
+  gap: 13px;
+  padding: 16px 18px 18px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--info-soft) 34%, transparent), transparent 52%),
+    var(--surface);
+}
+
+.telephony-alert-context {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.telephony-alert-identity {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 11px;
+}
+
+.telephony-alert-avatar {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  border: 1px solid color-mix(in srgb, var(--info) 28%, transparent);
+  border-radius: 50%;
+  place-items: center;
+  background: color-mix(in srgb, var(--info-soft) 78%, var(--surface));
+  color: var(--info);
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.telephony-alert-identity > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.telephony-alert-identity small {
+  color: var(--muted);
+  font-size: .64rem;
+  font-weight: 750;
+}
+
+.telephony-alert-identity strong {
+  overflow: hidden;
+  font-size: 1.14rem;
+  letter-spacing: -.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.telephony-alert-line {
+  padding: 5px 8px;
+  border-radius: 999px;
+  font-size: .65rem;
+  font-weight: 850;
+}
+
+.telephony-alert-line.is-mine {
+  background: var(--info-soft);
+  color: var(--info);
+}
+
+.telephony-alert-line.is-other {
+  background: var(--surface-muted);
+  color: var(--muted);
+}
+
+.telephony-alert-facts {
+  display: grid;
+  grid-template-columns: minmax(0, .82fr) minmax(0, 1.18fr);
+  gap: 8px;
+  margin: 0;
+}
+
+.telephony-alert-facts > div {
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid color-mix(in srgb, var(--info) 18%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--info-soft) 35%, var(--surface-muted));
+}
+
+.telephony-alert-facts dt {
+  margin-bottom: 3px;
+  color: var(--muted);
+  font-size: .62rem;
+  font-weight: 750;
+}
+
+.telephony-alert-facts dd {
+  overflow: hidden;
+  margin: 0;
+  color: var(--ink);
+  font-size: .76rem;
+  font-weight: 850;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.telephony-alert-answer,
+.telephony-alert-passive {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 12px;
+  font-size: .8rem;
+  font-weight: 850;
+}
+
+.telephony-alert-answer {
+  border: 1px solid var(--info);
+  background: var(--info);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--info) 32%, transparent);
+  color: white;
+  cursor: pointer;
+}
+
+.telephony-alert-answer:hover:not(:disabled) {
+  filter: brightness(.94);
+  transform: translateY(-1px);
+}
+
+.telephony-alert-answer:disabled {
+  cursor: wait;
+  opacity: .7;
+}
+
+.telephony-alert-answer svg {
+  width: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.telephony-alert-passive {
+  min-height: 38px;
+  background: var(--surface-muted);
+  color: var(--muted);
+}
+
 .consultation-alert-timer {
   position: absolute;
   right: 0;
@@ -2370,7 +2628,15 @@ a.inbound-customer:hover { text-decoration: underline; }
   height: 3px;
   transform-origin: left;
   background: var(--brand);
-  animation: consultation-alert-timer 10s linear forwards;
+  animation: consultation-alert-timer 20s linear forwards;
+}
+
+.telephony-alert-toast .consultation-alert-timer {
+  background: var(--info);
+}
+
+.telephony-alert-toast.is-my-customer .consultation-alert-timer {
+  background: var(--warning);
 }
 
 .consultation-alert-toast.is-actioning .consultation-alert-timer {
@@ -2389,13 +2655,14 @@ a.inbound-customer:hover { text-decoration: underline; }
     width: calc(100vw - 24px);
   }
 
-  .consultation-alert-facts { grid-template-columns: 1fr; }
-  .consultation-alert-actions > * { flex: 1; text-align: center; }
+  .telephony-alert-facts { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .consultation-alert-toast { animation: none; }
+  .consultation-alert-toast,
+  .telephony-alert-toast { animation: none; }
   .consultation-alert-timer { animation: none; }
+  .telephony-alert-signal::after { animation: none; }
 }
 
 .inbound-call-card.is-ended .inbound-call-title strong {

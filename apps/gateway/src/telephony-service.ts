@@ -410,6 +410,28 @@ export function externalInboundNotificationTargetUserIds(
   return [...new Set(activeStaff.map((staff) => staff.staffUserId))];
 }
 
+export function answerableInboundCallForActor(input: {
+  rootState: "ringing" | "connected" | "transferring" | "needs_confirmation" | "ended";
+  currentEndpointId: string;
+  currentEndpointOwnedByActor: boolean;
+  observedCall: {
+    observedCallId: string;
+    endpointId: string;
+    bridgeId: string;
+    state: "ringing" | "connected" | "ended";
+  } | null;
+  answerableBridgeIds: ReadonlySet<string>;
+}): string | null {
+  const observedCall = input.observedCall;
+  return input.rootState === "ringing" &&
+      observedCall?.state === "ringing" &&
+      observedCall.endpointId === input.currentEndpointId &&
+      input.answerableBridgeIds.has(observedCall.bridgeId) &&
+      input.currentEndpointOwnedByActor
+    ? observedCall.observedCallId
+    : null;
+}
+
 export type PhoneCustomerMatch =
   | {
       source: "consultation";
@@ -2056,13 +2078,16 @@ export function createTelephonyService(options: {
         .select({
           rootId: telephonyInboundCalls.callRootId,
           observedCallId: telephonyInboundCalls.id,
+          endpointId: telephonyInboundCalls.endpointId,
+          bridgeId: telephonyInboundCalls.bridgeId,
+          state: telephonyInboundCalls.state,
         })
         .from(telephonyInboundCalls)
         .where(inArray(telephonyInboundCalls.callRootId, rootIds)),
     ]);
     const observedByRoot = new Map(
       observedRows.flatMap((row) =>
-        row.rootId ? [[row.rootId, row.observedCallId] as const] : [],
+        row.rootId ? [[row.rootId, row] as const] : [],
       ),
     );
     const relationsByRoot = new Map<string, typeof relationRows>();
@@ -2198,6 +2223,12 @@ export function createTelephonyService(options: {
       const customerMatch = remotePhone
         ? customerMatches.get(remotePhone) ?? null
         : null;
+      const observedCall = observedByRoot.get(root.id) ?? null;
+      const currentEndpointOwnedByActor = Boolean(
+        ownersByActivityEndpoint
+          .get(root.currentEndpointId!)
+          ?.includes(actor.id),
+      );
       const relations = relationsByRoot.get(root.id) ?? [];
       const latestRelation = relations[0] ?? null;
       const participantByLeg = new Map(
@@ -2261,7 +2292,15 @@ export function createTelephonyService(options: {
       }
       items.push({
         id: root.id,
-        observedCallId: observedByRoot.get(root.id) ?? null,
+        observedCallId: observedCall?.observedCallId ?? null,
+        currentEndpointOwnedByActor,
+        answerableInboundCallId: answerableInboundCallForActor({
+          rootState: root.state,
+          currentEndpointId: root.currentEndpointId!,
+          currentEndpointOwnedByActor,
+          observedCall,
+          answerableBridgeIds,
+        }),
         scope: root.scope,
         direction: root.direction,
         state: root.state,

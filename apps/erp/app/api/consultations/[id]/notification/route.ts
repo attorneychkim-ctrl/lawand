@@ -21,10 +21,8 @@ export async function GET(
     const residenceRegion = latestRequest?.intake.residenceRegion;
     return NextResponse.json({
       id: consultation.id,
-      publicReceiptCode: consultation.publicReceiptCode,
       displayName: latestRequest?.name ?? consultation.displayName,
       contactChannel: consultation.contactChannel,
-      phone: latestRequest?.phone ?? null,
       residenceRegion:
         typeof residenceRegion === "string" ? residenceRegion : null,
       assigneeUserId: consultation.assignment?.assigneeUserId ?? null,
