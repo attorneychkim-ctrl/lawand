@@ -12,6 +12,7 @@ import {
   REVIEW_REQUEST_DEFAULT_TEMPLATES,
   centrexMessageByteLength,
   createEventId,
+  maskReviewAuthorDisplay,
   renderReviewRequestTemplate,
   reviewCustomerLinkSchema,
   reviewModerationSchema,
@@ -834,7 +835,9 @@ export function createReviewManagementService(options: {
               legacyId: null,
               legacyContentId: null,
               legacyUrl: null,
-              authorDisplay: submission.authorDisplay,
+              authorDisplay: maskReviewAuthorDisplay(
+                submission.authorDisplay,
+              ),
               title: "고객후기",
               content,
               practiceArea: submission.practiceArea,

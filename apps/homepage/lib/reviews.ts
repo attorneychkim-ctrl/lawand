@@ -1,5 +1,7 @@
 import { Pool } from "pg";
 
+import { maskReviewAuthorDisplay } from "@lawand/core";
+
 export const REVIEW_PAGE_SIZE = 9;
 
 export const reviewAreaOptions = [
@@ -220,7 +222,7 @@ type PublicReviewRow = {
 
 function toPublicReview(row: PublicReviewRow): PublicReview {
   return {
-    authorDisplay: row.author_display,
+    authorDisplay: maskReviewAuthorDisplay(row.author_display),
     content: row.content,
     experienceKeywords: row.experience_keywords,
     id: row.id,

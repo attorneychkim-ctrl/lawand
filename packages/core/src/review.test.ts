@@ -6,6 +6,7 @@ import {
   CURRENT_REVIEW_PUBLICATION_CONSENT_VERSION,
   REVIEW_REQUEST_DEFAULT_TEMPLATES,
   detectReviewPiiFlags,
+  maskReviewAuthorDisplay,
   renderReviewRequestTemplate,
   reviewModerationSchema,
   reviewRequestTemplateCreateSchema,
@@ -29,6 +30,13 @@ const validSubmission = {
   publicationConsent: true,
   website: "",
 } as const;
+
+test("공개 후기 작성자 이름은 첫 글자만 남기고 일관되게 마스킹한다", () => {
+  assert.equal(maskReviewAuthorDisplay("김법률"), "김○○ 고객");
+  assert.equal(maskReviewAuthorDisplay("  박고객  "), "박○○ 고객");
+  assert.equal(maskReviewAuthorDisplay("김○○ 고객"), "김○○ 고객");
+  assert.equal(maskReviewAuthorDisplay(""), "고○○ 고객");
+});
 
 test("후기 제출 계약은 전화번호를 정규화하고 정해진 필드만 받는다", () => {
   const parsed = reviewSubmissionSchema.parse(validSubmission);

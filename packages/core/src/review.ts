@@ -24,6 +24,13 @@ export const reviewProgressStageSchema = z.enum([
 export type ReviewPracticeArea = z.infer<typeof reviewPracticeAreaSchema>;
 export type ReviewProgressStage = z.infer<typeof reviewProgressStageSchema>;
 
+export function maskReviewAuthorDisplay(value: string): string {
+  const firstCharacter = Array.from(value.trim()).find((character) =>
+    /[\p{L}\p{N}]/u.test(character),
+  );
+  return `${firstCharacter ?? "고"}○○ 고객`;
+}
+
 export const reviewExperienceKeywordSchema = z.enum([
   "친절",
   "세심",
