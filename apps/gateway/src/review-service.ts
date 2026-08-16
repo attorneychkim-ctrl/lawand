@@ -11,6 +11,7 @@ import {
   createReviewReceiptCode,
   createReviewSubmissionId,
   detectReviewPiiFlags,
+  maskReviewAuthorDisplay,
   reviewRequestContextRequestSchema,
   reviewSubmissionSchema,
   type ReviewRequestContextRequest,
@@ -42,8 +43,7 @@ const RETENTION_YEARS = 1;
 export class ReviewSubmissionValidationError extends Error {}
 
 export function maskedReviewAuthorDisplay(clientName: string): string {
-  const firstCharacter = Array.from(clientName.trim()).find((value) => /\S/u.test(value));
-  return `${firstCharacter ?? "고"}○○ 고객`;
+  return maskReviewAuthorDisplay(clientName);
 }
 
 function invitationPhone(value: string | null): string | null {
@@ -156,7 +156,9 @@ export function createReviewSubmissionService(options: {
         return replayResponse(idempotentSubmission);
       }
 
-      let authorDisplay = submission.authorDisplay ?? null;
+      let authorDisplay = submission.authorDisplay
+        ? maskReviewAuthorDisplay(submission.authorDisplay)
+        : null;
       let phone = submission.phone ?? null;
       let linkSource: "invitation" | "exact_phone" | null = null;
       let reviewRequestId: string | null = null;

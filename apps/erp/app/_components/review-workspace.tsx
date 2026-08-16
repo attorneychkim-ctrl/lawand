@@ -6,7 +6,11 @@ import type { FormEvent } from "react";
 
 import {
   REVIEW_REQUEST_DEFAULT_TEMPLATES,
+  REVIEW_REQUEST_TEMPLATE_VARIABLES,
   centrexMessageByteLength,
+  centrexMessageKind,
+  renderReviewRequestTemplate,
+  type ReviewRequestTemplateVariable,
 } from "@lawand/core";
 
 import type {
@@ -51,6 +55,37 @@ const newTemplateBody =
   REVIEW_REQUEST_DEFAULT_TEMPLATES.find(
     (template) => template.presetKey === "other",
   )?.body ?? "{{고객명}}님, 후기 작성 부탁드립니다.\n{{후기작성링크}}";
+
+const templatePresetOrder = new Map([
+  ["consultation", 1],
+  ["commencement", 2],
+  ["discharge", 3],
+  ["other", 4],
+]);
+
+const templatePreviewValues = {
+  "{{고객명}}": "홍길동",
+  "{{담당자명}}": "김담당",
+  "{{사건번호}}": "2026개회1234",
+  "{{후기작성링크}}": "https://lawandfirm.com/bank/reviews/write#전용링크",
+} satisfies Record<ReviewRequestTemplateVariable, string>;
+
+function sortTemplates(items: ReviewRequestTemplate[]) {
+  return [...items].sort((left, right) => {
+    const leftPreset = left.presetKey
+      ? (templatePresetOrder.get(left.presetKey) ?? 5)
+      : 6;
+    const rightPreset = right.presetKey
+      ? (templatePresetOrder.get(right.presetKey) ?? 5)
+      : 6;
+    if (leftPreset !== rightPreset) return leftPreset - rightPreset;
+    if (!left.presetKey && !right.presetKey) {
+      const updatedOrder = right.updatedAt.localeCompare(left.updatedAt);
+      if (updatedOrder !== 0) return updatedOrder;
+    }
+    return left.name.localeCompare(right.name, "ko");
+  });
+}
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("ko-KR", {
@@ -109,21 +144,25 @@ export function ReviewWorkspace({
   initialTemplates: ReviewRequestTemplate[];
   staffName: string;
 }) {
+  const initialTemplate = initialTemplates[0] ?? null;
   const [tab, setTab] = useState<"manage" | "request">("manage");
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [templates, setTemplates] = useState(initialTemplates);
   const [selectedTemplateId, setSelectedTemplateId] = useState(
-    initialTemplates[0]?.id ?? "",
+    initialTemplate?.id ?? "",
   );
-  const [templateName, setTemplateName] = useState("");
-  const [templateBody, setTemplateBody] = useState(newTemplateBody);
+  const [creatingTemplate, setCreatingTemplate] = useState(!initialTemplate);
+  const [templateName, setTemplateName] = useState(initialTemplate?.name ?? "");
+  const [templateBody, setTemplateBody] = useState(
+    initialTemplate?.body ?? newTemplateBody,
+  );
   const [templateProgressStage, setTemplateProgressStage] = useState<
     ReviewRequestTemplate["defaultProgressStage"]
-  >("other");
-  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  >(initialTemplate?.defaultProgressStage ?? "other");
   const [templateBusy, setTemplateBusy] = useState(false);
+  const [templateNotice, setTemplateNotice] = useState("");
   const [query, setQuery] = useState("");
   const [searchResult, setSearchResult] = useState<LegalFriendsClientDirectorySearch | null>(null);
   const [searching, setSearching] = useState(false);
@@ -166,24 +205,115 @@ export function ReviewWorkspace({
     () => templates.find((template) => template.id === selectedTemplateId) ?? null,
     [selectedTemplateId, templates],
   );
-  const editingTemplate = useMemo(
-    () => templates.find((template) => template.id === editingTemplateId) ?? null,
-    [editingTemplateId, templates],
+  const defaultTemplates = useMemo(
+    () => templates.filter((template) => Boolean(template.presetKey)),
+    [templates],
+  );
+  const customTemplates = useMemo(
+    () => templates.filter((template) => !template.presetKey),
+    [templates],
   );
   const templateBodyByteLength = centrexMessageByteLength(templateBody);
+  const templateVariables = templateBody.match(/\{\{[^{}]+\}\}/g) ?? [];
+  const invalidTemplateVariables = templateVariables.filter(
+    (variable) =>
+      !(REVIEW_REQUEST_TEMPLATE_VARIABLES as readonly string[]).includes(
+        variable,
+      ),
+  );
   const templateValid =
+    templateName.trim().length > 0 &&
+    templateBody.trim().length > 0 &&
     templateBodyByteLength <= 500 &&
-    templateBody.includes("{{후기작성링크}}");
+    templateBody.includes("{{후기작성링크}}") &&
+    invalidTemplateVariables.length === 0;
+  const templateDirty = creatingTemplate
+    ? true
+    : Boolean(
+        selectedTemplate &&
+          (templateName !== selectedTemplate.name ||
+            templateBody !== selectedTemplate.body ||
+            templateProgressStage !== selectedTemplate.defaultProgressStage),
+      );
+  const templatePreview = templateBody.trim()
+    ? renderReviewRequestTemplate(templateBody, {
+        ...templatePreviewValues,
+        "{{담당자명}}": staffName,
+      })
+    : "문자 내용을 입력하면 실제 발송 형태를 여기에서 확인할 수 있습니다.";
+  const templatePreviewKind = centrexMessageKind(templatePreview);
+
+  useEffect(() => {
+    if (!templateDirty) return;
+    const warnBeforeLeaving = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeLeaving);
+    return () => window.removeEventListener("beforeunload", warnBeforeLeaving);
+  }, [templateDirty]);
+
+  function loadTemplate(template: ReviewRequestTemplate) {
+    setSelectedTemplateId(template.id);
+    setCreatingTemplate(false);
+    setTemplateName(template.name);
+    setTemplateBody(template.body);
+    setTemplateProgressStage(template.defaultProgressStage);
+    setTemplateNotice("");
+    setError("");
+  }
+
+  function confirmTemplateDraftDiscard() {
+    return (
+      !templateDirty ||
+      window.confirm(
+        "저장하지 않은 템플릿 변경사항이 있습니다. 변경사항을 버리고 이동할까요?",
+      )
+    );
+  }
+
+  function selectTemplate(templateId: string) {
+    const template = templates.find((item) => item.id === templateId);
+    if (!template || (!creatingTemplate && template.id === selectedTemplateId)) {
+      return;
+    }
+    if (!confirmTemplateDraftDiscard()) return;
+    loadTemplate(template);
+  }
+
+  function startCreatingTemplate() {
+    if (!confirmTemplateDraftDiscard()) return;
+    setSelectedTemplateId("");
+    setCreatingTemplate(true);
+    setTemplateName("");
+    setTemplateBody(newTemplateBody);
+    setTemplateProgressStage("other");
+    setTemplateNotice("");
+    setError("");
+  }
+
+  function discardTemplateDraft() {
+    if (creatingTemplate) {
+      const fallback = templates[0];
+      if (fallback) {
+        loadTemplate(fallback);
+      }
+      return;
+    }
+    if (selectedTemplate) loadTemplate(selectedTemplate);
+  }
 
   async function saveTemplate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!templateValid || (!creatingTemplate && !selectedTemplate)) return;
     setTemplateBusy(true);
     setError("");
+    setTemplateNotice("");
     try {
       const response = await fetch(
-        editingTemplateId
-          ? `/api/review-request-templates/${editingTemplateId}`
-          : "/api/review-request-templates",
+        creatingTemplate
+          ? "/api/review-request-templates"
+          : `/api/review-request-templates/${selectedTemplateId}`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -201,15 +331,22 @@ export function ReviewWorkspace({
         throw new Error(body?.message ?? "템플릿을 저장하지 못했습니다.");
       }
       setTemplates((current) =>
-        editingTemplateId
-          ? current.map((item) => item.id === body.id ? body : item)
-          : [body, ...current],
+        sortTemplates(
+          creatingTemplate
+            ? [...current, body]
+            : current.map((item) => (item.id === body.id ? body : item)),
+        ),
       );
       setSelectedTemplateId(body.id);
-      setEditingTemplateId(null);
-      setTemplateName("");
-      setTemplateBody(newTemplateBody);
-      setTemplateProgressStage("other");
+      setCreatingTemplate(false);
+      setTemplateName(body.name);
+      setTemplateBody(body.body);
+      setTemplateProgressStage(body.defaultProgressStage);
+      setTemplateNotice(
+        creatingTemplate
+          ? "새 템플릿을 추가했습니다. 이 템플릿으로 고객을 선택해 발송할 수 있습니다."
+          : "템플릿 변경사항을 저장했습니다.",
+      );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "템플릿을 저장하지 못했습니다.");
     } finally {
@@ -217,17 +354,12 @@ export function ReviewWorkspace({
     }
   }
 
-  function editTemplate(template: ReviewRequestTemplate) {
-    setEditingTemplateId(template.id);
-    setTemplateName(template.name);
-    setTemplateBody(template.body);
-    setTemplateProgressStage(template.defaultProgressStage);
-  }
-
   async function deleteTemplate(template: ReviewRequestTemplate) {
+    if (template.presetKey) return;
     if (!window.confirm(`“${template.name}” 템플릿을 삭제할까요?`)) return;
     setTemplateBusy(true);
     setError("");
+    setTemplateNotice("");
     try {
       const response = await fetch(`/api/review-request-templates/${template.id}`, {
         method: "DELETE",
@@ -236,9 +368,14 @@ export function ReviewWorkspace({
       if (!response.ok) throw new Error(body?.message ?? "템플릿을 삭제하지 못했습니다.");
       const next = templates.filter((item) => item.id !== template.id);
       setTemplates(next);
-      setSelectedTemplateId(next[0]?.id ?? "");
-      if (editingTemplateId === template.id) {
-        setEditingTemplateId(null);
+      const deletedIndex = templates.findIndex((item) => item.id === template.id);
+      const fallback = next[Math.min(Math.max(deletedIndex, 0), next.length - 1)];
+      if (fallback) {
+        loadTemplate(fallback);
+        setTemplateNotice(`“${template.name}” 템플릿을 삭제했습니다.`);
+      } else {
+        setSelectedTemplateId("");
+        setCreatingTemplate(true);
         setTemplateName("");
         setTemplateBody(newTemplateBody);
         setTemplateProgressStage("other");
@@ -291,7 +428,14 @@ export function ReviewWorkspace({
   }
 
   async function send() {
-    if (!selectedTemplate || selectedTargets.size === 0) return;
+    if (
+      !selectedTemplate ||
+      creatingTemplate ||
+      templateDirty ||
+      selectedTargets.size === 0
+    ) {
+      return;
+    }
     if (!window.confirm(`${selectedTargets.size}명에게 후기 요청 문자를 보낼까요?`)) return;
     setSending(true);
     setError("");
@@ -435,46 +579,209 @@ export function ReviewWorkspace({
           <section className="review-template-panel">
             <header>
               <div><p className="eyebrow">MY TEMPLATE</p><h2>내 후기 요청 템플릿</h2></div>
-              <span>기본 4종 · 전체 {templates.length}개</span>
+              <span>기본 {defaultTemplates.length}종 · 전체 {templates.length}개</span>
             </header>
-            <div className="review-template-layout">
-              <div className="review-template-list">
-                {templates.length ? templates.map((template) => (
-                  <article className={selectedTemplateId === template.id ? "is-selected" : undefined} key={template.id}>
-                    <button onClick={() => setSelectedTemplateId(template.id)} type="button">
-                      <strong>{template.name}</strong>
-                      <span>
-                        {template.presetKey ? "기본 템플릿" : "추가 템플릿"}
-                        {` · ${stageLabels[template.defaultProgressStage]} · ${template.bodyByteLength}바이트`}
-                      </span>
-                      <p>{template.body}</p>
-                    </button>
-                    <div>
-                      <button onClick={() => editTemplate(template)} type="button">수정</button>
-                      {!template.presetKey ? <button disabled={templateBusy} onClick={() => void deleteTemplate(template)} type="button">삭제</button> : <span>항상 유지</span>}
-                    </div>
-                  </article>
-                )) : <p>아직 템플릿이 없습니다. 첫 문구를 만들어 주세요.</p>}
+            <div className="review-template-toolbar">
+              <label className="review-template-selector" htmlFor="review-template-select">
+                <span>사용할 템플릿</span>
+                <select
+                  disabled={templateBusy}
+                  id="review-template-select"
+                  onChange={(event) => selectTemplate(event.target.value)}
+                  value={creatingTemplate ? "" : selectedTemplateId}
+                >
+                  {creatingTemplate ? <option value="">새 템플릿 작성 중</option> : null}
+                  {defaultTemplates.length ? (
+                    <optgroup label="기본 템플릿">
+                      {defaultTemplates.map((template) => (
+                        <option key={template.id} value={template.id}>
+                          [기본] {template.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null}
+                  {customTemplates.length ? (
+                    <optgroup label="내가 추가한 템플릿">
+                      {customTemplates.map((template) => (
+                        <option key={template.id} value={template.id}>
+                          {template.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null}
+                </select>
+              </label>
+              <div className="review-template-selection-state" aria-live="polite">
+                <span className={selectedTemplate?.presetKey ? "is-default" : "is-custom"}>
+                  {creatingTemplate
+                    ? "새 템플릿"
+                    : selectedTemplate?.presetKey
+                      ? "기본 템플릿"
+                      : "추가 템플릿"}
+                </span>
+                <span className={templateDirty ? "is-unsaved" : "is-saved"}>
+                  {creatingTemplate
+                    ? "저장 후 발송 가능"
+                    : templateDirty
+                      ? "저장되지 않은 변경"
+                      : "저장됨"}
+                </span>
               </div>
+              <button
+                className="review-template-new-button"
+                disabled={templateBusy || creatingTemplate}
+                onClick={startCreatingTemplate}
+                type="button"
+              >
+                <span aria-hidden="true">＋</span>
+                새 템플릿 만들기
+              </button>
+            </div>
+            <div className="review-template-layout">
+              <aside className="review-template-preview" aria-label="선택한 템플릿 문자 미리보기">
+                <header>
+                  <div>
+                    <p className="eyebrow">MESSAGE PREVIEW</p>
+                    <h3>고객에게 보이는 문자</h3>
+                  </div>
+                  <span>
+                    {templatePreviewKind === "sms"
+                      ? "SMS 예상"
+                      : templatePreviewKind === "lms"
+                        ? "LMS 예상"
+                        : "길이 확인 필요"}
+                  </span>
+                </header>
+                <div className="review-template-phone">
+                  <div className="review-template-phone-header">
+                    <span aria-hidden="true">‹</span>
+                    <div>
+                      <strong>법무법인 로앤</strong>
+                      <small>후기 요청 문자 · 예시</small>
+                    </div>
+                  </div>
+                  <div className="review-template-message">
+                    <p>{templatePreview}</p>
+                    <span>발송 전 미리보기</span>
+                  </div>
+                </div>
+                <footer>
+                  <strong>예시 데이터로 치환했습니다.</strong>
+                  <p>
+                    실제 발송 시 고객명·담당자명·사건번호와 고객별 1회용 링크가
+                    자동으로 들어갑니다.
+                  </p>
+                </footer>
+              </aside>
               <form className="review-template-form" onSubmit={(event) => void saveTemplate(event)}>
-                <h3>{editingTemplateId ? "템플릿 수정" : "새 템플릿"}</h3>
-                <label><span>템플릿 이름</span><input disabled={Boolean(editingTemplate?.presetKey)} maxLength={80} onChange={(event) => setTemplateName(event.target.value)} placeholder="예: 사건 종결 후 후기 요청" required value={templateName} /></label>
+                <div className="review-template-form-heading">
+                  <div>
+                    <p className="eyebrow">TEMPLATE EDITOR</p>
+                    <h3>{creatingTemplate ? "새 템플릿 작성" : "템플릿 내용 확인·수정"}</h3>
+                  </div>
+                  <span className={selectedTemplate?.presetKey ? "is-default" : "is-custom"}>
+                    {creatingTemplate
+                      ? "새 템플릿"
+                      : selectedTemplate?.presetKey
+                        ? "기본 템플릿"
+                        : "추가 템플릿"}
+                  </span>
+                </div>
+                {selectedTemplate?.presetKey && !creatingTemplate ? (
+                  <p className="review-template-lock-note">
+                    기본 템플릿은 이름과 후기 시점이 고정됩니다. 문자 내용은 자유롭게
+                    수정할 수 있고 삭제되지 않습니다.
+                  </p>
+                ) : null}
+                <label>
+                  <span>템플릿 이름</span>
+                  <input
+                    maxLength={80}
+                    onChange={(event) => {
+                      setTemplateName(event.target.value);
+                      setTemplateNotice("");
+                    }}
+                    placeholder="예: 사건 종결 후 후기 요청"
+                    readOnly={Boolean(selectedTemplate?.presetKey) && !creatingTemplate}
+                    required
+                    value={templateName}
+                  />
+                </label>
                 <label>
                   <span>후기 작성 시 기본 시점</span>
                   <select
-                    disabled={Boolean(editingTemplate?.presetKey)}
-                    onChange={(event) => setTemplateProgressStage(event.target.value as ReviewRequestTemplate["defaultProgressStage"])}
+                    disabled={Boolean(selectedTemplate?.presetKey) && !creatingTemplate}
+                    onChange={(event) => {
+                      setTemplateProgressStage(
+                        event.target.value as ReviewRequestTemplate["defaultProgressStage"],
+                      );
+                      setTemplateNotice("");
+                    }}
                     value={templateProgressStage}
                   >
                     {Object.entries(stageLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                   </select>
                 </label>
-                <label><span>문자 내용</span><textarea maxLength={720} onChange={(event) => setTemplateBody(event.target.value)} required rows={7} value={templateBody} /></label>
-                <p className={templateValid ? undefined : "is-invalid"}>{templateBodyByteLength} / 500바이트 · <code>{"{{후기작성링크}}"}</code> 필수</p>
+                <label>
+                  <span>문자 내용</span>
+                  <textarea
+                    aria-describedby="review-template-validation"
+                    maxLength={720}
+                    onChange={(event) => {
+                      setTemplateBody(event.target.value);
+                      setTemplateNotice("");
+                    }}
+                    required
+                    rows={10}
+                    value={templateBody}
+                  />
+                </label>
+                <div className="review-template-validation" id="review-template-validation">
+                  <span className={templateBodyByteLength <= 500 ? "is-valid" : "is-invalid"}>
+                    {templateBodyByteLength} / 500바이트
+                  </span>
+                  <span className={templateBody.includes("{{후기작성링크}}") ? "is-valid" : "is-invalid"}>
+                    후기 작성 링크 {templateBody.includes("{{후기작성링크}}") ? "포함" : "필수"}
+                  </span>
+                  {invalidTemplateVariables.length ? (
+                    <span className="is-invalid">허용되지 않은 변수가 있습니다.</span>
+                  ) : null}
+                </div>
                 <div className="review-template-variables"><code>{"{{고객명}}"}</code><code>{"{{담당자명}}"}</code><code>{"{{사건번호}}"}</code><code>{"{{후기작성링크}}"}</code></div>
-                <div className="review-form-actions">
-                  {editingTemplateId ? <button onClick={() => { setEditingTemplateId(null); setTemplateName(""); setTemplateBody(newTemplateBody); setTemplateProgressStage("other"); }} type="button">취소</button> : null}
-                  <button className="primary-button" disabled={templateBusy || !templateValid} type="submit">{templateBusy ? "저장 중…" : "템플릿 저장"}</button>
+                {templateNotice ? <p className="review-template-notice" role="status">{templateNotice}</p> : null}
+                <div className="review-template-form-footer">
+                  <div>
+                    {!creatingTemplate && selectedTemplate && !selectedTemplate.presetKey ? (
+                      <button
+                        className="review-template-delete-button"
+                        disabled={templateBusy}
+                        onClick={() => void deleteTemplate(selectedTemplate)}
+                        type="button"
+                      >
+                        템플릿 삭제
+                      </button>
+                    ) : (
+                      <span>기본 템플릿 4개는 항상 유지됩니다.</span>
+                    )}
+                  </div>
+                  <div className="review-form-actions">
+                    {(creatingTemplate || templateDirty) ? (
+                      <button disabled={templateBusy} onClick={discardTemplateDraft} type="button">
+                        {creatingTemplate ? "작성 취소" : "변경 취소"}
+                      </button>
+                    ) : null}
+                    <button
+                      className="primary-button"
+                      disabled={templateBusy || !templateValid || (!creatingTemplate && !templateDirty)}
+                      type="submit"
+                    >
+                      {templateBusy
+                        ? "저장 중…"
+                        : creatingTemplate
+                          ? "새 템플릿 추가"
+                          : "변경사항 저장"}
+                    </button>
+                  </div>
                 </div>
               </form>
             </div>
@@ -550,17 +857,36 @@ export function ReviewWorkspace({
             </div>
           </section>
 
-          <section className="review-send-dock">
+          <section className={selectedTargets.size ? "review-send-dock" : "review-send-dock is-idle"}>
             <div>
               <p>발신 담당자</p><strong>{staffName}</strong>
             </div>
             <div>
-              <p>선택 템플릿</p><strong>{selectedTemplate?.name ?? "템플릿을 선택해 주세요"}</strong>
+              <p>선택 템플릿</p>
+              <strong>
+                {creatingTemplate
+                  ? "새 템플릿 저장 필요"
+                  : selectedTemplate?.name ?? "템플릿을 선택해 주세요"}
+              </strong>
+              {templateDirty ? <small>변경사항을 저장해야 발송할 수 있습니다.</small> : null}
             </div>
             <div>
               <p>수신 고객</p><strong>{selectedTargets.size}명</strong>
             </div>
-            <button className="primary-button" disabled={sending || !selectedTemplate || selectedTargets.size === 0} onClick={() => void send()} type="button">{sending ? "요청 등록 중…" : `${selectedTargets.size}명에게 후기 요청`}</button>
+            <button
+              className="primary-button"
+              disabled={
+                sending ||
+                creatingTemplate ||
+                templateDirty ||
+                !selectedTemplate ||
+                selectedTargets.size === 0
+              }
+              onClick={() => void send()}
+              type="button"
+            >
+              {sending ? "요청 등록 중…" : `${selectedTargets.size}명에게 후기 요청`}
+            </button>
           </section>
           {sendResult ? (
             <p className={sendResult.failedCount ? "review-send-result has-failure" : "review-send-result"} role="status">

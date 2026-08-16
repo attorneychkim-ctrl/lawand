@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CURRENT_REVIEW_PRIVACY_NOTICE_VERSION,
   CURRENT_REVIEW_PUBLICATION_CONSENT_VERSION,
+  maskReviewAuthorDisplay,
   type ReviewRequestContextResponse,
   type ReviewSubmission,
   type ReviewSubmissionResponse,
@@ -196,6 +197,9 @@ export function ReviewForm({ requestToken }: { requestToken?: string }) {
       "작성하신 후기가 이곳에 미리 보입니다. 결과보다 과정에서 실제로 느낀 점을 편하게 들려주세요.",
     [form.content],
   );
+  const previewAuthorDisplay = form.authorDisplay.trim()
+    ? maskReviewAuthorDisplay(form.authorDisplay)
+    : "공개 이름";
 
   function setValue<Key extends keyof ReviewFormData>(
     key: Key,
@@ -592,7 +596,8 @@ export function ReviewForm({ requestToken }: { requestToken?: string }) {
                       value={form.authorDisplay}
                     />
                     <small>
-                      실명 대신 일부를 가린 이름이나 별칭을 권합니다.
+                      홈페이지에는 첫 글자만 남긴 “김○○ 고객” 형태로 자동
+                      마스킹됩니다.
                     </small>
                   </label>
                   <label className="review-text-field">
@@ -672,8 +677,9 @@ export function ReviewForm({ requestToken }: { requestToken?: string }) {
                   <span>
                     <strong>[필수] 후기 공개 동의</strong>
                     <small>
-                      검수 후 공개 이름, 분야, 작성 시점, 경험 키워드와 후기
-                      원문이 홈페이지에 공개될 수 있음에 동의합니다.
+                      검수 후 마스킹된 공개 이름, 분야, 작성 시점, 경험
+                      키워드와 후기 원문이 홈페이지에 공개될 수 있음에
+                      동의합니다.
                     </small>
                   </span>
                 </label>
@@ -716,7 +722,7 @@ export function ReviewForm({ requestToken }: { requestToken?: string }) {
               </header>
               <p>{previewContent}</p>
               <footer>
-                <strong>{form.authorDisplay.trim() || "공개 이름"}</strong>
+                <strong>{previewAuthorDisplay}</strong>
                 {form.experienceKeywords.length > 0 ? (
                   <ul>
                     {form.experienceKeywords.map((keyword) => (
