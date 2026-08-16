@@ -12,7 +12,7 @@
 고객 전 생애주기를 **최대한 사람 손이 안 타는 자동화**로 흐르게 한다. (상세: `PROJECT_PLAN.md`)
 
 ## 현재 상태
-- **홈페이지·ERP·gateway AWS 운영 배포와 Route 53 정식 도메인 전환 완료, DNS 전파·안정화 중.**
+- **홈페이지·ERP·gateway AWS 운영 배포와 Route 53 정식 도메인 전환 완료. 2026-08-16 공개 후기 작성자 마스킹·ERP 후기 요청 편집기 릴리스까지 운영 반영했다.**
 - 스택 전제: Next.js 16(App Router) · React 19 · TypeScript · Tailwind 4 · shadcn/ui ·
   TanStack Query, **모노레포(pnpm workspaces + Turborepo)**.
 - 이 WSL 환경: node **v22.22.2**, pnpm **11.17.0**(Corepack + 로컬 shim).
@@ -87,6 +87,58 @@
 ---
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
+
+### 2026-08-16 — 공개 후기 마스킹·후기 요청 편집기 운영 배포 완료
+- HERDR main과 `silver-meadow-902f`를 확인하고 원격 `origin/worktree/*` 53개를 전수 대조했다.
+  완료 커밋 `f612888`·`819d4a8`을 main에 병합한 소스
+  `d4b503934506b5f9c3b6206c039f424b77ebcc1e`는 배포 시점과 최종 기록 직전
+  `origin/main`과 일치하며 모든 로컬·원격 worktree HEAD가 이 소스의 ancestor다. 제외·진행 중
+  브랜치는 없다. 전체 5패키지 typecheck·lint·직접 production build, core 91개·gateway
+  166개 테스트, DB schema check, 배포 스크립트 syntax와 `git diff --check`를 통과했다.
+  GitHub Actions `31924301099`의 검증과 세 앱 `linux/arm64` 게시 작업도 모두 성공했다.
+- ECR digest는 홈페이지
+  `sha256:ab668f6016e10033911270680af2acb18dc02aa64fa865172d902fbf9019ebf3`, ERP
+  `sha256:2ebbd51ed261b3bc015c6a48064fab13f013739d31e06f134c4607576ca124c9`, gateway
+  `sha256:aeadfc14a63dff695e052ac0040037d90c1ecbe373cdb9c0056da53c1fce90d6`다.
+  EC2에서 digest를 직접 pull해 앱·revision·`arm64` label을 다시 대조했다. 새 scan과 기존
+  운영 이미지 재scan은 모두 CRITICAL 3·HIGH 10·MEDIUM 9·LOW 1이다. 기존 기록보다 늘어난
+  MEDIUM `CVE-2026-19487`은 두 이미지의 동일한 `perl 5.36.0-7+deb12u3`에서 함께 탐지된
+  scanner DB 갱신이며 2026-08-16 Debian Bookworm에는 수정 패키지가 없다. 앱 entrypoint는
+  Node만 실행하고 Perl을 호출하지 않으며 결과를 숨기지 않고 후속 base 갱신에서 재평가한다.
+- migration·스키마·운영 데이터 변경이 없어 RDS snapshot과 migration은 만들거나 실행하지
+  않았다. 릴리스 `20260816T035427Z-review-privacy-template-editor-v1`로 gateway → ERP →
+  홈페이지를 tag가 아닌 digest로 전환했다. 최종 image ID는 홈페이지
+  `sha256:93d03f83edb9cbef4cb6d0c712cefb5e3937080b1698b993a882311851d61967`, ERP
+  `sha256:b6b50c85e6c32b0260ee360063866f52fad9c4b8c4ca646eddf3601c6d517497`, gateway
+  `sha256:f7d09debd4460d7ee70c42b9164ffa4c9201a2c0f3ca6d356111eff08baeb71a`다.
+- health 뒤 홈페이지는 cache 1,421,000,000→1,421,000,000 bytes, 가용량
+  19,278,147,584→20,153,810,944 bytes, 회수 875,663,360 bytes이며 rollback은
+  `sha256:1319ac96d52dc2c560d585452711b8a7c9ea9ea16746751e2821adf31cc4a08d`·
+  `sha256:d95d28089e99e3c7f502541679b35281c561862493d88121ec4ac5358366c6b5`다. ERP는
+  cache 1,429,000,000→1,429,000,000, 가용량 93,573,431,296→94,451,634,176,
+  회수 878,202,880 bytes이며 rollback은
+  `sha256:b7001d2ba39f3afdc1e54790e0ace25f2ede067d0eee0b74e4bc897058d4dd25`·
+  `sha256:d0eac77e0d067cbb1e91718d96c2c3cbcf87942daddb8cb984db0a6e04ce3458`다. gateway는
+  cache 1,381,000,000→1,381,000,000, 가용량 93,191,540,736→94,034,075,648,
+  회수 842,534,912 bytes이며 rollback은
+  `sha256:c7b4aaaade1e494e48c9f57593dc19d983b607a1a6cb60ea7bd83df95af423e0`·
+  `sha256:37d880601772e37e4a5f835f2ff26763dc73a0686016896ac75e1e1c14a879c1`다.
+  세 서버 모두 현재+rollback 2개, source release 2개만 남겼고 전체 값은
+  `/var/log/lawand/deployments.log`에도 기록했다.
+- 정식·EIP HTTPS의 홈페이지 후기 목록·작성, ERP 로그인, gateway health가 모두 200이다.
+  홈페이지 최신 공개 후기 9건은 마스킹 9·원 작성자 문자열 노출 0이다. 임시 5분 세션과
+  실제 headless Chrome으로 ERP 후기 요청 탭을 열어 기본 4개·개인 2개 그룹, 문자 미리보기,
+  기본 필드 잠금, 미저장 발송 차단, 새 템플릿 상태와 390×844 무가로스크롤을 확인했다.
+  console·hydration 오류는 0이고 임시 세션 잔존도 0이다. 템플릿·수신 고객·발송 원장은
+  변경하지 않았고 실제 문자·후기 링크 canary를 만들지 않았다.
+- 최종 확인에서 세 앱·Caddy active, systemd/container restart 0, 환경파일 600, 배포 뒤
+  priority/error 패턴 0이며 request/LISTEN pool waiting은 각각 0/20·0/4, bridge key는 51개다.
+  스택 `UPDATE_COMPLETE`·종료 방지, RDS `available`·암호화·삭제 방지, 세 EC2 status ok,
+  SSM Online, CloudWatch OK 14·ALARM 0·INSUFFICIENT_DATA 0이다. outbox dead는 배포 전후
+  기존 문자 8건으로 같고 locked 0이며 pending 203→204는 배포 뒤 자연 유입된
+  `consultation.requested` 1건이다. 발신·문자·받기 명령과 최근 통화 root는 전환 전 3회 및
+  최종 확인 모두 0이다. Windows bridge·통화 원장·기존 dead 원장은 변경하지 않았다.
+- `PROJECT_PLAN.md`는 v1.47이며 운영 배포 문서의 현재 릴리스와 digest·검증 원장을 갱신했다.
 
 ### 2026-08-16 — ERP 후기 요청 템플릿 선택·미리보기·편집 UX 후보
 - 고정 카드 목록이 추가 템플릿 수만큼 화면을 밀어내던 후기 요청 화면을 기본/추가 그룹

@@ -1,19 +1,19 @@
 # AWS 운영 배포 기준선 v2
 
-기준 시각: 2026-08-14 KST
+기준 시각: 2026-08-16 KST
 CloudFormation 스택: `lawand-prod`
 리전: 서울(`ap-northeast-2`)
 최초 배포 릴리스: `20260804T085006Z-84e8708`
-현재 홈페이지 릴리스: `20260814T093947Z-integrated-phonebook-reviews-lawand-os-v1`
-현재 ERP 릴리스: `20260814T093947Z-integrated-phonebook-reviews-lawand-os-v1`
-현재 gateway 릴리스: `20260814T093947Z-integrated-phonebook-reviews-lawand-os-v1`
+현재 홈페이지 릴리스: `20260816T035427Z-review-privacy-template-editor-v1`
+현재 ERP 릴리스: `20260816T035427Z-review-privacy-template-editor-v1`
+현재 gateway 릴리스: `20260816T035427Z-review-privacy-template-editor-v1`
 현재 Windows bridge: `v0.8.3.0`
 
-완료된 모든 worktree를 main에 통합한 기준선 위에 migration `0061..0063`, 홈페이지·ERP·
-gateway를 같은 릴리스로 운영 반영했다. 암호화 공용 전화번호부와 수신 발신자 식별,
-미확정 통화 수동 담당자 확정, 후기 요청 기본 슬롯·고객별 무입력 링크·개인 템플릿 삭제,
-ERP `LAW& OS` 브랜드와 문자 스크롤 개선, 묶음 상담 리걸프렌즈 등록 복구가 포함됐다.
-Windows bridge는 코드 영향이 없어 `v0.8.3.0`을 유지했다.
+완료된 모든 worktree를 main에 통합한 기준선 위에 공개 후기 작성자 자동 마스킹과 ERP 후기
+요청 템플릿 선택·문자 미리보기·편집 UX를 홈페이지·ERP·gateway의 같은 릴리스로 운영
+반영했다. 이전 릴리스의 migration `0061..0063`, 암호화 공용 전화번호부, 후기 요청 기본
+슬롯·고객별 무입력 링크·개인 템플릿 삭제와 `LAW& OS` 기준선은 유지한다. 이번 릴리스에는
+migration·운영 데이터 변경이 없고 Windows bridge도 코드 영향이 없어 `v0.8.3.0`을 유지했다.
 
 이 문서는 정식 도메인 전환 이후를 포함한 실제 AWS 구성, 접속점, 데이터 이관 범위와
 운영 체크리스트를 기록한다. 비밀번호·API 키·AWS 계정 ID·RDS 마스터 시크릿 ARN은
@@ -99,8 +99,8 @@ Route 53·AWS 설정은 이 rollback의 대상이 아니다. 구 WordPress는 4.
 - 배포 S3 버킷은 전체 public access 차단, 버전 관리, TLS 강제, `artifacts/` 30일
   만료 정책을 사용한다. 홈페이지 사용자 파일 저장소로 사용하지 않는다.
 - 기본 CloudWatch 경보는 세 EC2 상태, RDS CPU, RDS 여유 저장공간을 감시한다.
-  SNS·PagerDuty·텔레그램 같은 실제 통지 대상은 아직 연결하지 않았다. 2026-08-13 최신
-  릴리스 최종 확인에서 metric·composite ALARM은 모두 0건이다.
+  SNS·PagerDuty·텔레그램 같은 실제 통지 대상은 아직 연결하지 않았다. 2026-08-16 최신
+  릴리스 최종 확인에서 OK 14개, ALARM·INSUFFICIENT_DATA는 각각 0건이다.
 
 ## RDS 기준선
 
@@ -119,8 +119,8 @@ Route 53·AWS 설정은 이 rollback의 대상이 아니다. 구 WordPress는 4.
 - migration `0022_consultation_sse_notifications.sql`은 상담 outbox INSERT가 커밋될 때
   개인정보 없이 이벤트 ID·유형·상담 ID·발생시각만 PostgreSQL 채널로 알린다. gateway의
   전용 연결만 이 채널을 `LISTEN`하며 RDS를 인터넷에 노출하지 않는다.
-- 2026-08-13 기준 migration `0056`까지 57개가 모두 적용됐고 최근 `0042..0056` 파일 해시는
-  현재 Git과 일치한다.
+- 2026-08-14 기준 migration `0063`까지 64개가 모두 적용됐고 이번 2026-08-16 릴리스에는
+  migration이나 운영 데이터 변경이 없다.
   역사적으로 운영에 적용된 `0028_inbound_phone_directory_resolver.sql` 한 개만 현재 파일과
   해시가 다르다. 후속 `0037_phone_desk_directory_context.sql`이 같은 함수 계약을 대체했고
   현재 스키마·권한 검증은 통과한다. 이 예외를 이유로 migration 원장을 수정하거나 0028을
@@ -1113,6 +1113,62 @@ x86 OCX 프로세스 하나를 격리해 실행하고, 배정된 회선과 제�
   wildcard→apex로 돌린다. 세 서버의 전환 전 Caddyfile은
   `Caddyfile.pre-domain-cutover-20260812T004900Z`에 있고 Cafe24 구 zone·호스팅·SSL과
   직전 홈페이지 이미지도 보존했다.
+
+## 2026-08-16 공개 후기 마스킹·후기 요청 편집기 릴리스
+
+HERDR main과 `silver-meadow-902f`, 원격 `origin/worktree/*` 53개를 전수 대조해 완료 작업이
+모두 main에 포함되고 제외·진행 중 브랜치가 없음을 확인했다. 배포 소스
+`d4b503934506b5f9c3b6206c039f424b77ebcc1e`는 배포 시점과 기록 직전 `origin/main`에
+일치한다.
+
+- 전체 5패키지 typecheck·lint·직접 production build, core 91개·gateway 166개 테스트,
+  DB schema check, 배포 스크립트 syntax와 `git diff --check`를 통과했다. GitHub Actions
+  `31924301099`은 같은 소스를 검증하고 세 `linux/arm64` 이미지를 게시했다. 홈페이지 digest는
+  `sha256:ab668f6016e10033911270680af2acb18dc02aa64fa865172d902fbf9019ebf3`, ERP는
+  `sha256:2ebbd51ed261b3bc015c6a48064fab13f013739d31e06f134c4607576ca124c9`, gateway는
+  `sha256:aeadfc14a63dff695e052ac0040037d90c1ecbe373cdb9c0056da53c1fce90d6`다. EC2에서
+  각 digest를 선행 pull해 앱·revision·`arm64` label과 배포 스크립트 해시를 대조했다.
+- ECR scan은 세 앱 모두 CRITICAL 3·HIGH 10·MEDIUM 9·LOW 1이다. 이전 기록보다 추가된
+  `CVE-2026-19487`은 현재 운영 이미지 재scan에서도 같은 `perl 5.36.0-7+deb12u3`로 탐지돼
+  이번 소스의 새 의존성 유입이 아니라 scanner DB 갱신임을 확인했다. 2026-08-16
+  [Debian Security Tracker](https://security-tracker.debian.org/tracker/CVE-2026-19487)는
+  Bookworm을 open·수정 버전 없음으로 기록한다. 운영 image entrypoint는 Node만 실행하고
+  Perl을 호출하지 않는다. 탐지 결과를 보존하고 base image 갱신 때 재평가한다.
+- 이번 변경은 공개 응답·화면 경계뿐이며 migration·스키마·운영 데이터 변경이 없다. 따라서
+  불필요한 RDS snapshot이나 migration을 만들지 않고 릴리스
+  `20260816T035427Z-review-privacy-template-editor-v1`로 gateway → ERP → 홈페이지를
+  tag가 아닌 digest로 전환했다. 최종 image ID는 홈페이지
+  `sha256:93d03f83edb9cbef4cb6d0c712cefb5e3937080b1698b993a882311851d61967`, ERP
+  `sha256:b6b50c85e6c32b0260ee360063866f52fad9c4b8c4ca646eddf3601c6d517497`, gateway
+  `sha256:f7d09debd4460d7ee70c42b9164ffa4c9201a2c0f3ca6d356111eff08baeb71a`다.
+- rollback image ID는 홈페이지
+  `sha256:1319ac96d52dc2c560d585452711b8a7c9ea9ea16746751e2821adf31cc4a08d`·
+  `sha256:d95d28089e99e3c7f502541679b35281c561862493d88121ec4ac5358366c6b5`, ERP
+  `sha256:b7001d2ba39f3afdc1e54790e0ace25f2ede067d0eee0b74e4bc897058d4dd25`·
+  `sha256:d0eac77e0d067cbb1e91718d96c2c3cbcf87942daddb8cb984db0a6e04ce3458`, gateway
+  `sha256:c7b4aaaade1e494e48c9f57593dc19d983b607a1a6cb60ea7bd83df95af423e0`·
+  `sha256:37d880601772e37e4a5f835f2ff26763dc73a0686016896ac75e1e1c14a879c1`다. 각 서버는
+  현재와 rollback 2개, source release 2개만 보존한다.
+- health 뒤 BuildKit cache는 홈페이지 1,421,000,000, ERP 1,429,000,000, gateway
+  1,381,000,000 bytes로 모두 4 GiB 아래다. 홈페이지는 가용량
+  19,278,147,584→20,153,810,944 bytes·회수 875,663,360 bytes, ERP는
+  93,573,431,296→94,451,634,176·회수 878,202,880, gateway는
+  93,191,540,736→94,034,075,648·회수 842,534,912 bytes다. cache 전후 값과 이미지 ID는
+  각 서버 `/var/log/lawand/deployments.log`에 함께 기록했다.
+- 정식·EIP HTTPS의 홈페이지 후기 목록·작성, ERP 로그인, gateway health는 모두 200이다.
+  홈페이지 최신 공개 후기 9건은 마스킹 9·원 작성자 문자열 노출 0이다. 운영 ERP는 임시
+  5분 세션과 headless Chrome으로 후기 요청 탭을 실제 클릭해 기본 4개·개인 2개 그룹,
+  문자 미리보기, 기본 이름·시점 잠금, 미저장 발송 차단, 새 템플릿 상태와 390×844
+  무가로스크롤을 확인했다. console·hydration 오류와 임시 세션 잔존은 0이며 템플릿 저장·
+  고객 검색·문자 발송은 실행하지 않았다.
+- 세 앱과 Caddy는 active, systemd/container restart 0, 환경파일 600이고 배포 준비 완료
+  뒤 priority/error 패턴은 0이다. gateway request pool과 LISTEN pool waiting은 각각
+  0/20·0/4, bridge key는 51개다. RDS는 `db.t4g.xlarge` available·암호화·삭제 방지,
+  세 EC2 status check는 ok, SSM은 Online, CloudWatch는 OK 14·ALARM 0·
+  INSUFFICIENT_DATA 0이다. outbox dead는 배포 전후 기존 문자 8건으로 같고, pending
+  203→204는 이후 자연 유입된 상담 1건이다. 발신·문자·받기 명령과 최근 통화 root는
+  전환 전 3회와 최종 확인 모두 0이다. Windows bridge·통화 원장·기존 dead 원장은
+  변경하지 않았고 실제 전화·문자·후기 링크 canary도 만들지 않았다.
 
 ## 2026-08-14 전화번호부·후기요청·LAW& OS 통합 릴리스
 
