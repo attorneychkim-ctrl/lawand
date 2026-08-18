@@ -95,6 +95,8 @@ import {
   SelfDiagnosisUnavailableError,
 } from "./service.js";
 import type { PublicIntakeProtection } from "./intake-protection.js";
+import { GiftishowError, GIFTISHOW_PRODUCTS } from "./giftishow.js";
+import type { GiftCouponService, GiftCouponReason } from "./gift-coupon-service.js";
 import {
   ReviewSubmissionValidationError,
   type ReviewSubmissionService,
@@ -286,6 +288,7 @@ export function createGatewayServer(options?: {
   intakeProtection?: PublicIntakeProtection;
   reviewService?: ReviewSubmissionService;
   reviewManagementService?: ReviewManagementService;
+  giftCouponService?: GiftCouponService;
   reviewEvents?: ReviewEventSource;
   telephonyService?: TelephonyService;
   centrexBridgeIngress?: CentrexBridgeIngressService;
@@ -1638,6 +1641,27 @@ export function createGatewayServer(options?: {
               actor,
             ),
           );
+          return;
+        }
+        if (request.method === "POST" && action === "gift-coupons") {
+          if (!options.giftCouponService) {
+            sendJson(response, 503, { error: "giftishow_not_configured", message: "기프티쇼 운영 설정이 완료되지 않았습니다." });
+            return;
+          }
+          const body = await readJson(request) as Record<string, unknown>;
+          const productKey = typeof body?.productKey === "string" ? body.productKey : "";
+          const reason = typeof body?.reason === "string" ? body.reason : "";
+          const idempotencyKey = typeof body?.idempotencyKey === "string" ? body.idempotencyKey : "";
+          if (!GIFTISHOW_PRODUCTS.some((product) => product.key === productKey) || !["review_thanks", "service_recovery", "event"].includes(reason) || !validUuid(idempotencyKey) || body.confirmed !== true) {
+            sendJson(response, 400, { error: "invalid_gift_coupon_request", message: "상품·사유·최종 확인값을 확인해 주세요." });
+            return;
+          }
+          try {
+            sendJson(response, 200, await options.giftCouponService.send(recordType, recordId, { productKey: productKey as (typeof GIFTISHOW_PRODUCTS)[number]["key"], reason: reason as GiftCouponReason, idempotencyKey, confirmed: true }, actor));
+          } catch (error) {
+            const giftError = error instanceof GiftishowError ? error : null;
+            sendJson(response, giftError?.uncertain ? 503 : 409, { error: giftError?.code ?? "gift_coupon_send_failed", message: error instanceof Error ? error.message : "쿠폰 발송에 실패했습니다." });
+          }
           return;
         }
         if (

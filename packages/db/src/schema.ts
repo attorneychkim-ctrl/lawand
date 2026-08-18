@@ -187,6 +187,7 @@ export const reviewRequestStatusEnum = pgEnum("review_request_status", [
   "redeemed",
   "cancelled",
 ]);
+export const reviewGiftCouponStatusEnum = pgEnum("review_gift_coupon_status", ["prepared", "sent", "failed", "cancelled", "unknown"]);
 
 export const caseStudyPracticeAreaEnum = pgEnum("case_study_practice_area", [
   "personal_rehabilitation",
@@ -3266,6 +3267,43 @@ export const customerReviewRequests = pgTable(
     ),
   ],
 );
+
+export const reviewGiftCouponDeliveries = pgTable("review_gift_coupon_deliveries", {
+  id: uuid("id").primaryKey(),
+  idempotencyKey: uuid("idempotency_key").notNull(),
+  recordType: varchar("record_type", { length: 20 }).notNull(),
+  recordId: uuid("record_id").notNull(),
+  requestedByUserId: uuid("requested_by_user_id").notNull().references(() => staffUsers.id, { onDelete: "restrict" }),
+  directoryClientIdx: integer("directory_client_idx").notNull(),
+  directoryCaseIdx: integer("directory_case_idx").notNull(),
+  phoneCiphertext: bytea("phone_ciphertext").notNull(),
+  phoneNonce: bytea("phone_nonce").notNull(),
+  phoneKeyVersion: varchar("phone_key_version", { length: 50 }).notNull(),
+  phoneFingerprint: bytea("phone_fingerprint").notNull(),
+  productKey: varchar("product_key", { length: 50 }).notNull(),
+  goodsCode: varchar("goods_code", { length: 20 }).notNull(),
+  brandNameSnapshot: varchar("brand_name_snapshot", { length: 100 }).notNull(),
+  goodsNameSnapshot: varchar("goods_name_snapshot", { length: 200 }).notNull(),
+  salePriceSnapshot: integer("sale_price_snapshot").notNull(),
+  reason: varchar("reason", { length: 40 }).notNull(),
+  trId: varchar("tr_id", { length: 25 }).notNull(),
+  providerOrderNo: varchar("provider_order_no", { length: 30 }),
+  status: reviewGiftCouponStatusEnum("status").default("prepared").notNull(),
+  lastErrorCode: varchar("last_error_code", { length: 100 }),
+  requestedAt: timestamp("requested_at", { withTimezone: true }).notNull(),
+  providerRespondedAt: timestamp("provider_responded_at", { withTimezone: true }),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex("review_gift_coupon_idempotency_uidx").on(table.idempotencyKey),
+  uniqueIndex("review_gift_coupon_tr_id_uidx").on(table.trId),
+  uniqueIndex("review_gift_coupon_one_active_per_review_uidx").on(table.recordType, table.recordId).where(sql`${table.status} IN ('prepared', 'sent', 'unknown')`),
+  index("review_gift_coupon_requested_idx").on(table.requestedAt),
+  check("review_gift_coupon_record_type", sql`${table.recordType} IN ('review', 'submission')`),
+  check("review_gift_coupon_reason", sql`${table.reason} IN ('review_thanks', 'service_recovery', 'event')`),
+  check("review_gift_coupon_directory_positive", sql`${table.directoryClientIdx} > 0 AND ${table.directoryCaseIdx} > 0`),
+  check("review_gift_coupon_crypto", sql`octet_length(${table.phoneNonce}) = 12 AND octet_length(${table.phoneCiphertext}) >= 17 AND octet_length(${table.phoneFingerprint}) = 32`),
+  check("review_gift_coupon_price_positive", sql`${table.salePriceSnapshot} > 0`),
+]);
 
 export const telephonyInboundMessages = pgTable(
   "telephony_inbound_messages",

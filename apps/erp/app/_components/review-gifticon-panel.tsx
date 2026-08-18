@@ -6,24 +6,24 @@ import type { ReviewManagementDetail } from "../../lib/gateway";
 
 const products = [
   {
-    id: "coffee",
-    brand: "카페 교환권",
-    name: "아메리카노 2잔 세트",
-    price: "10,000원 이하",
+    id: "mega_double_americano",
+    brand: "메가MGC커피",
+    name: "더블 아아 세트",
+    price: "4,000원",
     tone: "coffee",
   },
   {
-    id: "convenience",
-    brand: "편의점 모바일 금액권",
-    name: "모바일 금액권 10,000원",
+    id: "naverpay_10000",
+    brand: "네이버페이 포인트",
+    name: "네이버페이 포인트 10,000원",
     price: "10,000원",
     tone: "convenience",
   },
   {
-    id: "bakery",
-    brand: "베이커리 모바일 교환권",
-    name: "베이커리 금액권 5,000원",
-    price: "5,000원",
+    id: "baemin_30000",
+    brand: "배달의민족",
+    name: "[배달의민족] 모바일상품권 3만원",
+    price: "30,000원",
     tone: "bakery",
   },
 ] as const;
@@ -40,19 +40,38 @@ export function ReviewGifticonPanel({
   customer,
   receiptCode,
   submittedPhone,
+  recordType,
+  recordId,
 }: {
   customer: ReviewManagementDetail["linkedCustomer"];
   receiptCode: string | null;
   submittedPhone: string | null;
+  recordType: "review" | "submission";
+  recordId: string;
 }) {
-  const [selectedId, setSelectedId] = useState<(typeof products)[number]["id"]>("coffee");
+  const [selectedId, setSelectedId] = useState<(typeof products)[number]["id"]>("mega_double_americano");
   const [reason, setReason] = useState("review_thanks");
   const [confirmed, setConfirmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState("");
+  const [error, setError] = useState("");
   const selected = useMemo(
     () => products.find((product) => product.id === selectedId) ?? products[0],
     [selectedId],
   );
   const recipientPhone = customer?.phone ?? submittedPhone;
+
+  async function sendCoupon() {
+    if (!confirmed || !recipientPhone) return;
+    setBusy(true); setError(""); setResult("");
+    try {
+      const response = await fetch(`/api/reviews/${recordType}/${recordId}/gift-coupons`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ productKey: selectedId, reason, idempotencyKey: crypto.randomUUID(), confirmed: true }) });
+      const body = await response.json().catch(() => null) as { orderNo?: string; message?: string } | null;
+      if (!response.ok) throw new Error(body?.message ?? "쿠폰 발송에 실패했습니다.");
+      setResult(`발송 요청이 완료되었습니다. 주문번호 ${body?.orderNo ?? "확인 중"}`);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "쿠폰 발송에 실패했습니다."); }
+    finally { setBusy(false); }
+  }
 
   return (
     <section className="gifticon-review-panel" data-testid="giftishow-commercial-screen">
@@ -62,7 +81,7 @@ export function ReviewGifticonPanel({
           <h2>고객 감사 기프티콘</h2>
           <p>후기 내용의 긍정·부정과 무관하게 정해진 운영 기준으로만 발송합니다.</p>
         </div>
-        <span className="gifticon-api-status"><i aria-hidden="true" /> 기프티쇼 비즈 API 승인 대기</span>
+        <span className="gifticon-api-status"><i aria-hidden="true" /> 기프티쇼 비즈 API 승인</span>
       </header>
 
       {customer ? (
@@ -128,8 +147,8 @@ export function ReviewGifticonPanel({
               <input checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} type="checkbox" />
               <span>수신자·상품·발송 사유를 확인했고, 긍정적 후기의 대가로 지급하지 않음을 확인했습니다.</span>
             </label>
-            <button disabled type="button">상용 Key 발급 후 발송 가능</button>
-            <small>API 승인 전에는 실제 발송·과금·외부 데이터 전송이 일어나지 않습니다.</small>
+            <button disabled={!confirmed || busy || !recipientPhone || Boolean(result)} onClick={() => void sendCoupon()} type="button">{busy ? "발송 확인 중…" : result ? "발송 완료" : "모바일 쿠폰 발송"}</button>
+            {result ? <small role="status">{result}</small> : error ? <small role="alert">{error}</small> : <small>버튼을 누르면 비즈머니가 차감되고 기프티쇼 비즈가 MMS를 발송합니다.</small>}
           </div>
         </div>
       ) : (
