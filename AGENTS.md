@@ -102,6 +102,15 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-18 — ERP 후기 목록 상품 발송 배지 후보
+- 후기관리 목록의 공개 여부·답글 배지 오른쪽에 상품 `발송대기`·`발송완료` 배지를 추가했다.
+  gateway 목록 조회가 후기·제출별 쿠폰 원장에서 `sent` 존재 여부를 함께 판정하므로 카드별
+  추가 API 요청은 없다. 실제 `sent`만 완료로 보고 미발송·실패·취소·`prepared`·`unknown`은
+  안전하게 발송대기로 표시한다.
+- core·DB·gateway production build, gateway 172개 테스트, ERP production build,
+  gateway·ERP typecheck·lint와 `git diff --check`를 통과했다. migration·스키마·운영 데이터·
+  main 병합·운영 배포·실제 쿠폰 발송은 수행하지 않았다. `PROJECT_PLAN.md`는 v1.53이다.
+
 ### 2026-08-18 — 모바일 쿠폰 발송 상태·재발송 차단 운영 배포 완료
 - 메인 `263f6de5a5cb5352c930306c7f78bec0dce1aee1`에서 ERP의 쿠폰 발송 버튼을 확인 완료 시
   보라색 활성 상태·pointer cursor로 표시하고, 발송 완료 뒤에는 상품명·한국 시각·주문번호와

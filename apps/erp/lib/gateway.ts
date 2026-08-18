@@ -164,6 +164,7 @@ export type ReviewManagementListItem = {
   status: "pending" | "published" | "restricted";
   restrictionReason: ReviewRestrictionReason | null;
   replyStatus: "waiting" | "answered" | "not_applicable";
+  giftCouponStatus: "waiting" | "sent";
   linked: boolean;
   mine: boolean;
   occurredAt: string;

@@ -546,6 +546,9 @@ export function ReviewWorkspace({
                     <span className={`status-${item.status}`}>{statusLabels[item.status]}</span>
                     {item.replyStatus === "waiting" ? <span className="needs-reply">답글 필요</span> : null}
                     {item.replyStatus === "answered" ? <span>답글 완료</span> : null}
+                    <span className={`gift-coupon-${item.giftCouponStatus}`}>
+                      {item.giftCouponStatus === "sent" ? "발송완료" : "발송대기"}
+                    </span>
                     {item.mine ? <span className="is-mine">내 담당</span> : null}
                   </div>
                   <div className="review-card-copy">
