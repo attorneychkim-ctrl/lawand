@@ -1173,6 +1173,7 @@ export default async function ConsultationDetailPage({
                     <span className="request-summary-main">
                       <strong>{modeLabel(request)}</strong>
                       <small>{sourceLabel(request)} · {request.consultationReceiptCode} · {dedupeLabels[request.dedupeOutcome]}</small>
+                      {request.createdByDisplayName ? <small>등록자 {request.createdByDisplayName}</small> : null}
                     </span>
                     <time dateTime={request.submittedAt}>{formatDate(request.submittedAt)}</time>
                     <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m7 9 5 5 5-5" /></svg>

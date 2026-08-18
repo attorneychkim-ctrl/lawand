@@ -744,6 +744,7 @@ export type PhoneDeskAftercareInput = {
     | {
         mode: "create";
         customerName: string;
+        residenceRegion: ResidenceRegion;
         assigneeUserId?: string;
         transferNote?: string;
       };
@@ -1002,6 +1003,8 @@ export type ConsultationDetail = {
       | "erp_phone_desk"
       | "erp_staff"
       | "erp_client_directory";
+    createdByUserId: string | null;
+    createdByDisplayName: string | null;
     contactChannel: "phone" | "kakao_channel" | "naver_booking";
     phone: string | null;
     name: string | null;

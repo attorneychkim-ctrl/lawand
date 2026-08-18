@@ -5196,10 +5196,21 @@ export function createConsultationService(options: {
     }
 
     const requestRows = await db
-      .select()
+      .select({
+        request: consultationRequests,
+        createdByDisplayName: staffProfiles.displayName,
+      })
       .from(consultationRequests)
+      .leftJoin(
+        staffProfiles,
+        eq(staffProfiles.userId, consultationRequests.createdByUserId),
+      )
       .where(inArray(consultationRequests.consultationId, memberIds))
       .orderBy(desc(consultationRequests.submittedAt));
+    const requests = requestRows.map(({ request, createdByDisplayName }) => ({
+      ...request,
+      createdByDisplayName,
+    }));
     const attributionRows = await db
       .select()
       .from(consultationAttributions)
@@ -5207,7 +5218,7 @@ export function createConsultationService(options: {
     const attributionByRequest = new Map(
       attributionRows.map((row) => [row.requestId, row]),
     );
-    const candidateIds = requestRows
+    const candidateIds = requests
       .map((row) => row.candidateConsultationId)
       .filter((id): id is string => Boolean(id));
     const candidates =
@@ -5238,7 +5249,7 @@ export function createConsultationService(options: {
           )
         : null;
     const phoneByRequest = new Map(
-      requestRows.map((request) => [
+      requests.map((request) => [
         request.id,
         request.phoneCiphertext &&
         request.phoneNonce &&
@@ -5255,7 +5266,7 @@ export function createConsultationService(options: {
       ]),
     );
     const latestPhone =
-      requestRows
+      requests
         .map((request) => phoneByRequest.get(request.id) ?? null)
         .find((phone): phone is string => Boolean(phone)) ?? null;
     const unfilteredLegalFriendsMatches = latestPhone
@@ -5265,14 +5276,14 @@ export function createConsultationService(options: {
       unfilteredLegalFriendsMatches,
       legalFriendsCase?.caseIdx ?? null,
     );
-    const latestRequestSource = requestRows[0]?.source ?? null;
-    const firstRequestSource = requestRows.at(-1)?.source ?? null;
+    const latestRequestSource = requests[0]?.source ?? null;
+    const firstRequestSource = requests.at(-1)?.source ?? null;
     const latestRequestByMember = new Map<
       string,
-      (typeof requestRows)[number]
+      (typeof requests)[number]
     >();
     const requestCountByMember = new Map<string, number>();
-    for (const request of requestRows) {
+    for (const request of requests) {
       requestCountByMember.set(
         request.consultationId,
         (requestCountByMember.get(request.consultationId) ?? 0) + 1,
@@ -5281,7 +5292,7 @@ export function createConsultationService(options: {
         latestRequestByMember.set(request.consultationId, request);
       }
     }
-    const groupedNames = requestRows
+    const groupedNames = requests
       .map((request) =>
         request.nameCiphertext &&
         request.nameNonce &&
@@ -5416,7 +5427,7 @@ export function createConsultationService(options: {
             consultationId: kakaoEntry.consultationId,
             status: kakaoEntry.status,
             nameProvided: Boolean(
-              requestRows.find(
+              requests.find(
                 (request) => request.id === kakaoEntry.firstRequestId,
               )?.hasProvidedName,
             ),
@@ -5636,7 +5647,7 @@ export function createConsultationService(options: {
       lastRequestedAt: (
         groupRow?.lastRequestedAt ?? consultation.lastRequestedAt
       ).toISOString(),
-      requests: requestRows.map((request) => {
+      requests: requests.map((request) => {
         const attribution = attributionByRequest.get(request.id);
         return {
           id: request.id,
@@ -5646,6 +5657,8 @@ export function createConsultationService(options: {
               ?.publicReceiptCode ?? consultation.publicReceiptCode,
           mode: request.mode,
           source: request.source,
+          createdByUserId: request.createdByUserId,
+          createdByDisplayName: request.createdByDisplayName,
           contactChannel: request.contactChannel,
           phone: phoneByRequest.get(request.id) ?? null,
           name:

@@ -1810,6 +1810,7 @@ export function createTelephonyService(options: {
       await tx.insert(consultationRequests).values({
         id: requestId,
         consultationId,
+        createdByUserId: actor.id,
         source: requestSource,
         idempotencyKey: input.idempotencyKey,
         mode: "quick",
@@ -5447,6 +5448,7 @@ export function createTelephonyService(options: {
           channel: "phone_desk",
           callId,
           direction: call.direction,
+          residenceRegion: input.consultation.residenceRegion,
           note: "직원이 통화 후 전화데스크에서 생성한 신건상담",
           ...(input.consultation.transferNote
             ? { transferNote: input.consultation.transferNote }
@@ -5480,6 +5482,7 @@ export function createTelephonyService(options: {
         await tx.insert(consultationRequests).values({
           id: requestId,
           consultationId,
+          createdByUserId: actor.id,
           source: "erp_phone_desk",
           idempotencyKey: callId,
           mode: "quick",

@@ -56,6 +56,16 @@ const consultationStateLabels: Record<string, string> = {
   closed: "종결",
 };
 
+const residenceRegionOptions = [
+  ["seoul", "서울"], ["busan", "부산"], ["daegu", "대구"],
+  ["incheon", "인천"], ["gwangju", "광주"], ["daejeon", "대전"],
+  ["ulsan", "울산"], ["sejong", "세종"], ["gyeonggi", "경기"],
+  ["gangwon", "강원"], ["chungbuk", "충북"], ["chungnam", "충남"],
+  ["jeonbuk", "전북"], ["jeonnam", "전남"], ["gyeongbuk", "경북"],
+  ["gyeongnam", "경남"], ["jeju", "제주"],
+  ["overseas_or_other", "해외·기타"],
+] as const;
+
 const revivalStateLabels = new Map([
   [5, "상담대기"],
   [10, "상담완료"],
@@ -368,6 +378,7 @@ export function PhoneAftercareForm({
         ? detail.call.customerMatch.clientName
         : ""),
   );
+  const [residenceRegion, setResidenceRegion] = useState("");
   const [transferNote, setTransferNote] = useState("");
   const [consultationAssignee, setConsultationAssignee] = useState(
     recommendedAssignee,
@@ -459,7 +470,7 @@ export function PhoneAftercareForm({
     result &&
       (result !== "other" || otherText.trim()) &&
       (consultationMode !== "link" || linkedConsultationId) &&
-      (consultationMode !== "create" || customerName.trim()) &&
+      (consultationMode !== "create" || (customerName.trim() && residenceRegion)) &&
       (!followUpEnabled || (followUpDueValid && followUpAssignee)) &&
       (!phonebookEnabled ||
         (phonebookName.trim() &&
@@ -493,6 +504,10 @@ export function PhoneAftercareForm({
           ? {
               mode: "create",
               customerName: customerName.trim(),
+              residenceRegion: residenceRegion as Extract<
+                PhoneDeskAftercareInput["consultation"],
+                { mode: "create" }
+              >["residenceRegion"],
               ...(consultationAssignee
                 ? { assigneeUserId: consultationAssignee }
                 : {}),
@@ -774,6 +789,19 @@ export function PhoneAftercareForm({
                     <option key={staff.staffUserId} value={staff.staffUserId}>
                       {staff.displayName} · {staff.department}
                     </option>
+                  ))}
+                </select>
+              </label>
+              <label className="phone-aftercare-field">
+                <span>거주 지역</span>
+                <select
+                  onChange={(event) => setResidenceRegion(event.target.value)}
+                  required
+                  value={residenceRegion}
+                >
+                  <option value="">지역 선택</option>
+                  {residenceRegionOptions.map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
                   ))}
                 </select>
               </label>
