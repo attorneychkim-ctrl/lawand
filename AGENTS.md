@@ -102,6 +102,34 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-18 — Orca 완료 작업 6개 통합 운영 배포 완료
+- Orca 완료 worktree 6개를 main에 병합하고 로컬·원격 worktree HEAD가 최종 main
+  `b837751660172877c80d2cdcc59cd57293540c64`의 ancestor임을 확인했다. migration 충돌은
+  `0066_consultation_request_creator.sql`·`0067_goofy_mongoose.sql`의 단일 journal/snapshot
+  체인으로 정리했다. 전체 5패키지 typecheck·lint·build, core 91개·gateway 177개 테스트,
+  schema check·`git diff --check`와 Actions `32118482069`가 성공했다.
+- 암호화 snapshot `lawand-prod-pre-orca-integrated-ops-20260818t083359z` 뒤 migration 2개를
+  같은 gateway 이미지로 적용하고 재실행 no-op을 확인했다. 운영 migration은 68개, 최신
+  해시는 `7cec50f50e5d793971d1dfea302f2888912dfcb06374403f475d096073c1b775`·
+  `bb2726e26f88ed2b5a3ffee1cb32cf147caac1c8c546d78e218ac87e24750573`이며 직원 생성 상담
+  22건을 보수적으로 역채움했다. 최소 권한과 PUBLIC grant 0을 확인했다.
+- 최초 gateway 전환은 새 문자 SSE의 다섯 번째 영구 LISTEN 연결이 기존 최대 4개 풀을
+  기다려 health에 실패했다. ERP 전환·정리 전 운영 설정을 5로 높여 복구하고 코드 기본값·
+  최소값도 5로 고정한 최종 main을 재게시했다. 최종 릴리스
+  `20260818T090149Z-orca-integrated-ops-v2`의 gateway digest/image ID는
+  `sha256:4990242815ab0a936f8ea1661b0b9d9a4574efb6e03dce41766a3d7f75deee3a`·
+  `sha256:33c5c617258346e56fa9c4018b7a71313d2ca2ab5b2f1c18e864a276ff3b2bad`, ERP는
+  `sha256:9e2ea7f66115cd8b271f21c228a2dd68e5a12776f1df9c4f62e1fbf5ef81a35b`·
+  `sha256:3259c97aced4999a11d67bb0434c2cabe6bc21d717699d0d5dcbf3d3775e851a`다. scan은
+  CRITICAL 3·HIGH 11·MEDIUM 10·LOW 1이다.
+- health 뒤 gateway cache 1,381,000,000 bytes·회수 851,546,112 bytes, ERP cache
+  1,429,000,000 bytes·회수 1,786,585,088 bytes를 기록했다. 정식·EIP HTTPS 200, 앱·Caddy
+  active, restart 0, 환경파일 600, error journal 0이며 request/LISTEN waiting은 0/20·0/5다.
+  outbox는 dead 11·pending 330·published 680, locked 0이다. 세 EC2 status ok·SSM Online,
+  RDS available·암호화·삭제 방지, CloudWatch OK 14·ALARM 0·INSUFFICIENT_DATA 0이다.
+  홈페이지·Windows bridge·실제 외부 발송·별도 운영 원장은 변경하지 않았다.
+  `PROJECT_PLAN.md`는 v1.55다.
+
 ### 2026-08-18 — Orca 완료 작업 6개 통합 병합 후보
 - Orca 원장의 `auto_sms`·`call_region`·`change_manager_althogh_invalidity`·
   `feedback_present_list`·`legal_add_error`·`sms_reply_alarm` 작업 HEAD와 원격 브랜치를 대조해

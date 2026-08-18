@@ -5,8 +5,8 @@ CloudFormation 스택: `lawand-prod`
 리전: 서울(`ap-northeast-2`)
 최초 배포 릴리스: `20260804T085006Z-84e8708`
 현재 홈페이지 릴리스: `20260818T051852Z-integrated-notifications-memo-sms-gifts-v1`
-현재 ERP 릴리스: `20260818T051852Z-integrated-notifications-memo-sms-gifts-v1`
-현재 gateway 릴리스: `20260818T054421Z-consultation-listener-pool-hotfix-v1`
+현재 ERP 릴리스: `20260818T090149Z-orca-integrated-ops-v2`
+현재 gateway 릴리스: `20260818T090149Z-orca-integrated-ops-v2`
 현재 Windows bridge: `v0.8.3.0`
 
 완료된 모든 worktree를 main에 통합한 기준선 위에 공개 후기 작성자 자동 마스킹과 ERP 후기
@@ -1113,6 +1113,45 @@ x86 OCX 프로세스 하나를 격리해 실행하고, 배정된 회선과 제�
   wildcard→apex로 돌린다. 세 서버의 전환 전 Caddyfile은
   `Caddyfile.pre-domain-cutover-20260812T004900Z`에 있고 Cafe24 구 zone·호스팅·SSL과
   직전 홈페이지 이미지도 보존했다.
+
+## 2026-08-18 Orca 완료 작업 6개 통합 릴리스
+
+- Orca main과 완료 worktree 6개, 로컬·원격 `worktree/*`·`LegalFlow/*`를 전수 대조해
+  제외·진행 중 브랜치 없이 모두 main ancestor임을 확인했다. 독립 브랜치의 migration 번호
+  충돌은 상담 등록자 `0066_consultation_request_creator.sql`과 수신문자 알림
+  `0067_goofy_mongoose.sql`의 단일 snapshot/journal 체인으로 정리했다.
+- 전체 5패키지 typecheck·lint·production build, core 91개·gateway 177개 테스트,
+  DB schema check와 `git diff --check`를 통과했다. 최종 소스
+  `b837751660172877c80d2cdcc59cd57293540c64`의 Actions `32118482069`도 검증과 세 앱
+  ARM64 게시를 모두 성공했다. 운영 영향 앱은 gateway·ERP이며 홈페이지는 게시·scan만 했다.
+- 암호화 snapshot `lawand-prod-pre-orca-integrated-ops-20260818t083359z`을 available·100%로
+  확보한 뒤 gateway digest로 migration `0066`·`0067`을 적용하고 재실행 no-op을 확인했다.
+  운영 migration은 68개이며 최신 해시는
+  `7cec50f50e5d793971d1dfea302f2888912dfcb06374403f475d096073c1b775`와
+  `bb2726e26f88ed2b5a3ffee1cb32cf147caac1c8c546d78e218ac87e24750573`다. 기존 직원 생성
+  상담 22건을 보수적으로 역채움했고 앱·viewer 최소 권한과 PUBLIC grant 0을 확인했다.
+- 최종 parent digest는 gateway
+  `sha256:4990242815ab0a936f8ea1661b0b9d9a4574efb6e03dce41766a3d7f75deee3a`, ERP
+  `sha256:9e2ea7f66115cd8b271f21c228a2dd68e5a12776f1df9c4f62e1fbf5ef81a35b`다. ARM64 child는
+  각각 `sha256:912eacb6bc944f6cfda9937a092e62c9e5b4069237d7f271ed88486612175329`와
+  `sha256:e91cc35c3664b1c9c6d0a182eac4eb9a7bfa773e14dfe2ccfa7114df1906f4bd`이며 scan은 기존과
+  같은 CRITICAL 3·HIGH 11·MEDIUM 10·LOW 1이다.
+- 최초 gateway 전환에서 새 문자 SSE의 다섯 번째 영구 LISTEN 연결이 기존 최대 4개 풀을
+  기다려 health가 실패했다. ERP 전환과 정리는 시작하지 않은 채 운영 secret을 5로 높여
+  gateway를 복구하고, 코드 기본값·최소값도 5로 고정한 최종 main 이미지를 다시 배포했다.
+  최종 릴리스는 `20260818T090149Z-orca-integrated-ops-v2`이며 gateway image ID는
+  `sha256:33c5c617258346e56fa9c4018b7a71313d2ca2ab5b2f1c18e864a276ff3b2bad`, ERP는
+  `sha256:3259c97aced4999a11d67bb0434c2cabe6bc21d717699d0d5dcbf3d3775e851a`다.
+- health 뒤 gateway cache는 1,381,000,000 bytes, 가용량
+  93,057,114,112→93,908,660,224 bytes, 회수 851,546,112 bytes다. ERP cache는
+  1,429,000,000 bytes, 가용량 92,600,684,544→94,387,269,632 bytes, 회수
+  1,786,585,088 bytes다. 서버 로그에 같은 값을 기록하고 현재+rollback 2개를 보존했다.
+- 정식·EIP HTTPS gateway health와 ERP 로그인은 200이고 두 앱·Caddy active, container
+  restart 0, 환경파일 600, 배포 후 error journal 0이다. gateway request/LISTEN waiting은
+  0/20·0/5다. outbox는 배포 전 dead 11·pending 321·published 672에서 최종 dead 11·pending
+  330·published 680으로 자연 유입·처리됐고 locked 0이다. 세 EC2 status ok·SSM Online,
+  RDS available·암호화·삭제 방지, CloudWatch OK 14·ALARM 0·INSUFFICIENT_DATA 0이다.
+  실제 전화·문자·쿠폰 canary, 홈페이지·Windows bridge와 별도 운영 원장 수정은 하지 않았다.
 
 ## 2026-08-18 모바일 쿠폰 발송 상태·재발송 차단 릴리스
 
