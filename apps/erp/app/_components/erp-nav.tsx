@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { subscribeReviewRealtime } from "./review-realtime";
+import { subscribeMessageRealtime } from "./message-realtime";
 
 function NavIcon({ kind }: { kind: "consultations" | "clients" | "reviews" | "phone" | "phonebook" | "messages" | "staff" }) {
   return kind === "consultations" ? (
@@ -47,6 +48,7 @@ function NavIcon({ kind }: { kind: "consultations" | "clients" | "reviews" | "ph
 export function ErpNav({ showStaff }: { showStaff: boolean }) {
   const pathname = usePathname();
   const [reviewDutyCount, setReviewDutyCount] = useState(0);
+  const [messageDutyCount, setMessageDutyCount] = useState(0);
   const consultationActive = pathname === "/" || pathname.startsWith("/consultations/");
 
   const refreshReviewDutyCount = useCallback(async () => {
@@ -75,6 +77,24 @@ export function ErpNav({ showStaff }: { showStaff: boolean }) {
       }
     });
   }, [refreshReviewDutyCount]);
+
+  const refreshMessageDutyCount = useCallback(async () => {
+    try {
+      const response = await fetch("/api/messages/duty-count", { cache: "no-store" });
+      const body = await response.json() as { count?: unknown };
+      if (response.ok && typeof body.count === "number") setMessageDutyCount(body.count);
+    } catch { /* 다음 실시간 이벤트나 화면 이동 때 다시 동기화한다. */ }
+  }, []);
+
+  useEffect(() => {
+    queueMicrotask(() => { void refreshMessageDutyCount(); });
+    const unsubscribe = subscribeMessageRealtime((message) => {
+      if (message.kind === "sync" || message.kind === "changed") void refreshMessageDutyCount();
+    });
+    const refresh = () => { void refreshMessageDutyCount(); };
+    window.addEventListener("lawand:message-read", refresh);
+    return () => { unsubscribe(); window.removeEventListener("lawand:message-read", refresh); };
+  }, [pathname, refreshMessageDutyCount]);
 
   return (
     <nav aria-label="ERP 주요 메뉴" className="staff-primary-nav">
@@ -133,6 +153,9 @@ export function ErpNav({ showStaff }: { showStaff: boolean }) {
       >
         <NavIcon kind="messages" />
         <span>문자</span>
+        {messageDutyCount > 0 ? <span aria-label={`읽지 않은 문자 ${messageDutyCount}건`} className="nav-count-badge">
+          {messageDutyCount > 99 ? "99+" : messageDutyCount}
+        </span> : null}
       </Link>
       {showStaff ? (
         <Link

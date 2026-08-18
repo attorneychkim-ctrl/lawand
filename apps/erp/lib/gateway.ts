@@ -1632,6 +1632,26 @@ export async function openReviewEventStream(
   });
 }
 
+export async function getMessageDutyCount(): Promise<{ count: number }> {
+  return reviewResponse(await gatewayFetch("/v1/messages/duty-count"));
+}
+
+export async function getMessageNotification(id: string): Promise<{
+  id: string; threadKey: string; href: string; customerLabel: string; receivedAt: string;
+} | null> {
+  const response = await gatewayFetch(`/v1/messages/${id}/notification`);
+  if (response.status === 404) return null;
+  return reviewResponse(response);
+}
+
+export async function listUnreadMessageNotifications(): Promise<{ items: Array<{ messageId: string }> }> {
+  return reviewResponse(await gatewayFetch("/v1/messages/notifications"));
+}
+
+export async function openMessageEventStream(signal: AbortSignal): Promise<Response> {
+  return gatewayFetch("/v1/message-events/stream", { signal, streaming: true });
+}
+
 export async function linkReviewCustomer(
   recordType: ReviewRecordType,
   id: string,

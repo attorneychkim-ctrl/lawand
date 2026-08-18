@@ -102,6 +102,23 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-18 — ERP 수신문자 담당 알림 후보
+- 센트릭스 대표번호의 새 수신문자를 기존 전화번호 지문 기반 최신 발송 원장과 연결한 뒤,
+  가장 최근 발송 직원과 현재 상담 담당자를 중복 없이 알림 대상으로 만든다. 최신 발송과
+  연결할 수 없는 번호는 활성 관리자에게 공용 처리 대상으로 배정한다. 수신문자·대상 직원·
+  배정 사유·직원별 읽은 시각은 신규 `telephony_inbound_message_notifications` 원장에 보존하며,
+  수신문자·대상·`pg_notify`는 한 트랜잭션으로 확정한다.
+- gateway 문자 전용 LISTEN/SSE는 전화번호·본문 없이 메시지 ID·대화 키·대상 직원 ID만
+  전달하고 인증된 현재 직원이 대상일 때만 브라우저로 내린다. ERP 문자 메뉴에는 직원별
+  미읽음 숫자가 붙고, 새 문자는 8초 토스트와 본문을 제외한 브라우저 알림으로 표시된다.
+  알림을 누르면 해당 대화를 바로 열며, 대화 조회가 성공하면 그 직원의 해당 대화 수신문자만
+  읽음 처리한다. 브라우저 알림 성공 키로 같은 브라우저의 중복 표시도 막는다.
+- migration `0066_goofy_mongoose.sql`의 SHA-256은
+  `bb2726e26f88ed2b5a3ffee1cb32cf147caac1c8c546d78e218ac87e24750573`이다. gateway 174개
+  테스트, gateway·ERP·DB typecheck/lint, core·DB·gateway·ERP production build, DB schema
+  check와 `git diff --check`를 통과했다. 운영 migration·운영 데이터·main 병합·배포·실제
+  문자 수신 canary는 수행하지 않았다. `PROJECT_PLAN.md`는 v1.53이다.
+
 ### 2026-08-18 — 모바일 쿠폰 발송 상태·재발송 차단 운영 배포 완료
 - 메인 `263f6de5a5cb5352c930306c7f78bec0dce1aee1`에서 ERP의 쿠폰 발송 버튼을 확인 완료 시
   보라색 활성 상태·pointer cursor로 표시하고, 발송 완료 뒤에는 상품명·한국 시각·주문번호와

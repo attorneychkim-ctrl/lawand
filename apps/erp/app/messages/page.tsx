@@ -24,8 +24,9 @@ const emptyHub: MessageHub = {
   mailboxes: [],
 };
 
-export default async function MessagesPage() {
+export default async function MessagesPage({ searchParams }: { searchParams: Promise<{ thread?: string }> }) {
   const staff = await requireStaff();
+  const requestedThread = (await searchParams).thread?.trim() || null;
   let hub = emptyHub;
   let templates: MessageTemplate[] = [];
   let loadError = "";
@@ -62,6 +63,7 @@ export default async function MessagesPage() {
           <MessageHubWorkspace
             initialHub={hub}
             initialTemplates={templates}
+            initialThreadKey={requestedThread}
             staffName={staff.displayName}
           />
         )}

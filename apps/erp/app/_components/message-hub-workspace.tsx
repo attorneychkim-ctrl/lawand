@@ -195,21 +195,23 @@ function recipientFromThread(
 export function MessageHubWorkspace({
   initialHub,
   initialTemplates,
+  initialThreadKey,
   staffName,
 }: {
   initialHub: MessageHub;
   initialTemplates: MessageTemplate[];
+  initialThreadKey: string | null;
   staffName: string;
 }) {
   const router = useRouter();
   const [hub, setHub] = useState(initialHub);
   const [selectedKey, setSelectedKey] = useState<string | null>(
-    initialHub.items[0]?.key ?? null,
+    initialThreadKey ?? initialHub.items[0]?.key ?? null,
   );
   const [query, setQuery] = useState("");
   const [thread, setThread] = useState<MessageThread | null>(null);
   const [threadLoading, setThreadLoading] = useState(
-    Boolean(initialHub.items[0]),
+    Boolean(initialThreadKey ?? initialHub.items[0]),
   );
   const [hubLoadingMore, setHubLoadingMore] = useState(false);
   const [threadLoadingOlder, setThreadLoadingOlder] = useState(false);
@@ -332,6 +334,7 @@ export function MessageHubWorkspace({
             : result,
         );
         setLoadError("");
+        window.dispatchEvent(new Event("lawand:message-read"));
         if (shouldStickToBottom) {
           timelineNearBottomRef.current = true;
           pendingBottomScrollRef.current = key;

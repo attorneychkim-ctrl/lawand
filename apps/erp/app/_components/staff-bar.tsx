@@ -7,6 +7,7 @@ import { ErpNav } from "./erp-nav";
 import { InboundCallIndicator } from "./inbound-call-indicator";
 import { LawandOsBrand } from "./lawand-os-brand";
 import { ReviewNotificationBridge } from "./review-notification-bridge";
+import { MessageNotificationBridge } from "./message-notification-bridge";
 import { ThemeToggle } from "./theme-toggle";
 
 export function StaffBar({ staff }: { staff: StaffPrincipal }) {
@@ -49,6 +50,7 @@ export function StaffBar({ staff }: { staff: StaffPrincipal }) {
         staffUserId={staff.id}
       />
       <ReviewNotificationBridge />
+      <MessageNotificationBridge />
     </header>
   );
 }

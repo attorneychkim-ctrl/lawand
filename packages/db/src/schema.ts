@@ -11,6 +11,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   real,
   text,
   timestamp,
@@ -3450,6 +3451,38 @@ export const telephonyInboundMessages = pgTable(
     check(
       "telephony_inbound_messages_fetch_time_order",
       sql`${table.fetchedAt} >= ${table.receivedAt} - interval '5 minutes'`,
+    ),
+  ],
+);
+
+export const telephonyInboundMessageNotifications = pgTable(
+  "telephony_inbound_message_notifications",
+  {
+    inboundMessageId: uuid("inbound_message_id")
+      .notNull()
+      .references(() => telephonyInboundMessages.id, { onDelete: "cascade" }),
+    staffUserId: uuid("staff_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "cascade" }),
+    reason: varchar("reason", { length: 30 }).notNull(),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.inboundMessageId, table.staffUserId] }),
+    index("telephony_inbound_message_notifications_staff_unread_idx").on(
+      table.staffUserId,
+      table.readAt,
+      table.createdAt,
+    ),
+    check(
+      "telephony_inbound_message_notifications_reason",
+      sql`${table.reason} IN ('latest_sender', 'consultation_assignee', 'unmatched_admin')`,
     ),
   ],
 );
