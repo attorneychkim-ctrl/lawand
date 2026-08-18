@@ -3028,6 +3028,45 @@ export function createGatewayServer(options?: {
       if (
         request.method === "POST" &&
         url.pathname.startsWith("/v1/consultations/") &&
+        url.pathname.endsWith("/legalfriends/restore")
+      ) {
+        if (
+          !options?.service ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(request, "x-lawand-internal-key", options.internalApiKey) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const consultationId = url.pathname.slice(
+          "/v1/consultations/".length,
+          -"/legalfriends/restore".length,
+        );
+        if (!validUuid(consultationId)) {
+          sendJson(response, 400, { error: "invalid_consultation_id" });
+          return;
+        }
+        const actor = await options.authService.authorize(
+          sessionToken,
+          [...consultationAccessRoles],
+        );
+        const result = await options.service.restoreInvalidatedLegalFriendsCase(
+          consultationId,
+          actor,
+        );
+        sendJson(response, result.replayed ? 200 : 201, result);
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        url.pathname.startsWith("/v1/consultations/") &&
         url.pathname.endsWith("/legalfriends/invalidate")
       ) {
         if (

@@ -3227,6 +3227,7 @@ export function createConsultationService(options: {
     consultationId: string,
     input: ConsultationAssigneeTransferInput,
     actor: StaffPrincipal,
+    options: { restoreInvalidated?: boolean } = {},
   ) {
     const now = new Date();
     return db.transaction(async (tx) => {
@@ -3270,6 +3271,7 @@ export function createConsultationService(options: {
         );
       }
       if (
+        !options.restoreInvalidated &&
         assignment.assigneeUserId !== actor.id &&
         !actor.roles.includes("admin")
       ) {
@@ -3278,7 +3280,10 @@ export function createConsultationService(options: {
           "현재 상담 담당자 또는 관리자만 담당자를 변경할 수 있습니다.",
         );
       }
-      if (assignment.assigneeUserId === input.targetStaffUserId) {
+      if (
+        !options.restoreInvalidated &&
+        assignment.assigneeUserId === input.targetStaffUserId
+      ) {
         throw new ConsultationAssigneeTransferError(
           "same_assignee",
           "현재 담당자와 다른 직원을 선택해 주세요.",
@@ -3301,13 +3306,15 @@ export function createConsultationService(options: {
           "리걸프렌즈 사건 등록이 완료된 상담만 담당자를 변경할 수 있습니다.",
         );
       }
-      if (
+      const caseInvalidated =
         caseLink.managerExternalAccountId ===
-        LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID
-      ) {
+        LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID;
+      if (options.restoreInvalidated ? !caseInvalidated : caseInvalidated) {
         throw new ConsultationAssigneeTransferError(
           "case_invalidated",
-          "무효 처리된 사건은 일반 담당자 변경으로 되돌릴 수 없습니다.",
+          options.restoreInvalidated
+            ? "무효 처리된 사건만 되돌릴 수 있습니다."
+            : "무효 처리된 사건은 되돌리기 버튼으로 복원해 주세요.",
         );
       }
 
@@ -3466,7 +3473,9 @@ export function createConsultationService(options: {
       await tx.insert(staffAuditLogs).values({
         id: createEventId(),
         actorUserId: actor.id,
-        action: "consultation.assignment_transfer_requested",
+        action: options.restoreInvalidated
+          ? "legalfriends.case.restoration_requested"
+          : "consultation.assignment_transfer_requested",
         targetType: "consultation",
         targetId: consultationId,
         metadata: {
@@ -3476,6 +3485,7 @@ export function createConsultationService(options: {
           previousAssigneeUserId: assignment.assigneeUserId,
           targetAssigneeUserId: target.userId,
           reason: input.reason,
+          ...(options.restoreInvalidated ? { restoration: true } : {}),
         },
         occurredAt: now,
         createdAt: now,
@@ -3493,6 +3503,18 @@ export function createConsultationService(options: {
         replayed: false,
       };
     });
+  }
+
+  async function restoreInvalidatedLegalFriendsCase(
+    consultationId: string,
+    actor: StaffPrincipal,
+  ) {
+    return requestAssigneeTransfer(
+      consultationId,
+      { targetStaffUserId: actor.id, reason: "other" },
+      actor,
+      { restoreInvalidated: true },
+    );
   }
 
   async function linkConsultationGroup(
@@ -5702,6 +5724,7 @@ export function createConsultationService(options: {
     assignToSelf,
     linkConsultationGroup,
     requestAssigneeTransfer,
+    restoreInvalidatedLegalFriendsCase,
     confirmKakaoHomepageEntry,
     detail,
     ingestNaverBooking,

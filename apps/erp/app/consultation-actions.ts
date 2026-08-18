@@ -15,6 +15,7 @@ import {
   invalidateKakaoHomepageEntry,
   linkConsultationGroup,
   requestConsultationAssigneeTransfer,
+  restoreInvalidatedLegalFriendsCase,
   softDeleteStaffConsultation,
   splitConsultationGroup,
 } from "../lib/gateway";
@@ -48,6 +49,27 @@ export async function assignConsultationToMeAction(
 export type LegalFriendsInvalidationActionState = {
   error: string;
 };
+
+export async function restoreInvalidatedLegalFriendsCaseAction(
+  consultationId: string,
+  previousState: LegalFriendsInvalidationActionState,
+): Promise<LegalFriendsInvalidationActionState> {
+  void previousState;
+  await requireStaff();
+  try {
+    await restoreInvalidatedLegalFriendsCase(consultationId);
+  } catch (error) {
+    return {
+      error:
+        error instanceof ConsultationGatewayError
+          ? error.message
+          : "무효 상담을 되돌리지 못했습니다. 잠시 후 다시 시도해 주세요.",
+    };
+  }
+  revalidatePath("/");
+  revalidatePath(`/consultations/${consultationId}`);
+  return { error: "" };
+}
 
 export async function invalidateLegalFriendsCaseAction(
   consultationId: string,

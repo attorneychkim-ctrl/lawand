@@ -27,6 +27,7 @@ import { CopyButton } from "../../_components/copy-button";
 import { KakaoEntryInvalidationButton } from "../../_components/kakao-entry-invalidation-button";
 import { KakaoEntryPanel } from "../../_components/kakao-entry-panel";
 import { LegalFriendsInvalidationButton } from "../../_components/legalfriends-invalidation-button";
+import { LegalFriendsRestorationButton } from "../../_components/legalfriends-restoration-button";
 import { LegalFriendsReviewClaim } from "../../_components/legalfriends-review-claim";
 import { MessageComposeButton } from "../../_components/message-compose-button";
 import { StaffBar } from "../../_components/staff-bar";
@@ -741,6 +742,7 @@ export default async function ConsultationDetailPage({
         : "ready";
   const canInvalidateLegalFriendsCase =
     !isSoftDeleted &&
+    !legalFriendsInvalidated &&
     (Boolean(consultation.legalFriendsCase) ||
       consultation.kakaoEntry?.status === "confirmed") &&
     (consultation.assignment?.assigneeUserId === staff.id ||
@@ -829,6 +831,12 @@ export default async function ConsultationDetailPage({
               <LegalFriendsInvalidationButton
                 consultationId={consultation.id}
                 status={invalidationStatus}
+              />
+            ) : null}
+            {!isSoftDeleted && legalFriendsInvalidated ? (
+              <LegalFriendsRestorationButton
+                consultationId={consultation.id}
+                pending={consultation.assignmentTransfers[0]?.status === "pending"}
               />
             ) : null}
             {!isSoftDeleted && consultation.kakaoEntry?.status === "pending" ? (
