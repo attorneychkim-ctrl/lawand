@@ -102,6 +102,19 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-18 — Orca 완료 작업 6개 통합 병합 후보
+- Orca 원장의 `auto_sms`·`call_region`·`change_manager_althogh_invalidity`·
+  `feedback_present_list`·`legal_add_error`·`sms_reply_alarm` 작업 HEAD와 원격 브랜치를 대조해
+  모두 `main`에 병합했다. 각 브랜치는 병합 전 깨끗하고 원격과 일치했으며 통합 뒤 모두 현재
+  `main`의 ancestor다.
+- 독립 브랜치가 함께 만든 migration `0066` 충돌은 상담 등록자 원장을
+  `0066_consultation_request_creator.sql`, 수신문자 알림 원장을 `0067_goofy_mongoose.sql`로
+  재번호화하고 Drizzle snapshot/journal을 연속 체인으로 다시 생성했다. SQL 내용과 원래 문자
+  migration SHA-256은 유지했다.
+- 전체 5패키지 typecheck·lint·production build, core 91개·gateway 177개 테스트, DB schema
+  check와 `git diff --check`를 통과했다. 아직 `main` 원격 푸시·운영 migration·배포·운영 데이터
+  변경·외부 발송은 수행하지 않았다. `PROJECT_PLAN.md`는 v1.54다.
+
 ### 2026-08-18 — ERP 수신문자 담당 알림 후보
 - 센트릭스 대표번호의 새 수신문자를 기존 전화번호 지문 기반 최신 발송 원장과 연결한 뒤,
   가장 최근 발송 직원과 현재 상담 담당자를 중복 없이 알림 대상으로 만든다. 최신 발송과
