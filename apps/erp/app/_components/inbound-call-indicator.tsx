@@ -61,6 +61,7 @@ type IndicatorToast = {
   href?: string;
   consultation?: ConsultationNotificationSummary;
   telephony?: {
+    callRegion: TelephonyCallActivity["callRegion"];
     customerName: string;
     managerLabel: string;
     stateLabel: string;
@@ -76,6 +77,16 @@ type IndicatorToast = {
     | "assignment_transferred";
   claimStatus?: "idle" | "claiming" | "failed";
   claimError?: string;
+};
+
+const callRegionCopy: Record<
+  TelephonyCallActivity["callRegion"],
+  { label: string; className: string }
+> = {
+  seoul: { label: "서울", className: "seoul" },
+  daejeon: { label: "대전", className: "daejeon" },
+  busan: { label: "부산", className: "busan" },
+  unclassified: { label: "미분류", className: "unclassified" },
 };
 
 const residenceRegionLabels: Record<string, string> = {
@@ -475,10 +486,11 @@ function notificationCopy(
 ) {
   if (activity.notificationKind === "external_inbound") {
     const summary = telephonyNotificationSummary(activity, staffUserId);
+    const region = callRegionCopy[activity.callRegion];
     return {
       title: summary.myCustomer
-        ? `📞 내 담당 고객 전화 · ${summary.customerName}`
-        : `📞 수신전화 · ${summary.customerName}`,
+        ? `[${region.label}] 📞 내 담당 고객 전화 · ${summary.customerName}`
+        : `[${region.label}] 📞 수신전화 · ${summary.customerName}`,
       body: `${summary.managerLabel} · ${summary.stateLabel}\n${
         activity.remotePhone
           ? `전화 ${formatPhone(activity.remotePhone)}`
@@ -1059,6 +1071,7 @@ export function InboundCallIndicator({
       seenTelephonyToastKeys.current.add(toastKey);
       const summary = {
         ...telephonyNotificationSummary(activity, staffUserId),
+        callRegion: activity.callRegion,
         remotePhone: activity.remotePhone,
       };
       enqueueToast({
@@ -1941,6 +1954,11 @@ export function InboundCallIndicator({
                   </header>
                   <div className="telephony-alert-body">
                     <div className="telephony-alert-context">
+                      <span className={`telephony-alert-region is-${
+                        callRegionCopy[telephony.callRegion].className
+                      }`}>
+                        {callRegionCopy[telephony.callRegion].label}
+                      </span>
                       <span className={`telephony-alert-line is-${
                         telephony.lineLabel === "내 회선" ? "mine" : "other"
                       }`}>

@@ -2924,6 +2924,34 @@ a.inbound-customer:hover { text-decoration: underline; }
   color: var(--warning);
 }
 
+.telephony-alert-region {
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: .7rem;
+  font-weight: 900;
+  letter-spacing: .03em;
+}
+
+.telephony-alert-region.is-seoul {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.telephony-alert-region.is-daejeon {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+
+.telephony-alert-region.is-busan {
+  background: #ccfbf1;
+  color: #0f766e;
+}
+
+.telephony-alert-region.is-unclassified {
+  background: var(--surface-muted);
+  color: var(--muted);
+}
+
 .consultation-alert-kicker {
   display: inline-flex;
   align-items: center;

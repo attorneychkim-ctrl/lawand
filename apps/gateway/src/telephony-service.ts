@@ -98,6 +98,7 @@ import {
   SolapiDeliveryError,
   type SolapiClient,
 } from "./solapi.js";
+import { classifyTelephonyCallRegion } from "./telephony-call-region.js";
 
 type Database = ReturnType<typeof createDatabaseClient>["db"];
 type DatabaseTransaction = Parameters<
@@ -2495,8 +2496,11 @@ export function createTelephonyService(options: {
         endedAt: telephonyCallRoots.endedAt,
         lastEventAt: telephonyCallRoots.lastEventAt,
         endpointLabel: telephonyEndpoints.label,
+        endpointType: telephonyEndpoints.endpointType,
         endpointLineNumber: telephonyEndpoints.lineNumber,
+        endpointPublicNumber: telephonyEndpoints.publicNumber,
         endpointExtension: telephonyEndpoints.extension,
+        endpointRegionKey: telephonyEndpoints.regionKey,
         legId: telephonyCallLegs.id,
         legEndpointId: telephonyCallLegs.endpointId,
         legStaffUserId: telephonyCallLegs.staffUserId,
@@ -2604,6 +2608,7 @@ export function createTelephonyService(options: {
       .select({
         endpointId: staffTelephonyBindings.endpointId,
         staffUserId: staffTelephonyBindings.staffUserId,
+        regionKey: staffMemberships.regionKey,
       })
       .from(staffTelephonyBindings)
       .innerJoin(
@@ -2628,10 +2633,14 @@ export function createTelephonyService(options: {
         ),
       );
     const ownersByActivityEndpoint = new Map<string, string[]>();
+    const ownerRegionsByActivityEndpoint = new Map<string, string[]>();
     for (const owner of activityOwnerRows) {
       const current = ownersByActivityEndpoint.get(owner.endpointId) ?? [];
       current.push(owner.staffUserId);
       ownersByActivityEndpoint.set(owner.endpointId, current);
+      const regions = ownerRegionsByActivityEndpoint.get(owner.endpointId) ?? [];
+      regions.push(owner.regionKey);
+      ownerRegionsByActivityEndpoint.set(owner.endpointId, regions);
     }
     const remotePhonesByRoot = new Map<string, string>();
     for (const rootRows of grouped.values()) {
@@ -2802,6 +2811,14 @@ export function createTelephonyService(options: {
         state: root.state,
         correlationStatus: root.correlationStatus,
         remotePhone,
+        callRegion: classifyTelephonyCallRegion({
+          endpointType: root.endpointType,
+          lineNumber: root.endpointLineNumber,
+          publicNumber: root.endpointPublicNumber,
+          endpointRegionKey: root.endpointRegionKey,
+          ownerRegionKeys:
+            ownerRegionsByActivityEndpoint.get(root.currentEndpointId!) ?? [],
+        }),
         originalLineLast4: root.originalLineLast4,
         startedAt: root.startedAt.toISOString(),
         connectedAt: root.connectedAt?.toISOString() ?? null,
