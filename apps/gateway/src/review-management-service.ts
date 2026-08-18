@@ -83,6 +83,7 @@ export type ReviewManagementListItem = {
   status: "pending" | "published" | "restricted";
   restrictionReason: ReviewRestrictionReason | null;
   replyStatus: "waiting" | "answered" | "not_applicable";
+  giftCouponStatus: "waiting" | "sent";
   linked: boolean;
   mine: boolean;
   occurredAt: string;
@@ -168,6 +169,7 @@ type ReviewListRow = {
   status: ReviewManagementListItem["status"];
   restriction_reason: ReviewRestrictionReason | null;
   reply_status: ReviewManagementListItem["replyStatus"];
+  gift_coupon_status: ReviewManagementListItem["giftCouponStatus"];
   linked: boolean;
   mine: boolean;
   occurred_at: Date | string;
@@ -323,6 +325,13 @@ export function createReviewManagementService(options: {
             WHEN reply.id IS NOT NULL THEN 'answered'
             ELSE 'not_applicable'
           END AS reply_status,
+          CASE WHEN EXISTS (
+            SELECT 1
+            FROM review_gift_coupon_deliveries delivery
+            WHERE delivery.record_type = 'review'
+              AND delivery.record_id = review.id
+              AND delivery.status = 'sent'
+          ) THEN 'sent' ELSE 'waiting' END AS gift_coupon_status,
           link.id IS NOT NULL AS linked,
           EXISTS (
             SELECT 1
@@ -362,6 +371,13 @@ export function createReviewManagementService(options: {
             WHEN submission.status = 'pending_review' THEN 'waiting'
             ELSE 'not_applicable'
           END AS reply_status,
+          CASE WHEN EXISTS (
+            SELECT 1
+            FROM review_gift_coupon_deliveries delivery
+            WHERE delivery.record_type = 'submission'
+              AND delivery.record_id = submission.id
+              AND delivery.status = 'sent'
+          ) THEN 'sent' ELSE 'waiting' END AS gift_coupon_status,
           link.id IS NOT NULL AS linked,
           EXISTS (
             SELECT 1
@@ -465,6 +481,7 @@ export function createReviewManagementService(options: {
         status: row.status,
         restrictionReason: row.restriction_reason,
         replyStatus: row.reply_status,
+        giftCouponStatus: row.gift_coupon_status,
         linked: row.linked,
         mine: row.mine,
         occurredAt: serializeReviewOccurredAt(row.occurred_at),

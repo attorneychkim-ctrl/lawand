@@ -53,7 +53,7 @@ export default async function ReviewsPage() {
             <p className="eyebrow">REVIEW CARE</p>
             <h1>후기관리</h1>
             <p>
-              고객 사건을 확인하고 공개 상태와 공식 답글, 후기 요청 문자를 한곳에서 관리합니다.
+              고객 사건을 확인하고 공개 상태와 공식 답글, 상품 발송, 후기 요청 문자를 한곳에서 관리합니다.
             </p>
           </div>
           <p className="header-context">

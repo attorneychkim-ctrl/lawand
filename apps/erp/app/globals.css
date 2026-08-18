@@ -237,6 +237,16 @@
   color: var(--info);
 }
 
+.review-card-status .gift-coupon-sent {
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+}
+
+.review-card-status .gift-coupon-waiting {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
 .review-card-status .is-mine {
   border: 1px solid color-mix(in srgb, var(--brand) 34%, transparent);
   background: transparent;
