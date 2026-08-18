@@ -15,6 +15,7 @@ import {
   ArrowIcon,
   CheckIcon,
 } from "../../_components/site-chrome";
+import { moveAttention } from "@/lib/move-attention";
 
 type PracticeArea = ReviewSubmission["practiceArea"] | "";
 type ProgressStage = ReviewSubmission["progressStage"] | "";
@@ -149,6 +150,26 @@ export function ReviewForm({ requestToken }: { requestToken?: string }) {
   const [result, setResult] = useState<ReviewSubmissionResponse | null>(null);
   const idempotencyKey = useRef(crypto.randomUUID());
   const errorRef = useRef<HTMLDivElement>(null);
+  const completeRef = useRef<HTMLElement>(null);
+  const attentionRequestedRef = useRef(false);
+
+  useEffect(() => {
+    if (!result || !attentionRequestedRef.current) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      attentionRequestedRef.current = false;
+      const scrollTarget = completeRef.current;
+      if (!scrollTarget) return;
+
+      moveAttention(scrollTarget, {
+        focusTarget: scrollTarget.querySelector<HTMLElement>(
+          "[data-attention-heading]",
+        ),
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [result]);
 
   useEffect(() => {
     if (!requestToken) return;
@@ -283,8 +304,8 @@ export function ReviewForm({ requestToken }: { requestToken?: string }) {
             : "후기를 접수하지 못했습니다. 잠시 후 다시 시도해 주세요.",
         );
       }
+      attentionRequestedRef.current = true;
       setResult(body as ReviewSubmissionResponse);
-      window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -320,12 +341,20 @@ export function ReviewForm({ requestToken }: { requestToken?: string }) {
 
   if (result) {
     return (
-      <section className="review-write-complete shell">
+      <section
+        className="review-write-complete shell"
+        aria-labelledby="review-complete-title"
+        ref={completeRef}
+      >
         <div className="review-complete-mark" aria-hidden="true">
           <CheckIcon />
         </div>
         <p className="eyebrow">REVIEW RECEIVED</p>
-        <h1>
+        <h1
+          data-attention-heading
+          id="review-complete-title"
+          tabIndex={-1}
+        >
           소중한 경험을
           <br />
           맡겨주셔서 감사합니다.
