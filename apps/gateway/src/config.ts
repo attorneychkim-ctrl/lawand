@@ -406,8 +406,10 @@ export function readGatewayConfig(): GatewayConfig {
   );
   const databaseListenerPoolMax = integerValue(
     "LAWAND_DB_LISTENER_POOL_MAX",
-    4,
-    3,
+    // 상담·후기·문자·전화 인바운드·전화 데스크 이벤트가 각각
+    // 영구 LISTEN 연결을 하나씩 점유한다.
+    5,
+    5,
     20,
   );
   return {
