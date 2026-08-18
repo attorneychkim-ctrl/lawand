@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type { DatabasePool } from "@lawand/db";
+
 import {
   consultationEventNotificationFromSnapshot,
+  createPostgresConsultationEventSource,
   parseConsultationEventNotification,
 } from "./consultation-events.js";
 
@@ -110,4 +113,24 @@ test("최근 outbox snapshot은 실시간 알림과 같은 비식별 payload로 
       notificationKind: "repeat_unassigned",
     },
   );
+});
+
+test("최근 outbox snapshot 조회는 영구 LISTEN 연결과 분리된 요청 풀을 사용한다", async () => {
+  let snapshotQueries = 0;
+  const source = createPostgresConsultationEventSource({
+    pool: {
+      query() {
+        throw new Error("LISTEN 전용 풀로 snapshot을 조회하면 안 됩니다.");
+      },
+    } as unknown as DatabasePool,
+    snapshotPool: {
+      async query() {
+        snapshotQueries += 1;
+        return { rows: [] };
+      },
+    } as unknown as DatabasePool,
+  });
+
+  assert.deepEqual(await source.getRecentNotifications?.(), []);
+  assert.equal(snapshotQueries, 1);
 });

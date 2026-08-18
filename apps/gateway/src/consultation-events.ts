@@ -103,6 +103,7 @@ export function parseConsultationEventNotification(
 
 export function createPostgresConsultationEventSource(options: {
   pool: DatabasePool;
+  snapshotPool: DatabasePool;
   reconnectDelayMs?: number;
   onError?: (error: unknown) => void;
 }) {
@@ -248,7 +249,7 @@ export function createPostgresConsultationEventSource(options: {
       return () => listeners.delete(listener);
     },
     async getRecentNotifications() {
-      const result = await options.pool.query<ConsultationEventSnapshotRow>(`
+      const result = await options.snapshotPool.query<ConsultationEventSnapshotRow>(`
         SELECT
           id::text AS event_id,
           event_type,

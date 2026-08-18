@@ -155,6 +155,7 @@ const centrexInboundObserver = config.centrexRingCallback
   : null;
 const consultationEvents = createPostgresConsultationEventSource({
   pool: listenerPool,
+  snapshotPool: database.pool,
   onError: (error) => {
     console.error("lawand consultation realtime source error", error);
   },
