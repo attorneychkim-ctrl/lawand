@@ -102,6 +102,22 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-18 — 상담 등록자 표시·전화 후처리 리걸프렌즈 변환 오류 수정 후보
+- ERP 직원 신규등록과 전화데스크 후처리 `신건상담으로 저장`이 인증 직원 ID를 상담요청
+  원장에 같은 트랜잭션으로 보존하고, 상담 상세의 요청 이력 요약에 `등록자 {직원명}`으로
+  표시한다. migration `0066_consultation_request_creator.sql`은 nullable FK를 추가하며 기존
+  `erp_staff`·`erp_client_directory`·`erp_phone_desk` 요청 중 요청 시각과 정확히 일치하는 초기
+  직원 상태이력이 있는 건만 역채움해 자동 접수나 다른 반복 요청의 직원을 추정하지 않는다.
+- 2026-08-18 16:08의 전화 후처리 신건 리걸프렌즈 `invalid_stored_data`는 후처리 화면·계약이
+  거주지역을 받지 않고 `channel`·`callId`·`direction`만 intake에 저장한 반면, 리걸프렌즈
+  payload 변환기는 모든 일반 전화 상담에 필수 `residenceRegion`을 요구한 구조적 불일치가
+  원인이다. 전화 후처리 신건에 거주지역 필수 선택을 추가해 암호화 intake에 함께 저장하고,
+  필수 intake가 없는 과거 원장은 포괄 오류 대신 `invalid_consultation_intake`로 표시한다.
+- core 91개·gateway 172개 테스트, 관련 4패키지 typecheck·lint, DB schema check,
+  core·DB·gateway·ERP production build와 `git diff --check`를 통과했다. 운영 migration·기존 dead
+  재대기·운영 데이터 수정·main 병합·배포·외부 API 호출은 수행하지 않았다. `PROJECT_PLAN.md`는
+  v1.53이다.
+
 ### 2026-08-18 — 모바일 쿠폰 발송 상태·재발송 차단 운영 배포 완료
 - 메인 `263f6de5a5cb5352c930306c7f78bec0dce1aee1`에서 ERP의 쿠폰 발송 버튼을 확인 완료 시
   보라색 활성 상태·pointer cursor로 표시하고, 발송 완료 뒤에는 상품명·한국 시각·주문번호와

@@ -509,7 +509,9 @@ export function createOutboxWorker(options: {
             incomes: [],
             concern: "카카오 채팅방에서 상담 내용을 확인",
           }
-        : consultationIntakeAnswersSchema.parse(storedIntake);
+        : (() => {
+            throw new LegalFriendsPayloadError("invalid_consultation_intake");
+          })();
     const name = resolveStoredRegistrationName(protection, request);
 
     const assignee = "registrationTarget" in envelope.data

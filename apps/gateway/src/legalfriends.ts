@@ -65,14 +65,17 @@ export class LegalFriendsPayloadError extends Error {
     readonly code:
       | "unsupported_residence_region"
       | "assignee_mapping_missing"
-      | "consultation_phone_not_collected",
+      | "consultation_phone_not_collected"
+      | "invalid_consultation_intake",
   ) {
     super(
       code === "unsupported_residence_region"
         ? "리걸프렌즈가 해외·기타 거주지역을 지원하지 않습니다."
         : code === "assignee_mapping_missing"
           ? "담당 직원의 리걸프렌즈 계정 매핑이 없습니다."
-          : "전화번호가 수집되지 않은 상담은 리걸프렌즈에 등록할 수 없습니다.",
+          : code === "consultation_phone_not_collected"
+            ? "전화번호가 수집되지 않은 상담은 리걸프렌즈에 등록할 수 없습니다."
+            : "저장된 상담정보에 리걸프렌즈 등록에 필요한 거주지역이 없습니다.",
     );
   }
 }

@@ -364,6 +364,7 @@ const phoneDeskConsultationActionSchema = z.discriminatedUnion("mode", [
     .object({
       mode: z.literal("create"),
       customerName: z.string().trim().min(1).max(50),
+      residenceRegion: residenceRegionSchema,
       assigneeUserId: z.uuid().optional(),
       transferNote: z.string().trim().max(2_000).optional(),
     })

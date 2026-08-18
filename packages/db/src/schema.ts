@@ -1931,6 +1931,10 @@ export const consultationRequests = pgTable(
     consultationId: uuid("consultation_id")
       .notNull()
       .references(() => consultations.id, { onDelete: "restrict" }),
+    createdByUserId: uuid("created_by_user_id").references(
+      () => staffUsers.id,
+      { onDelete: "restrict" },
+    ),
     source: varchar("source", { length: 50 }).default("homepage").notNull(),
     idempotencyKey: uuid("idempotency_key").notNull(),
     mode: consultationModeEnum("mode").notNull(),
