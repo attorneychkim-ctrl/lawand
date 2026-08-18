@@ -302,6 +302,13 @@ test("전화데스크 후처리는 기타 설명과 재통화 담당·일시를 
   assert.equal(
     phoneDeskAftercareSaveSchema.safeParse({
       ...base,
+      automaticMessage: { enabled: true },
+    }).success,
+    true,
+  );
+  assert.equal(
+    phoneDeskAftercareSaveSchema.safeParse({
+      ...base,
       consultation: {
         mode: "create",
         customerName: "통화 고객",

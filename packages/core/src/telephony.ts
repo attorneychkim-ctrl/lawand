@@ -438,6 +438,10 @@ export const phoneDeskAftercareSaveSchema = z
     consultation: phoneDeskConsultationActionSchema,
     followUp: phoneDeskFollowUpSchema,
     phonebook: phoneDeskPhonebookActionSchema.optional(),
+    automaticMessage: z
+      .object({ enabled: z.boolean() })
+      .strict()
+      .optional(),
   })
   .strict()
   .superRefine((value, context) => {

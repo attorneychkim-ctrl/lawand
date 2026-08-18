@@ -732,6 +732,14 @@ export type PhoneDeskCallDetail = {
     { source: "legal_friends" }
   > | null;
   recommendedAssigneeUserIds: string[];
+  aftercareAutomations?: Array<{
+    result: "no_answer" | "busy" | "manager_callback_requested" | "rejected" | "consultation_completed";
+    kind: "message_template" | "review_request";
+    available: boolean;
+    templateName: string | null;
+    templateBody: string | null;
+    latest: { status: "pending" | "sent" | "failed" | "unknown"; occurredAt: string } | null;
+  }>;
 };
 
 export type PhoneDeskAftercareInput = {
@@ -759,6 +767,7 @@ export type PhoneDeskAftercareInput = {
         originalPhone: string;
         connectedPhone?: string | null;
       };
+  automaticMessage: { enabled: boolean };
 };
 
 export type PhonebookContact = {

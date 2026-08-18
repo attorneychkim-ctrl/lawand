@@ -4863,7 +4863,7 @@ export function createTelephonyService(options: {
       .orderBy(asc(staffProfiles.displayName));
   }
 
-  async function getPhoneDeskCall(callId: string) {
+  async function getPhoneDeskCall(callId: string, actor?: StaffPrincipal) {
     const [snapshot, staffOptions] = await Promise.all([
       getPhoneDeskCalls(1, callId),
       activePhoneDeskStaff(),
@@ -4972,6 +4972,96 @@ export function createTelephonyService(options: {
         if (participant.staffUserId) recommended.add(participant.staffUserId);
       }
     }
+    const aftercareAutomations = actor && call.scope !== "internal"
+      ? await Promise.all(
+          (["no_answer", "busy", "manager_callback_requested", "rejected"] as const).map(
+            async (result) => {
+              const [template] = await db
+                .select()
+                .from(messageTemplates)
+                .where(
+                  and(
+                    eq(messageTemplates.ownerUserId, actor.id),
+                    eq(messageTemplates.autoSendTrigger, result),
+                  ),
+                )
+                .limit(1);
+              if (!template) {
+                return {
+                  result,
+                  kind: "message_template" as const,
+                  available: false,
+                  templateName: null,
+                  templateBody: null,
+                  latest: null,
+                };
+              }
+              const directory = call.clickToCall?.directoryClient;
+              const matchedCase = legalFriendsMatch?.cases[0];
+              const directoryTarget = directory
+                ? { clientIdx: directory.clientIdx, caseIdx: directory.caseIdx }
+                : matchedCase
+                  ? { clientIdx: matchedCase.clientIdx, caseIdx: matchedCase.caseIdx }
+                  : null;
+              const consultationId = call.aftercare?.consultationId ??
+                (call.customerMatch?.source === "consultation"
+                  ? call.customerMatch.consultation.id
+                  : null);
+              const [latest] = consultationId
+                ? await db
+                    .select({ status: telephonyMessages.commandStatus, occurredAt: telephonyMessages.requestedAt })
+                    .from(telephonyMessages)
+                    .innerJoin(messageTemplates, eq(messageTemplates.id, telephonyMessages.templateId))
+                    .where(
+                      and(
+                        eq(messageTemplates.autoSendTrigger, result),
+                        eq(telephonyMessages.consultationId, consultationId),
+                      ),
+                    )
+                    .orderBy(desc(telephonyMessages.requestedAt))
+                    .limit(1)
+                : directoryTarget
+                  ? await db
+                      .select({ status: telephonyMessages.commandStatus, occurredAt: telephonyMessages.requestedAt })
+                      .from(telephonyMessages)
+                      .innerJoin(messageTemplates, eq(messageTemplates.id, telephonyMessages.templateId))
+                      .innerJoin(
+                        telephonyMessageDirectoryTargets,
+                        eq(telephonyMessageDirectoryTargets.telephonyMessageId, telephonyMessages.id),
+                      )
+                      .where(
+                        and(
+                          eq(messageTemplates.autoSendTrigger, result),
+                          eq(telephonyMessageDirectoryTargets.clientIdx, directoryTarget.clientIdx),
+                          eq(telephonyMessageDirectoryTargets.caseIdx, directoryTarget.caseIdx),
+                        ),
+                      )
+                      .orderBy(desc(telephonyMessages.requestedAt))
+                      .limit(1)
+                  : [];
+              const status = latest?.status === "succeeded"
+                ? "sent"
+                : latest?.status === "queued" || latest?.status === "dispatching"
+                  ? "pending"
+                  : latest?.status === "failed"
+                    ? "failed"
+                    : latest
+                      ? "unknown"
+                      : null;
+              return {
+                result,
+                kind: "message_template" as const,
+                available: true,
+                templateName: template.name,
+                templateBody: template.body,
+                latest: latest && status
+                  ? { status, occurredAt: latest.occurredAt.toISOString() }
+                  : null,
+              };
+            },
+          ),
+        )
+      : [];
     return {
       snapshotAt: snapshot.snapshotAt,
       call,
@@ -4981,6 +5071,7 @@ export function createTelephonyService(options: {
       recommendedAssigneeUserIds: [...recommended].filter((id) =>
         staffOptions.some((staff) => staff.staffUserId === id),
       ),
+      aftercareAutomations,
     };
   }
 
@@ -5717,7 +5808,7 @@ export function createTelephonyService(options: {
       });
     });
     const automaticSourceId = savedAftercareId as string | null;
-    if (automaticTrigger && automaticSourceId) {
+    if (input.automaticMessage?.enabled && automaticTrigger && automaticSourceId) {
       let automaticTarget:
         | { source: "consultation"; consultationId: string; customerName: string; receiptCode: string }
         | { source: "legal_friends_directory"; clientIdx: number; caseIdx: number; customerName: string; receiptCode: string }
@@ -5798,7 +5889,7 @@ export function createTelephonyService(options: {
       }
     }
     if (phonebookInput) phoneCustomerCache.clear();
-    return getPhoneDeskCall(callId);
+    return getPhoneDeskCall(callId, actor);
   }
 
   async function completePhoneDeskFollowUp(

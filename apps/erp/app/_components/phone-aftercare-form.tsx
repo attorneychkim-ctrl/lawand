@@ -9,7 +9,6 @@ import type {
   PhoneDeskAftercareInput,
   PhoneDeskCallDetail,
   PhoneDeskCallResult,
-  MessageTemplate,
 } from "../../lib/gateway";
 import { MessageComposeButton } from "./message-compose-button";
 
@@ -405,7 +404,9 @@ export function PhoneAftercareForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
-  const [automaticTriggers, setAutomaticTriggers] = useState<Set<NonNullable<MessageTemplate["autoSendTrigger"]>>>(new Set());
+  const [automaticSelections, setAutomaticSelections] = useState<
+    Partial<Record<PhoneDeskCallResult, boolean>>
+  >({});
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -415,18 +416,6 @@ export function PhoneAftercareForm({
       setFollowUpDate((current) => current || date);
       setFollowUpTime((current) => current || time);
     });
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    void fetch("/api/message-templates")
-      .then((response) => response.ok ? response.json() : Promise.reject())
-      .then((payload: { items?: MessageTemplate[] }) => {
-        if (!active) return;
-        setAutomaticTriggers(new Set((payload.items ?? []).flatMap((template) => template.autoSendTrigger ? [template.autoSendTrigger] : [])));
-      })
-      .catch(() => undefined);
-    return () => { active = false; };
   }, []);
 
   const linkedConsultationId =
@@ -450,14 +439,22 @@ export function PhoneAftercareForm({
     followUpDueAt && minimumDueAt && followUpDueAt >= minimumDueAt,
   );
   const safeMessageTarget = messageTarget(detail);
-  const selectedAutomaticTrigger = result && ["no_answer", "busy", "manager_callback_requested", "rejected"].includes(result)
-    ? result as NonNullable<MessageTemplate["autoSendTrigger"]>
-    : null;
-  const automaticMessageEnabled = Boolean(
-    safeMessageTarget &&
-      selectedAutomaticTrigger &&
-      automaticTriggers.has(selectedAutomaticTrigger),
+  const selectedAutomation = detail.aftercareAutomations?.find(
+    (item) => item.result === result,
+  ) ?? null;
+  const automaticMessageAvailable = Boolean(
+    safeMessageTarget && selectedAutomation?.available,
   );
+
+  const automaticMessageDefault = Boolean(
+    automaticMessageAvailable &&
+      selectedAutomation?.latest?.status !== "sent" &&
+      selectedAutomation?.latest?.status !== "pending" &&
+      selectedAutomation?.latest?.status !== "unknown",
+  );
+  const sendAutomaticMessage = result
+    ? automaticSelections[result] ?? automaticMessageDefault
+    : false;
   const normalizedOriginalPhone = phonebookOriginalPhone.replace(/\D/g, "");
   const normalizedConnectedPhone = phonebookConnectedPhone.replace(/\D/g, "");
   const phonebookCallNumberIncluded = Boolean(
@@ -537,7 +534,8 @@ export function PhoneAftercareForm({
               ? { connectedPhone: normalizedConnectedPhone }
               : {}),
           }
-        : { mode: "none" },
+          : { mode: "none" },
+      automaticMessage: { enabled: sendAutomaticMessage && automaticMessageAvailable },
     };
     try {
       const response = await fetch(
@@ -604,15 +602,58 @@ export function PhoneAftercareForm({
       {!internal ? <>
         <section className="phone-aftercare-message-action">
           <div>
-            <strong>{automaticMessageEnabled ? "자동문자 발송 예정" : "고객에게 문자 남기기"}</strong>
-            <span>{automaticMessageEnabled
-              ? selectedAutomaticTrigger === "manager_callback_requested"
-                ? "후처리를 저장하면 등록된 템플릿과 재연락 일정·담당자가 고객에게 자동발송됩니다."
-                : "후처리를 저장하면 이 결과에 등록된 내 템플릿이 고객에게 자동발송됩니다."
+            <strong>고객에게 문자 남기기</strong>
+            <span>{automaticMessageAvailable
+              ? selectedAutomation?.kind === "review_request"
+                ? "후기관리 → 후기 요청 → 기본 템플릿의 ‘상담을 받은 뒤’ 내용과 개인 후기 작성 링크가 발송됩니다."
+                : result === "manager_callback_requested"
+                  ? "후처리를 저장하면 등록된 내 템플릿과 재연락 일정·담당자가 고객에게 발송됩니다."
+                  : "후처리를 저장하면 이 결과에 등록된 내 문자 템플릿이 고객에게 발송됩니다."
               : "통화 결과와 관계없이 안내나 부재 메시지를 바로 보낼 수 있습니다."}</span>
           </div>
-          {automaticMessageEnabled ? (
-            <span className="message-template-auto-badge">수동 발송 대신 자동발송</span>
+          {automaticMessageAvailable ? (
+            <div className="phone-aftercare-message-unavailable">
+              <label className="phone-aftercare-choice">
+                <input
+                  checked={sendAutomaticMessage}
+                  disabled={selectedAutomation?.latest?.status === "pending"}
+                  onChange={(event) => {
+                    if (!result) return;
+                    setAutomaticSelections((current) => ({
+                      ...current,
+                      [result]: event.target.checked,
+                    }));
+                  }}
+                  type="checkbox"
+                />
+                <span>
+                  <strong>{selectedAutomation?.kind === "review_request" ? "후기 요청 문자 발송" : "자동문자 발송 예정"}</strong>
+                  <span>사용 템플릿: {selectedAutomation?.templateName}</span>
+                </span>
+              </label>
+              {selectedAutomation?.latest ? (
+                <small>
+                  {new Intl.DateTimeFormat("ko-KR", {
+                    timeZone: "Asia/Seoul",
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  }).format(new Date(selectedAutomation.latest.occurredAt))}
+                  {selectedAutomation.latest.status === "sent"
+                    ? " 발송 완료 · 다시 보내려면 체크하세요."
+                    : selectedAutomation.latest.status === "pending"
+                      ? " 발송 처리 중"
+                      : selectedAutomation.latest.status === "unknown"
+                        ? " 발송 결과 확인 필요 · 중복 발송 여부를 먼저 확인하세요."
+                        : " 이전 발송 실패 · 다시 시도할 수 있습니다."}
+                </small>
+              ) : null}
+              {selectedAutomation?.templateBody ? (
+                <details>
+                  <summary>발송될 내용 미리보기</summary>
+                  <p style={{ whiteSpace: "pre-wrap" }}>{selectedAutomation.templateBody}</p>
+                </details>
+              ) : null}
+            </div>
           ) : safeMessageTarget?.source === "consultation" ? (
             <MessageComposeButton
               consultationId={safeMessageTarget.consultationId}
