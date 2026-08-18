@@ -88,6 +88,25 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-18 — ERP 브라우저 알림 누락 복구·다중 탭 안정화 후보
+- 전화·상담 Notification은 실제 표시 성공 뒤에만 탭 메모리와 localStorage 완료 키를 남기며,
+  서비스 워커와 페이지 Notification이 모두 실패하면 완료 처리하지 않아 다음 snapshot에서
+  다시 시도한다. 진행 중 키는 별도로 두어 한 탭의 비동기 중복 실행만 막는다.
+- 기존 localStorage 8초 lease 대표 선출을 `BroadcastChannel`의 탭 visibility heartbeat로
+  교체했다. 현재 보이는 탭은 대표 여부와 무관하게 알림을 처리하고, 보이는 탭이 없을 때만
+  살아 있는 백그라운드 탭 하나를 대표로 고른다. Notification tag와 성공 키의 기존
+  브라우저별 중복 방지는 유지한다.
+- 상담 SSE 연결·gateway LISTEN 재연결 때 최근 2분 `outbox_events` 최대 200건을 개인정보
+  없는 snapshot으로 재전송한다. 이미 성공한 이벤트는 브라우저 완료 키로 건너뛰고 단절 중
+  놓쳤거나 표시가 실패한 상담만 복구한다. migration·스키마 변경은 없다.
+- SSE 연결/단절/sync, 서비스 워커 준비, 서비스 워커/페이지 표시 성공·실패를 직원·고객·전화·
+  상담 식별자 없이 ERP 서버 구조화 로그에 기록하고 같은 결과는 탭별 30초 동안 묶는다.
+  ERP·gateway typecheck/lint, core·DB build, gateway 167개 테스트와 `git diff --check`를
+  통과했다. ERP production build는 코드 검사 전에 Turbopack가 한글 워크트리 경로를 UTF-8
+  문자 중간에서 자르는 내부 panic으로 중단됐고, webpack 대체 경로는 기존 core의
+  `node:crypto` client import를 처리하지 못해 별도 환경 빌드가 필요하다. main 병합·운영
+  배포·운영 데이터 변경은 수행하지 않았다. `PROJECT_PLAN.md`는 v1.48이다.
+
 ### 2026-08-16 — 공개 후기 마스킹·후기 요청 편집기 운영 배포 완료
 - HERDR main과 `silver-meadow-902f`를 확인하고 원격 `origin/worktree/*` 53개를 전수 대조했다.
   완료 커밋 `f612888`·`819d4a8`을 main에 병합한 소스

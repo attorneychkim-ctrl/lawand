@@ -1156,6 +1156,7 @@ test("통화 결과 API는 허용된 분류와 현재 직원을 서비스에 전
 
 test("직원 상담 SSE는 연결 동기화 뒤 outbox 변경 이벤트를 전달한다", async (context) => {
   const eventId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2a1";
+  const snapshotEventId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2a3";
   const consultationId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2a2";
   const authService = {
     authorize: async () => realtimeActor,
@@ -1164,6 +1165,13 @@ test("직원 상담 SSE는 연결 동기화 뒤 outbox 변경 이벤트를 전�
     authService,
     internalApiKey: "test-internal-key",
     consultationEvents: {
+      getRecentNotifications: async () => [{
+        eventId: snapshotEventId,
+        eventType: "consultation.requested",
+        consultationId,
+        occurredAt: "2026-08-05T08:59:59+00:00",
+        notificationKind: null,
+      }],
       subscribe: (listener) => {
         queueMicrotask(() => {
           listener({
@@ -1209,11 +1217,16 @@ test("직원 상담 SSE는 연결 동기화 뒤 outbox 변경 이벤트를 전�
     const chunk = await reader.read();
     if (chunk.done) break;
     received += decoder.decode(chunk.value, { stream: true });
-    if (received.includes(`id: ${eventId}`)) break;
+    if (
+      received.includes(`id: ${eventId}`) &&
+      received.includes(`id: ${snapshotEventId}`)
+    ) break;
   }
   assert.match(received, /event: consultation\.sync/);
   assert.match(received, /event: consultation\.changed/);
   assert.match(received, new RegExp(`id: ${eventId}`));
+  assert.match(received, new RegExp(`id: ${snapshotEventId}`));
+  assert.match(received, /recent_snapshot_complete/);
   assert.match(received, new RegExp(consultationId));
   await reader.cancel();
   controller.abort();

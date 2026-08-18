@@ -1,5 +1,7 @@
 "use client";
 
+import { recordBrowserNotificationDiagnostic } from "./browser-notification-diagnostics";
+
 const NOTIFICATION_SERVICE_WORKER_PATH = "/notification-service-worker.js";
 const NOTIFICATION_ICON_PATH = "/notification-icon.png";
 const NOTIFICATION_BADGE_PATH = "/notification-badge.png";
@@ -128,7 +130,13 @@ export function prepareBrowserNotifications() {
   if (!("serviceWorker" in navigator)) return null;
   if (!serviceWorkerRegistration) {
     serviceWorkerRegistration = registerNotificationServiceWorker().catch(
-      (error) => {
+      (error: unknown) => {
+        recordBrowserNotificationDiagnostic({
+          channel: "service_worker",
+          stage: "prepare",
+          outcome: "failed",
+          reason: error instanceof Error ? error.name : "unknown_error",
+        });
         serviceWorkerRegistration = null;
         throw error;
       },
@@ -222,16 +230,42 @@ async function showErpBrowserNotification(input: ErpBrowserNotification) {
         richOptions as NotificationOptions,
       );
       closePersistentNotification(registration, tag, input.notificationId);
+      recordBrowserNotificationDiagnostic({
+        channel: input.resourceKind,
+        stage: "display",
+        outcome: "succeeded",
+        displayMethod: "service_worker",
+      });
       return true;
     }
-  } catch {
+  } catch (error) {
+    recordBrowserNotificationDiagnostic({
+      channel: input.resourceKind,
+      stage: "display",
+      outcome: "failed",
+      reason: error instanceof Error ? error.name : "service_worker_error",
+      displayMethod: "service_worker",
+    });
     // 서비스 워커 표시가 지원되지 않으면 아래 페이지 Notification으로 대체한다.
   }
 
   try {
     showPageNotification(input, sharedOptions);
+    recordBrowserNotificationDiagnostic({
+      channel: input.resourceKind,
+      stage: "display",
+      outcome: "succeeded",
+      displayMethod: "page",
+    });
     return true;
-  } catch {
+  } catch (error) {
+    recordBrowserNotificationDiagnostic({
+      channel: input.resourceKind,
+      stage: "display",
+      outcome: "failed",
+      reason: error instanceof Error ? error.name : "page_notification_error",
+      displayMethod: "page",
+    });
     return false;
   }
 }

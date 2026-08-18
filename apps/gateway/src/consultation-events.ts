@@ -27,10 +27,39 @@ export type ConsultationEventSource = {
   subscribe(
     listener: (message: ConsultationEventMessage) => void,
   ): () => void;
+  getRecentNotifications?(): Promise<ConsultationEventNotification[]>;
 };
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export type ConsultationEventSnapshotRow = {
+  event_id: string;
+  event_type: string;
+  consultation_id: string;
+  occurred_at: Date;
+  repeat_stage: string | null;
+};
+
+export function consultationEventNotificationFromSnapshot(
+  row: ConsultationEventSnapshotRow,
+) {
+  const notificationKind =
+    row.event_type === "consultation.assignment.transferred"
+      ? "assignment_transferred" as const
+      : row.repeat_stage === "before_assignment"
+        ? "repeat_unassigned" as const
+        : row.repeat_stage === "after_assignment"
+          ? "repeat_assigned" as const
+          : null;
+  return parseConsultationEventNotification(JSON.stringify({
+    eventId: row.event_id,
+    eventType: row.event_type,
+    consultationId: row.consultation_id,
+    occurredAt: row.occurred_at.toISOString(),
+    notificationKind,
+  }));
+}
 
 export function parseConsultationEventNotification(
   payload: string | undefined,
@@ -217,6 +246,26 @@ export function createPostgresConsultationEventSource(options: {
     subscribe(listener: (message: ConsultationEventMessage) => void) {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+    async getRecentNotifications() {
+      const result = await options.pool.query<ConsultationEventSnapshotRow>(`
+        SELECT
+          id::text AS event_id,
+          event_type,
+          aggregate_id::text AS consultation_id,
+          occurred_at,
+          payload #>> '{data,repeatStage}' AS repeat_stage
+        FROM public.outbox_events
+        WHERE aggregate_type = 'consultation'
+          AND event_type LIKE 'consultation.%'
+          AND occurred_at >= now() - interval '2 minutes'
+        ORDER BY occurred_at ASC, id ASC
+        LIMIT 200
+      `);
+      return result.rows.flatMap((row) => {
+        const notification = consultationEventNotificationFromSnapshot(row);
+        return notification ? [notification] : [];
+      });
     },
   } satisfies ConsultationEventSource & {
     start(): Promise<void>;
