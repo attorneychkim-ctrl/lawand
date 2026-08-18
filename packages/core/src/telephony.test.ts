@@ -147,8 +147,17 @@ test("센트릭스 SMS/LMS 바이트와 템플릿 변수를 검증한다", () =>
     messageTemplateCreateSchema.safeParse({
       name: "부재 안내",
       body: "{{고객명}}님, {{담당자명}}입니다. 접수번호 {{접수번호}}",
+      autoSendTrigger: "no_answer",
     }).success,
     true,
+  );
+  assert.equal(
+    messageTemplateCreateSchema.safeParse({
+      name: "잘못된 자동발송",
+      body: "안내입니다.",
+      autoSendTrigger: "unknown",
+    }).success,
+    false,
   );
   assert.equal(
     messageTemplateCreateSchema.safeParse({

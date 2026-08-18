@@ -1,0 +1,3 @@
+ALTER TABLE "message_templates" ADD COLUMN "auto_send_trigger" varchar(40);--> statement-breakpoint
+CREATE UNIQUE INDEX "message_templates_owner_auto_send_trigger_uidx" ON "message_templates" USING btree ("owner_user_id","auto_send_trigger") WHERE "message_templates"."auto_send_trigger" IS NOT NULL;--> statement-breakpoint
+ALTER TABLE "message_templates" ADD CONSTRAINT "message_templates_auto_send_trigger_valid" CHECK ("message_templates"."auto_send_trigger" IS NULL OR "message_templates"."auto_send_trigger" IN ('consultation_assigned', 'no_answer', 'busy', 'manager_callback_requested', 'rejected'));

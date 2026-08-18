@@ -88,6 +88,27 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-18 — 담당 배정·통화 후처리 개인 템플릿 자동문자 후보
+- ERP 문자 템플릿 관리의 각 `내 템플릿` 카드에 `자동발송` 드롭다운을 추가했다. 기본값은
+  `선택없음`이고 담당자배정·부재 및 무응답·통화중·담당자 연결 요청·거절 중 하나를 고른다.
+  직원별 동일 조건은 partial unique index로 템플릿 하나만 허용하며 생성·수정 API와 감사
+  원장에도 설정을 반영했다.
+- 상담 상세의 `상담하기` 담당 배정과 전화데스크 후처리 저장 뒤 등록된 개인 템플릿으로
+  문자 원장·outbox를 생성한다. 담당자 연결 요청은 재통화 업무가 함께 저장될 때만 허용하고
+  템플릿 본문 뒤에 `재연락 일정 : 2026-08-20 (목), 10:30 ~ 11:00, 담당자 방한솔` 형식을
+  자동으로 붙인다. 업무 원장 ID와 조건에서 만든 안정적인 idempotency key로 재시도 중복을
+  막는다. 전화번호가 없는 상담이나 문자 대상이 해석되지 않는 통화에는 발송을 만들지 않는다.
+- 통화 후처리에서 현재 결과에 자동 템플릿이 있으면 `고객에게 문자 남기기` 수동 동작을
+  자동발송 예정 안내로 교체한다. 상담·리걸프렌즈 고객 대상으로만 이 안내와 차단을 적용한다.
+  migration `0064_real_alex_power.sql`과 정식 Drizzle journal/snapshot을 생성했고 SHA-256은
+  `9819aab7c0c9e97390f92b970c20f15a3e53205424a928fb646c14364a38dc78`이다. core 91개·
+  gateway 167개 테스트, 전체 5패키지 typecheck·lint, DB schema check와 `git diff --check`,
+  core·db·gateway production build를 통과했다. Next 앱 build는 한글 worktree 절대경로를
+  Turbopack이 UTF-8 문자 중간에서 자르는 Next 16.2.11 내부 panic으로 시작 단계에서 중단됐다.
+  Webpack fallback도 기존 `@lawand/core` 브라우저 import의 `node:crypto` 경계 때문에 사용할 수
+  없었으며 코드 typecheck·lint는 통과했다. main 병합·운영 migration·배포·운영 데이터 변경·
+  실제 문자 발송은 수행하지 않았다. `PROJECT_PLAN.md`는 v1.48이다.
+
 ### 2026-08-16 — 공개 후기 마스킹·후기 요청 편집기 운영 배포 완료
 - HERDR main과 `silver-meadow-902f`를 확인하고 원격 `origin/worktree/*` 53개를 전수 대조했다.
   완료 커밋 `f612888`·`819d4a8`을 main에 병합한 소스

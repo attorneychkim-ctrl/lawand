@@ -106,6 +106,18 @@ const messageTemplateImageSchema = z
   })
   .strict();
 
+export const messageTemplateAutoSendTriggerSchema = z.enum([
+  "consultation_assigned",
+  "no_answer",
+  "busy",
+  "manager_callback_requested",
+  "rejected",
+]);
+
+export type MessageTemplateAutoSendTrigger = z.infer<
+  typeof messageTemplateAutoSendTriggerSchema
+>;
+
 const messageSendFields = {
   idempotencyKey: z.uuid(),
   templateId: z.uuid().nullable(),
@@ -137,6 +149,7 @@ export const messageTemplateCreateSchema = z
   .object({
     name: messageTemplateNameSchema,
     body: messageTemplateBodySchema,
+    autoSendTrigger: messageTemplateAutoSendTriggerSchema.nullable().default(null),
     image: messageTemplateImageSchema.nullable().optional(),
   })
   .strict();
@@ -145,6 +158,7 @@ export const messageTemplateUpdateSchema = z
   .object({
     name: messageTemplateNameSchema,
     body: messageTemplateBodySchema,
+    autoSendTrigger: messageTemplateAutoSendTriggerSchema.nullable(),
     // 생략하면 기존 이미지를 유지하고, null이면 제거하며, 객체면 교체한다.
     image: messageTemplateImageSchema.nullable().optional(),
   })

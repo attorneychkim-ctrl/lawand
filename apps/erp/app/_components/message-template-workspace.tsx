@@ -15,6 +15,15 @@ import type { MessageTemplate } from "../../lib/gateway";
 
 type ImageDraft = { originalName: string; fileBase64: string; previewUrl: string };
 
+const autoSendOptions = [
+  { value: null, label: "선택없음" },
+  { value: "consultation_assigned", label: "담당자배정" },
+  { value: "no_answer", label: "부재 및 무응답" },
+  { value: "busy", label: "통화중" },
+  { value: "manager_callback_requested", label: "담당자 연결 요청" },
+  { value: "rejected", label: "거절" },
+] as const;
+
 function readImage(file: File): Promise<ImageDraft> {
   return new Promise((resolve, reject) => {
     if (file.type !== "image/jpeg" || file.size > MMS_IMAGE_MAX_BYTES) {
@@ -55,11 +64,13 @@ export function MessageTemplateWorkspace({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [body, setBody] = useState("");
+  const [autoSendTrigger, setAutoSendTrigger] = useState<MessageTemplate["autoSendTrigger"]>(null);
   const [existingImage, setExistingImage] = useState<MessageTemplate["image"]>(null);
   const [imageDraft, setImageDraft] = useState<ImageDraft | null>(null);
   const [removeImage, setRemoveImage] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [updatingTriggerId, setUpdatingTriggerId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -71,6 +82,7 @@ export function MessageTemplateWorkspace({
     setEditingId(null);
     setName("");
     setBody("");
+    setAutoSendTrigger(null);
     setExistingImage(null);
     setImageDraft(null);
     setRemoveImage(false);
@@ -82,6 +94,7 @@ export function MessageTemplateWorkspace({
     setEditingId(template.id);
     setName(template.name);
     setBody(template.body);
+    setAutoSendTrigger(template.autoSendTrigger);
     setExistingImage(template.image);
     setImageDraft(null);
     setRemoveImage(false);
@@ -138,6 +151,7 @@ export function MessageTemplateWorkspace({
           body: JSON.stringify({
             name,
             body,
+            autoSendTrigger,
             ...(image === undefined ? {} : { image }),
           }),
         },
@@ -157,6 +171,7 @@ export function MessageTemplateWorkspace({
       setEditingId(result.id);
       setName(result.name);
       setBody(result.body);
+      setAutoSendTrigger(result.autoSendTrigger);
       setExistingImage(result.image);
       setImageDraft(null);
       setRemoveImage(false);
@@ -193,6 +208,28 @@ export function MessageTemplateWorkspace({
     }
   }
 
+  async function updateAutoSend(template: MessageTemplate, next: MessageTemplate["autoSendTrigger"]) {
+    setUpdatingTriggerId(template.id);
+    setError("");
+    setSuccess("");
+    try {
+      const response = await fetch(`/api/message-templates/${template.id}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: template.name, body: template.body, autoSendTrigger: next }),
+      });
+      const result = (await response.json().catch(() => null)) as (MessageTemplate & { message?: string }) | null;
+      if (!response.ok || !result) throw new Error(result?.message ?? "자동발송 설정을 저장하지 못했습니다.");
+      setItems((current) => current.map((item) => item.id === result.id ? result : item));
+      if (editingId === result.id) setAutoSendTrigger(result.autoSendTrigger);
+      setSuccess("자동발송 설정을 저장했습니다.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "자동발송 설정을 저장하지 못했습니다.");
+    } finally {
+      setUpdatingTriggerId(null);
+    }
+  }
+
   return (
     <div className="message-template-layout">
       <section className="erp-panel message-template-editor" aria-labelledby="template-editor-title">
@@ -222,6 +259,20 @@ export function MessageTemplateWorkspace({
             <label>
               <span>메시지 내용</span>
               <textarea maxLength={720} onChange={(event) => setBody(event.target.value)} placeholder="고객에게 자주 보내는 문구를 입력해 주세요." ref={textareaRef} rows={10} value={body} />
+            </label>
+            <label>
+              <span>자동발송</span>
+              <select
+                onChange={(event) => setAutoSendTrigger((event.target.value || null) as MessageTemplate["autoSendTrigger"])}
+                value={autoSendTrigger ?? ""}
+              >
+                {autoSendOptions.map((option) => (
+                  <option key={option.value ?? "none"} value={option.value ?? ""}>{option.label}</option>
+                ))}
+              </select>
+              <small className="message-template-auto-help">
+                선택한 업무를 저장할 때 이 템플릿이 자동으로 발송됩니다. 조건 하나에는 템플릿 하나만 연결할 수 있습니다.
+              </small>
             </label>
             <div className="message-compose-meta">
               <span>{previewImage ? "MMS" : byteLength <= 80 ? "SMS" : "LMS"}</span>
@@ -274,11 +325,23 @@ export function MessageTemplateWorkspace({
               <div>
                 <span className="message-template-scope is-personal">내 템플릿</span>
                 {template.image ? <span className="message-template-image-badge">이미지</span> : null}
+                {template.autoSendTrigger ? <span className="message-template-auto-badge">자동발송 · {autoSendOptions.find((option) => option.value === template.autoSendTrigger)?.label}</span> : null}
               </div>
               <h3>{template.name}</h3>
               <p>{template.body}</p>
               <small>{template.bodyByteLength} byte{template.image ? ` · ${template.image.originalName}` : ""}</small>
               <div className="message-template-card-actions">
+                <label className="message-template-auto-select">
+                  <span>자동발송</span>
+                  <select
+                    aria-label={`${template.name} 자동발송`}
+                    disabled={saving || deletingId !== null || updatingTriggerId !== null}
+                    onChange={(event) => void updateAutoSend(template, (event.target.value || null) as MessageTemplate["autoSendTrigger"])}
+                    value={template.autoSendTrigger ?? ""}
+                  >
+                    {autoSendOptions.map((option) => <option key={option.value ?? "none"} value={option.value ?? ""}>{option.label}</option>)}
+                  </select>
+                </label>
                 <button className="secondary-button" disabled={saving || deletingId !== null} onClick={() => edit(template)} type="button">수정</button>
                 <button className="message-template-delete-button" disabled={saving || deletingId !== null} onClick={() => void remove(template)} type="button">
                   {deletingId === template.id ? "삭제 중…" : "삭제"}
