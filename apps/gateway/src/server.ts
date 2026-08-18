@@ -30,6 +30,8 @@ import { createTelephonyRealtimeMonitor } from "./telephony-realtime-monitor.js"
 import { createReviewSubmissionService } from "./review-service.js";
 import { createReviewManagementService } from "./review-management-service.js";
 import { createSolapiClient } from "./solapi.js";
+import { createGiftishowClient } from "./giftishow.js";
+import { createGiftCouponService } from "./gift-coupon-service.js";
 
 const localEnvPath = resolve(process.cwd(), ".env.local");
 if (existsSync(localEnvPath)) {
@@ -129,6 +131,12 @@ const reviewManagementService = createReviewManagementService({
   telephonyService,
   reviewWriteUrl: config.reviewWriteUrl,
 });
+const giftCouponService = createGiftCouponService({
+  db: database.db,
+  protection,
+  client: config.giftishow ? createGiftishowClient(config.giftishow) : null,
+  reviewManagement: reviewManagementService,
+});
 const centrexBridgeIngress = createCentrexBridgeIngressService({
   db: database.db,
   protection,
@@ -205,6 +213,7 @@ const server = createGatewayServer({
     : {}),
   reviewService,
   reviewManagementService,
+  giftCouponService,
   internalApiKey: config.internalApiKey,
   publicIntakeApiKey: config.publicIntakeApiKey,
   intakeProtection,

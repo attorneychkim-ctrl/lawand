@@ -10,6 +10,14 @@ export type GatewayConfig = {
   internalApiKey: string;
   publicIntakeApiKey: string;
   reviewWriteUrl: string;
+  giftishow: {
+    authCode: string;
+    authToken: string;
+    userId: string;
+    callbackNo: string;
+    bannerId: string;
+    templateId: string;
+  } | null;
   outboxWorkerEnabled: boolean;
   legalFriendsApiToken: string | null;
   alimtalkWorkerEnabled: boolean;
@@ -239,6 +247,23 @@ function reviewWriteUrlValue(): string {
   return url.toString().replace(/\/$/, "");
 }
 
+function giftishowValue(): GatewayConfig["giftishow"] {
+  const values = {
+    authCode: process.env.LAWAND_GIFTISHOW_AUTH_CODE?.trim() || "",
+    authToken: process.env.LAWAND_GIFTISHOW_AUTH_TOKEN?.trim() || "",
+    userId: process.env.LAWAND_GIFTISHOW_USER_ID?.trim() || "",
+    callbackNo: process.env.LAWAND_GIFTISHOW_CALLBACK_NO?.replace(/\D/g, "") || "",
+    bannerId: process.env.LAWAND_GIFTISHOW_BANNER_ID?.trim() || "",
+    templateId: process.env.LAWAND_GIFTISHOW_TEMPLATE_ID?.trim() || "",
+  };
+  if (Object.values(values).every(Boolean)) {
+    if (!/^\d{8,11}$/.test(values.callbackNo)) throw new Error("기프티쇼 발신번호 형식이 올바르지 않습니다.");
+    return values;
+  }
+  if (Object.values(values).some(Boolean)) throw new Error("기프티쇼 설정 6개를 모두 입력해야 합니다.");
+  return null;
+}
+
 function centrexRingCallbackValue(): GatewayConfig["centrexRingCallback"] {
   if (!booleanValue("LAWAND_CENTREX_RING_CALLBACK_ENABLED", false)) {
     return null;
@@ -400,6 +425,7 @@ export function readGatewayConfig(): GatewayConfig {
     internalApiKey: required("LAWAND_INTERNAL_API_KEY"),
     publicIntakeApiKey: required("LAWAND_PUBLIC_INTAKE_API_KEY"),
     reviewWriteUrl: reviewWriteUrlValue(),
+    giftishow: giftishowValue(),
     outboxWorkerEnabled,
     legalFriendsApiToken,
     alimtalkWorkerEnabled,
