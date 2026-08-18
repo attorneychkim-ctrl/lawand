@@ -69,6 +69,7 @@ export function ConsultationCreateButton() {
     ResidenceRegion | ""
   >("");
   const [caseType, setCaseType] = useState<1 | 2 | 3>(1);
+  const [transferNote, setTransferNote] = useState("");
   const [relationship, setRelationship] =
     useState<DirectoryRelationship>("none");
   const [selectedSource, setSelectedSource] =
@@ -101,6 +102,7 @@ export function ConsultationCreateButton() {
     setPhone("");
     setResidenceRegion("");
     setCaseType(1);
+    setTransferNote("");
   }
 
   function openDialog() {
@@ -196,6 +198,7 @@ export function ConsultationCreateButton() {
           phone,
           residenceRegion,
           caseType,
+          ...(transferNote.trim() ? { transferNote: transferNote.trim() } : {}),
           directorySource:
             relationship !== "none" && selectedSource
               ? {
@@ -447,6 +450,18 @@ export function ConsultationCreateButton() {
               </select>
             </label>
           </div>
+
+          <label className="client-consultation-note">
+            <span>전달사항</span>
+            <textarea
+              maxLength={2000}
+              onChange={(event) => setTransferNote(event.target.value)}
+              placeholder="어떤 용건으로 연락했고 현재 어떤 상황인지, 다음 담당자가 알아야 할 내용을 적어 주세요."
+              rows={5}
+              value={transferNote}
+            />
+            <small>선택 입력 · 상담 상세의 고객 핵심정보에 표시됩니다.</small>
+          </label>
 
           {error ? (
             <p className="client-consultation-error" role="alert">

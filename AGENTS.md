@@ -107,6 +107,21 @@
   `node:crypto` client import를 처리하지 못해 별도 환경 빌드가 필요하다. main 병합·운영
   배포·운영 데이터 변경은 수행하지 않았다. `PROJECT_PLAN.md`는 v1.48이다.
 
+### 2026-08-18 — ERP 신규상담 전달사항 후보
+- ERP 상담 작업 큐의 `신규등록` 모달 하단과 전화데스크 통화 후처리에서
+  `신건상담으로 저장`을 선택했을 때 고객명·상담 담당자 바로 아래에 선택 입력
+  `전달사항`을 추가했다. 두 경로는 공통 core 계약으로 공백 정리와 최대 2,000자를
+  검증하며, 전달사항은 별도 평문 컬럼이 아니라 기존 `consultation_requests.intake`에
+  포함해 AES-GCM 암호화 상태로 보존한다. 상담 상세의 고객 핵심정보 카드 하단에는
+  가장 최근에 기록된 전달사항을 줄바꿈 그대로 표시하고, 전달사항이 없는 기존 상담은 종전과
+  동일하게 표시한다.
+- core 91개·gateway 166개 테스트와 전체 5패키지 typecheck·lint, core·DB·gateway build,
+  `git diff --check`를 통과했다. Next production build는 한글 워크트리 절대경로를 바이트
+  중간에서 자르는 Turbopack 내부 panic으로 ERP 단계에서 중단됐다. webpack fallback도
+  기존 client import graph의 `node:crypto` 처리 문제로 중단돼 Next 앱 production build는
+  ASCII 경로의 메인 통합 세션에서 다시 확인해야 한다. migration·운영 데이터·main 병합·
+  운영 배포는 수행하지 않았다. `PROJECT_PLAN.md`는 v1.48이다.
+
 ### 2026-08-16 — 공개 후기 마스킹·후기 요청 편집기 운영 배포 완료
 - HERDR main과 `silver-meadow-902f`를 확인하고 원격 `origin/worktree/*` 53개를 전수 대조했다.
   완료 커밋 `f612888`·`819d4a8`을 main에 병합한 소스

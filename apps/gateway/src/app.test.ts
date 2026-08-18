@@ -615,6 +615,7 @@ test("고객찾기와 직원 신규등록 API는 인증된 서비스에 입력�
         phone: string;
         residenceRegion: string;
         caseType: number;
+        transferNote?: string;
         directorySource: {
           clientIdx: number;
           caseIdx: number;
@@ -813,6 +814,7 @@ test("고객찾기와 직원 신규등록 API는 인증된 서비스에 입력�
         phone: "010-9876-5432",
         residenceRegion: "gyeonggi",
         caseType: 2,
+        transferNote: "채권 추심 연락을 받고 대응 방법을 문의함",
         directorySource: {
           clientIdx: 123,
           caseIdx: 456,
@@ -828,6 +830,7 @@ test("고객찾기와 직원 신규등록 API는 인증된 서비스에 입력�
     phone: "01098765432",
     residenceRegion: "gyeonggi",
     caseType: 2,
+    transferNote: "채권 추심 연락을 받고 대응 방법을 문의함",
     directorySource: {
       clientIdx: 123,
       caseIdx: 456,

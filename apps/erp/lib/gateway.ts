@@ -740,7 +740,12 @@ export type PhoneDeskAftercareInput = {
   consultation:
     | { mode: "none" }
     | { mode: "link"; consultationId: string }
-    | { mode: "create"; customerName: string; assigneeUserId?: string };
+    | {
+        mode: "create";
+        customerName: string;
+        assigneeUserId?: string;
+        transferNote?: string;
+      };
   followUp:
     | { enabled: false }
     | { enabled: true; dueAt: string; assigneeUserId: string };

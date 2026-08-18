@@ -701,6 +701,15 @@ export default async function ConsultationDetailPage({
   const isSoftDeleted = Boolean(consultation.softDeletedAt);
   const latestPhone = consultation.phone;
   const latestRegion = latestRequest?.intake.residenceRegion;
+  const requestWithTransferNote = consultation.requests.find(
+    (request) =>
+      typeof request.intake.transferNote === "string" &&
+      request.intake.transferNote.length > 0,
+  );
+  const transferNote =
+    typeof requestWithTransferNote?.intake.transferNote === "string"
+      ? requestWithTransferNote.intake.transferNote
+      : null;
   const action = nextAction(consultation);
   const canClaim =
     consultation.state === "requested" &&
@@ -891,6 +900,13 @@ export default async function ConsultationDetailPage({
                     ? ` 비교 대상 ${latestRequest.candidateReceiptCode}`
                     : ""}
                 </span>
+              </div>
+            ) : null}
+
+            {transferNote ? (
+              <div className="customer-transfer-note">
+                <span>전달사항</span>
+                <p>{transferNote}</p>
               </div>
             ) : null}
           </section>

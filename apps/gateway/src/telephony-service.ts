@@ -1394,6 +1394,7 @@ export function createTelephonyService(options: {
             phone: input.phone,
             residenceRegion: input.residenceRegion,
             caseType: input.caseType,
+            transferNote: input.transferNote,
             isReferral: input.directorySource.relationship === "referrer",
           }
         : {
@@ -1402,6 +1403,7 @@ export function createTelephonyService(options: {
             phone: input.phone,
             residenceRegion: input.residenceRegion,
             caseType: input.caseType,
+            transferNote: input.transferNote,
           },
     );
     const idempotencyFingerprint = protection.fingerprint({
@@ -1686,6 +1688,7 @@ export function createTelephonyService(options: {
             : input.caseType === 3
               ? "기타"
               : "개인회생",
+        ...(input.transferNote ? { transferNote: input.transferNote } : {}),
       };
       const intakeEncrypted = protection.encrypt(
         JSON.stringify(intake),
@@ -5387,6 +5390,9 @@ export function createTelephonyService(options: {
           callId,
           direction: call.direction,
           note: "직원이 통화 후 전화데스크에서 생성한 신건상담",
+          ...(input.consultation.transferNote
+            ? { transferNote: input.consultation.transferNote }
+            : {}),
         };
         const intakeEncrypted = protection.encrypt(
           JSON.stringify(intake),
