@@ -1114,6 +1114,24 @@ x86 OCX 프로세스 하나를 격리해 실행하고, 배정된 회선과 제�
   `Caddyfile.pre-domain-cutover-20260812T004900Z`에 있고 Cafe24 구 zone·호스팅·SSL과
   직전 홈페이지 이미지도 보존했다.
 
+## 2026-08-18 모바일 쿠폰 발송 상태·재발송 차단 릴리스
+
+- 배포 소스 `263f6de5a5cb5352c930306c7f78bec0dce1aee1`, Actions `32106273002`를 사용했다.
+  ERP digest는 `sha256:4fc57d1458bc73d773cc05b51b002b88f9996d2b3f413c7fedbbffcd19c946ed`,
+  gateway digest는 `sha256:dada004e0395b82af879462ff995800e9bd69383a5201045db7238886fc795a4`다.
+  두 ARM64 image scan은 기존 운영 이미지와 같은 CRITICAL 3·HIGH 11·MEDIUM 10·LOW 1이다.
+- migration이나 운영 데이터 변경 없이 릴리스
+  `20260818T062700Z-gift-coupon-delivery-state-v1`로 gateway → ERP를 digest 전환했다.
+  최종 image ID는 gateway
+  `sha256:cb84c5d7bbe7a3cea5efa028a0616372934f4aa06020f1acbe2b607da1ef9d1e`, ERP
+  `sha256:66530c6334dd3e4306da2668f494a6993c76a6d92f796bfa8decd7118737dcfb`다.
+- 운영 쿠폰 원장의 기존 `sent` 1건과 상품·주문번호·발송/응답 시각을 읽기 전용으로 확인했다.
+  새 조회 경계는 이 원장을 화면 재진입 때 복원하고 활성 상태 한 건이 있으면 재발송을 막는다.
+  실제 외부 쿠폰 canary와 운영 원장 수정은 하지 않았다.
+- gateway cache 1.381GB, ERP cache 1.429GB로 4 GiB 아래이며 gateway 857,034,752 bytes,
+  ERP 890,023,936 bytes를 회수했다. 정식·EIP HTTPS, 서비스·container·RDS·EC2·SSM·CloudWatch는
+  모두 정상이고 배포 후 error journal과 container restart는 0이다.
+
 ## 2026-08-18 상담 알림 snapshot LISTEN 풀 대기 hotfix
 
 통합 릴리스 최종 health에서 LISTEN pool waiting이 9→10으로 누적됐다. 상담 SSE의 최근 2분

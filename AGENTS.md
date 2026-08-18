@@ -102,6 +102,41 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-18 — 모바일 쿠폰 발송 상태·재발송 차단 운영 배포 완료
+- 메인 `263f6de5a5cb5352c930306c7f78bec0dce1aee1`에서 ERP의 쿠폰 발송 버튼을 확인 완료 시
+  보라색 활성 상태·pointer cursor로 표시하고, 발송 완료 뒤에는 상품명·한국 시각·주문번호와
+  재발송 불가 안내를 강조 카드로 표시했다. 화면 진입 때 gateway가 기존
+  `review_gift_coupon_deliveries` 활성 원장을 먼저 읽으므로 목록을 나갔다 돌아오거나 다른 탭에서
+  열어도 `prepared`·`sent`·`unknown` 건은 다시 보낼 수 없다. gateway도 발송 직전 활성 원장을
+  확인하고 기존 partial unique index 충돌을 명시적인 중복 발송 오류로 바꾼다.
+- HERDR 환경변수는 없는 메인 세션이었으나 `git worktree list`의 7개 HEAD와 원격
+  `origin/worktree/*`·`origin/LegalFlow/*`를 전수 대조해 모두 main ancestor임을 확인했다.
+  전체 5패키지 typecheck·lint·production build, core 91개·gateway 172개 테스트, DB schema
+  check와 `git diff --check`를 통과했고 Actions `32106273002`의 검증과 세 앱 ARM64 게시가
+  성공했다. 영향 앱은 ERP·gateway뿐이고 migration·스키마·운영 데이터 변경은 없다.
+- 릴리스 `20260818T062700Z-gift-coupon-delivery-state-v1`로 gateway를 먼저, ERP를 이어서
+  digest로 전환했다. gateway digest는
+  `sha256:dada004e0395b82af879462ff995800e9bd69383a5201045db7238886fc795a4`, image ID는
+  `sha256:cb84c5d7bbe7a3cea5efa028a0616372934f4aa06020f1acbe2b607da1ef9d1e`다. ERP digest는
+  `sha256:4fc57d1458bc73d773cc05b51b002b88f9996d2b3f413c7fedbbffcd19c946ed`, image ID는
+  `sha256:66530c6334dd3e4306da2668f494a6993c76a6d92f796bfa8decd7118737dcfb`다. 두 이미지 scan은
+  현재 운영 이미지와 같은 CRITICAL 3·HIGH 11·MEDIUM 10·LOW 1이다.
+- health 뒤 gateway cache는 1,381,000,000 bytes 유지, 가용량
+  93,077,651,456→93,934,686,208 bytes, 회수 857,034,752 bytes이며 rollback은
+  `sha256:8a268ba58bd504440b6adb1deda649aa2e56c2911eccb0ad33d6313a5c9bd5dc`·
+  `sha256:e4e1009ac813a0abb8ad175fad5879fe7a8eae0faed693310af2e15fcb2fdb87`다. ERP cache는
+  1,429,000,000 bytes 유지, 가용량 93,516,288,000→94,406,311,936 bytes, 회수
+  890,023,936 bytes이며 rollback은
+  `sha256:9641a7e295b1b50cff200ce4b1768d62b8c1535aa28fdb8e5c76a19870951411`·
+  `sha256:b6b50c85e6c32b0260ee360063866f52fad9c4b8c4ca646eddf3601c6d517497`다. 서버 배포 로그에도
+  같은 값을 기록했고 현재+rollback 2개와 source release 2개만 보존했다.
+- 정식·EIP HTTPS gateway health와 ERP 로그인은 200이고 두 앱·Caddy active, container
+  restart 0, 환경파일 600, 배포 후 error journal 0이다. gateway request/LISTEN waiting은
+  0/20·0/4다. 기존 운영 쿠폰 원장 1건은 `sent`, 메가MGC커피 더블 아아 세트, 주문번호 존재,
+  발송·응답 시각 존재로 그대로 보존돼 새 조회 화면에서 복원할 수 있다. 실제 쿠폰·문자·전화
+  canary나 운영 원장 수정은 하지 않았다. RDS available·암호화·삭제 방지, 두 EC2 status ok,
+  SSM Online, CloudWatch OK 14·ALARM 0·INSUFFICIENT_DATA 0이다. `PROJECT_PLAN.md`는 v1.52다.
+
 ### 2026-08-18 — 상담 알림 snapshot LISTEN 풀 대기 hotfix 운영 배포 완료
 - 통합 릴리스 최종 health에서 LISTEN pool waiting이 9→10으로 누적됐다. 상담 SSE 연결 때
   최근 2분 outbox snapshot 조회가 영구 LISTEN 연결 4개로 꽉 찬 전용 풀의 `query`를 사용해,
