@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parseConsultationEventNotification } from "./consultation-events.js";
+import {
+  consultationEventNotificationFromSnapshot,
+  parseConsultationEventNotification,
+} from "./consultation-events.js";
 
 test("상담 outbox 알림 payload에서 실시간 이벤트를 복원한다", () => {
   assert.deepEqual(
@@ -87,5 +90,24 @@ test("상담 외 이벤트와 잘못된 식별자는 실시간 payload로 받지
       }),
     ),
     null,
+  );
+});
+
+test("최근 outbox snapshot은 실시간 알림과 같은 비식별 payload로 복원한다", () => {
+  assert.deepEqual(
+    consultationEventNotificationFromSnapshot({
+      event_id: "019fa6a4-6834-7782-aa0b-4e71ffb8a2a1",
+      event_type: "consultation.request.updated",
+      consultation_id: "019fa6a4-6834-7782-aa0b-4e71ffb8a2a2",
+      occurred_at: new Date("2026-08-18T01:02:03.000Z"),
+      repeat_stage: "before_assignment",
+    }),
+    {
+      eventId: "019fa6a4-6834-7782-aa0b-4e71ffb8a2a1",
+      eventType: "consultation.request.updated",
+      consultationId: "019fa6a4-6834-7782-aa0b-4e71ffb8a2a2",
+      occurredAt: "2026-08-18T01:02:03.000Z",
+      notificationKind: "repeat_unassigned",
+    },
   );
 });

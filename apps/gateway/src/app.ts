@@ -653,6 +653,27 @@ export function createGatewayServer(options?: {
             );
           },
         );
+        if (options.consultationEvents.getRecentNotifications) {
+          try {
+            const recent = await options.consultationEvents
+              .getRecentNotifications();
+            for (const notification of recent) {
+              if (response.destroyed || response.writableEnded) break;
+              sendSseEvent(
+                response,
+                "consultation.changed",
+                notification,
+                notification.eventId,
+              );
+            }
+            sendSseEvent(response, "consultation.sync", {
+              reason: "recent_snapshot_complete",
+              count: recent.length,
+            });
+          } catch (error) {
+            console.error("lawand consultation recent snapshot error", error);
+          }
+        }
         const heartbeat = setInterval(() => {
           if (!response.destroyed && !response.writableEnded) {
             response.write(": keepalive\n\n");

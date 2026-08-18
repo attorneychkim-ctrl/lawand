@@ -23,6 +23,7 @@ import {
   showConsultationBrowserNotification,
   showTelephonyBrowserNotification,
 } from "./browser-notification";
+import { recordBrowserNotificationDiagnostic } from "./browser-notification-diagnostics";
 import { notificationPermissionChangedEvent } from "./browser-notification-toggle";
 import { subscribeConsultationRealtime } from "./consultation-realtime";
 import { PhoneAftercareDialog } from "./phone-aftercare-form";
@@ -600,8 +601,10 @@ export function InboundCallIndicator({
   const deskStartedAt = useRef(0);
   const seenDeskEndedCallIds = useRef<Set<string>>(new Set());
   const seenNotificationKeys = useRef<Set<string>>(new Set());
+  const pendingNotificationKeys = useRef<Set<string>>(new Set());
   const seenTelephonyToastKeys = useRef<Set<string>>(new Set());
   const seenConsultationEventIds = useRef<Set<string>>(new Set());
+  const pendingConsultationEventIds = useRef<Set<string>>(new Set());
   const consultationAssignmentTimes = useRef<Map<string, number>>(new Map());
   const notificationLeader = useRef(false);
   const notificationTabId = useRef("");
@@ -630,40 +633,64 @@ export function InboundCallIndicator({
     );
     window.addEventListener("storage", synchronizeNotificationPermission);
     notificationTabId.current = window.crypto.randomUUID();
-    const leaseKey = "lawand:telephony-notification-leader";
-    const claimLeadership = () => {
+    const peers = new Map<string, { visible: boolean; seenAt: number }>();
+    const channel = "BroadcastChannel" in window
+      ? new BroadcastChannel("lawand:browser-notification-tabs")
+      : null;
+    const electLeader = () => {
       const current = Date.now();
-      let lease: { tabId: string; expiresAt: number } | null = null;
-      try {
-        lease = JSON.parse(window.localStorage.getItem(leaseKey) ?? "null") as
-          | { tabId: string; expiresAt: number }
-          | null;
-      } catch {
-        lease = null;
+      for (const [tabId, peer] of peers) {
+        if (current - peer.seenAt > 10_000) peers.delete(tabId);
       }
-      if (
-        !lease ||
-        lease.expiresAt <= current ||
-        lease.tabId === notificationTabId.current
-      ) {
-        try {
-          window.localStorage.setItem(
-            leaseKey,
-            JSON.stringify({
-              tabId: notificationTabId.current,
-              expiresAt: current + 8_000,
-            }),
-          );
-        } catch {
-          // 저장소가 막혀도 이 탭의 네이티브 알림 자체는 계속 시도한다.
-        }
-        notificationLeader.current = true;
-      } else {
-        notificationLeader.current = false;
-      }
+      const ownVisible = document.visibilityState === "visible";
+      peers.set(notificationTabId.current, {
+        visible: ownVisible,
+        seenAt: current,
+      });
+      const candidates = [...peers.entries()]
+        .filter(([, peer]) => peer.visible)
+        .map(([tabId]) => tabId)
+        .sort();
+      const fallbackCandidates = [...peers.keys()].sort();
+      notificationLeader.current = ownVisible ||
+        (candidates[0] ?? fallbackCandidates[0]) === notificationTabId.current;
     };
-    claimLeadership();
-    const timer = window.setInterval(claimLeadership, 3_000);
+    const announce = () => {
+      const message = {
+        tabId: notificationTabId.current,
+        visible: document.visibilityState === "visible",
+        sentAt: Date.now(),
+      };
+      peers.set(message.tabId, {
+        visible: message.visible,
+        seenAt: message.sentAt,
+      });
+      channel?.postMessage(message);
+      electLeader();
+    };
+    if (channel) {
+      channel.onmessage = (event: MessageEvent<unknown>) => {
+        const value = event.data as Partial<{
+          tabId: string;
+          visible: boolean;
+          sentAt: number;
+        }>;
+        if (
+          typeof value.tabId !== "string" ||
+          typeof value.visible !== "boolean" ||
+          typeof value.sentAt !== "number"
+        ) return;
+        peers.set(value.tabId, {
+          visible: value.visible,
+          seenAt: Date.now(),
+        });
+        electLeader();
+      };
+    }
+    announce();
+    document.addEventListener("visibilitychange", announce);
+    window.addEventListener("focus", announce);
+    const timer = window.setInterval(announce, 3_000);
     return () => {
       window.removeEventListener(
         notificationPermissionChangedEvent,
@@ -674,17 +701,10 @@ export function InboundCallIndicator({
         synchronizeNotificationPermission,
       );
       window.removeEventListener("storage", synchronizeNotificationPermission);
+      document.removeEventListener("visibilitychange", announce);
+      window.removeEventListener("focus", announce);
       window.clearInterval(timer);
-      try {
-        const lease = JSON.parse(
-          window.localStorage.getItem(leaseKey) ?? "null",
-        ) as { tabId?: string } | null;
-        if (lease?.tabId === notificationTabId.current) {
-          window.localStorage.removeItem(leaseKey);
-        }
-      } catch {
-        // 손상된 다른 탭 lease는 만료 뒤 자연스럽게 교체된다.
-      }
+      channel?.close();
     };
   }, []);
 
@@ -909,10 +929,24 @@ export function InboundCallIndicator({
     stream.addEventListener("telephony.inbound.sync", handleChange);
     stream.addEventListener("telephony.inbound.changed", handleChange);
     stream.onopen = () => {
-      if (!disposed) setConnection("connected");
+      if (!disposed) {
+        setConnection("connected");
+        recordBrowserNotificationDiagnostic({
+          channel: "telephony",
+          stage: "sse",
+          outcome: "connected",
+        });
+      }
     };
     stream.onerror = () => {
-      if (!disposed) setConnection("disconnected");
+      if (!disposed) {
+        setConnection("disconnected");
+        recordBrowserNotificationDiagnostic({
+          channel: "telephony",
+          stage: "sse",
+          outcome: "disconnected",
+        });
+      }
     };
 
     return () => {
@@ -1055,7 +1089,8 @@ export function InboundCallIndicator({
     realtimeEntityId?: string,
   ) => {
     if (
-      !notificationLeader.current ||
+      (document.visibilityState !== "visible" &&
+        !notificationLeader.current) ||
       notificationPermission !== "granted" ||
       !notificationsEnabled
     ) return false;
@@ -1075,19 +1110,19 @@ export function InboundCallIndicator({
         continue;
       }
       const notificationKey = `${activity.id}:${activity.notificationKind}`;
-      if (seenNotificationKeys.current.has(notificationKey)) continue;
-      seenNotificationKeys.current.add(notificationKey);
+      if (
+        seenNotificationKeys.current.has(notificationKey) ||
+        pendingNotificationKeys.current.has(notificationKey)
+      ) continue;
       const storageKey = `lawand:telephony-notified:${notificationKey}`;
       let alreadyNotified = false;
       try {
         alreadyNotified = Boolean(window.localStorage.getItem(storageKey));
-        if (!alreadyNotified) {
-          window.localStorage.setItem(storageKey, String(current));
-        }
       } catch {
         // 저장소가 막힌 브라우저에서도 Notification API는 별도로 시도한다.
       }
       if (alreadyNotified) continue;
+      pendingNotificationKeys.current.add(notificationKey);
       const copy = notificationCopy(activity, staffUserId);
       const shown = await showTelephonyBrowserNotification({
         ...copy,
@@ -1096,7 +1131,15 @@ export function InboundCallIndicator({
         href: `/phone-desk/${activity.id}`,
         occurredAt: activity.lastEventAt,
         answerCallId: activity.answerableInboundCallId,
-      });
+      }).finally(() => pendingNotificationKeys.current.delete(notificationKey));
+      if (shown) {
+        seenNotificationKeys.current.add(notificationKey);
+        try {
+          window.localStorage.setItem(storageKey, String(current));
+        } catch {
+          // 저장소가 막혀도 현재 탭의 성공 기록은 메모리에 유지한다.
+        }
+      }
       if (
         shown &&
         realtimeEntityId &&
@@ -1175,6 +1218,18 @@ export function InboundCallIndicator({
     };
     stream.addEventListener("telephony.desk.sync", handleChange);
     stream.addEventListener("telephony.desk.changed", handleChange);
+    stream.onopen = () => recordBrowserNotificationDiagnostic({
+      channel: "telephony",
+      stage: "sse",
+      outcome: "connected",
+      reason: "phone_desk",
+    });
+    stream.onerror = () => recordBrowserNotificationDiagnostic({
+      channel: "telephony",
+      stage: "sse",
+      outcome: "disconnected",
+      reason: "phone_desk",
+    });
     return () => {
       deskRequestSequence.current += 1;
       stream.removeEventListener("telephony.desk.sync", handleChange);
@@ -1242,6 +1297,30 @@ export function InboundCallIndicator({
   useEffect(() => {
     let active = true;
     const unsubscribe = subscribeConsultationRealtime((message) => {
+      if (message.kind === "open") {
+        recordBrowserNotificationDiagnostic({
+          channel: "consultation",
+          stage: "sse",
+          outcome: "connected",
+        });
+        return;
+      }
+      if (message.kind === "sync") {
+        recordBrowserNotificationDiagnostic({
+          channel: "consultation",
+          stage: "sse",
+          outcome: "sync",
+        });
+        return;
+      }
+      if (message.kind === "error") {
+        recordBrowserNotificationDiagnostic({
+          channel: "consultation",
+          stage: "sse",
+          outcome: "disconnected",
+        });
+        return;
+      }
       if (message.kind !== "changed") return;
       const payload = message.payload;
       const isRequestedEvent = payload.eventType === "consultation.requested";
@@ -1256,11 +1335,12 @@ export function InboundCallIndicator({
       }
       if (
         (!isRequestedEvent && payload.notificationKind === null) ||
-        seenConsultationEventIds.current.has(payload.eventId)
+        seenConsultationEventIds.current.has(payload.eventId) ||
+        pendingConsultationEventIds.current.has(payload.eventId)
       ) {
         return;
       }
-      seenConsultationEventIds.current.add(payload.eventId);
+      pendingConsultationEventIds.current.add(payload.eventId);
 
       const notificationKey = `consultation:${payload.eventId}`;
       const href = `/consultations/${payload.consultationId}`;
@@ -1269,7 +1349,11 @@ export function InboundCallIndicator({
         notificationPermission === "granted" &&
         notificationsEnabled &&
         (visibleAtEvent || notificationLeader.current);
-      if (!visibleAtEvent && !shouldShowNotification) return;
+      if (!visibleAtEvent && !shouldShowNotification) {
+        seenConsultationEventIds.current.add(payload.eventId);
+        pendingConsultationEventIds.current.delete(payload.eventId);
+        return;
+      }
 
       void (async () => {
         let consultation: ConsultationNotificationSummary | null = null;
@@ -1340,20 +1424,23 @@ export function InboundCallIndicator({
               : {}),
           });
         }
-        if (!shouldShowNotification) return;
+        if (!shouldShowNotification) {
+          seenConsultationEventIds.current.add(payload.eventId);
+          return;
+        }
 
         const storageKey = `lawand:consultation-notified:${payload.eventId}`;
         let alreadyNotified = false;
         try {
           alreadyNotified = Boolean(window.localStorage.getItem(storageKey));
-          if (!alreadyNotified) {
-            window.localStorage.setItem(storageKey, String(Date.now()));
-          }
         } catch {
           // 저장소가 막힌 브라우저에서도 Notification API는 별도로 시도한다.
         }
-        if (alreadyNotified) return;
-        await showConsultationBrowserNotification({
+        if (alreadyNotified) {
+          seenConsultationEventIds.current.add(payload.eventId);
+          return;
+        }
+        const shown = await showConsultationBrowserNotification({
           title,
           body,
           eventId: payload.eventId,
@@ -1362,7 +1449,16 @@ export function InboundCallIndicator({
           occurredAt: payload.occurredAt,
           canClaim: consultation?.canClaim ?? false,
         });
-      })();
+        if (!shown) return;
+        seenConsultationEventIds.current.add(payload.eventId);
+        try {
+          window.localStorage.setItem(storageKey, String(Date.now()));
+        } catch {
+          // 저장소가 막혀도 현재 탭의 성공 기록은 메모리에 유지한다.
+        }
+      })().finally(() => {
+        pendingConsultationEventIds.current.delete(payload.eventId);
+      });
     });
     return () => {
       active = false;
