@@ -474,6 +474,7 @@ export type TelephonyCallActivity = {
     | "ended";
   correlationStatus: "pending" | "confirmed" | "needs_confirmation" | "rejected";
   remotePhone: string | null;
+  callRegion: "seoul" | "daejeon" | "busan" | "unclassified";
   originalLineLast4: string | null;
   startedAt: string;
   connectedAt: string | null;
