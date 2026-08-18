@@ -102,6 +102,25 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-18 — 상담 알림 snapshot LISTEN 풀 대기 hotfix 운영 배포 완료
+- 통합 릴리스 최종 health에서 LISTEN pool waiting이 9→10으로 누적됐다. 상담 SSE 연결 때
+  최근 2분 outbox snapshot 조회가 영구 LISTEN 연결 4개로 꽉 찬 전용 풀의 `query`를 사용해,
+  연결마다 해제되지 않는 acquire 대기를 추가한 것이 원인이다. snapshot 조회만 최대 20개의
+  일반 요청 풀로 분리하고 LISTEN 풀을 사용하면 실패하는 회귀 테스트를 추가했다. gateway
+  172개 테스트·typecheck·lint·production build와 `git diff --check`를 통과했다.
+- main 소스 `430081bf864c542a7d2b4369c9a6ef2feeee8d47`의 GitHub Actions `32103794006` 검증·
+  세 앱 게시가 성공했다. gateway digest
+  `sha256:112adf87d77820fc1e384a0e0a8b3194bfb7c6f689d3dd45ddfa04bf0d072b6e`를 릴리스
+  `20260818T054421Z-consultation-listener-pool-hotfix-v1`로 전환했다. ARM64 child scan은
+  기존 통합 이미지와 같은 CRITICAL 3·HIGH 11·MEDIUM 10·LOW 1이다.
+- 최종 gateway image ID는 `sha256:8a268ba58bd504440b6adb1deda649aa2e56c2911eccb0ad33d6313a5c9bd5dc`이고
+  rollback은 `sha256:e4e1009ac813a0abb8ad175fad5879fe7a8eae0faed693310af2e15fcb2fdb87`·
+  `sha256:f7d09debd4460d7ee70c42b9164ffa4c9201a2c0f3ca6d356111eff08baeb71a`다. health 뒤 cache는
+  1,381,000,000 bytes, 가용량 93,080,162,304→93,936,222,208, 회수 856,059,904 bytes다.
+  실제 ERP SSE 재연결이 반복되는 동안 네 health 표본에서 request waiting 0/20·LISTEN waiting
+  0/4를 유지했다. migration·snapshot·운영 데이터·ERP·홈페이지·Windows bridge와 외부 발송은
+  변경하지 않았다. `PROJECT_PLAN.md`는 v1.51이다.
+
 ### 2026-08-18 — 알림·전달사항·어텐션·자동문자·기프티쇼 통합 운영 배포 완료
 - HERDR 명령은 이 세션에서 `HERDR_ENV`가 없고 현재 경로를 관리 worktree로 인식하지 못해,
   Git의 로컬 worktree와 원격 `origin/worktree/*`를 읽기 전용으로 전수 대조했다. 완료 브랜치

@@ -6,7 +6,7 @@ CloudFormation 스택: `lawand-prod`
 최초 배포 릴리스: `20260804T085006Z-84e8708`
 현재 홈페이지 릴리스: `20260818T051852Z-integrated-notifications-memo-sms-gifts-v1`
 현재 ERP 릴리스: `20260818T051852Z-integrated-notifications-memo-sms-gifts-v1`
-현재 gateway 릴리스: `20260818T051852Z-integrated-notifications-memo-sms-gifts-v1`
+현재 gateway 릴리스: `20260818T054421Z-consultation-listener-pool-hotfix-v1`
 현재 Windows bridge: `v0.8.3.0`
 
 완료된 모든 worktree를 main에 통합한 기준선 위에 공개 후기 작성자 자동 마스킹과 ERP 후기
@@ -1113,6 +1113,25 @@ x86 OCX 프로세스 하나를 격리해 실행하고, 배정된 회선과 제�
   wildcard→apex로 돌린다. 세 서버의 전환 전 Caddyfile은
   `Caddyfile.pre-domain-cutover-20260812T004900Z`에 있고 Cafe24 구 zone·호스팅·SSL과
   직전 홈페이지 이미지도 보존했다.
+
+## 2026-08-18 상담 알림 snapshot LISTEN 풀 대기 hotfix
+
+통합 릴리스 최종 health에서 LISTEN pool waiting이 9→10으로 누적됐다. 상담 SSE의 최근 2분
+outbox snapshot이 영구 연결 4개로 꽉 찬 LISTEN 전용 풀을 사용해 각 SSE 연결의 acquire를
+대기열에 남긴 것이 원인이다. snapshot 조회를 일반 요청 풀로 분리하고 전용 풀 사용을 막는
+회귀 테스트를 추가했다.
+
+- gateway 172개 테스트·typecheck·lint·build와 GitHub Actions `32103794006`이 성공했다.
+  소스 `430081bf864c542a7d2b4369c9a6ef2feeee8d47`, gateway digest
+  `sha256:112adf87d77820fc1e384a0e0a8b3194bfb7c6f689d3dd45ddfa04bf0d072b6e`, 릴리스
+  `20260818T054421Z-consultation-listener-pool-hotfix-v1`을 운영에 반영했다.
+- 최종 image ID는 `sha256:8a268ba58bd504440b6adb1deda649aa2e56c2911eccb0ad33d6313a5c9bd5dc`,
+  rollback은 `sha256:e4e1009ac813a0abb8ad175fad5879fe7a8eae0faed693310af2e15fcb2fdb87`·
+  `sha256:f7d09debd4460d7ee70c42b9164ffa4c9201a2c0f3ca6d356111eff08baeb71a`다. cache는
+  1.381GB, 가용량은 93,080,162,304→93,936,222,208 bytes, 회수는 856,059,904 bytes다.
+- 실제 SSE 재연결 뒤 네 health 표본에서 request waiting 0/20과 LISTEN waiting 0/4를
+  유지했다. ARM64 scan은 통합 이미지와 같은 CRITICAL 3·HIGH 11·MEDIUM 10·LOW 1이다.
+  migration·snapshot·운영 데이터·ERP·홈페이지·Windows bridge·외부 발송은 변경하지 않았다.
 
 ## 2026-08-18 알림·전달사항·어텐션·자동문자·기프티쇼 통합 릴리스
 
