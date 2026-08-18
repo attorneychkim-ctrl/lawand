@@ -1,19 +1,19 @@
 # AWS 운영 배포 기준선 v2
 
-기준 시각: 2026-08-16 KST
+기준 시각: 2026-08-18 KST
 CloudFormation 스택: `lawand-prod`
 리전: 서울(`ap-northeast-2`)
 최초 배포 릴리스: `20260804T085006Z-84e8708`
-현재 홈페이지 릴리스: `20260816T035427Z-review-privacy-template-editor-v1`
-현재 ERP 릴리스: `20260816T035427Z-review-privacy-template-editor-v1`
-현재 gateway 릴리스: `20260816T035427Z-review-privacy-template-editor-v1`
+현재 홈페이지 릴리스: `20260818T051852Z-integrated-notifications-memo-sms-gifts-v1`
+현재 ERP 릴리스: `20260818T051852Z-integrated-notifications-memo-sms-gifts-v1`
+현재 gateway 릴리스: `20260818T051852Z-integrated-notifications-memo-sms-gifts-v1`
 현재 Windows bridge: `v0.8.3.0`
 
 완료된 모든 worktree를 main에 통합한 기준선 위에 공개 후기 작성자 자동 마스킹과 ERP 후기
 요청 템플릿 선택·문자 미리보기·편집 UX를 홈페이지·ERP·gateway의 같은 릴리스로 운영
-반영했다. 이전 릴리스의 migration `0061..0063`, 암호화 공용 전화번호부, 후기 요청 기본
-슬롯·고객별 무입력 링크·개인 템플릿 삭제와 `LAW& OS` 기준선은 유지한다. 이번 릴리스에는
-migration·운영 데이터 변경이 없고 Windows bridge도 코드 영향이 없어 `v0.8.3.0`을 유지했다.
+반영했다. 2026-08-18 통합 릴리스는 알림 복구·신규 상담 전달사항·화면 전환 어텐션,
+개인 템플릿 자동문자와 기프티쇼 비즈 통제 발송을 더하고 migration `0064`·`0065`를
+적용했다. Windows bridge는 코드 영향이 없어 `v0.8.3.0`을 유지했다.
 
 이 문서는 정식 도메인 전환 이후를 포함한 실제 AWS 구성, 접속점, 데이터 이관 범위와
 운영 체크리스트를 기록한다. 비밀번호·API 키·AWS 계정 ID·RDS 마스터 시크릿 ARN은
@@ -119,8 +119,8 @@ Route 53·AWS 설정은 이 rollback의 대상이 아니다. 구 WordPress는 4.
 - migration `0022_consultation_sse_notifications.sql`은 상담 outbox INSERT가 커밋될 때
   개인정보 없이 이벤트 ID·유형·상담 ID·발생시각만 PostgreSQL 채널로 알린다. gateway의
   전용 연결만 이 채널을 `LISTEN`하며 RDS를 인터넷에 노출하지 않는다.
-- 2026-08-14 기준 migration `0063`까지 64개가 모두 적용됐고 이번 2026-08-16 릴리스에는
-  migration이나 운영 데이터 변경이 없다.
+- 2026-08-18 기준 migration `0065`까지 66개가 모두 적용됐다. `0064`는 개인 문자 템플릿의
+  자동발송 조건, `0065`는 암호화 기프티쇼 발송 원장과 최소 권한을 추가한다.
   역사적으로 운영에 적용된 `0028_inbound_phone_directory_resolver.sql` 한 개만 현재 파일과
   해시가 다르다. 후속 `0037_phone_desk_directory_context.sql`이 같은 함수 계약을 대체했고
   현재 스키마·권한 검증은 통과한다. 이 예외를 이유로 migration 원장을 수정하거나 0028을
@@ -1113,6 +1113,45 @@ x86 OCX 프로세스 하나를 격리해 실행하고, 배정된 회선과 제�
   wildcard→apex로 돌린다. 세 서버의 전환 전 Caddyfile은
   `Caddyfile.pre-domain-cutover-20260812T004900Z`에 있고 Cafe24 구 zone·호스팅·SSL과
   직전 홈페이지 이미지도 보존했다.
+
+## 2026-08-18 알림·전달사항·어텐션·자동문자·기프티쇼 통합 릴리스
+
+완료 worktree 5개를 main에 병합한 소스
+`3c53cb46ac49c464e41b2085ba9ee28f2c7cf89c`를 단일 배포 입력으로 사용했다. 전체
+typecheck·lint·test·production build, DB schema check와 GitHub Actions `32095749402`가
+성공했고 세 앱의 `linux/arm64` image를 게시했다.
+
+- ECR digest는 홈페이지
+  `sha256:586617f0ac1e8c1bd107b7cbb1a8c8ae3be3c8eac7fc93c68cb3eae4ef20c1d6`, ERP
+  `sha256:92441a2b9a3ba3d389ecf07b7ba3e7117175aaea5b5fb7236afed16e60367b13`, gateway
+  `sha256:8adfbc16c3f7ca6ba53e14eb7c57fab219ff7fdc0d9c47ebac7f58b454264401`다. EC2 pull 뒤
+  앱·revision·`arm64` label을 대조했다. ECR scan은 세 앱 모두 CRITICAL 3·HIGH 11·
+  MEDIUM 10·LOW 1이다. 새 HIGH `CVE-2026-14456`은 탐지된 OpenSSL 3.0.20과 설명상 영향
+  시작 버전 3.5가 맞지 않고 Node 앱은 QUIC listener를 사용하지 않는다. MEDIUM
+  `CVE-2026-16742`는 container에서 사용하지 않는 systemd-homed의 local-user 조건이다.
+- 기존 gateway secret을 보존하며 기프티쇼 인증·토큰·사용자·발신번호·배너·카드 ID 6개를
+  추가했다. 값은 로그나 문서에 남기지 않고 키 존재 개수와 gateway 설정 로딩만 확인했다.
+- 암호화 snapshot `lawand-prod-pre-integrated-notifications-sms-gifts-20260818t051852z`을
+  available·100%까지 확보하고 같은 gateway digest로 migration `0064`·`0065`를 적용했다.
+  운영 migration은 66개이며 최신 해시는 각각
+  `9819aab7c0c9e97390f92b970c20f15a3e53205424a928fb646c14364a38dc78`,
+  `8de8a92023588a4b58e9869ee2ecac6885dd04e867eb3d8c72c48727dd78655c`다. 신규 쿠폰 원장은
+  0건이며 앱/viewer 최소 권한과 PUBLIC grant 0을 확인했다.
+- 릴리스 `20260818T051852Z-integrated-notifications-memo-sms-gifts-v1`로 gateway → ERP →
+  홈페이지를 digest로 전환했다. image ID는 홈페이지
+  `sha256:c6cac11488781cce61b428d96b52271b97727e5b3cf2ca19e3ad73873940684a`, ERP
+  `sha256:9641a7e295b1b50cff200ce4b1768d62b8c1535aa28fdb8e5c76a19870951411`, gateway
+  `sha256:e4e1009ac813a0abb8ad175fad5879fe7a8eae0faed693310af2e15fcb2fdb87`다.
+- health 뒤 BuildKit cache는 홈페이지 1.421GB, ERP 1.429GB, gateway 1.381GB다. 홈페이지는
+  가용량 19,200,933,888→20,083,027,968 bytes·회수 882,094,080, ERP는
+  93,524,164,608→94,398,738,432·회수 874,573,824, gateway는
+  93,083,996,160→93,933,522,944·회수 849,526,784 bytes다. 각 서버는 현재와 rollback
+  2개, source release 2개를 보존하고 `/var/log/lawand/deployments.log`에 기록했다.
+- 정식·EIP HTTPS는 모두 200이고 세 앱·Caddy active, restart 0, 환경파일 600,
+  priority/error journal 0이다. gateway pool waiting 0, CloudWatch OK 14·ALARM 0·
+  INSUFFICIENT_DATA 0, RDS·EC2·SSM도 정상이다. outbox는 배포 전후 dead 9·pending 284·
+  published 608, locked 0이고 활성 수신 명령 0이다. 실제 전화·문자·쿠폰 발송과 Windows
+  bridge 변경은 수행하지 않았다.
 
 ## 2026-08-16 공개 후기 마스킹·후기 요청 편집기 릴리스
 

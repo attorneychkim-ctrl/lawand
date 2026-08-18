@@ -12,7 +12,7 @@
 고객 전 생애주기를 **최대한 사람 손이 안 타는 자동화**로 흐르게 한다. (상세: `PROJECT_PLAN.md`)
 
 ## 현재 상태
-- **홈페이지·ERP·gateway AWS 운영 배포와 Route 53 정식 도메인 전환 완료. 2026-08-16 공개 후기 작성자 마스킹·ERP 후기 요청 편집기 릴리스까지 운영 반영했다.**
+- **홈페이지·ERP·gateway AWS 운영 배포와 Route 53 정식 도메인 전환 완료. 2026-08-18 알림·전달사항·어텐션·자동문자·기프티쇼 통합 릴리스까지 운영 반영했다.**
 - 스택 전제: Next.js 16(App Router) · React 19 · TypeScript · Tailwind 4 · shadcn/ui ·
   TanStack Query, **모노레포(pnpm workspaces + Turborepo)**.
 - 이 WSL 환경: node **v22.22.2**, pnpm **11.17.0**(Corepack + 로컬 shim).
@@ -101,6 +101,46 @@
 ---
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
+
+### 2026-08-18 — 알림·전달사항·어텐션·자동문자·기프티쇼 통합 운영 배포 완료
+- HERDR 명령은 이 세션에서 `HERDR_ENV`가 없고 현재 경로를 관리 worktree로 인식하지 못해,
+  Git의 로컬 worktree와 원격 `origin/worktree/*`를 읽기 전용으로 전수 대조했다. 완료 브랜치
+  5개의 커밋을 main에 병합한 소스 `3c53cb46ac49c464e41b2085ba9ee28f2c7cf89c`는 배포 시점과
+  최종 기록 직전 `origin/main`에 일치하고 모든 로컬·원격 HEAD가 ancestor다. 제외·진행 중
+  브랜치는 없다. 전체 5패키지 typecheck·lint·test·production build, core 91개·gateway
+  171개 테스트, DB schema check와 `git diff --check`를 통과했고 GitHub Actions
+  `32095749402`의 검증·세 앱 `linux/arm64` 게시도 성공했다.
+- ECR digest는 홈페이지 `sha256:586617f0ac1e8c1bd107b7cbb1a8c8ae3be3c8eac7fc93c68cb3eae4ef20c1d6`,
+  ERP `sha256:92441a2b9a3ba3d389ecf07b7ba3e7117175aaea5b5fb7236afed16e60367b13`,
+  gateway `sha256:8adfbc16c3f7ca6ba53e14eb7c57fab219ff7fdc0d9c47ebac7f58b454264401`다.
+  EC2에서 digest를 직접 pull해 앱·revision·`arm64` label을 대조했다. ECR scan은 세 앱 모두
+  CRITICAL 3·HIGH 11·MEDIUM 10·LOW 1이다. 직전 이미지보다 추가된 HIGH `CVE-2026-14456`은
+  OpenSSL 3.5부터의 QUIC server 이슈로 설명되지만 탐지 패키지는 3.0.20이고 앱은 Node HTTP
+  entrypoint라 해당 경로를 사용하지 않는다. MEDIUM `CVE-2026-16742`는 container에서 사용하지
+  않는 systemd-homed의 local-user 조건이다. 탐지를 숨기지 않고 후속 base 갱신에서 재평가한다.
+- 기프티쇼 운영 인증·토큰·사용자·발신번호·배너·카드 ID 6개를 기존 gateway secret에 추가하고
+  값 없이 존재 개수 6과 새 gateway 설정 로딩을 확인했다. 암호화 snapshot
+  `lawand-prod-pre-integrated-notifications-sms-gifts-20260818t051852z`을 available·100%까지
+  확보한 뒤 같은 gateway digest로 migration `0064`·`0065`를 적용했다. 운영 migration은
+  66개이고 최신 해시는 `9819aab7c0c9e97390f92b970c20f15a3e53205424a928fb646c14364a38dc78`·
+  `8de8a92023588a4b58e9869ee2ecac6885dd04e867eb3d8c72c48727dd78655c`다. 신규 컬럼·쿠폰 원장과
+  앱/viewer 최소 권한·PUBLIC grant 0을 확인했고 쿠폰 발송 원장은 0건이다.
+- 릴리스 `20260818T051852Z-integrated-notifications-memo-sms-gifts-v1`로 gateway → ERP → 홈페이지를
+  digest로 전환했다. 최종 image ID는 홈페이지 `sha256:c6cac11488781cce61b428d96b52271b97727e5b3cf2ca19e3ad73873940684a`,
+  ERP `sha256:9641a7e295b1b50cff200ce4b1768d62b8c1535aa28fdb8e5c76a19870951411`, gateway
+  `sha256:e4e1009ac813a0abb8ad175fad5879fe7a8eae0faed693310af2e15fcb2fdb87`다.
+  health 뒤 cache는 홈페이지 1,421,000,000, ERP 1,429,000,000, gateway 1,381,000,000 bytes다.
+  홈페이지 가용량 19,200,933,888→20,083,027,968·회수 882,094,080, ERP
+  93,524,164,608→94,398,738,432·회수 874,573,824, gateway
+  93,083,996,160→93,933,522,944·회수 849,526,784 bytes이며 현재+rollback 2개와 source release
+  2개를 보존하고 `/var/log/lawand/deployments.log`에 기록했다.
+- 정식·EIP HTTPS의 홈페이지·ERP 로그인·gateway health는 모두 200이다. 세 앱·Caddy active,
+  restart 0, 환경파일 600, priority/error journal 0이고 gateway request/LISTEN waiting은
+  0/20·0/4다. 스택 `UPDATE_COMPLETE`·종료 방지, RDS available·암호화·삭제 방지,
+  세 EC2 status ok, SSM Online, CloudWatch OK 14·ALARM 0·INSUFFICIENT_DATA 0이다. outbox는
+  배포 전후 dead 9·pending 284·published 608, locked 0이고 활성 수신 명령 0이다. 실제 전화·
+  문자·쿠폰 발송은 만들지 않았으며 Windows bridge와 기존 원장은 변경하지 않았다.
+- `PROJECT_PLAN.md`는 v1.50이며 운영 배포 문서의 현재 릴리스·migration·digest 원장을 갱신했다.
 
 ### 2026-08-18 — ERP 브라우저 알림 누락 복구·다중 탭 안정화 후보
 - 전화·상담 Notification은 실제 표시 성공 뒤에만 탭 메모리와 localStorage 완료 키를 남기며,
