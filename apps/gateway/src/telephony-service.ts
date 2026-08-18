@@ -79,6 +79,7 @@ import {
   telephonyInboundCalls,
   telephonyInboundCommands,
   telephonyInboundEvents,
+  telephonyInboundMessageNotifications,
   telephonyInboundMessages,
   telephonyMessageDirectoryTargets,
   telephonyMessageManualContacts,
@@ -7117,6 +7118,53 @@ export function createTelephonyService(options: {
     };
   }
 
+  async function getMessageDutyCount(actor: StaffPrincipal) {
+    const [row] = await db
+      .select({ count: count() })
+      .from(telephonyInboundMessageNotifications)
+      .where(and(
+        eq(telephonyInboundMessageNotifications.staffUserId, actor.id),
+        isNull(telephonyInboundMessageNotifications.readAt),
+      ));
+    return { count: row?.count ?? 0 };
+  }
+
+  async function getMessageNotification(messageId: string, actor: StaffPrincipal) {
+    const [allowed] = await db
+      .select({ id: telephonyInboundMessageNotifications.inboundMessageId })
+      .from(telephonyInboundMessageNotifications)
+      .where(and(
+        eq(telephonyInboundMessageNotifications.inboundMessageId, messageId),
+        eq(telephonyInboundMessageNotifications.staffUserId, actor.id),
+      ))
+      .limit(1);
+    if (!allowed) return null;
+    const { incoming } = await loadMessageHubRows({ outgoingIds: [], incomingIds: [messageId], includeMailboxes: false });
+    const row = incoming[0];
+    if (!row) return null;
+    const identity = incomingThreadIdentity(row);
+    return {
+      id: row.id,
+      threadKey: identity.key,
+      href: `/messages?thread=${encodeURIComponent(identity.key)}`,
+      customerLabel: identity.customerName,
+      receivedAt: row.receivedAt.toISOString(),
+    };
+  }
+
+  async function listUnreadMessageNotifications(actor: StaffPrincipal) {
+    const rows = await db
+      .select({ messageId: telephonyInboundMessageNotifications.inboundMessageId })
+      .from(telephonyInboundMessageNotifications)
+      .where(and(
+        eq(telephonyInboundMessageNotifications.staffUserId, actor.id),
+        isNull(telephonyInboundMessageNotifications.readAt),
+      ))
+      .orderBy(desc(telephonyInboundMessageNotifications.createdAt))
+      .limit(20);
+    return { items: rows };
+  }
+
   async function getMessageThread(
     threadKey: string,
     actor: StaffPrincipal,
@@ -7248,6 +7296,17 @@ export function createTelephonyService(options: {
       );
     }
     timeline.reverse();
+    await db.execute(sql`
+      with message_records as (${messageRecordUnion})
+      update telephony_inbound_message_notifications as notification
+      set read_at = ${now()}, updated_at = ${now()}
+      where notification.staff_user_id = ${actor.id}
+        and notification.read_at is null
+        and notification.inbound_message_id in (
+          select message_id from message_records
+          where thread_key = ${threadKey} and direction = 'inbound'
+        )
+    `);
     await auditMessageView({
       actor,
       action: "telephony.message_thread.viewed",
@@ -8989,9 +9048,12 @@ export function createTelephonyService(options: {
     getCallActivitySnapshot,
     getInboundCallSnapshot,
     getMessage,
+    getMessageDutyCount,
     getMessageHub,
+    getMessageNotification,
     getMessageThread,
     listMessageTemplates,
+    listUnreadMessageNotifications,
     getPhoneDeskCalls,
     getPhoneDeskCall,
     listPhonebookContacts,

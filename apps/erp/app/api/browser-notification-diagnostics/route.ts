@@ -8,6 +8,7 @@ const channels = new Set([
   "consultation",
   "telephony",
   "review",
+  "message",
   "service_worker",
 ]);
 const stages = new Set(["sse", "prepare", "display"]);

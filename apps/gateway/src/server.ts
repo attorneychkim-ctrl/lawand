@@ -16,6 +16,7 @@ import { createCentrexWorker } from "./centrex-worker.js";
 import { readGatewayConfig } from "./config.js";
 import { createPostgresConsultationEventSource } from "./consultation-events.js";
 import { createPostgresReviewEventSource } from "./review-events.js";
+import { createPostgresMessageEventSource } from "./message-events.js";
 import { createDataProtection } from "./crypto.js";
 import { createDatabasePoolMonitor } from "./database-pool-monitor.js";
 import { createPublicIntakeProtection } from "./intake-protection.js";
@@ -166,6 +167,10 @@ const reviewEvents = createPostgresReviewEventSource({
     console.error("lawand review realtime source error", error);
   },
 });
+const messageEvents = createPostgresMessageEventSource({
+  pool: listenerPool,
+  onError: (error) => console.error("lawand message realtime source error", error),
+});
 const telephonyInboundEvents = createPostgresTelephonyInboundEventSource({
   pool: listenerPool,
   onError: (error) => {
@@ -198,6 +203,7 @@ const server = createGatewayServer({
   authService,
   consultationEvents,
   reviewEvents,
+  messageEvents,
   telephonyInboundEvents,
   telephonyDeskEvents,
   telephonyRealtimeMonitor,
@@ -276,6 +282,7 @@ await Promise.all([
   centrexBridgeProvisioning?.start(),
   consultationEvents.start(),
   reviewEvents.start(),
+  messageEvents.start(),
   telephonyInboundEvents.start(),
   telephonyDeskEvents.start(),
 ]);
@@ -338,6 +345,7 @@ function shutdown(signal: string) {
       await Promise.all([
         consultationEvents.stop(),
         reviewEvents.stop(),
+        messageEvents.stop(),
         telephonyInboundEvents.stop(),
         telephonyDeskEvents.stop(),
         legalFriendsOutboxWorker?.stop(),

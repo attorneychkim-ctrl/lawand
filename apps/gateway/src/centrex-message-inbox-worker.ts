@@ -13,8 +13,13 @@ import {
   createEventId,
 } from "@lawand/core";
 import {
+  consultationAssignments,
+  legalFriendsCaseLinks,
+  staffMemberships,
+  staffUsers,
   telephonyEndpointCredentials,
   telephonyEndpoints,
+  telephonyInboundMessageNotifications,
   telephonyInboundMessages,
   telephonyMessageDirectoryTargets,
   telephonyMessageMailboxStates,
@@ -28,6 +33,7 @@ import type { CentrexCredentialVault } from "./centrex-credential-vault.js";
 import type { DataProtection } from "./crypto.js";
 
 type Database = ReturnType<typeof createDatabaseClient>["db"];
+type DatabaseTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 const DEFAULT_POLL_INTERVAL_MS = 10_000;
 const PROVIDER_CLOCK_SKEW_MS = 5 * 60_000;
@@ -176,10 +182,12 @@ export function createCentrexMessageInboxWorker(options: {
   async function matchOutbound(
     remotePhoneFingerprint: Buffer,
     receivedAt: Date,
+    executor: Database | DatabaseTransaction = db,
   ) {
-    const [match] = await db
+    const [match] = await executor
       .select({
         id: telephonyMessages.id,
+        staffUserId: telephonyMessages.staffUserId,
         targetSource: telephonyMessages.targetSource,
         consultationId: telephonyMessages.consultationId,
         directoryClientIdx: telephonyMessageDirectoryTargets.clientIdx,
@@ -269,10 +277,11 @@ export function createCentrexMessageInboxWorker(options: {
       record.message,
       `telephony_inbound_messages/${inboundMessageId}/body`,
     );
+    return db.transaction(async (tx) => {
     const match = sourceIdentity.matchOutbound
-      ? await matchOutbound(remotePhoneFingerprint, receivedAt)
+      ? await matchOutbound(remotePhoneFingerprint, receivedAt, tx)
       : null;
-    const [inserted] = await db
+    const [inserted] = await tx
       .insert(telephonyInboundMessages)
       .values({
         id: inboundMessageId,
@@ -321,7 +330,74 @@ export function createCentrexMessageInboxWorker(options: {
         ],
       })
       .returning({ id: telephonyInboundMessages.id });
-    return inserted ? receivedAt : null;
+    if (!inserted) return null;
+
+    const targets = new Map<string, "latest_sender" | "consultation_assignee" | "unmatched_admin">();
+    if (match?.staffUserId) targets.set(match.staffUserId, "latest_sender");
+    if (match?.consultationId) {
+      const [assignment] = await tx
+        .select({ staffUserId: consultationAssignments.assigneeUserId })
+        .from(consultationAssignments)
+        .where(eq(consultationAssignments.consultationId, match.consultationId))
+        .limit(1);
+      if (assignment && !targets.has(assignment.staffUserId)) {
+        targets.set(assignment.staffUserId, "consultation_assignee");
+      }
+    }
+    if (!match) {
+      const admins = await tx
+        .selectDistinct({ staffUserId: staffMemberships.userId })
+        .from(staffMemberships)
+        .innerJoin(staffUsers, eq(staffUsers.id, staffMemberships.userId))
+        .where(
+          and(
+            eq(staffMemberships.isActive, true),
+            eq(staffMemberships.role, "admin"),
+            eq(staffUsers.status, "active"),
+          ),
+        );
+      for (const admin of admins) {
+        targets.set(admin.staffUserId, "unmatched_admin");
+      }
+    }
+    if (targets.size > 0) {
+      await tx.insert(telephonyInboundMessageNotifications).values(
+        [...targets].map(([staffUserId, reason]) => ({
+          inboundMessageId,
+          staffUserId,
+          reason,
+          createdAt: fetchedAt,
+          updatedAt: fetchedAt,
+        })),
+      );
+    }
+    const [caseLink] = match?.consultationId
+      ? await tx
+          .select({ caseIdx: legalFriendsCaseLinks.caseIdx })
+          .from(legalFriendsCaseLinks)
+          .where(eq(legalFriendsCaseLinks.consultationId, match.consultationId))
+          .limit(1)
+      : [];
+    const threadKey =
+      match?.targetSource === "legal_friends_directory" && match.directoryCaseIdx
+        ? `case:${match.directoryCaseIdx}`
+        : match?.targetSource === "manual" && match.manualContactId
+          ? `manual:${match.manualContactId}`
+          : caseLink?.caseIdx
+            ? `case:${caseLink.caseIdx}`
+            : match?.consultationId
+              ? `consultation:${match.consultationId}`
+              : `unmatched:${inboundMessageId}`;
+    await tx.execute(sql`select pg_notify('lawand_message_events', ${JSON.stringify({
+      eventId: inboundMessageId,
+      eventType: "message.received",
+      messageId: inboundMessageId,
+      threadKey,
+      targetUserIds: [...targets.keys()],
+      occurredAt: receivedAt.toISOString(),
+    })})`);
+    return receivedAt;
+    });
   }
 
   async function runOnce(): Promise<boolean> {

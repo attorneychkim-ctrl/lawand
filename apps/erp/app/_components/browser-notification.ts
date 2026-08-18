@@ -56,11 +56,15 @@ type ReviewBrowserNotification = {
   occurredAt: string;
 };
 
+type MessageBrowserNotification = {
+  title: string; body: string; eventId: string; messageId: string; href: string; occurredAt: string;
+};
+
 type ErpBrowserNotification = {
   title: string;
   body: string;
   notificationId: string;
-  resourceKind: "consultation" | "telephony" | "review";
+  resourceKind: "consultation" | "telephony" | "review" | "message";
   resourceId: string;
   href: string;
   deskHref?: string;
@@ -371,5 +375,13 @@ export function showReviewBrowserNotification(
       { action: "erp-detail", title: "후기 보기" },
       { action: "erp-desk", title: "후기관리" },
     ],
+  });
+}
+
+export function showMessageBrowserNotification(input: MessageBrowserNotification) {
+  return showErpBrowserNotification({
+    title: input.title, body: input.body, notificationId: input.eventId,
+    resourceKind: "message", resourceId: input.messageId, href: input.href,
+    occurredAt: input.occurredAt,
   });
 }

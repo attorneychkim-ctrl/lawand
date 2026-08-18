@@ -55,6 +55,7 @@ import {
 } from "./auth.js";
 import type { ConsultationEventSource } from "./consultation-events.js";
 import type { ReviewEventSource } from "./review-events.js";
+import type { MessageEventSource } from "./message-events.js";
 import type { TelephonyInboundEventSource } from "./telephony-inbound-events.js";
 import type { TelephonyDeskEventSource } from "./telephony-desk-events.js";
 import {
@@ -290,6 +291,7 @@ export function createGatewayServer(options?: {
   reviewManagementService?: ReviewManagementService;
   giftCouponService?: GiftCouponService;
   reviewEvents?: ReviewEventSource;
+  messageEvents?: MessageEventSource;
   telephonyService?: TelephonyService;
   centrexBridgeIngress?: CentrexBridgeIngressService;
   centrexBridgeKeys?: CentrexBridgeKeyMap;
@@ -762,6 +764,36 @@ export function createGatewayServer(options?: {
         request.once("aborted", close);
         response.once("close", close);
         return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/v1/message-events/stream") {
+        if (!options?.messageEvents || !options.internalApiKey ||
+          !hasHeaderAccess(request, "x-lawand-internal-key", options.internalApiKey) || !options.authService) {
+          sendJson(response, 401, { error: "unauthorized" }); return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) { sendJson(response, 401, { error: "invalid_session" }); return; }
+        const actor = await options.authService.authorize(sessionToken, [...consultationAccessRoles]);
+        response.writeHead(200, {
+          "content-type": "text/event-stream; charset=utf-8",
+          "cache-control": "no-cache, no-store, no-transform",
+          connection: "keep-alive", "x-accel-buffering": "no", "x-content-type-options": "nosniff",
+        });
+        response.flushHeaders(); response.write("retry: 3000\n\n");
+        sendSseEvent(response, "message.sync", { reason: "connected" });
+        const unsubscribe = options.messageEvents.subscribe((message) => {
+          if (response.destroyed || response.writableEnded) return;
+          if (message.kind === "sync") { sendSseEvent(response, "message.sync", { reason: "source_reconnected" }); return; }
+          if (!message.notification.targetUserIds.includes(actor.id)) return;
+          sendSseEvent(response, "message.received", message.notification, message.notification.eventId);
+        });
+        const heartbeat = setInterval(() => {
+          if (!response.destroyed && !response.writableEnded) response.write(": keepalive\n\n");
+        }, SSE_HEARTBEAT_INTERVAL_MS);
+        heartbeat.unref();
+        let closed = false;
+        const close = () => { if (closed) return; closed = true; clearInterval(heartbeat); unsubscribe(); };
+        request.once("aborted", close); response.once("close", close); return;
       }
 
       if (
@@ -2746,6 +2778,41 @@ export function createGatewayServer(options?: {
           }),
         );
         return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/v1/messages/duty-count") {
+        if (!options?.telephonyService || !options.internalApiKey ||
+          !hasHeaderAccess(request, "x-lawand-internal-key", options.internalApiKey) || !options.authService) {
+          sendJson(response, 401, { error: "unauthorized" }); return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) { sendJson(response, 401, { error: "invalid_session" }); return; }
+        const actor = await options.authService.authorize(sessionToken, [...consultationAccessRoles]);
+        sendJson(response, 200, await options.telephonyService.getMessageDutyCount(actor)); return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/v1/messages/notifications") {
+        if (!options?.telephonyService || !options.internalApiKey ||
+          !hasHeaderAccess(request, "x-lawand-internal-key", options.internalApiKey) || !options.authService) {
+          sendJson(response, 401, { error: "unauthorized" }); return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) { sendJson(response, 401, { error: "invalid_session" }); return; }
+        const actor = await options.authService.authorize(sessionToken, [...consultationAccessRoles]);
+        sendJson(response, 200, await options.telephonyService.listUnreadMessageNotifications(actor)); return;
+      }
+
+      const messageNotificationMatch = url.pathname.match(/^\/v1\/messages\/([0-9a-f-]+)\/notification$/i);
+      if (request.method === "GET" && messageNotificationMatch) {
+        if (!options?.telephonyService || !options.internalApiKey ||
+          !hasHeaderAccess(request, "x-lawand-internal-key", options.internalApiKey) || !options.authService) {
+          sendJson(response, 401, { error: "unauthorized" }); return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) { sendJson(response, 401, { error: "invalid_session" }); return; }
+        const actor = await options.authService.authorize(sessionToken, [...consultationAccessRoles]);
+        const notification = await options.telephonyService.getMessageNotification(messageNotificationMatch[1]!, actor);
+        sendJson(response, notification ? 200 : 404, notification ?? { error: "message_notification_not_found" }); return;
       }
 
       if (
