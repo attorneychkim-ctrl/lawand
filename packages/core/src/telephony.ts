@@ -292,6 +292,7 @@ export const staffConsultationCreateSchema = z
       ),
     residenceRegion: residenceRegionSchema,
     caseType: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+    transferNote: z.string().trim().max(2_000).optional(),
     directorySource: z
       .object({
         clientIdx: z.number().int().positive(),
@@ -350,6 +351,7 @@ const phoneDeskConsultationActionSchema = z.discriminatedUnion("mode", [
       mode: z.literal("create"),
       customerName: z.string().trim().min(1).max(50),
       assigneeUserId: z.uuid().optional(),
+      transferNote: z.string().trim().max(2_000).optional(),
     })
     .strict(),
 ]);

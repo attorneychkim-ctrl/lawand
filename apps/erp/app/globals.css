@@ -4475,6 +4475,31 @@ a.inbound-customer:hover { text-decoration: underline; }
   overflow: hidden;
 }
 
+.customer-transfer-note {
+  display: grid;
+  gap: 8px;
+  margin: 0 22px 22px;
+  padding: 15px 16px;
+  border: 1px solid color-mix(in srgb, var(--brand) 24%, var(--line));
+  border-radius: 12px;
+  background: var(--brand-soft);
+}
+
+.customer-transfer-note span {
+  color: var(--brand-strong);
+  font-size: .68rem;
+  font-weight: 800;
+}
+
+.customer-transfer-note p {
+  margin: 0;
+  color: var(--ink);
+  font-size: .76rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .card-heading {
   padding: 21px 22px 17px;
   border-bottom: 1px solid var(--line);
@@ -7540,6 +7565,7 @@ a.inbound-customer:hover { text-decoration: underline; }
 .phone-aftercare-section.is-follow-up { padding: 17px; border: 1px solid color-mix(in srgb, var(--warning) 25%, var(--line)); border-radius: 13px; background: var(--warning-soft); }
 .phone-aftercare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .phone-aftercare-field { display: grid; gap: 7px; }
+.phone-aftercare-transfer-note { margin-top: 12px; }
 
 .phone-aftercare-follow-up-fields { display: grid; gap: 14px; }
 .phone-aftercare-schedule-picker {
@@ -9282,7 +9308,8 @@ a.inbound-customer:hover { text-decoration: underline; }
 }
 
 .client-consultation-fields input,
-.client-consultation-fields select {
+.client-consultation-fields select,
+.client-consultation-note textarea {
   width: 100%;
   min-height: 43px;
   border: 1px solid var(--line-strong);
@@ -9292,8 +9319,34 @@ a.inbound-customer:hover { text-decoration: underline; }
   padding: 0 12px;
 }
 
+.client-consultation-note {
+  display: grid;
+  gap: 6px;
+}
+
+.client-consultation-note > span {
+  color: var(--ink-soft);
+  font-size: .7rem;
+  font-weight: 780;
+}
+
+.client-consultation-note textarea {
+  min-height: 112px;
+  padding: 11px 12px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.client-consultation-note small,
+.phone-aftercare-transfer-note small {
+  color: var(--muted);
+  font-size: .64rem;
+  line-height: 1.5;
+}
+
 .client-consultation-fields input:focus,
-.client-consultation-fields select:focus {
+.client-consultation-fields select:focus,
+.client-consultation-note textarea:focus {
   border-color: var(--brand);
   background: var(--surface);
 }

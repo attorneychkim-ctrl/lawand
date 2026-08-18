@@ -367,6 +367,7 @@ export function PhoneAftercareForm({
         ? detail.call.customerMatch.clientName
         : ""),
   );
+  const [transferNote, setTransferNote] = useState("");
   const [consultationAssignee, setConsultationAssignee] = useState(
     recommendedAssignee,
   );
@@ -472,6 +473,9 @@ export function PhoneAftercareForm({
               customerName: customerName.trim(),
               ...(consultationAssignee
                 ? { assigneeUserId: consultationAssignee }
+                : {}),
+              ...(transferNote.trim()
+                ? { transferNote: transferNote.trim() }
                 : {}),
             }
           : { mode: "none" };
@@ -720,31 +724,44 @@ export function PhoneAftercareForm({
           </span>
         </label>
         {consultationMode === "create" ? (
-          <div className="phone-aftercare-grid">
-            <label className="phone-aftercare-field">
-              <span>고객명</span>
-              <input
-                maxLength={50}
-                onChange={(event) => setCustomerName(event.target.value)}
-                placeholder="고객명"
-                value={customerName}
+          <>
+            <div className="phone-aftercare-grid">
+              <label className="phone-aftercare-field">
+                <span>고객명</span>
+                <input
+                  maxLength={50}
+                  onChange={(event) => setCustomerName(event.target.value)}
+                  placeholder="고객명"
+                  value={customerName}
+                />
+              </label>
+              <label className="phone-aftercare-field">
+                <span>상담 담당자</span>
+                <select
+                  onChange={(event) => setConsultationAssignee(event.target.value)}
+                  value={consultationAssignee}
+                >
+                  <option value="">미배정으로 생성</option>
+                  {detail.staffOptions.map((staff) => (
+                    <option key={staff.staffUserId} value={staff.staffUserId}>
+                      {staff.displayName} · {staff.department}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <label className="phone-aftercare-field phone-aftercare-transfer-note">
+              <span>전달사항</span>
+              <textarea
+                maxLength={2000}
+                onChange={(event) => setTransferNote(event.target.value)}
+                placeholder="어떤 용건으로 연락했고 현재 어떤 상황인지, 다음 담당자가 알아야 할 내용을 적어 주세요."
+                rows={4}
+                value={transferNote}
               />
+              <small>선택 입력 · 생성된 상담의 고객 핵심정보에 표시됩니다.</small>
             </label>
-            <label className="phone-aftercare-field">
-              <span>상담 담당자</span>
-              <select
-                onChange={(event) => setConsultationAssignee(event.target.value)}
-                value={consultationAssignee}
-              >
-                <option value="">미배정으로 생성</option>
-                {detail.staffOptions.map((staff) => (
-                  <option key={staff.staffUserId} value={staff.staffUserId}>
-                    {staff.displayName} · {staff.department}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
+          </>
         ) : null}
 
         {detail.legalFriendsMatch ? (

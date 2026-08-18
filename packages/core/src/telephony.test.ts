@@ -99,12 +99,14 @@ test("직원 신규상담은 일반·기존고객·소개 등록 문맥을 엄�
     phone: "010-2345-6789",
     residenceRegion: "gyeonggi",
     caseType: 1,
+    transferNote: "  개인회생 가능 여부를 문의함  ",
     directorySource: null,
   } as const;
   assert.deepEqual(staffConsultationCreateSchema.parse(input), {
     ...input,
     customerName: "신규 고객",
     phone: "01023456789",
+    transferNote: "개인회생 가능 여부를 문의함",
   });
   assert.equal(
     staffConsultationCreateSchema.safeParse({
@@ -125,6 +127,13 @@ test("직원 신규상담은 일반·기존고객·소개 등록 문맥을 엄�
         caseIdx: 20,
         relationship: "invalid",
       },
+    }).success,
+    false,
+  );
+  assert.equal(
+    staffConsultationCreateSchema.safeParse({
+      ...input,
+      transferNote: "가".repeat(2_001),
     }).success,
     false,
   );
@@ -281,6 +290,17 @@ test("전화데스크 후처리는 기타 설명과 재통화 담당·일시를 
     },
   } as const;
   assert.deepEqual(phoneDeskAftercareSaveSchema.parse(base), base);
+  assert.equal(
+    phoneDeskAftercareSaveSchema.safeParse({
+      ...base,
+      consultation: {
+        mode: "create",
+        customerName: "통화 고객",
+        transferNote: "가".repeat(2_001),
+      },
+    }).success,
+    false,
+  );
   assert.equal(
     phoneDeskAftercareSaveSchema.safeParse({
       ...base,
