@@ -8449,6 +8449,7 @@ a.inbound-customer:hover { text-decoration: underline; }
 
 .consultation-invalidation-form { display: grid; gap: 5px; }
 .consultation-invalidation-button,
+.consultation-restoration-button,
 .consultation-soft-delete-button {
   display: inline-flex;
   min-height: 42px;
@@ -8465,10 +8466,17 @@ a.inbound-customer:hover { text-decoration: underline; }
   font-weight: 820;
 }
 .consultation-invalidation-button:hover:not(:disabled),
+.consultation-restoration-button:hover:not(:disabled),
 .consultation-soft-delete-button:hover:not(:disabled) { background: var(--danger-soft); }
 .consultation-invalidation-button:disabled,
+.consultation-restoration-button:disabled,
 .consultation-soft-delete-button:disabled { cursor: default; opacity: .58; }
 .consultation-invalidation-error { max-width: 240px; margin: 0; color: var(--danger); font-size: .64rem; line-height: 1.4; text-align: right; }
+.consultation-restoration-button {
+  border-color: color-mix(in srgb, var(--brand) 48%, var(--line));
+  color: var(--brand-strong);
+}
+.consultation-restoration-button:hover:not(:disabled) { background: var(--brand-softer); }
 
 .workflow-assignment-value { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .assignee-transfer-control { display: grid; justify-items: end; gap: 7px; }

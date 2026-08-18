@@ -1550,6 +1550,33 @@ export async function invalidateLegalFriendsCase(id: string): Promise<{
   };
 }
 
+export async function restoreInvalidatedLegalFriendsCase(id: string): Promise<{
+  consultationId: string;
+  transferId: string;
+  eventId: string;
+  state: "queued";
+  replayed: boolean;
+}> {
+  const response = await gatewayFetch(
+    `/v1/consultations/${id}/legalfriends/restore`,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { message?: string } | null;
+    throw new ConsultationGatewayError(
+      response.status,
+      body?.message ?? `무효 상담 복원 요청 실패 (${response.status})`,
+    );
+  }
+  return (await response.json()) as {
+    consultationId: string;
+    transferId: string;
+    eventId: string;
+    state: "queued";
+    replayed: boolean;
+  };
+}
+
 async function telephonyResponse(response: Response): Promise<TelephonyCall> {
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as {
