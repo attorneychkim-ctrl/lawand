@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import type { ReviewManagementDetail } from "../../lib/gateway";
+import type { ReviewGiftCouponDelivery, ReviewManagementDetail } from "../../lib/gateway";
 
 const products = [
   {
@@ -36,6 +36,17 @@ function formatPhone(value: string | null) {
     : value;
 }
 
+function formatSentAt(value: string) {
+  return new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
 export function ReviewGifticonPanel({
   customer,
   receiptCode,
@@ -53,7 +64,9 @@ export function ReviewGifticonPanel({
   const [reason, setReason] = useState("review_thanks");
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState("");
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyFailed, setHistoryFailed] = useState(false);
+  const [delivery, setDelivery] = useState<ReviewGiftCouponDelivery | null>(null);
   const [error, setError] = useState("");
   const selected = useMemo(
     () => products.find((product) => product.id === selectedId) ?? products[0],
@@ -61,14 +74,34 @@ export function ReviewGifticonPanel({
   );
   const recipientPhone = customer?.phone ?? submittedPhone;
 
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch(`/api/reviews/${recordType}/${recordId}/gift-coupons`, { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        const body = await response.json().catch(() => null) as { delivery?: ReviewGiftCouponDelivery | null; message?: string } | null;
+        if (!response.ok) throw new Error(body?.message ?? "쿠폰 발송 내역을 불러오지 못했습니다.");
+        setDelivery(body?.delivery ?? null);
+      })
+      .catch((caught) => {
+        if (!controller.signal.aborted) {
+          setHistoryFailed(true);
+          setError(caught instanceof Error ? caught.message : "쿠폰 발송 내역을 불러오지 못했습니다.");
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setHistoryLoading(false);
+      });
+    return () => controller.abort();
+  }, [recordId, recordType]);
+
   async function sendCoupon() {
     if (!confirmed || !recipientPhone) return;
-    setBusy(true); setError(""); setResult("");
+    setBusy(true); setError("");
     try {
       const response = await fetch(`/api/reviews/${recordType}/${recordId}/gift-coupons`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ productKey: selectedId, reason, idempotencyKey: crypto.randomUUID(), confirmed: true }) });
-      const body = await response.json().catch(() => null) as { orderNo?: string; message?: string } | null;
+      const body = await response.json().catch(() => null) as (ReviewGiftCouponDelivery & { message?: string }) | null;
       if (!response.ok) throw new Error(body?.message ?? "쿠폰 발송에 실패했습니다.");
-      setResult(`발송 요청이 완료되었습니다. 주문번호 ${body?.orderNo ?? "확인 중"}`);
+      if (body) setDelivery(body);
     } catch (caught) { setError(caught instanceof Error ? caught.message : "쿠폰 발송에 실패했습니다."); }
     finally { setBusy(false); }
   }
@@ -102,7 +135,7 @@ export function ReviewGifticonPanel({
             </dl>
           </div>
 
-          <fieldset className="gifticon-products">
+          <fieldset className="gifticon-products" disabled={Boolean(delivery)}>
             <legend>발송 상품</legend>
             <div>
               {products.map((product) => (
@@ -137,19 +170,31 @@ export function ReviewGifticonPanel({
             </label>
           </div>
 
-          <div className="gifticon-final-check">
-            <div>
-              <span>최종 발송 내용</span>
-              <strong>{selected.name}</strong>
-              <p>{customer.clientName} · {formatPhone(recipientPhone)} · {reason === "review_thanks" ? "후기 작성 감사" : "고객 배려"}</p>
+          {delivery ? (
+            <div className={`gifticon-delivery-record is-${delivery.status}`} role="status">
+              <span className="gifticon-delivery-icon" aria-hidden="true">✓</span>
+              <div>
+                <span>{delivery.status === "sent" ? "모바일 쿠폰 발송 완료" : "모바일 쿠폰 발송 결과 확인 중"}</span>
+                <strong>{delivery.brandName} · {delivery.goodsName}</strong>
+                <p>{formatSentAt(delivery.respondedAt ?? delivery.requestedAt)} 발송{delivery.orderNo ? ` · 주문번호 ${delivery.orderNo}` : ""}</p>
+              </div>
+              <b>이 후기에는 다시 발송할 수 없습니다.</b>
             </div>
-            <label>
-              <input checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} type="checkbox" />
-              <span>수신자·상품·발송 사유를 확인했고, 긍정적 후기의 대가로 지급하지 않음을 확인했습니다.</span>
-            </label>
-            <button disabled={!confirmed || busy || !recipientPhone || Boolean(result)} onClick={() => void sendCoupon()} type="button">{busy ? "발송 확인 중…" : result ? "발송 완료" : "모바일 쿠폰 발송"}</button>
-            {result ? <small role="status">{result}</small> : error ? <small role="alert">{error}</small> : <small>버튼을 누르면 비즈머니가 차감되고 기프티쇼 비즈가 MMS를 발송합니다.</small>}
-          </div>
+          ) : (
+            <div className="gifticon-final-check">
+              <div>
+                <span>최종 발송 내용</span>
+                <strong>{selected.name}</strong>
+                <p>{customer.clientName} · {formatPhone(recipientPhone)} · {reason === "review_thanks" ? "후기 작성 감사" : "고객 배려"}</p>
+              </div>
+              <label>
+                <input checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} type="checkbox" />
+                <span>수신자·상품·발송 사유를 확인했고, 긍정적 후기의 대가로 지급하지 않음을 확인했습니다.</span>
+              </label>
+              <button disabled={!confirmed || busy || !recipientPhone || historyLoading || historyFailed} onClick={() => void sendCoupon()} type="button">{busy ? "발송 확인 중…" : historyLoading ? "발송 내역 확인 중…" : "모바일 쿠폰 발송"}</button>
+              {error ? <small role="alert">{error}</small> : <small>버튼을 누르면 비즈머니가 차감되고 기프티쇼 비즈가 MMS를 발송합니다.</small>}
+            </div>
+          )}
         </div>
       ) : (
         <div className="gifticon-unlinked">

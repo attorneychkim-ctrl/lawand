@@ -1643,6 +1643,14 @@ export function createGatewayServer(options?: {
           );
           return;
         }
+        if (request.method === "GET" && action === "gift-coupons") {
+          if (!options.giftCouponService) {
+            sendJson(response, 503, { error: "giftishow_not_configured", message: "기프티쇼 운영 설정이 완료되지 않았습니다." });
+            return;
+          }
+          sendJson(response, 200, { delivery: await options.giftCouponService.getActive(recordType, recordId) });
+          return;
+        }
         if (request.method === "POST" && action === "gift-coupons") {
           if (!options.giftCouponService) {
             sendJson(response, 503, { error: "giftishow_not_configured", message: "기프티쇼 운영 설정이 완료되지 않았습니다." });

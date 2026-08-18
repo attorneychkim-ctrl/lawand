@@ -271,7 +271,7 @@ export function ReviewDetailWorkspace({
             ) : <p className="review-reply-locked">후기를 공개 원장으로 전환한 뒤 답글을 작성할 수 있습니다.</p>}
           </section>
 
-          <ReviewGifticonPanel customer={customer} receiptCode={detail.receiptCode} submittedPhone={detail.submittedPhone} recordType={detail.recordType} recordId={detail.id} />
+          <ReviewGifticonPanel key={`${detail.recordType}:${detail.id}`} customer={customer} receiptCode={detail.receiptCode} submittedPhone={detail.submittedPhone} recordType={detail.recordType} recordId={detail.id} />
         </div>
 
         <aside className="review-detail-sidebar">

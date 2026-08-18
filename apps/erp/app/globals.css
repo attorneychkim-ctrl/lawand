@@ -1840,10 +1840,98 @@
   padding: 0 15px;
   border: 0;
   border-radius: 10px;
-  background: #b9b5d2;
+  background: linear-gradient(135deg, #6557df, #7b66ed);
   color: #fff;
   font-size: .64rem;
   font-weight: 850;
+  cursor: pointer;
+  box-shadow: 0 7px 16px rgba(101, 87, 223, .24);
+  transition: transform .16s ease, filter .16s ease, box-shadow .16s ease, opacity .16s ease;
+}
+
+.gifticon-final-check button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+  box-shadow: 0 9px 20px rgba(101, 87, 223, .32);
+}
+
+.gifticon-final-check button:disabled {
+  background: #b9b5d2;
+  cursor: not-allowed;
+  box-shadow: none;
+  opacity: .62;
+}
+
+.gifticon-delivery-record {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  margin-top: 18px;
+  padding: 18px 20px;
+  border: 1px solid #a9dfc4;
+  border-radius: 14px;
+  background: #eefbf4;
+}
+
+.gifticon-delivery-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 50%;
+  background: #168753;
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.gifticon-delivery-record div > span,
+.gifticon-delivery-record div > strong {
+  display: block;
+}
+
+.gifticon-delivery-record div > span {
+  color: #137747;
+  font-size: .62rem;
+  font-weight: 850;
+}
+
+.gifticon-delivery-record div > strong {
+  margin: 4px 0;
+  font-size: .76rem;
+}
+
+.gifticon-delivery-record p,
+.gifticon-delivery-record > b {
+  margin: 0;
+  color: #547064;
+  font-size: .59rem;
+}
+
+.gifticon-delivery-record > b {
+  padding: 8px 11px;
+  border-radius: 999px;
+  background: #d9f2e5;
+  color: #11643d;
+}
+
+:root[data-theme="dark"] .gifticon-delivery-record {
+  border-color: #32664d;
+  background: #173326;
+}
+
+:root[data-theme="dark"] .gifticon-delivery-record div > span,
+:root[data-theme="dark"] .gifticon-delivery-record > b {
+  color: #83ddb0;
+}
+
+:root[data-theme="dark"] .gifticon-delivery-record p {
+  color: #a8c8b8;
+}
+
+:root[data-theme="dark"] .gifticon-delivery-record > b {
+  background: #244a38;
 }
 
 .gifticon-final-check > small {
@@ -1878,6 +1966,15 @@
 
   .gifticon-final-check button {
     grid-column: 1 / -1;
+  }
+
+  .gifticon-delivery-record {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .gifticon-delivery-record > b {
+    grid-column: 1 / -1;
+    text-align: center;
   }
 }
 

@@ -1747,8 +1747,25 @@ export async function sendReviewGiftCoupon(
   recordType: ReviewRecordType,
   id: string,
   input: { productKey: "mega_double_americano" | "naverpay_10000" | "baemin_30000"; reason: "review_thanks" | "service_recovery" | "event"; idempotencyKey: string; confirmed: true },
-): Promise<{ id: string; status: string; orderNo: string | null; replayed: boolean }> {
+): Promise<ReviewGiftCouponDelivery & { replayed: boolean }> {
   return reviewResponse(await gatewayFetch(`/v1/reviews/${recordType}/${id}/gift-coupons`, { method: "POST", body: input, timeoutMs: 30_000 }));
+}
+
+export type ReviewGiftCouponDelivery = {
+  id: string;
+  status: "prepared" | "sent" | "unknown";
+  productKey: string;
+  brandName: string;
+  goodsName: string;
+  salePrice: number;
+  reason: "review_thanks" | "service_recovery" | "event";
+  orderNo: string | null;
+  requestedAt: string;
+  respondedAt: string | null;
+};
+
+export async function getReviewGiftCoupon(recordType: ReviewRecordType, id: string): Promise<{ delivery: ReviewGiftCouponDelivery | null }> {
+  return reviewResponse(await gatewayFetch(`/v1/reviews/${recordType}/${id}/gift-coupons`));
 }
 
 export async function getMessageTemplates(): Promise<MessageTemplate[]> {
