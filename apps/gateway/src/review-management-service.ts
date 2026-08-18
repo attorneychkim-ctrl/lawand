@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   and,
   desc,
@@ -39,6 +41,7 @@ import {
   customerReviewSubmissions,
   staffAuditLogs,
   staffProfiles,
+  telephonyMessages,
 } from "@lawand/db";
 import type { createDatabaseClient } from "@lawand/db";
 
@@ -54,6 +57,11 @@ import { createReviewRequestToken } from "./review-token.js";
 import type { TelephonyService } from "./telephony-service.js";
 
 type Database = ReturnType<typeof createDatabaseClient>["db"];
+
+function stableReviewUuid(value: string): string {
+  const hex = createHash("sha256").update(value).digest("hex").slice(0, 32);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20)}`;
+}
 
 export type ReviewRecordType = "review" | "submission";
 export type ReviewListFilter =
@@ -1442,6 +1450,97 @@ export function createReviewManagementService(options: {
     };
   }
 
+  async function aftercareRequestOption(
+    target: { clientIdx: number; caseIdx: number },
+    actor: StaffPrincipal,
+  ) {
+    await ensureDefaultRequestTemplates(actor);
+    const [template] = await db
+      .select()
+      .from(customerReviewRequestTemplates)
+      .where(
+        and(
+          eq(customerReviewRequestTemplates.ownerUserId, actor.id),
+          eq(customerReviewRequestTemplates.presetKey, "consultation"),
+          isNull(customerReviewRequestTemplates.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (!template) {
+      return {
+        result: "consultation_completed" as const,
+        kind: "review_request" as const,
+        available: false,
+        templateName: null,
+        templateBody: null,
+        latest: null,
+      };
+    }
+    const [latest] = await db
+      .select({
+        requestStatus: customerReviewRequests.status,
+        messageStatus: telephonyMessages.commandStatus,
+        occurredAt: customerReviewRequests.requestedAt,
+      })
+      .from(customerReviewRequests)
+      .innerJoin(
+        customerReviewRequestTemplates,
+        eq(customerReviewRequestTemplates.id, customerReviewRequests.templateId),
+      )
+      .leftJoin(
+        telephonyMessages,
+        eq(telephonyMessages.id, customerReviewRequests.telephonyMessageId),
+      )
+      .where(
+        and(
+          eq(customerReviewRequestTemplates.presetKey, "consultation"),
+          eq(customerReviewRequests.directoryClientIdx, target.clientIdx),
+          eq(customerReviewRequests.directoryCaseIdx, target.caseIdx),
+        ),
+      )
+      .orderBy(desc(customerReviewRequests.requestedAt))
+      .limit(1);
+    const status = latest?.requestStatus === "redeemed" || latest?.messageStatus === "succeeded"
+      ? "sent"
+      : latest?.requestStatus === "queued" || latest?.messageStatus === "queued" || latest?.messageStatus === "dispatching"
+        ? "pending"
+        : latest?.messageStatus === "unknown"
+          ? "unknown"
+          : latest
+            ? "failed"
+          : null;
+    return {
+      result: "consultation_completed" as const,
+      kind: "review_request" as const,
+      available: true,
+      templateName: template.name,
+      templateBody: template.body,
+      latest: latest && status
+        ? { status, occurredAt: latest.occurredAt.toISOString() }
+        : null,
+      templateId: template.id,
+    };
+  }
+
+  async function sendAftercareRequest(
+    target: { clientIdx: number; caseIdx: number; sourceId: string },
+    actor: StaffPrincipal,
+  ) {
+    const option = await aftercareRequestOption(target, actor);
+    if (!option.available || !("templateId" in option) || !option.templateId) return null;
+    return sendRequests(
+      {
+        templateId: option.templateId,
+        targets: [{
+          clientIdx: target.clientIdx,
+          caseIdx: target.caseIdx,
+          idempotencyKey: stableReviewUuid(`aftercare-review:${target.sourceId}`),
+        }],
+      },
+      actor,
+    );
+  }
+
   async function dutyCount(actor: StaffPrincipal) {
     const result = await db.execute(sql<{ count: string }>`
       SELECT count(DISTINCT link.id)::text AS count
@@ -1516,6 +1615,8 @@ export function createReviewManagementService(options: {
     updateRequestTemplate,
     deleteRequestTemplate,
     sendRequests,
+    aftercareRequestOption,
+    sendAftercareRequest,
     dutyCount,
     notification,
   };

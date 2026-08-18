@@ -2524,15 +2524,42 @@ export function createGatewayServer(options?: {
         const actor = await options.authService.authorize(sessionToken, [
           ...consultationAccessRoles,
         ]);
-        sendJson(
-          response,
-          200,
-          await options.telephonyService.savePhoneDeskAftercare(
-            callId,
-            parsed.data,
-            actor,
-          ),
+        let detail = await options.telephonyService.savePhoneDeskAftercare(
+          callId,
+          parsed.data,
+          actor,
         );
+        const reviewTarget = detail.call.clickToCall?.directoryClient ?? detail.legalFriendsMatch?.cases[0];
+        if (
+          parsed.data.result === "consultation_completed" &&
+          parsed.data.automaticMessage?.enabled &&
+          reviewTarget &&
+          detail.call.aftercare?.id &&
+          options.reviewManagementService
+        ) {
+          await options.reviewManagementService.sendAftercareRequest(
+            {
+              clientIdx: reviewTarget.clientIdx,
+              caseIdx: reviewTarget.caseIdx,
+              sourceId: detail.call.aftercare.id,
+            },
+            actor,
+          );
+          detail = await options.telephonyService.getPhoneDeskCall(callId, actor);
+        }
+        const reviewOption = reviewTarget && options.reviewManagementService
+          ? await options.reviewManagementService.aftercareRequestOption(
+              { clientIdx: reviewTarget.clientIdx, caseIdx: reviewTarget.caseIdx },
+              actor,
+            )
+          : null;
+        sendJson(response, 200, {
+          ...detail,
+          aftercareAutomations: [
+            ...(detail.aftercareAutomations ?? []),
+            ...(reviewOption ? [reviewOption] : []),
+          ],
+        });
         return;
       }
 
@@ -2612,14 +2639,24 @@ export function createGatewayServer(options?: {
           sendJson(response, 400, { error: "invalid_call_id" });
           return;
         }
-        await options.authService.authorize(sessionToken, [
+        const actor = await options.authService.authorize(sessionToken, [
           ...consultationAccessRoles,
         ]);
-        sendJson(
-          response,
-          200,
-          await options.telephonyService.getPhoneDeskCall(callId),
-        );
+        const detail = await options.telephonyService.getPhoneDeskCall(callId, actor);
+        const reviewTarget = detail.call.clickToCall?.directoryClient ?? detail.legalFriendsMatch?.cases[0];
+        const reviewOption = reviewTarget && options.reviewManagementService
+          ? await options.reviewManagementService.aftercareRequestOption(
+              { clientIdx: reviewTarget.clientIdx, caseIdx: reviewTarget.caseIdx },
+              actor,
+            )
+          : null;
+        sendJson(response, 200, {
+          ...detail,
+          aftercareAutomations: [
+            ...(detail.aftercareAutomations ?? []),
+            ...(reviewOption ? [reviewOption] : []),
+          ],
+        });
         return;
       }
 
