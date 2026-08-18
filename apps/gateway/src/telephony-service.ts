@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   and,
   asc,
@@ -35,6 +37,7 @@ import {
   type ManualTelephonyMessageSend,
   type MessageTemplateCreate,
   type MessageTemplateUpdate,
+  type MessageTemplateAutoSendTrigger,
   type PhoneDeskAftercareSave,
   type PhoneDeskCallResolution,
   type PhonebookContactSave,
@@ -42,6 +45,7 @@ import {
   type TelephonyCallDisposition,
   type CentrexBridgeCommandResult,
   type PlatformEvent,
+  renderMessageTemplate,
   type ResidenceRegion,
   type StaffConsultationCreate,
 } from "@lawand/core";
@@ -746,6 +750,7 @@ export class TelephonyCallError extends Error {
       | "message_template_not_found"
       | "message_template_inactive"
       | "message_template_name_conflict"
+      | "message_template_auto_send_conflict"
       | "message_template_owned_by_other_staff"
       | "message_image_invalid"
       | "message_image_upload_failed"
@@ -786,6 +791,37 @@ function eventRow(
     occurredAt: new Date(event.occurredAt),
     createdAt: new Date(event.occurredAt),
   };
+}
+
+function stableUuid(value: string): string {
+  const hex = createHash("sha256").update(value).digest("hex").slice(0, 32);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20)}`;
+}
+
+export function automaticCallbackScheduleText(
+  dueAt: Date,
+  assigneeName: string,
+): string {
+  const dateParts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+  }).formatToParts(dueAt);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    dateParts.find((item) => item.type === type)?.value ?? "";
+  const time = (value: Date) =>
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Seoul",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).format(value);
+  const weekdays: Record<string, string> = {
+    Mon: "월", Tue: "화", Wed: "수", Thu: "목", Fri: "금", Sat: "토", Sun: "일",
+  };
+  return `재연락 일정 : ${part("year")}-${part("month")}-${part("day")} (${weekdays[part("weekday")] ?? part("weekday")}), ${time(dueAt)} ~ ${time(new Date(dueAt.getTime() + 30 * 60_000))}, 담당자 ${assigneeName}`;
 }
 
 function callResponse(call: {
@@ -5272,6 +5308,28 @@ export function createTelephonyService(options: {
     const remotePhoneFingerprint = call.remotePhone
       ? protection.fingerprint(call.remotePhone)
       : null;
+    const automaticTrigger = (["no_answer", "busy", "manager_callback_requested", "rejected"] as const)
+      .find((value) => value === input.result) ?? null;
+    if (automaticTrigger === "manager_callback_requested" && !input.followUp.enabled) {
+      const [automaticTemplate] = await db
+        .select({ id: messageTemplates.id })
+        .from(messageTemplates)
+        .where(
+          and(
+            eq(messageTemplates.ownerUserId, actor.id),
+            eq(messageTemplates.autoSendTrigger, automaticTrigger),
+          ),
+        )
+        .limit(1);
+      if (automaticTemplate) {
+        throw new TelephonyCallError(
+          "follow_up_due_invalid",
+          "담당자 연결 요청 자동문자를 보내려면 재통화 업무와 일정을 함께 저장해 주세요.",
+        );
+      }
+    }
+    let savedAftercareId: string | null = null;
+    let savedConsultationId: string | null = null;
 
     await db.transaction(async (tx) => {
       const assigneeIds = new Set<string>();
@@ -5538,6 +5596,8 @@ export function createTelephonyService(options: {
         .limit(1)
         .for("update");
       const aftercareId = existingAftercare?.id ?? createEventId();
+      savedAftercareId = aftercareId;
+      savedConsultationId = consultationId;
       const otherTextEncrypted =
         input.result === "other"
           ? protection.encrypt(
@@ -5653,6 +5713,87 @@ export function createTelephonyService(options: {
         createdAt: confirmedAt,
       });
     });
+    const automaticSourceId = savedAftercareId as string | null;
+    if (automaticTrigger && automaticSourceId) {
+      let automaticTarget:
+        | { source: "consultation"; consultationId: string; customerName: string; receiptCode: string }
+        | { source: "legal_friends_directory"; clientIdx: number; caseIdx: number; customerName: string; receiptCode: string }
+        | null = null;
+      if (savedConsultationId) {
+        const [consultation] = await db
+          .select({
+            id: consultations.id,
+            publicReceiptCode: consultations.publicReceiptCode,
+            preferredNameCiphertext: consultations.preferredNameCiphertext,
+            preferredNameNonce: consultations.preferredNameNonce,
+            preferredNameKeyVersion: consultations.preferredNameKeyVersion,
+            anonymousLabel: consultations.anonymousLabel,
+          })
+          .from(consultations)
+          .where(eq(consultations.id, savedConsultationId))
+          .limit(1);
+        if (consultation) {
+          automaticTarget = {
+            source: "consultation",
+            consultationId: consultation.id,
+            customerName:
+              consultation.preferredNameCiphertext && consultation.preferredNameNonce && consultation.preferredNameKeyVersion
+                ? protection.decrypt(
+                    {
+                      ciphertext: consultation.preferredNameCiphertext,
+                      nonce: consultation.preferredNameNonce,
+                      keyVersion: consultation.preferredNameKeyVersion,
+                    },
+                    `consultations.preferred_name:${consultation.id}`,
+                  )
+                : consultation.anonymousLabel,
+            receiptCode: consultation.publicReceiptCode,
+          };
+        }
+      } else {
+        const directory = call.clickToCall?.directoryClient;
+        const matchedCase = detail.legalFriendsMatch?.cases[0];
+        if (directory) {
+          automaticTarget = {
+            source: "legal_friends_directory",
+            clientIdx: directory.clientIdx,
+            caseIdx: directory.caseIdx,
+            customerName: directory.displayName,
+            receiptCode: "리걸프렌즈",
+          };
+        } else if (detail.legalFriendsMatch && matchedCase) {
+          automaticTarget = {
+            source: "legal_friends_directory",
+            clientIdx: matchedCase.clientIdx,
+            caseIdx: matchedCase.caseIdx,
+            customerName: detail.legalFriendsMatch.clientName,
+            receiptCode: matchedCase.caseNumber ?? "리걸프렌즈",
+          };
+        }
+      }
+      if (automaticTarget) {
+        const followUpAssigneeUserId = input.followUp.enabled ? input.followUp.assigneeUserId : null;
+        const scheduleText = automaticTrigger === "manager_callback_requested" && dueAt
+          ? automaticCallbackScheduleText(
+              dueAt,
+              detail.staffOptions.find((staff) => staff.staffUserId === followUpAssigneeUserId)?.displayName ?? actor.displayName,
+            )
+          : undefined;
+        await requestAutomaticMessage(
+          {
+            trigger: automaticTrigger,
+            sourceId: automaticSourceId,
+            target: automaticTarget.source === "consultation"
+              ? { source: "consultation", consultationId: automaticTarget.consultationId }
+              : { source: "legal_friends_directory", clientIdx: automaticTarget.clientIdx, caseIdx: automaticTarget.caseIdx },
+            customerName: automaticTarget.customerName,
+            receiptCode: automaticTarget.receiptCode,
+            ...(scheduleText ? { scheduleText } : {}),
+          },
+          actor,
+        );
+      }
+    }
     if (phonebookInput) phoneCustomerCache.clear();
     return getPhoneDeskCall(callId);
   }
@@ -7021,12 +7162,119 @@ export function createTelephonyService(options: {
     };
   }
 
+  async function requestAutomaticMessage(
+    input: {
+      trigger: MessageTemplateAutoSendTrigger;
+      sourceId: string;
+      target:
+        | { source: "consultation"; consultationId: string }
+        | { source: "legal_friends_directory"; clientIdx: number; caseIdx: number };
+      customerName: string;
+      receiptCode: string;
+      scheduleText?: string;
+    },
+    actor: StaffPrincipal,
+  ) {
+    const [template] = await db
+      .select()
+      .from(messageTemplates)
+      .where(
+        and(
+          eq(messageTemplates.ownerUserId, actor.id),
+          eq(messageTemplates.autoSendTrigger, input.trigger),
+        ),
+      )
+      .limit(1);
+    if (!template) return null;
+    let body = renderMessageTemplate(template.body, {
+      "{{고객명}}": input.customerName,
+      "{{담당자명}}": actor.displayName,
+      "{{접수번호}}": input.receiptCode,
+    });
+    if (input.scheduleText) body = `${body.trimEnd()}\n\n${input.scheduleText}`;
+    if (centrexMessageKind(body) === "too_long") {
+      throw new TelephonyCallError(
+        "message_body_invalid",
+        "자동발송 문구를 포함하면 720바이트를 초과합니다. 템플릿 내용을 줄여 주세요.",
+      );
+    }
+    const messageInput = {
+      idempotencyKey: stableUuid(`automatic-message:${input.sourceId}:${input.trigger}`),
+      templateId: template.id,
+      body,
+    };
+    return input.target.source === "consultation"
+      ? requestMessage(input.target.consultationId, messageInput, actor)
+      : requestDirectoryMessage(
+          { clientIdx: input.target.clientIdx, caseIdx: input.target.caseIdx },
+          messageInput,
+          actor,
+        );
+  }
+
+  async function requestConsultationAssignedAutomaticMessage(
+    consultationId: string,
+    assignmentId: string,
+    actor: StaffPrincipal,
+  ) {
+    const [consultation] = await db
+      .select({
+        id: consultations.id,
+        publicReceiptCode: consultations.publicReceiptCode,
+        anonymousLabel: consultations.anonymousLabel,
+        preferredNameCiphertext: consultations.preferredNameCiphertext,
+        preferredNameNonce: consultations.preferredNameNonce,
+        preferredNameKeyVersion: consultations.preferredNameKeyVersion,
+      })
+      .from(consultations)
+      .where(eq(consultations.id, consultationId))
+      .limit(1);
+    if (!consultation) return null;
+    const [messageableRequest] = await db
+      .select({ id: consultationRequests.id })
+      .from(consultationRequests)
+      .where(
+        and(
+          eq(consultationRequests.consultationId, consultationId),
+          isNotNull(consultationRequests.phoneCiphertext),
+          isNotNull(consultationRequests.phoneNonce),
+          isNotNull(consultationRequests.phoneKeyVersion),
+          isNotNull(consultationRequests.phoneFingerprint),
+        ),
+      )
+      .orderBy(desc(consultationRequests.submittedAt))
+      .limit(1);
+    if (!messageableRequest) return null;
+    const customerName =
+      consultation.preferredNameCiphertext && consultation.preferredNameNonce && consultation.preferredNameKeyVersion
+        ? protection.decrypt(
+            {
+              ciphertext: consultation.preferredNameCiphertext,
+              nonce: consultation.preferredNameNonce,
+              keyVersion: consultation.preferredNameKeyVersion,
+            },
+            `consultations.preferred_name:${consultation.id}`,
+          )
+        : consultation.anonymousLabel;
+    return requestAutomaticMessage(
+      {
+        trigger: "consultation_assigned",
+        sourceId: assignmentId,
+        target: { source: "consultation", consultationId },
+        customerName,
+        receiptCode: consultation.publicReceiptCode,
+      },
+      actor,
+    );
+  }
+
   function templateResponse(template: typeof messageTemplates.$inferSelect) {
     return {
       id: template.id,
       name: template.name,
       body: template.body,
       bodyByteLength: template.bodyByteLength,
+      autoSendTrigger: template.autoSendTrigger,
       image:
         template.imageFileId &&
         template.imageUrl &&
@@ -7109,6 +7357,24 @@ export function createTelephonyService(options: {
         "내 템플릿에 같은 이름이 이미 있습니다.",
       );
     }
+    if (input.autoSendTrigger) {
+      const [triggerConflict] = await db
+        .select({ id: messageTemplates.id })
+        .from(messageTemplates)
+        .where(
+          and(
+            eq(messageTemplates.ownerUserId, actor.id),
+            eq(messageTemplates.autoSendTrigger, input.autoSendTrigger),
+          ),
+        )
+        .limit(1);
+      if (triggerConflict) {
+        throw new TelephonyCallError(
+          "message_template_auto_send_conflict",
+          "이 자동발송 조건은 다른 내 템플릿에서 이미 사용 중입니다.",
+        );
+      }
+    }
     const imageValues = input.image
       ? await uploadTemplateImage(input.image)
       : {};
@@ -7120,6 +7386,7 @@ export function createTelephonyService(options: {
         name: input.name,
         body: input.body,
         bodyByteLength: centrexMessageByteLength(input.body),
+        autoSendTrigger: input.autoSendTrigger,
         ...imageValues,
         createdByUserId: actor.id,
         updatedByUserId: actor.id,
@@ -7191,6 +7458,25 @@ export function createTelephonyService(options: {
           "내 템플릿에 같은 이름이 이미 있습니다.",
         );
       }
+      if (input.autoSendTrigger) {
+        const [triggerConflict] = await tx
+          .select({ id: messageTemplates.id })
+          .from(messageTemplates)
+          .where(
+            and(
+              ne(messageTemplates.id, templateId),
+              eq(messageTemplates.ownerUserId, actor.id),
+              eq(messageTemplates.autoSendTrigger, input.autoSendTrigger),
+            ),
+          )
+          .limit(1);
+        if (triggerConflict) {
+          throw new TelephonyCallError(
+            "message_template_auto_send_conflict",
+            "이 자동발송 조건은 다른 내 템플릿에서 이미 사용 중입니다.",
+          );
+        }
+      }
       const imageValues =
         input.image === undefined
           ? {}
@@ -7210,6 +7496,7 @@ export function createTelephonyService(options: {
           name: input.name,
           body: input.body,
           bodyByteLength: centrexMessageByteLength(input.body),
+          autoSendTrigger: input.autoSendTrigger,
           ...imageValues,
           updatedByUserId: actor.id,
           updatedAt,
@@ -8603,6 +8890,8 @@ export function createTelephonyService(options: {
     requestDirectoryMessage,
     requestInboundAnswer,
     requestManualMessage,
+    requestAutomaticMessage,
+    requestConsultationAssignedAutomaticMessage,
     searchLegalFriendsClients,
     requestMessage,
     resolvePhoneDeskCall,

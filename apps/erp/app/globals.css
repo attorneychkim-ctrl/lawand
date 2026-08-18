@@ -7871,10 +7871,15 @@ a.inbound-customer:hover { text-decoration: underline; }
 .message-template-image-badge { padding: 4px 7px; border-radius: 999px; background: var(--surface); color: var(--muted); font-size: .59rem; font-weight: 840; }
 .message-template-scope.is-personal { background: var(--brand-soft); color: var(--brand-strong); }
 .message-template-image-badge { background: var(--info-soft); color: var(--info); }
+.message-template-auto-badge { padding: 4px 7px; border-radius: 999px; background: var(--success-soft); color: var(--success); font-size: .59rem; font-weight: 840; }
+.message-template-auto-help { color: var(--muted); font-size: .62rem; line-height: 1.5; }
 .message-template-cards h3 { margin: 0; font-size: .85rem; }
 .message-template-cards p { display: -webkit-box; min-height: 4.6em; margin: 0; overflow: hidden; color: var(--ink-soft); font-size: .7rem; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 3; white-space: pre-wrap; }
 .message-template-cards small { color: var(--muted); font-size: .62rem; }
-.message-template-card-actions { align-items: center; margin-top: 3px; }
+.message-template-card-actions { display: flex; align-items: end; gap: 8px; margin-top: 3px; }
+.message-template-auto-select { display: grid; flex: 1; gap: 4px; }
+.message-template-auto-select > span { color: var(--muted); font-size: .6rem; font-weight: 780; }
+.message-template-auto-select select { min-height: 36px; padding: 0 9px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--ink); font: inherit; font-size: .66rem; }
 .message-template-delete-button {
   min-height: 36px;
   padding: 0 12px;

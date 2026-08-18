@@ -9,6 +9,7 @@ import type {
   PhoneDeskAftercareInput,
   PhoneDeskCallDetail,
   PhoneDeskCallResult,
+  MessageTemplate,
 } from "../../lib/gateway";
 import { MessageComposeButton } from "./message-compose-button";
 
@@ -393,6 +394,7 @@ export function PhoneAftercareForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
+  const [automaticTriggers, setAutomaticTriggers] = useState<Set<NonNullable<MessageTemplate["autoSendTrigger"]>>>(new Set());
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -402,6 +404,18 @@ export function PhoneAftercareForm({
       setFollowUpDate((current) => current || date);
       setFollowUpTime((current) => current || time);
     });
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/message-templates")
+      .then((response) => response.ok ? response.json() : Promise.reject())
+      .then((payload: { items?: MessageTemplate[] }) => {
+        if (!active) return;
+        setAutomaticTriggers(new Set((payload.items ?? []).flatMap((template) => template.autoSendTrigger ? [template.autoSendTrigger] : [])));
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
   }, []);
 
   const linkedConsultationId =
@@ -425,6 +439,14 @@ export function PhoneAftercareForm({
     followUpDueAt && minimumDueAt && followUpDueAt >= minimumDueAt,
   );
   const safeMessageTarget = messageTarget(detail);
+  const selectedAutomaticTrigger = result && ["no_answer", "busy", "manager_callback_requested", "rejected"].includes(result)
+    ? result as NonNullable<MessageTemplate["autoSendTrigger"]>
+    : null;
+  const automaticMessageEnabled = Boolean(
+    safeMessageTarget &&
+      selectedAutomaticTrigger &&
+      automaticTriggers.has(selectedAutomaticTrigger),
+  );
   const normalizedOriginalPhone = phonebookOriginalPhone.replace(/\D/g, "");
   const normalizedConnectedPhone = phonebookConnectedPhone.replace(/\D/g, "");
   const phonebookCallNumberIncluded = Boolean(
@@ -567,10 +589,16 @@ export function PhoneAftercareForm({
       {!internal ? <>
         <section className="phone-aftercare-message-action">
           <div>
-            <strong>고객에게 문자 남기기</strong>
-            <span>통화 결과와 관계없이 안내나 부재 메시지를 바로 보낼 수 있습니다.</span>
+            <strong>{automaticMessageEnabled ? "자동문자 발송 예정" : "고객에게 문자 남기기"}</strong>
+            <span>{automaticMessageEnabled
+              ? selectedAutomaticTrigger === "manager_callback_requested"
+                ? "후처리를 저장하면 등록된 템플릿과 재연락 일정·담당자가 고객에게 자동발송됩니다."
+                : "후처리를 저장하면 이 결과에 등록된 내 템플릿이 고객에게 자동발송됩니다."
+              : "통화 결과와 관계없이 안내나 부재 메시지를 바로 보낼 수 있습니다."}</span>
           </div>
-          {safeMessageTarget?.source === "consultation" ? (
+          {automaticMessageEnabled ? (
+            <span className="message-template-auto-badge">수동 발송 대신 자동발송</span>
+          ) : safeMessageTarget?.source === "consultation" ? (
             <MessageComposeButton
               consultationId={safeMessageTarget.consultationId}
               customerName={safeMessageTarget.customerName}

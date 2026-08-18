@@ -125,6 +125,7 @@ export type MessageTemplate = {
   name: string;
   body: string;
   bodyByteLength: number;
+  autoSendTrigger: "consultation_assigned" | "no_answer" | "busy" | "manager_callback_requested" | "rejected" | null;
   image: {
     url: string;
     originalName: string;
@@ -1775,6 +1776,7 @@ export async function getMessageThread(
 export async function createMessageTemplate(input: {
   name: string;
   body: string;
+  autoSendTrigger: MessageTemplate["autoSendTrigger"];
   image?: { originalName: string; fileBase64: string } | null;
 }): Promise<MessageTemplate> {
   return messageResponse(
@@ -1791,6 +1793,7 @@ export async function updateMessageTemplate(
   input: {
     name: string;
     body: string;
+    autoSendTrigger: MessageTemplate["autoSendTrigger"];
     image?: { originalName: string; fileBase64: string } | null;
   },
 ): Promise<MessageTemplate> {

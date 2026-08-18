@@ -3089,6 +3089,13 @@ export function createGatewayServer(options?: {
           actor,
           assignmentInput.data.legalFriendsHandling,
         );
+        if (options.telephonyService) {
+          await options.telephonyService.requestConsultationAssignedAutomaticMessage(
+            consultationId,
+            result.assignmentId,
+            actor,
+          );
+        }
         sendJson(response, result.replayed ? 200 : 201, result);
         return;
       }

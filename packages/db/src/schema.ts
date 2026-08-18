@@ -2686,6 +2686,7 @@ export const messageTemplates = pgTable(
     name: varchar("name", { length: 80 }).notNull(),
     body: text("body").notNull(),
     bodyByteLength: integer("body_byte_length").notNull(),
+    autoSendTrigger: varchar("auto_send_trigger", { length: 40 }),
     imageFileId: varchar("image_file_id", { length: 100 }),
     imageUrl: text("image_url"),
     imageOriginalName: varchar("image_original_name", { length: 100 }),
@@ -2705,6 +2706,9 @@ export const messageTemplates = pgTable(
       table.ownerUserId,
       sql`lower(${table.name})`,
     ),
+    uniqueIndex("message_templates_owner_auto_send_trigger_uidx")
+      .on(table.ownerUserId, table.autoSendTrigger)
+      .where(sql`${table.autoSendTrigger} IS NOT NULL`),
     check(
       "message_templates_name_nonempty",
       sql`length(btrim(${table.name})) > 0`,
@@ -2716,6 +2720,10 @@ export const messageTemplates = pgTable(
     check(
       "message_templates_body_byte_length",
       sql`${table.bodyByteLength} >= 1 AND ${table.bodyByteLength} <= 720`,
+    ),
+    check(
+      "message_templates_auto_send_trigger_valid",
+      sql`${table.autoSendTrigger} IS NULL OR ${table.autoSendTrigger} IN ('consultation_assigned', 'no_answer', 'busy', 'manager_callback_requested', 'rejected')`,
     ),
     check(
       "message_templates_owner_audit_consistent",

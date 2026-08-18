@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  automaticCallbackScheduleText,
   answerableInboundCallForActor,
   canResolvePhoneDeskFinalParticipant,
   canonicalizePhoneDeskObservedCalls,
@@ -16,6 +17,16 @@ import {
   shouldAutoOpenConnectedAftercare,
   staffPhoneCustomerMatches,
 } from "./telephony-service.js";
+
+test("담당자 연결 요청 자동문자는 한국 시간의 30분 일정과 담당자를 고정 형식으로 붙인다", () => {
+  assert.equal(
+    automaticCallbackScheduleText(
+      new Date("2026-08-20T01:30:00.000Z"),
+      "방한솔",
+    ),
+    "재연락 일정 : 2026-08-20 (목), 10:30 ~ 11:00, 담당자 방한솔",
+  );
+});
 
 test("종료 고객 leg만 남은 확인 필요 통화는 2분 뒤 직원이 수동 확정할 수 있다", () => {
   const resolutionAt = new Date("2026-08-14T07:45:00.000Z");
