@@ -102,6 +102,19 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-19 — ERP 상단 내비게이션 단순화 후보
+- ERP의 상담·고객 찾기·후기·전화·문자는 핵심 1차 메뉴로 유지하고, 모든 직원이 쓰는
+  전화번호부는 `더보기`, 관리자 전용 직원 관리는 별도 `관리` 드롭다운으로 분리했다.
+  전화번호부를 관리자 기능으로 분류하지 않으며 향후 일반 저빈도 기능과 관리자 기능이
+  서로 다른 확장 지점을 갖도록 했다.
+- 전화번호부·직원 관리 화면에서는 각각 상위 메뉴와 하위 항목을 활성 표시한다. 기본
+  `details` 키보드 동작에 바깥 클릭·Escape·페이지 이동 닫기를 더했고, 메뉴 텍스트의
+  줄바꿈을 차단하면서 480px 이하에서는 기존 아이콘 중심 표시를 유지했다.
+- ERP typecheck·lint, core 선행 build 뒤 ERP production build와 `git diff --check`를
+  통과했다. 첫 ERP build는 이 워크트리에 core dist가 없어 `@lawand/core` 해석에 실패했으나
+  core를 먼저 빌드한 뒤 동일 ERP build가 성공했다. migration·스키마·운영 데이터·main 병합·
+  운영 배포는 수행하지 않았다. `PROJECT_PLAN.md`는 v1.56이다.
+
 ### 2026-08-18 — Orca 완료 작업 6개 통합 운영 배포 완료
 - Orca 완료 worktree 6개를 main에 병합하고 로컬·원격 worktree HEAD가 최종 main
   `b837751660172877c80d2cdcc59cd57293540c64`의 ancestor임을 확인했다. migration 충돌은
