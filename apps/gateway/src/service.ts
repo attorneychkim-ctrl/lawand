@@ -242,7 +242,6 @@ export class ConsultationAssigneeTransferError extends Error {
       | "consultation_not_found"
       | "assignment_not_found"
       | "consultation_not_transferable"
-      | "transfer_forbidden"
       | "target_assignee_invalid"
       | "same_assignee"
       | "case_not_registered"
@@ -3267,15 +3266,6 @@ export function createConsultationService(options: {
         throw new ConsultationAssigneeTransferError(
           "assignment_not_found",
           "담당자가 배정된 상담만 변경할 수 있습니다.",
-        );
-      }
-      if (
-        assignment.assigneeUserId !== actor.id &&
-        !actor.roles.includes("admin")
-      ) {
-        throw new ConsultationAssigneeTransferError(
-          "transfer_forbidden",
-          "현재 상담 담당자 또는 관리자만 담당자를 변경할 수 있습니다.",
         );
       }
       if (assignment.assigneeUserId === input.targetStaffUserId) {

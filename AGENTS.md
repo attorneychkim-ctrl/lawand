@@ -102,6 +102,18 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-19 — ERP 담당자 변경 전 직원 허용·버튼 정렬 후보
+- 일반 담당자 변경은 ERP의 `canChangeAssignee`와 gateway의 `transfer_forbidden` 검사 양쪽에서
+  현재 담당자 또는 관리자에게만 제한돼 있었다. 상담 접근 권한이 있는 인증 직원이면 누구나
+  변경 버튼을 보고 요청할 수 있도록 두 제한을 제거했다. 대상 직원 활성 계정 검증, 같은 담당자
+  차단, 리걸프렌즈 등록·무효·상담 상태 조건, pending 멱등 처리와 외부 성공 뒤 ERP 확정은
+  그대로 유지한다.
+- 처리 현황 카드의 담당자명과 변경 버튼을 `minmax(0, 1fr) + 64px` 그리드로 정렬하고 버튼 폭을
+  고정해 이름 길이와 화면 폭에 따라 버튼 위치가 흔들리지 않게 했다. migration·운영 데이터·
+  main 병합·운영 배포는 수행하지 않았다. gateway 179개 테스트, gateway·ERP typecheck·lint·
+  production build와 core·DB 선행 build, `git diff --check`를 통과했다. `PROJECT_PLAN.md`는
+  v1.57이다.
+
 ### 2026-08-19 — ERP closed·미배정 무효 상담 복원 후속 후보
 - 운영 사례 `LA-260819-MD4J5HPA`는 리걸프렌즈 담당자가 `lawandfirm_s999`였지만 ERP 상태가
   `closed`이고 `consultation_assignments`가 없어 기존 복원 UI와 API 전제에서 빠졌다. 무효는
