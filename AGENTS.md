@@ -102,6 +102,34 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-19 — GA4 무팝업 자동 측정 hotfix 운영 배포 완료
+- `LegalFlow/GA4_insert` hotfix `1a045b7e935bd65b4ba98bc4c237840a3898155f`를 main
+  `22ebd761e0502ae3ac1ca07bac8e625ed4a6fd7e`에 병합했다. HERDR는 이 세션에서 환경변수와
+  서버가 없어 목록을 제공하지 못했지만 로컬 Git worktree와 모든 `origin/worktree/*`·
+  `origin/LegalFlow/*`를 대조해 hotfix 외 HEAD가 병합 전 main ancestor였고, 병합 뒤 hotfix도
+  main ancestor임을 확인했다. 홈페이지 test 9개·typecheck·lint·production build·
+  `git diff --check`와 Actions `32232759640`이 성공했다. migration은 없다.
+- 릴리스 `20260819T084041Z-ga4-no-prompt-hotfix-v1`로 홈페이지만 새 ARM64 parent digest
+  `sha256:a524922177d9a86da1d7ca45b74c3e79ae3d1ec8d19c88aa9e550b934b7351ca`, image ID
+  `sha256:a56d1c3a921000df1d9acecfdb04f695399cc12ee74277f2bf199a1dc26c428d`로 전환했다.
+  scan은 CRITICAL 3·HIGH 11·MEDIUM 11·LOW 1이다. rollback은
+  `sha256:c422c640286252f4df42958f9f2ea1917f82306dbd8d7acbd81cc06ee08b4fa9`·
+  `sha256:37f55f653cfa04e552a00818c5e5586fa1e829c422f72737bbb0d2267445cd13`, cache는
+  1,421,000,000 bytes, 가용량 19,153,502,208→20,035,911,680 bytes, 회수량 882,409,472
+  bytes다. PORT 3020·현재 secret을 사용했고 정식·EIP 홈페이지/config를 3회 연속 200,
+  앱·Caddy active, restart 0, 환경파일 600, error journal 0으로 확인했다.
+- 새 분리 Chrome 운영 canary에서 배너·분석 설정 UI·legacy 선택값 0, GA script 1,
+  `analytics_storage=granted`, 세 광고 저장 유형 `denied`, 최초·내부이동·모바일 page_view 각각
+  정확히 1회, GA collect 세 건 HTTP 204를 확인했다. 정식 origin·`n_keyword_id`·허용 UTM만
+  남고 `n_query`·민감 검색어·fragment는 0이며, enhanced measurement 추가 이벤트·모바일
+  가로 overflow·console error·hydration signal도 0이다. 실제 `generate_lead`는 운영 상담 생성
+  승인이 없어 실행하지 않았다. GA 실시간 개요는 아직 0으로 처리 지연 상태이므로 배포 실패로
+  보지 않고 24~48시간 뒤 일반 보고서/Data API에서 확인한다.
+- 직전 설정 활성화 때 PORT 3000 오기록으로 발생한 일시적 502와 PORT 3020 복구 사실은 아래
+  원장과 서버 배포 로그에 그대로 보존했다. gateway·ERP·DB·운영 상담·광고 연결은 변경하지
+  않았고 gateway health·ERP 로그인 200, 세 EC2 status ok, CloudWatch OK 14다.
+  `PROJECT_PLAN.md`는 v1.66다.
+
 ### 2026-08-19 — GA4 동의 배너 제거·무팝업 자동 측정 hotfix 후보
 - 운영 Measurement ID 1차 활성화 뒤 실서비스에서 분석·국외이전 동의 배너가 실제 노출되는
   것을 확인했고, 사용자가 첫 방문 이탈 우려를 이유로 해당 UI를 제거하도록 명시했다. 루트

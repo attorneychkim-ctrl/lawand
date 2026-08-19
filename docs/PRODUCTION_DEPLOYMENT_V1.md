@@ -4,7 +4,7 @@
 CloudFormation 스택: `lawand-prod`
 리전: 서울(`ap-northeast-2`)
 최초 배포 릴리스: `20260804T085006Z-84e8708`
-현재 홈페이지 릴리스: `20260819T075837Z-ga4-config-activation-v1-recovery`
+현재 홈페이지 릴리스: `20260819T084041Z-ga4-no-prompt-hotfix-v1`
 현재 ERP 릴리스: `20260819T035353Z-orca-integrated-ops-v3`
 현재 gateway 릴리스: `20260819T071714Z-four-worktrees-v1`
 현재 Windows bridge: `v0.8.3.0`
@@ -18,6 +18,34 @@ CloudFormation 스택: `lawand-prod`
 이 문서는 정식 도메인 전환 이후를 포함한 실제 AWS 구성, 접속점, 데이터 이관 범위와
 운영 체크리스트를 기록한다. 비밀번호·API 키·AWS 계정 ID·RDS 마스터 시크릿 ARN은
 기록하지 않는다.
+
+## 2026-08-19 GA4 무팝업 자동 측정 hotfix 운영 배포
+
+- hotfix `1a045b7e935bd65b4ba98bc4c237840a3898155f`를 main
+  `22ebd761e0502ae3ac1ca07bac8e625ed4a6fd7e`에 병합했다. 홈페이지 test 9개·typecheck·
+  lint·production build·diff check와 Actions `32232759640`이 성공했다. migration은 없다.
+- 릴리스 `20260819T084041Z-ga4-no-prompt-hotfix-v1`의 홈페이지 parent digest는
+  `sha256:a524922177d9a86da1d7ca45b74c3e79ae3d1ec8d19c88aa9e550b934b7351ca`, image ID는
+  `sha256:a56d1c3a921000df1d9acecfdb04f695399cc12ee74277f2bf199a1dc26c428d`이고 ARM64 label과
+  main revision이 일치한다. scan은 CRITICAL 3·HIGH 11·MEDIUM 11·LOW 1이다. rollback은
+  `sha256:c422c640286252f4df42958f9f2ea1917f82306dbd8d7acbd81cc06ee08b4fa9`·
+  `sha256:37f55f653cfa04e552a00818c5e5586fa1e829c422f72737bbb0d2267445cd13`다. BuildKit cache는
+  1,421,000,000 bytes, 가용량 19,153,502,208→20,035,911,680 bytes, 회수량 882,409,472
+  bytes이며 서버 배포 로그에 기록했다.
+- 현재 secret과 PORT 3020을 사용해 홈페이지만 전환했다. 정식·EIP `/bank`·
+  `/api/analytics-config`는 3회 연속 200, config는 값 비출력 검증에서 유효한 non-null 형식이다.
+  홈페이지·Caddy active, restart 0, 환경파일 600, GA4 env 키 존재, 로컬 health 200, 배포 뒤
+  error journal 0이다.
+- 새 분리 Chrome 운영 canary는 배너·분석 설정 UI·legacy 선택값 0, GA script 1,
+  `analytics_storage=granted`, `ad_storage`·`ad_user_data`·`ad_personalization=denied`, 최초·
+  내부이동·모바일 page_view 각 1회와 GA collect HTTP 204 세 건을 확인했다. 정식 origin·
+  `n_keyword_id`·허용 UTM만 남고 `n_query`·민감 검색어·fragment는 제거됐으며, enhanced
+  measurement 추가 이벤트·모바일 가로 overflow·console error·hydration signal은 0이다.
+  실제 `generate_lead`는 운영 상담 생성 승인 없이 실행하지 않았다. 실시간 개요는 현재 0으로
+  처리 지연 상태이며 24~48시간 뒤 일반 보고서/Data API에서 후속 확인한다.
+- 아래 1차 활성화 원장의 PORT 3000 오기록·일시적 502·PORT 3020 복구 사실은 삭제하거나
+  덮어쓰지 않고 보존했다. gateway·ERP·DB·운영 상담·광고 연결은 변경하지 않았고 gateway·ERP
+  health 200, 세 EC2 status ok, CloudWatch OK 14다.
 
 ## 2026-08-19 GA4 운영 Measurement ID 설정 활성화
 
