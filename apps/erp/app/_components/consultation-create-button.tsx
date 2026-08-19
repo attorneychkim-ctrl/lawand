@@ -367,7 +367,9 @@ export function ConsultationCreateButton() {
                     <strong>{sourceCaseLabel(selectedSource)}</strong>
                   </div>
                   <div>
-                    <span>기존 담당</span>
+                    <span>
+                      {relationship === "referrer" ? "소개자 담당" : "기존 담당"}
+                    </span>
                     <strong>{selectedSource.staffNames.join(" · ") || "미지정"}</strong>
                   </div>
                 </div>
@@ -403,7 +405,12 @@ export function ConsultationCreateButton() {
                           </span>
                           <span>
                             <strong>{sourceCaseLabel(item)}</strong>
-                            <small>{item.staffNames.join(" · ") || "담당 미지정"}</small>
+                            <small>
+                              {relationship === "referrer"
+                                ? "소개자 담당"
+                                : "기존 담당"}{" "}
+                              {item.staffNames.join(" · ") || "미지정"}
+                            </small>
                           </span>
                           <b>{selected ? "선택됨" : "선택"}</b>
                         </button>

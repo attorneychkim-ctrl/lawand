@@ -3,6 +3,8 @@ import { createHmac } from "node:crypto";
 import { once } from "node:events";
 import test from "node:test";
 
+import type { PhoneDeskAftercareSave } from "@lawand/core";
+
 import { createGatewayServer } from "./app.js";
 import type { StaffAuthService, StaffPrincipal } from "./auth.js";
 import { centrexBridgeCanonicalRequest } from "./centrex-bridge-auth.js";
@@ -1733,6 +1735,11 @@ test("전화데스크 통화자 확정·후처리·재통화 완료 API는 통�
   const finalStaffUserId = "019fa6a4-6834-7782-aa0b-4e71ffb8a304";
   let savedResult = "";
   let savedAssignee = "";
+  let savedDirectorySource: {
+    clientIdx: number;
+    caseIdx: number;
+    relationship: "referrer";
+  } | null = null;
   let completedBy = "";
   let resolvedBy = "";
   const telephonyService = {
@@ -1744,13 +1751,19 @@ test("전화데스크 통화자 확정·후처리·재통화 완료 API는 통�
     }),
     savePhoneDeskAftercare: async (
       receivedCallId: string,
-      input: { result: string; followUp: { enabled: boolean; assigneeUserId?: string } },
+      input: PhoneDeskAftercareSave,
       actor: StaffPrincipal,
     ) => {
       assert.equal(receivedCallId, callId);
       assert.equal(actor.id, realtimeActor.id);
       savedResult = input.result;
-      savedAssignee = input.followUp.assigneeUserId ?? "";
+      savedAssignee = input.followUp.enabled
+        ? input.followUp.assigneeUserId
+        : "";
+      savedDirectorySource =
+        input.consultation.mode === "create"
+          ? input.consultation.directorySource ?? null
+          : null;
       return { call: { id: callId, aftercare: { result: input.result } } };
     },
     resolvePhoneDeskCall: async (
@@ -1820,7 +1833,17 @@ test("전화데스크 통화자 확정·후처리·재통화 완료 API는 통�
       body: JSON.stringify({
         result: "manager_callback_requested",
         memo: "담당자 확인 후 재통화",
-        consultation: { mode: "none" },
+        consultation: {
+          mode: "create",
+          customerName: "소개받은 고객",
+          customerNameTag: "referral",
+          directorySource: {
+            clientIdx: 123,
+            caseIdx: 456,
+            relationship: "referrer",
+          },
+          residenceRegion: "seoul",
+        },
         followUp: {
           enabled: true,
           dueAt: "2026-08-08T14:30:00+09:00",
@@ -1832,6 +1855,11 @@ test("전화데스크 통화자 확정·후처리·재통화 완료 API는 통�
   assert.equal(saved.status, 200);
   assert.equal(savedResult, "manager_callback_requested");
   assert.equal(savedAssignee, realtimeActor.id);
+  assert.deepEqual(savedDirectorySource, {
+    clientIdx: 123,
+    caseIdx: 456,
+    relationship: "referrer",
+  });
 
   const completed = await fetch(
     `http://127.0.0.1:${address.port}/v1/phone-desk/follow-ups/${taskId}/complete`,

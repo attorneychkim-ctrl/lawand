@@ -170,7 +170,7 @@ export function ClientDirectoryConsultationButton({
             <strong>{item.caseNumber || item.caseName || `Case ${item.caseIdx}`}</strong>
           </div>
           <div>
-            <span>기존 담당</span>
+            <span>{isReferral ? "소개자 담당" : "기존 담당"}</span>
             <strong>{item.staffNames.join(" · ") || "미지정"}</strong>
           </div>
         </div>

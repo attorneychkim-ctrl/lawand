@@ -7837,6 +7837,9 @@ a.inbound-customer:hover { text-decoration: underline; }
   font-size: .62rem;
   line-height: 1.5;
 }
+.phone-aftercare-referrer-picker > .phone-aftercare-name-tag-help {
+  margin: 0;
+}
 .phone-aftercare-error,
 .phone-aftercare-success { margin: 0; padding: 10px 12px; border-radius: 9px; font-size: .7rem; }
 .phone-aftercare-error { background: var(--danger-soft); color: var(--danger); }
@@ -9848,7 +9851,8 @@ a.inbound-customer:hover { text-decoration: underline; }
 }
 
 @media (max-width: 620px) {
-  .consultation-customer-name-input > input {
+  .consultation-customer-name-input > input,
+  .phone-aftercare-referrer-picker input {
     font-size: 16px;
   }
 

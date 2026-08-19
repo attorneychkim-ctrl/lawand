@@ -4450,15 +4450,40 @@ export function createConsultationService(options: {
       );
     }
     const directorySourceRows = await db
-      .select({ consultationId: consultationDirectorySources.consultationId })
+      .select({
+        consultationId: consultationDirectorySources.consultationId,
+        relationship: consultationDirectorySources.relationship,
+        snapshotCiphertext: consultationDirectorySources.snapshotCiphertext,
+        snapshotNonce: consultationDirectorySources.snapshotNonce,
+        snapshotKeyVersion: consultationDirectorySources.snapshotKeyVersion,
+      })
       .from(consultationDirectorySources)
-      .where(inArray(consultationDirectorySources.consultationId, ids));
+      .where(inArray(consultationDirectorySources.consultationId, ids))
+      .orderBy(desc(consultationDirectorySources.createdAt));
     const directorySourceIds = new Set(
       directorySourceRows.map(
         (row) =>
           canonicalByMember.get(row.consultationId) ?? row.consultationId,
       ),
     );
+    const referrerStaffNamesByConsultation = new Map<string, string[]>();
+    for (const row of directorySourceRows) {
+      if (row.relationship !== "referrer") continue;
+      const canonicalId =
+        canonicalByMember.get(row.consultationId) ?? row.consultationId;
+      if (referrerStaffNamesByConsultation.has(canonicalId)) continue;
+      const snapshot = JSON.parse(
+        protection.decrypt(
+          {
+            ciphertext: row.snapshotCiphertext,
+            nonce: row.snapshotNonce,
+            keyVersion: row.snapshotKeyVersion,
+          },
+          `consultation_directory_sources/${row.consultationId}/snapshot`,
+        ),
+      ) as ConsultationDirectorySnapshot;
+      referrerStaffNamesByConsultation.set(canonicalId, snapshot.staffNames);
+    }
     const handlingRows = await db
       .select({ consultationId: consultationLegalFriendsHandlings.consultationId })
       .from(consultationLegalFriendsHandlings)
@@ -4752,6 +4777,8 @@ export function createConsultationService(options: {
           existingCustomer,
           existingCustomerStaffNames:
             existingCustomersByConsultation.get(item.id) ?? [],
+          referrerStaffNames:
+            referrerStaffNamesByConsultation.get(item.id) ?? null,
           legalFriendsRegistered,
           requiresLegalFriendsReview:
             existingCustomer &&

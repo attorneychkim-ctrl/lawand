@@ -114,6 +114,8 @@ function searchText(item: ConsultationListItem) {
     item.assigneeDisplayName,
     item.existingCustomer ? "기존고객" : null,
     ...(item.existingCustomerStaffNames ?? []),
+    item.referrerStaffNames ? "소개건 소개자 담당" : null,
+    ...(item.referrerStaffNames ?? []),
     isInvalidConsultation(item) ? "무효" : null,
     item.legalFriendsRegistered ? "리걸프렌즈 등록 완료" : null,
     residenceRegionLabels[item.residenceRegion ?? ""],
@@ -209,6 +211,7 @@ function ChannelIcon({ tone }: { tone: ReturnType<typeof channelTone> }) {
 
 function StatusBadges({ item }: { item: ConsultationListItem }) {
   const existingCustomerStaffNames = item.existingCustomerStaffNames ?? [];
+  const referrerStaffNames = item.referrerStaffNames ?? null;
   return (
     <div className="consultation-flags">
       {item.groupMemberCount > 1 ? (
@@ -245,6 +248,11 @@ function StatusBadges({ item }: { item: ConsultationListItem }) {
           {existingCustomerStaffNames.length > 0
             ? ` · 담당 ${existingCustomerStaffNames.join(" · ")}`
             : ""}
+        </span>
+      ) : null}
+      {referrerStaffNames ? (
+        <span className="flag-badge is-info">
+          소개건 · 소개자 담당 {referrerStaffNames.join(" · ") || "미지정"}
         </span>
       ) : null}
       {item.legalFriendsRegistered ? (

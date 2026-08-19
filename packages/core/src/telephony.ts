@@ -412,6 +412,14 @@ const phoneDeskConsultationActionSchema = z.discriminatedUnion("mode", [
       mode: z.literal("create"),
       customerName: z.string().trim().min(1).max(50),
       customerNameTag: consultationCustomerNameTagSchema.optional(),
+      directorySource: z
+        .object({
+          clientIdx: z.number().int().positive(),
+          caseIdx: z.number().int().positive(),
+          relationship: z.literal("referrer"),
+        })
+        .strict()
+        .optional(),
       residenceRegion: residenceRegionSchema,
       assigneeUserId: z.uuid().optional(),
       transferNote: z.string().trim().max(2_000).optional(),
@@ -494,9 +502,10 @@ export const phoneDeskAftercareSaveSchema = z
   .strict()
   .superRefine((value, context) => {
     if (value.consultation.mode === "create") {
+      const customerNameTag = value.consultation.customerNameTag ?? "none";
       const customerName = formatConsultationCustomerName(
         value.consultation.customerName,
-        value.consultation.customerNameTag ?? "none",
+        customerNameTag,
       );
       if (!customerName) {
         context.addIssue({
@@ -511,6 +520,26 @@ export const phoneDeskAftercareSaveSchema = z
           code: "custom",
           message: "고객 이름은 자동 접미사를 포함해 50자 이하여야 합니다.",
           path: ["consultation", "customerName"],
+        });
+      }
+      if (
+        customerNameTag === "referral" &&
+        !value.consultation.directorySource
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "소개자를 고객찾기에서 선택해 주세요.",
+          path: ["consultation", "directorySource"],
+        });
+      }
+      if (
+        customerNameTag !== "referral" &&
+        value.consultation.directorySource
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "소개건에서만 소개자 정보를 저장할 수 있습니다.",
+          path: ["consultation", "directorySource"],
         });
       }
     }

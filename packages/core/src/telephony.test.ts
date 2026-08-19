@@ -332,10 +332,44 @@ test("전화데스크 후처리는 기타 설명과 재통화 담당·일시를 
         mode: "create",
         customerName: "통화 고객",
         customerNameTag: "referral",
+        directorySource: {
+          clientIdx: 123,
+          caseIdx: 456,
+          relationship: "referrer",
+        },
         residenceRegion: "seoul",
       },
     }).success,
     true,
+  );
+  assert.equal(
+    phoneDeskAftercareSaveSchema.safeParse({
+      ...base,
+      consultation: {
+        mode: "create",
+        customerName: "통화 고객",
+        customerNameTag: "referral",
+        residenceRegion: "seoul",
+      },
+    }).success,
+    false,
+  );
+  assert.equal(
+    phoneDeskAftercareSaveSchema.safeParse({
+      ...base,
+      consultation: {
+        mode: "create",
+        customerName: "통화 고객",
+        customerNameTag: "existing",
+        directorySource: {
+          clientIdx: 123,
+          caseIdx: 456,
+          relationship: "referrer",
+        },
+        residenceRegion: "seoul",
+      },
+    }).success,
+    false,
   );
   assert.equal(
     phoneDeskAftercareSaveSchema.safeParse({
