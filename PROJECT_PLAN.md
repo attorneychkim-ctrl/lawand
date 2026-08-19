@@ -1,8 +1,19 @@
-# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.55)
+# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.56)
 
 > 이 문서는 새 로앤 홈페이지 + 새 ERP + 리걸플로/리걸프렌즈 연동을 하나의 플랫폼으로
 > 묶기 위한 **저장소 구조·아키텍처 설계 초안**이다. 코덱스/클로드코드 세션이 번갈아
 > 작업하는 것을 전제로 하며, 첫 커밋 시점에 이 문서를 기준선으로 삼는다.
+>
+> 2026-08-19 운영 canary: 센트릭스 대표 endpoint `070-4607-0588`의 RID를 제거한 뒤 그
+> 계정을 명시적으로 선택해 SMS 1건을 발송했다. 고객 단말에는 `070-4607-0588`이
+> 발신번호로 표시됐고, 전화 단말의 전원·인터넷이 연결되지 않은 상태에서도 같은 번호로 보낸
+> 회신이 0588의 `getrecvsmslist`에 들어왔다. gateway는 수신 후 약 14초 안에 원 발송 건과
+> `latest_outbound`로 연결하고 최신 발송 직원 알림을 만들었다. 따라서 개인 전화 회선은 통화에
+> 유지하면서 센트릭스 SMS/LMS만 0588 공용 계정으로 보내고 같은 mailbox에서 회신을 받는
+> 수직 경로는 운영에서 검증됐다. 실제 제품화 전에는 현재의 상대번호 전역 최신 발송 매칭을
+> `회신 mailbox + 상대번호 + 발송시각` 기준으로 좁히고 발송 당시 회신 mailbox snapshot을
+> 보존해야 한다. SOLAPI JPG MMS는 기존 `02-555-7455` 발신을 유지하되 그 번호의 실제
+> 센트릭스 회신 mailbox를 별도로 snapshot한다. 소스·migration·배포는 아직 변경하지 않았다.
 >
 > 2026-08-18 운영 반영: Orca 완료 작업 6개와 migration `0066`·`0067`을 소스
 > `b837751660172877c80d2cdcc59cd57293540c64`, 릴리스
@@ -1362,6 +1373,17 @@ snapshot과 같은 경우에만 URL을 보강한다. 따라서 템플릿을 나�
 허용 변수 치환과 실시간 휴대전화 미리보기를 제공한다. 운영 적용·통제 발송 게이트는
 [`docs/CENTREX_MESSAGING_V1.md`](docs/CENTREX_MESSAGING_V1.md)를 따른다.
 
+현재 운영 코드는 위와 같이 직원의 활성 주 회선을 SMS/LMS endpoint로 선택하지만,
+2026-08-19 통제 canary로 공용 대표 endpoint `070-4607-0588`을 선택한 발송·표시·회신·ERP
+연결 전 구간이 확인됐다. 다음 문자 라우팅 변경에서는 직원의 개인 endpoint binding을 통화와
+Windows bridge에 그대로 두고, 센트릭스 텍스트 문자에만 별도의 활성 공용 발신 endpoint
+설정을 둔다. `telephony_messages.staff_user_id`는 실제 발송 직원을 계속 보존하고
+`endpoint_id`만 0588 공용 계정을 가리킨다. 발송 시점에는 고객이 회신할 실제 mailbox endpoint와
+표시 발신번호 snapshot을 함께 보존한다. 수신 매칭은 같은 mailbox·같은 상대번호의 수신시각 이전
+성공 또는 결과 불명확 발송만 후보로 삼으며, 여러 활성 상담·사건이 경합하면 임의로 확정하지 않고
+모호 상태와 관련 직원 알림으로 올린다. 센트릭스 SMS/LMS와 달리 SOLAPI JPG MMS는
+`02-555-7455`를 계속 표시하므로 해당 번호의 실제 회신 mailbox mapping을 별도 설정한다.
+
 2026-08-11 대표 문자 수신함은 직원 개인 endpoint·binding·Windows bridge와
 분리된 `representative` endpoint 7개를 migration `0044_sturdy_preak.sql`에 비활성
 메타데이터로 등록한다. 현재 클릭투콜 발신 회선과 대표전화의 U+ 순차착신 설정은 바꾸지
@@ -2395,6 +2417,8 @@ Manager와 별도 역할·보안그룹·TLS 기준을 적용한다.
 - [x] 고객 문자 로컬 출시 후보: 센트릭스 SMS/LMS, SOLAPI JPG MMS, 담당자 개인 템플릿·
   변수 치환·휴대전화 미리보기·상담별 암호화 발송 원장
 - [x] 운영 migration `0041`·gateway·ERP 통합 배포 → 통제 센트릭스 SMS 실제 발송 canary
+- [x] RID를 제거한 0588 대표 계정 통제 SMS → 단말에 `070-4607-0588` 표시 → 단말 미연결
+  상태의 회신이 같은 mailbox로 유입 → 정확한 수동 발송 원장·최신 발송 직원 알림 연결 canary
 - [x] 운영 migration `0042`·gateway·ERP 통합 배포 → 기본 템플릿/활성화 제거, 개인 템플릿
   실삭제·과거 발송 snapshot 보존, ERP 내 정보·본인 업무 연결 운영 활성화
 - [x] 운영 migration `0043`·gateway·ERP 통합 배포 → 고객 찾기 대상 재검증·암호화 snapshot·
@@ -2414,7 +2438,8 @@ Manager와 별도 역할·보안그룹·TLS 기준을 적용한다.
 - [x] 활성·인증 대표 endpoint 7개를 직원 binding 없이 전화 callback·24시간 수신이력
   관찰 대상으로 포함하되 개인 회선의 직원 binding 조건과 문자/Windows bridge 분리 유지
 - [x] U+ 비표준 `SRC` 격리 gateway 수정 운영 반영 → 대표 mailbox 7개 오류 0·최근 동기화
-- [ ] 대표번호 통제 회신 1건의 Case_idx 연결·단말/ERP 수신 canary
+- [ ] 0588 공용 SMS/LMS 발신 설정·발신 당시 회신 mailbox snapshot·mailbox별 수신 매칭 구현
+  뒤 상담 또는 Case_idx 대상 통제 회신의 ERP 대화·담당자 알림 canary
 - [x] SOLAPI 등록 MMS 발신번호를 운영 Secrets Manager·gateway에 적용
 - [ ] 200KB 이하 명함 JPG MMS 실제 발송·단말 수신 canary
 - [x] 임시 Windows Server 2022 x64 + 32비트 OpenAPI OCX 수신 canary:
@@ -2541,9 +2566,10 @@ Manager와 별도 역할·보안그룹·TLS 기준을 적용한다.
 7. 활성화된 리걸프렌즈 워커의 외부 멱등성 계약과 응답 유실 건 운영 절차 확정
 8. SOLAPI 명함 JPG MMS 1건 canary 뒤, Solapi 최종 발송결과 자동 수신과 전체 상담
    상태머신 확정
-9. 대표 문자 수신함의 U+ 비표준 `SRC` 격리 수정은 배포 완료. 승인된 통제 대표 회선의
-   회신 1건으로 Case_idx 통합 대화 canary; 대표전화 근무/휴무·담당자
-   조건 라우팅은 별도 설계
+9. 검증된 0588 공용 센트릭스 SMS/LMS 발신 설정과 발신 당시 회신 mailbox snapshot,
+   mailbox별 최신 발신 매칭·경합 처리를 구현한 뒤 상담/Case_idx 통합 대화 canary를 수행한다.
+   대표 문자 수신함의 U+ 비표준 `SRC` 격리는 배포 완료 상태를 유지하고, 대표전화 근무/휴무·
+   담당자 조건 라우팅은 별도 설계한다.
 10. 홈페이지 카카오 버튼 → 이름/표시명·광역 거주지역과 선택 전화번호 입력 → ERP 즉시 표시 → 실제 채팅을 찾아
     `상담하기`로 확인·배정하는 운영자 canary
 11. 실제 수신·ERP 발신·직접 발신 한 건씩 통화 종료 후 공용 후처리 자동 열림과 담당자·
