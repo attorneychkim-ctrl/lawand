@@ -102,6 +102,35 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-19 — Orca 완료 작업 6개 통합 운영 배포 완료
+- Orca 완료 브랜치 6개를 최종 `main` `224e156619f4fab3b9d78f7ca9204e377de5b4c8`에
+  통합했고 Actions `32213073096`의 검증과 세 `linux/arm64` 이미지 게시가 성공했다.
+  `sms_number_problem`은 코드 변경 없이 main과 같은 HEAD라 제외했고, 별도 AdPilot 저장소도
+  이번 lawand 릴리스에 포함하지 않았다. 전체 5패키지 test·typecheck·lint·production build,
+  DB schema check와 `git diff --check`, core 92개·gateway 180개 테스트를 통과했다.
+- 암호화 snapshot `lawand-prod-pre-orca-integrated-ops-20260819t035353z`을 available·100%로
+  확보한 뒤 gateway digest로 migration `0068`을 적용하고 재실행 no-op을 확인했다. 운영
+  migration은 69개이고 `0068` SHA-256은
+  `2501c6e125577791d4b45e0305db1f1369fdf275d12cde90d3ad590907d20204`다. 안정 unique index
+  1개와 중복 그룹 0을 확인했다. 첫 두 migration 명령은 각각 이미지 검사 인용과
+  `DATABASE_URL` 이름 불일치로 DB 실행 전에 중단됐고, migrator 전용 URL을 명시 매핑한
+  최종 명령만 성공했다.
+- 릴리스 `20260819T035353Z-orca-integrated-ops-v3`로 gateway→ERP→홈페이지를 digest 전환했다.
+  parent digest/image ID는 gateway
+  `sha256:10735fbeb4968edacf56cfcdd52872dabbb250f613e9abb548695e8300210a3e`·
+  `sha256:dce53948efe1518c90a60ef62b194057663e51d6e66921f03b34cd817fb7c465`, ERP
+  `sha256:49d10a433437020113692be2902fa0f4b34135e8a364744684c1e6b4711bb08e`·
+  `sha256:944686691a7080ddd6730e759d2bd223de8a7691abadf811322d027cc31c5666`, 홈페이지
+  `sha256:9e23a81fa6c27cfe5557cc522e76672e256219df9a0b0a289dae0132c5085679`·
+  `sha256:37f55f653cfa04e552a00818c5e5586fa1e829c422f72737bbb0d2267445cd13`이다.
+  세 ARM64 child scan은 CRITICAL 3·HIGH 11·MEDIUM 11·LOW 1이다.
+- health 뒤 gateway·ERP·홈페이지 cache는 각각 1,381,000,000·1,429,000,000·
+  1,421,000,000 bytes이고 회수량은 856,387,584·879,525,888·880,054,272 bytes다. 정식·
+  EIP HTTPS는 모두 200, 앱·Caddy active, restart 0, 환경파일 600, error journal 0이며
+  gateway request/LISTEN waiting은 0/20·0/5다. 세 EC2 status ok·SSM Online, RDS
+  available·암호화·삭제 방지, CloudWatch OK 14다. GA4 운영 Measurement ID·AdPilot·Windows
+  bridge·외부 발송은 변경하지 않았다. `PROJECT_PLAN.md`는 v1.60이다.
+
 ### 2026-08-19 — Orca 완료 작업 6개 통합 병합 후보
 - Orca 원장과 원격 HEAD를 대조해 `GA4_insert`·`centrex_call_button_add`·
   `change_manager_althogh_invalidity`·`existing_intro_auto_text`·`navigation_bar_simplify`·
