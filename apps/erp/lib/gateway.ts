@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 
 import { createSingleFlight } from "@lawand/core";
 import type {
+  ConsultationCustomerNameTag,
   ConsultationAssigneeTransferInput,
   LegalFriendsConsultationHandling,
   LegalFriendsDirectoryConsultationCreate,
@@ -754,6 +755,7 @@ export type PhoneDeskAftercareInput = {
     | {
         mode: "create";
         customerName: string;
+        customerNameTag?: ConsultationCustomerNameTag;
         residenceRegion: ResidenceRegion;
         assigneeUserId?: string;
         transferNote?: string;

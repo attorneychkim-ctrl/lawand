@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+import {
+  CONSULTATION_CUSTOMER_NAME_MAX_LENGTH,
+  consultationCustomerNameTagSchema,
+  formatConsultationCustomerName,
+} from "./consultation.js";
 import { residenceRegionSchema } from "./intake.js";
 
 export const CENTREX_SMS_MAX_BYTES = 80;
@@ -285,7 +290,26 @@ export const legalFriendsDirectoryConsultationCreateSchema = z
     caseType: z.union([z.literal(1), z.literal(2), z.literal(3)]),
     isReferral: z.boolean(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    const customerName = formatConsultationCustomerName(
+      value.customerName,
+      value.isReferral ? "referral" : "existing",
+    );
+    if (!customerName) {
+      context.addIssue({
+        code: "custom",
+        message: "고객 이름을 입력해 주세요.",
+        path: ["customerName"],
+      });
+    } else if (customerName.length > CONSULTATION_CUSTOMER_NAME_MAX_LENGTH) {
+      context.addIssue({
+        code: "custom",
+        message: "고객 이름은 자동 접미사를 포함해 50자 이하여야 합니다.",
+        path: ["customerName"],
+      });
+    }
+  });
 
 export type LegalFriendsDirectoryConsultationCreate = z.infer<
   typeof legalFriendsDirectoryConsultationCreateSchema
@@ -316,7 +340,30 @@ export const staffConsultationCreateSchema = z
       .strict()
       .nullable(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    const customerName = formatConsultationCustomerName(
+      value.customerName,
+      value.directorySource?.relationship === "customer"
+        ? "existing"
+        : value.directorySource?.relationship === "referrer"
+          ? "referral"
+          : "none",
+    );
+    if (!customerName) {
+      context.addIssue({
+        code: "custom",
+        message: "고객 이름을 입력해 주세요.",
+        path: ["customerName"],
+      });
+    } else if (customerName.length > CONSULTATION_CUSTOMER_NAME_MAX_LENGTH) {
+      context.addIssue({
+        code: "custom",
+        message: "고객 이름은 자동 접미사를 포함해 50자 이하여야 합니다.",
+        path: ["customerName"],
+      });
+    }
+  });
 
 export type StaffConsultationCreate = z.infer<
   typeof staffConsultationCreateSchema
@@ -364,6 +411,7 @@ const phoneDeskConsultationActionSchema = z.discriminatedUnion("mode", [
     .object({
       mode: z.literal("create"),
       customerName: z.string().trim().min(1).max(50),
+      customerNameTag: consultationCustomerNameTagSchema.optional(),
       residenceRegion: residenceRegionSchema,
       assigneeUserId: z.uuid().optional(),
       transferNote: z.string().trim().max(2_000).optional(),
@@ -445,6 +493,27 @@ export const phoneDeskAftercareSaveSchema = z
   })
   .strict()
   .superRefine((value, context) => {
+    if (value.consultation.mode === "create") {
+      const customerName = formatConsultationCustomerName(
+        value.consultation.customerName,
+        value.consultation.customerNameTag ?? "none",
+      );
+      if (!customerName) {
+        context.addIssue({
+          code: "custom",
+          message: "고객 이름을 입력해 주세요.",
+          path: ["consultation", "customerName"],
+        });
+      } else if (
+        customerName.length > CONSULTATION_CUSTOMER_NAME_MAX_LENGTH
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "고객 이름은 자동 접미사를 포함해 50자 이하여야 합니다.",
+          path: ["consultation", "customerName"],
+        });
+      }
+    }
     if (value.result === "other" && !value.otherText) {
       context.addIssue({
         code: "custom",

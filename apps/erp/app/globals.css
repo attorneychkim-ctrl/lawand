@@ -7795,6 +7795,48 @@ a.inbound-customer:hover { text-decoration: underline; }
 .phone-aftercare-field input:focus,
 .phone-aftercare-field select:focus,
 .phone-aftercare-field textarea:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+.phone-aftercare-field .consultation-customer-name-input {
+  display: flex;
+  align-items: center;
+  min-height: 42px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.phone-aftercare-field .consultation-customer-name-input:focus-within {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-soft);
+}
+.phone-aftercare-field .consultation-customer-name-input > input,
+.phone-aftercare-field .consultation-customer-name-input > input:focus {
+  min-width: 0;
+  flex: 1;
+  width: auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.consultation-customer-name-input > span {
+  display: flex;
+  align-self: stretch;
+  align-items: center;
+  flex: none;
+  padding: 0 12px 0 5px;
+  color: var(--brand-strong);
+  font-size: .78rem;
+  font-weight: 850;
+  white-space: nowrap;
+  user-select: none;
+}
+.phone-aftercare-name-tags { margin-top: 2px; }
+.phone-aftercare-name-tag-help {
+  margin-top: -9px;
+  color: var(--muted);
+  font-size: .62rem;
+  line-height: 1.5;
+}
 .phone-aftercare-error,
 .phone-aftercare-success { margin: 0; padding: 10px 12px; border-radius: 9px; font-size: .7rem; }
 .phone-aftercare-error { background: var(--danger-soft); color: var(--danger); }
@@ -9499,6 +9541,32 @@ a.inbound-customer:hover { text-decoration: underline; }
   background: var(--surface);
 }
 
+.client-consultation-fields .consultation-customer-name-input {
+  display: flex;
+  align-items: center;
+  min-height: 43px;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--surface-subtle);
+}
+
+.client-consultation-fields .consultation-customer-name-input:focus-within {
+  border-color: var(--brand);
+  background: var(--surface);
+}
+
+.client-consultation-fields .consultation-customer-name-input > input,
+.client-consultation-fields .consultation-customer-name-input > input:focus {
+  min-width: 0;
+  flex: 1;
+  width: auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
 .client-consultation-referral {
   display: flex;
   align-items: flex-start;
@@ -9780,6 +9848,10 @@ a.inbound-customer:hover { text-decoration: underline; }
 }
 
 @media (max-width: 620px) {
+  .consultation-customer-name-input > input {
+    font-size: 16px;
+  }
+
   .queue-toolbar-heading {
     align-items: stretch;
     flex-direction: column;

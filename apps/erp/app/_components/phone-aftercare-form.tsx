@@ -5,11 +5,18 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 
+import {
+  formatConsultationCustomerName,
+  stripConsultationCustomerNameSuffixes,
+  type ConsultationCustomerNameTag,
+} from "@lawand/core";
+
 import type {
   PhoneDeskAftercareInput,
   PhoneDeskCallDetail,
   PhoneDeskCallResult,
 } from "../../lib/gateway";
+import { ConsultationCustomerNameInput } from "./consultation-customer-name-input";
 import { MessageComposeButton } from "./message-compose-button";
 
 const resultOptions = [
@@ -377,6 +384,8 @@ export function PhoneAftercareForm({
         ? detail.call.customerMatch.clientName
         : ""),
   );
+  const [customerNameTag, setCustomerNameTag] =
+    useState<ConsultationCustomerNameTag>("none");
   const [residenceRegion, setResidenceRegion] = useState("");
   const [transferNote, setTransferNote] = useState("");
   const [consultationAssignee, setConsultationAssignee] = useState(
@@ -467,7 +476,9 @@ export function PhoneAftercareForm({
     result &&
       (result !== "other" || otherText.trim()) &&
       (consultationMode !== "link" || linkedConsultationId) &&
-      (consultationMode !== "create" || (customerName.trim() && residenceRegion)) &&
+      (consultationMode !== "create" ||
+        (formatConsultationCustomerName(customerName, customerNameTag) &&
+          residenceRegion)) &&
       (!followUpEnabled || (followUpDueValid && followUpAssignee)) &&
       (!phonebookEnabled ||
         (phonebookName.trim() &&
@@ -489,6 +500,16 @@ export function PhoneAftercareForm({
     setSaved(false);
   }
 
+  function changeCustomerNameTag(
+    next: Exclude<ConsultationCustomerNameTag, "none">,
+  ) {
+    setCustomerName((current) =>
+      stripConsultationCustomerNameSuffixes(current),
+    );
+    setCustomerNameTag((current) => current === next ? "none" : next);
+    setSaved(false);
+  }
+
   async function save() {
     if (!result || !canSave) return;
     setSaving(true);
@@ -501,6 +522,7 @@ export function PhoneAftercareForm({
           ? {
               mode: "create",
               customerName: customerName.trim(),
+              customerNameTag,
               residenceRegion: residenceRegion as Extract<
                 PhoneDeskAftercareInput["consultation"],
                 { mode: "create" }
@@ -809,13 +831,53 @@ export function PhoneAftercareForm({
         </label>
         {consultationMode === "create" ? (
           <>
+            <div
+              aria-label="고객 이름 사내 구분"
+              className="client-consultation-source-options phone-aftercare-name-tags"
+              role="group"
+            >
+              <label
+                className={`client-consultation-referral${
+                  customerNameTag === "existing" ? " is-selected" : ""
+                }`}
+              >
+                <input
+                  checked={customerNameTag === "existing"}
+                  onChange={() => changeCustomerNameTag("existing")}
+                  type="checkbox"
+                />
+                <span>
+                  <strong>기존고객</strong>
+                  <small>이름 뒤에 _기존을 자동으로 붙입니다.</small>
+                </span>
+              </label>
+              <label
+                className={`client-consultation-referral${
+                  customerNameTag === "referral" ? " is-selected" : ""
+                }`}
+              >
+                <input
+                  checked={customerNameTag === "referral"}
+                  onChange={() => changeCustomerNameTag("referral")}
+                  type="checkbox"
+                />
+                <span>
+                  <strong>소개건</strong>
+                  <small>이름 뒤에 _소개를 자동으로 붙입니다.</small>
+                </span>
+              </label>
+            </div>
+            <small className="phone-aftercare-name-tag-help">
+              두 항목은 동시에 선택할 수 없습니다. 사내 고객명 구분에만 사용합니다.
+            </small>
             <div className="phone-aftercare-grid">
               <label className="phone-aftercare-field">
                 <span>고객명</span>
-                <input
-                  maxLength={50}
-                  onChange={(event) => setCustomerName(event.target.value)}
+                <ConsultationCustomerNameInput
+                  onValueChange={setCustomerName}
                   placeholder="고객명"
+                  required
+                  tag={customerNameTag}
                   value={customerName}
                 />
               </label>

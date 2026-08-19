@@ -31,6 +31,7 @@ import {
   createTelephonyMessageId,
   CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION,
   DEDUPE_WINDOWS,
+  formatConsultationCustomerName,
   type DedupeOutcome,
   type ExistingConsultationCandidate,
   type LegalFriendsDirectoryConsultationCreate,
@@ -1419,6 +1420,14 @@ export function createTelephonyService(options: {
     actor: StaffPrincipal,
   ) {
     const acceptedAt = now();
+    const customerName = formatConsultationCustomerName(
+      input.customerName,
+      input.directorySource?.relationship === "customer"
+        ? "existing"
+        : input.directorySource?.relationship === "referrer"
+          ? "referral"
+          : "none",
+    );
     const requestSource = input.directorySource
       ? "erp_client_directory"
       : "erp_staff";
@@ -1428,7 +1437,7 @@ export function createTelephonyService(options: {
             source: requestSource,
             clientIdx: input.directorySource.clientIdx,
             caseIdx: input.directorySource.caseIdx,
-            customerName: input.customerName,
+            customerName,
             phone: input.phone,
             residenceRegion: input.residenceRegion,
             caseType: input.caseType,
@@ -1437,7 +1446,7 @@ export function createTelephonyService(options: {
           }
         : {
             source: requestSource,
-            customerName: input.customerName,
+            customerName,
             phone: input.phone,
             residenceRegion: input.residenceRegion,
             caseType: input.caseType,
@@ -1451,7 +1460,7 @@ export function createTelephonyService(options: {
     const phoneFingerprint = protection.fingerprint(input.phone);
     const nameFingerprint = protection.fingerprint({
       kind: "consultation_name",
-      value: normalizeConsultationName(input.customerName),
+      value: normalizeConsultationName(customerName),
     });
 
     return db.transaction(async (tx) => {
@@ -1671,7 +1680,7 @@ export function createTelephonyService(options: {
                 : null;
             return candidateName
               ? normalizeConsultationName(candidateName) ===
-                  normalizeConsultationName(input.customerName)
+                  normalizeConsultationName(customerName)
               : false;
           });
         if (
@@ -1711,7 +1720,7 @@ export function createTelephonyService(options: {
       const dedupeOutcome = staffDedupeOutcome(decision);
       let publicReceiptCode: string;
       const requestNameEncrypted = protection.encrypt(
-        input.customerName,
+        customerName,
         `consultation_requests.name:${requestId}`,
       );
       const phoneEncrypted = protection.encrypt(
@@ -1762,7 +1771,7 @@ export function createTelephonyService(options: {
       if (createConsultation) {
         publicReceiptCode = createPublicReceiptCode(acceptedAt);
         const nameEncrypted = protection.encrypt(
-          input.customerName,
+          customerName,
           `consultations.preferred_name:${consultationId}`,
         );
         await tx.insert(consultations).values({
@@ -5541,12 +5550,16 @@ export function createTelephonyService(options: {
         consultationId = createConsultationId();
         const requestId = createConsultationRequestId();
         const receiptCode = createPublicReceiptCode(confirmedAt);
-        const nameEncrypted = protection.encrypt(
+        const customerName = formatConsultationCustomerName(
           input.consultation.customerName,
+          input.consultation.customerNameTag ?? "none",
+        );
+        const nameEncrypted = protection.encrypt(
+          customerName,
           `consultations.preferred_name:${consultationId}`,
         );
         const requestNameEncrypted = protection.encrypt(
-          input.consultation.customerName,
+          customerName,
           `consultation_requests.name:${requestId}`,
         );
         const phoneEncrypted = protection.encrypt(
@@ -5814,6 +5827,10 @@ export function createTelephonyService(options: {
         metadata: {
           result: input.result,
           consultationMode: input.consultation.mode,
+          customerNameTag:
+            input.consultation.mode === "create"
+              ? input.consultation.customerNameTag ?? "none"
+              : null,
           consultationId,
           followUpEnabled: input.followUp.enabled,
           followUpAssigneeUserId: input.followUp.enabled

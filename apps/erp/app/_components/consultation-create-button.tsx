@@ -5,15 +5,30 @@ import { useEffect, useId, useState } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 
-import type { ResidenceRegion } from "@lawand/core";
+import {
+  stripConsultationCustomerNameSuffixes,
+  type ConsultationCustomerNameTag,
+  type ResidenceRegion,
+} from "@lawand/core";
 
 import type {
   ClientDirectoryConsultationResult,
   LegalFriendsClientDirectoryItem,
   LegalFriendsClientDirectorySearch,
 } from "../../lib/gateway";
+import { ConsultationCustomerNameInput } from "./consultation-customer-name-input";
 
 type DirectoryRelationship = "none" | "customer" | "referrer";
+
+function customerNameTag(
+  relationship: DirectoryRelationship,
+): ConsultationCustomerNameTag {
+  return relationship === "customer"
+    ? "existing"
+    : relationship === "referrer"
+      ? "referral"
+      : "none";
+}
 
 const residenceOptions: Array<{ value: ResidenceRegion; label: string }> = [
   { value: "seoul", label: "서울" },
@@ -120,6 +135,11 @@ export function ConsultationCreateButton() {
   function changeRelationship(next: Exclude<DirectoryRelationship, "none">) {
     const value = relationship === next ? "none" : next;
     if (selectedSource && relationship === "customer") resetCustomerFields();
+    if (value !== "none") {
+      setCustomerName((current) =>
+        stripConsultationCustomerNameSuffixes(current),
+      );
+    }
     setRelationship(value);
     setSelectedSource(null);
     setSourceQuery("");
@@ -165,7 +185,9 @@ export function ConsultationCreateButton() {
     setSelectedSource(item);
     setSourceError("");
     if (relationship === "customer") {
-      setCustomerName(item.clientName);
+      setCustomerName(
+        stripConsultationCustomerNameSuffixes(item.clientName),
+      );
       setPhone(item.phone ?? "");
       setResidenceRegion(item.residenceRegion ?? "");
       setCaseType(defaultCaseType(item.caseType));
@@ -396,11 +418,11 @@ export function ConsultationCreateButton() {
           <div className="client-consultation-fields">
             <label>
               <span>이름</span>
-              <input
+              <ConsultationCustomerNameInput
                 autoFocus
-                maxLength={50}
-                onChange={(event) => setCustomerName(event.target.value)}
+                onValueChange={setCustomerName}
                 required
+                tag={customerNameTag(relationship)}
                 value={customerName}
               />
             </label>

@@ -5,12 +5,16 @@ import { useEffect, useId, useState } from "react";
 import type { FormEvent } from "react";
 import { createPortal } from "react-dom";
 
-import type { ResidenceRegion } from "@lawand/core";
+import {
+  stripConsultationCustomerNameSuffixes,
+  type ResidenceRegion,
+} from "@lawand/core";
 
 import type {
   ClientDirectoryConsultationResult,
   LegalFriendsClientDirectoryItem,
 } from "../../lib/gateway";
+import { ConsultationCustomerNameInput } from "./consultation-customer-name-input";
 
 const residenceOptions: Array<{ value: ResidenceRegion; label: string }> = [
   { value: "seoul", label: "서울" },
@@ -74,7 +78,9 @@ export function ClientDirectoryConsultationButton({
   }, [open, submitting]);
 
   function openDialog() {
-    setCustomerName(item.clientName);
+    setCustomerName(
+      stripConsultationCustomerNameSuffixes(item.clientName),
+    );
     setPhone(item.phone ?? "");
     setResidenceRegion(item.residenceRegion ?? "");
     setCaseType(defaultCaseType(item.caseType));
@@ -173,11 +179,11 @@ export function ClientDirectoryConsultationButton({
           <div className="client-consultation-fields">
             <label>
               <span>이름</span>
-              <input
+              <ConsultationCustomerNameInput
                 autoFocus
-                maxLength={50}
-                onChange={(event) => setCustomerName(event.target.value)}
+                onValueChange={setCustomerName}
                 required
+                tag={isReferral ? "referral" : "existing"}
                 value={customerName}
               />
             </label>
@@ -225,7 +231,12 @@ export function ClientDirectoryConsultationButton({
             <input
               aria-describedby={referralHelpId}
               checked={isReferral}
-              onChange={(event) => setIsReferral(event.target.checked)}
+              onChange={(event) => {
+                setCustomerName((current) =>
+                  stripConsultationCustomerNameSuffixes(current),
+                );
+                setIsReferral(event.target.checked);
+              }}
               type="checkbox"
             />
             <span>
