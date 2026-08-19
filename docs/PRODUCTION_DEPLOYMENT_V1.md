@@ -4,9 +4,9 @@
 CloudFormation 스택: `lawand-prod`
 리전: 서울(`ap-northeast-2`)
 최초 배포 릴리스: `20260804T085006Z-84e8708`
-현재 홈페이지 릴리스: `20260819T035353Z-orca-integrated-ops-v3`
+현재 홈페이지 릴리스: `20260819T071714Z-four-worktrees-v1`
 현재 ERP 릴리스: `20260819T035353Z-orca-integrated-ops-v3`
-현재 gateway 릴리스: `20260819T035353Z-orca-integrated-ops-v3`
+현재 gateway 릴리스: `20260819T071714Z-four-worktrees-v1`
 현재 Windows bridge: `v0.8.3.0`
 
 완료된 모든 worktree를 main에 통합한 기준선 위에 공개 후기 작성자 자동 마스킹과 ERP 후기
@@ -18,6 +18,25 @@ CloudFormation 스택: `lawand-prod`
 이 문서는 정식 도메인 전환 이후를 포함한 실제 AWS 구성, 접속점, 데이터 이관 범위와
 운영 체크리스트를 기록한다. 비밀번호·API 키·AWS 계정 ID·RDS 마스터 시크릿 ARN은
 기록하지 않는다.
+
+## 2026-08-19 완료 작업 4개 통합 운영 배포
+
+- 검증된 main `299bb56eea7769f211d96918ab8b5c28464f1cb4`과 Actions `32226220654`이 세 앱의
+  ARM64 이미지를 게시했다. 영향 앱은 홈페이지·gateway이고 ERP 이미지는 게시만 하고 기존
+  운영 릴리스를 유지했다.
+- 암호화 snapshot `lawand-prod-pre-four-worktrees-20260819t071714z` 뒤 gateway digest로
+  migration `0069`·`0070`을 적용했다. 운영 migration 71개와 최신 해시 일치, 리걸프렌즈
+  security-definer 함수·앱 실행 권한과 문자 mailbox 컬럼을 확인했고 재실행은 no-op이다.
+- 릴리스 `20260819T071714Z-four-worktrees-v1`의 parent digest/image ID는 홈페이지
+  `sha256:99fab4666dba02727b52cb40dafe6aa49c9542ff1f56eaa41eda6c5fe63d7998`·
+  `sha256:c422c640286252f4df42958f9f2ea1917f82306dbd8d7acbd81cc06ee08b4fa9`, gateway
+  `sha256:7289d00568755090563a491ad47a574fc4576e6ee0173e8cbfe554622c327000`·
+  `sha256:b79063876c62833360f065ec799a5320b0210b4348b45515ff21e4216012fdcf`다. scan은 두 앱과
+  게시된 ERP 모두 CRITICAL 3·HIGH 11·MEDIUM 11·LOW 1이다.
+- 정식·EIP HTTPS 200, 컨테이너 restart 0, 환경파일 600, 배포 후 error journal 0과 gateway
+  request/LISTEN waiting 0/20·0/5를 확인했다. 세 EC2 status ok·SSM Online, RDS available·
+  암호화·삭제 방지, CloudWatch OK 14다. 공용 문자 발신번호는 0588로 설정했으며 실제 외부
+  발송은 만들지 않았다. GA4 Measurement ID가 운영 secret에 없어 측정은 비활성이다.
 
 ## 2026-08-19 Orca 완료 작업 6개 통합 운영 배포
 

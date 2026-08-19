@@ -102,6 +102,36 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-19 — 완료 작업 4개 통합 운영 배포 완료
+- 네 완료 브랜치를 최종 `main` `299bb56eea7769f211d96918ab8b5c28464f1cb4`에 통합했고,
+  Actions `32226220654`의 검증과 세 ARM64 이미지 게시가 성공했다. 전체 5패키지 test·
+  typecheck·lint·production build, DB schema check와 `git diff --check`, core 93개·gateway
+  190개·홈페이지 GA4 10개 테스트를 통과했다. 네 원격 브랜치 HEAD는 모두 최종 main의
+  ancestor다.
+- 암호화 snapshot `lawand-prod-pre-four-worktrees-20260819t071714z`을 available·100%로
+  확보한 뒤 gateway digest로 migration `0069`·`0070`을 적용하고 재실행 no-op을 확인했다.
+  운영 migration은 71개이고 최신 해시는
+  `06ee2c3ac5c70152e945c13287e63403a71531b066993de3522761c4c775a01f`·
+  `51873fe6ae9c241a4d4ca03abcf51bc4cc92e91bd3aeb7dbbac9bb48ce615a57`다. 리걸프렌즈
+  보안 함수·앱 실행 권한과 문자 mailbox 컬럼을 확인했다. migration 뒤 읽기 전용 검증 두
+  명령은 각각 Node 모듈 형식과 `CB` schema 대소문자 인용 오류로 실패했고 세 번째가 성공했다.
+- 릴리스 `20260819T071714Z-four-worktrees-v1`로 홈페이지·gateway를 digest 전환했다. parent
+  digest/image ID는 홈페이지
+  `sha256:99fab4666dba02727b52cb40dafe6aa49c9542ff1f56eaa41eda6c5fe63d7998`·
+  `sha256:c422c640286252f4df42958f9f2ea1917f82306dbd8d7acbd81cc06ee08b4fa9`, gateway
+  `sha256:7289d00568755090563a491ad47a574fc4576e6ee0173e8cbfe554622c327000`·
+  `sha256:b79063876c62833360f065ec799a5320b0210b4348b45515ff21e4216012fdcf`다. ERP는 코드 영향이
+  없어 기존 릴리스를 유지했다. 세 ARM64 child scan은 CRITICAL 3·HIGH 11·MEDIUM 11·LOW 1이다.
+- gateway 첫 전환은 registry와 별도 canary secret에 같은 bridge ID가 있어 앱 변경 전에
+  안전 중단됐고, canary를 이미 포함한 registry 하나만 사용해 재실행 성공했다. 공용 문자
+  발신번호 `070-4607-0588` 설정을 gateway secret에 추가했다. health 뒤 홈페이지·gateway
+  cache는 1,421,000,000·1,381,000,000 bytes, 회수량은 881,397,760·858,726,400 bytes다.
+  정식·EIP HTTPS 200, 앱 restart 0, 환경파일 600, error journal 0, gateway request/LISTEN
+  waiting 0/20·0/5다. 세 EC2 status ok·SSM Online, RDS available·암호화·삭제 방지,
+  CloudWatch OK 14다. GA4 Measurement ID는 운영 secret과 현재 세션에 없어 코드만 배포하고
+  측정은 안전하게 비활성으로 유지했다. 외부 문자·전화·광고 발송과 Windows bridge는 변경하지
+  않았다. `PROJECT_PLAN.md`는 v1.64다.
+
 ### 2026-08-19 — 완료 작업 4개 통합 병합 후보
 - 원격과 일치하고 깨끗한 `GA4_insert`·`erp_legal_synch`·`region_error`·`sms_number_problem`
   워크트리를 `main`에 통합했다. 다른 `origin/LegalFlow/*`·`origin/worktree/*` HEAD는 모두 통합 전
