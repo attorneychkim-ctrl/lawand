@@ -417,9 +417,6 @@ export function SiteFooter() {
           <Logo />
           <div className="footer-links">
             <a href="/privacy">개인정보처리방침</a>
-            <button data-analytics-settings type="button">
-              분석 설정
-            </button>
             <a href="/terms">이용약관</a>
             <a href="/people">변호사·구성원</a>
             <a href="/about#automation">AI·자동화 원칙</a>

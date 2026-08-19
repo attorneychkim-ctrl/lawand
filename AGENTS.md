@@ -102,6 +102,24 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-19 — GA4 동의 배너 제거·무팝업 자동 측정 hotfix 후보
+- 운영 Measurement ID 1차 활성화 뒤 실서비스에서 분석·국외이전 동의 배너가 실제 노출되는
+  것을 확인했고, 사용자가 첫 방문 이탈 우려를 이유로 해당 UI를 제거하도록 명시했다. 루트
+  `AnalyticsManager`는 더 이상 브라우저 선택값을 읽거나 배너·설정 dialog를 렌더하지 않고,
+  유효한 same-origin 런타임 Measurement ID가 있으면 GA4를 자동 로드한다. 푸터와
+  개인정보처리방침의 분석 설정 버튼, 관련 CSS도 제거했다.
+- 정제한 수동 `page_view`, 직접 상담·상담을 생성한 자가진단의 `generate_lead`,
+  `cookie_update=false`·14개월 제한은 유지한다. 향상된 측정·Google Signals·사용자 제공
+  데이터·`ad_storage`·`ad_user_data`·`ad_personalization`·광고 개인화는 계속 비활성화한다.
+  개인정보처리방침의 Google LLC 처리위탁·국외 이전 사실과 항목·국가·기간은 유지하고,
+  별도 UI 대신 브라우저 쿠키·사이트 데이터 차단·삭제 방법을 안내하도록 실제 동작과 맞췄다.
+- 가짜 Measurement ID를 쓴 로컬 프로덕션과 분리 Chrome에서 외부 Google 요청을 차단한 채
+  배너·설정 UI·과거 선택 저장 0, 스크립트 요소 1, 자동 `page_view` 1, 허용 캠페인 키만 남긴
+  정식 origin URL, `analytics_storage=granted`와 세 광고 저장 유형 `denied`를 확인했다. 홈페이지
+  test 9개, typecheck, lint, production build와 `git diff --check`를 통과했다. migration·운영
+  데이터·실제 상담·광고·AdPilot 연결은 변경하지 않았다. main 병합·ARM64 게시·digest 운영
+  배포와 실제 운영 canary는 메인 세션에 인계한다.
+
 ### 2026-08-19 — GA4 운영 Measurement ID 설정 활성화 완료
 - Windows Chrome 클립보드를 비출력 입력 경로로 사용해 운영 Measurement ID를 회수했다. 전체
   값은 터미널·Git·문서·작업 코멘트에 남기지 않았고, 권한 600 임시 파일은 즉시 파기하고 OS

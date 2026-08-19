@@ -4173,8 +4173,7 @@ svg {
   gap: 24px;
 }
 
-.footer-links a,
-.footer-links button {
+.footer-links a {
   min-height: 44px;
   align-content: center;
   border: 0;
@@ -4184,169 +4183,6 @@ svg {
   font-family: inherit;
   font-size: 12px;
   padding: 0;
-}
-
-.analytics-consent-banner,
-.analytics-settings-dialog {
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: var(--ink-950);
-  box-shadow: 0 24px 80px rgba(15, 20, 18, 0.3);
-  color: #eaf0ed;
-}
-
-.analytics-consent-banner {
-  position: fixed;
-  z-index: 120;
-  right: 18px;
-  bottom: 18px;
-  left: 18px;
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 34px;
-  max-width: 920px;
-  max-height: calc(100dvh - 36px);
-  margin-inline: auto;
-  padding: 26px 28px;
-  border-radius: 22px;
-  overflow-y: auto;
-}
-
-.analytics-consent-banner > div:first-child,
-.analytics-settings-dialog {
-  max-width: 670px;
-}
-
-.analytics-consent-banner p,
-.analytics-settings-dialog p {
-  margin: 0;
-  color: #bdc9c4;
-  font-size: 13px;
-  line-height: 1.7;
-}
-
-.analytics-consent-banner > div:first-child > p:first-child,
-.analytics-settings-dialog > p:first-child {
-  color: #93c7b7;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.analytics-consent-banner h2,
-.analytics-settings-dialog h2 {
-  margin: 7px 0 8px;
-  color: white;
-  font-size: 20px;
-  letter-spacing: -0.025em;
-  line-height: 1.35;
-}
-
-.analytics-consent-banner a,
-.analytics-settings-dialog a {
-  display: inline-block;
-  margin-top: 8px;
-  color: #dce9e4;
-  font-size: 12px;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
-.analytics-overseas-details {
-  margin-top: 10px;
-  color: #bdc9c4;
-  font-size: 12px;
-  line-height: 1.65;
-}
-
-.analytics-overseas-details summary {
-  width: fit-content;
-  color: #dce9e4;
-  cursor: pointer;
-  font-weight: 750;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
-.analytics-overseas-details p {
-  margin-top: 10px;
-  font-size: inherit;
-}
-
-.analytics-overseas-details ul {
-  display: grid;
-  gap: 4px;
-  margin: 8px 0 0;
-  padding-left: 18px;
-}
-
-.analytics-consent-actions {
-  display: flex;
-  flex: 0 0 auto;
-  gap: 8px;
-}
-
-.analytics-consent-actions button,
-.analytics-settings-close {
-  min-height: 44px;
-  padding: 0 17px;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  border-radius: 999px;
-  background: transparent;
-  color: white;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 750;
-}
-
-.analytics-consent-actions button.is-primary {
-  border-color: #dbece6;
-  background: #e7f1ed;
-  color: var(--ink-950);
-}
-
-.analytics-settings-backdrop {
-  position: fixed;
-  z-index: 130;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: rgba(8, 12, 11, 0.58);
-}
-
-.analytics-settings-dialog {
-  position: relative;
-  width: min(100%, 620px);
-  padding: 34px;
-  border-radius: 24px;
-}
-
-.analytics-settings-dialog > p:not(:first-child) {
-  margin-top: 14px;
-}
-
-.analytics-settings-status strong {
-  color: white;
-}
-
-.analytics-settings-dialog .analytics-consent-actions {
-  margin-top: 24px;
-}
-
-.analytics-settings-close {
-  position: absolute;
-  top: 18px;
-  right: 18px;
-  min-height: 36px;
-  padding-inline: 13px;
-  font-size: 12px;
-}
-
-.legal-analytics-settings {
-  margin-top: 18px;
 }
 
 .office-grid {
@@ -13013,36 +12849,6 @@ svg {
   }
 }
 
-@media (max-width: 700px) {
-  .analytics-consent-banner {
-    bottom: calc(78px + env(safe-area-inset-bottom));
-    display: block;
-    max-height: calc(100dvh - 106px - env(safe-area-inset-bottom));
-    padding: 22px 20px;
-    border-radius: 18px;
-  }
-
-  .analytics-consent-banner h2,
-  .analytics-settings-dialog h2 {
-    padding-right: 54px;
-    font-size: 18px;
-  }
-
-  .analytics-consent-actions {
-    margin-top: 18px;
-  }
-
-  .analytics-consent-actions button {
-    flex: 1;
-    min-width: 0;
-    font-size: 16px;
-  }
-
-  .analytics-settings-dialog {
-    padding: 30px 20px 22px;
-  }
-}
-
 @media (max-width: 980px) {
   .legal-layout {
     gap: 48px;
@@ -13169,9 +12975,7 @@ svg {
 
   .site-header,
   .mobile-actions,
-  .legal-toc,
-  .analytics-consent-banner,
-  .analytics-settings-backdrop {
+  .legal-toc {
     display: none;
   }
 

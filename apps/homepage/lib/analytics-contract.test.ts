@@ -2,16 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  ANALYTICS_CONSENT_STORAGE_KEY,
   buildGa4PageViewPayload,
   isEligibleGenerateLeadSuccess,
   makeGa4LeadSuccessMarkerKey,
   normalizeGa4MeasurementId,
   normalizeTrackedPagePath,
-  parseStoredAnalyticsConsent,
   sanitizeGa4PageLocation,
   sanitizeGa4PageReferrer,
-  serializeAnalyticsConsent,
 } from "./analytics-contract.ts";
 import {
   denyGa4AnalyticsConsent,
@@ -29,26 +26,6 @@ test("GA4 Measurement ID가 없거나 형식이 잘못되면 비활성화한다"
     normalizeGa4MeasurementId(" g-1a2b3c4d5e "),
     "G-1A2B3C4D5E",
   );
-});
-
-test("동의 선택은 현재 버전과 명시적인 선택만 복원한다", () => {
-  const stored = serializeAnalyticsConsent(
-    "granted",
-    "2026-08-19T01:02:03.000Z",
-  );
-  assert.equal(parseStoredAnalyticsConsent(stored), "granted");
-  assert.equal(
-    parseStoredAnalyticsConsent(
-      JSON.stringify({
-        version: 0,
-        choice: "granted",
-        updatedAt: "2026-08-19T01:02:03.000Z",
-      }),
-    ),
-    null,
-  );
-  assert.equal(parseStoredAnalyticsConsent("not-json"), null);
-  assert.equal(ANALYTICS_CONSENT_STORAGE_KEY, "lawand.analytics-consent.v2");
 });
 
 test("page_location은 정식 origin과 허용된 캠페인 키만 남긴다", () => {
@@ -185,7 +162,7 @@ test("성공 마커는 UUID 논리 제출키만 받는다", () => {
   assert.equal(makeGa4LeadSuccessMarkerKey("receipt-or-phone"), null);
 });
 
-test("브라우저 런타임은 동의 뒤 page_view와 논리 제출당 generate_lead를 한 번만 큐에 넣는다", () => {
+test("브라우저 런타임은 분석 활성화 뒤 page_view와 논리 제출당 generate_lead를 한 번만 큐에 넣는다", () => {
   const sessionValues = new Map<string, string>();
   const localValues = new Map<string, string>();
   const storage = (values: Map<string, string>) =>
