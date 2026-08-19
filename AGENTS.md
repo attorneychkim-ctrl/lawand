@@ -124,6 +124,24 @@
   이름 반영에는 별도 경량 연결사건명 sync 또는 검증된 timer 변경이 필요하다고 오픈 게이트로
   남겼다. 타 저장소 timer·운영 데이터·외부 호출·main 병합·운영 배포는 수행하지 않았다.
   `PROJECT_PLAN.md`는 v1.61이다.
+### 2026-08-19 — ERP 리걸프렌즈 intake 내부 메타데이터 호환 후보
+- 운영 `invalid_consultation_intake` 원장을 읽기 전용으로 대조했다. 14:54 전화데스크 신건은
+  `부산` 거주지역을 정상 보유했지만 `channel`·`callId`·`direction`·`note`가 홈페이지용
+  strict intake 스키마에서 거부됐다. 2026-08-18 이후 같은 오류 10건은 `erp_staff` 7건·
+  `erp_phone_desk` 2건·`erp_client_directory` 1건이고, 모두 유효한 지역을 보유했다.
+  상담데스크 계열 8건은 선택 전달사항 `transferNote`, 전화데스크 2건은 고정 통화 메타데이터가
+  원인이었다.
+- outbox worker는 기존 strict 파싱을 우선하고, 실패했을 때 세 신뢰된 ERP 출처에 한해서만
+  내부 메타데이터를 제외한 표준 상담 답변을 재검증한다. 공개 홈페이지의 알 수 없는 필드
+  거부, 카카오 자리표시자 처리, 실제 지역 누락과 잘못된 알려진 상담값 거부는 유지했다.
+  `invalid_consultation_intake` 안내도 지역 누락으로 단정하지 않도록 교정했다.
+- gateway 회귀 테스트 8개를 포함한 전체 184개 테스트와 typecheck·lint·production build,
+  core·DB 선행 build 및 `git diff --check`를 통과했다. 사용자 요청에 따라 기존 dead 10건은
+  재처리하지 않았으며 운영 데이터·외부 API·migration·main 병합·운영 배포는 변경하거나
+  수행하지 않았다. 추가 outbox DB fixture는 이 워크트리의 환경변수 부재 뒤 메인 로컬 환경을
+  사용했지만 로컬 DB가 migration `0066` 전이라 `created_by_user_id` 조회 전에 중단됐고,
+  fixture가 만든 임시 행은 `finally` 정리 후 0건임을 확인했다. `HERDR_ENV`와 실행 중인 HERDR
+  서버가 없어 Git 워크트리만 확인했다. `PROJECT_PLAN.md`는 v1.61이다.
 
 ### 2026-08-19 — Orca 완료 작업 6개 통합 운영 배포 완료
 - Orca 완료 브랜치 6개를 최종 `main` `224e156619f4fab3b9d78f7ca9204e377de5b4c8`에

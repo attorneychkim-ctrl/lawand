@@ -69,6 +69,15 @@ const EVENT_TYPES = [
 const MAX_ATTEMPTS = 5;
 const LEASE_TIMEOUT_MS = 2 * 60 * 1_000;
 const RETRY_DELAYS_SECONDS = [30, 120, 600, 1_800, 3_600] as const;
+// 공개 접수의 strict 계약은 유지하고, 신뢰된 ERP 출처가 저장한 내부 메타데이터만
+// 리걸프렌즈 전송용 상담 답변에서 제외한다.
+const storedInternalConsultationIntakeSchema =
+  consultationIntakeAnswersSchema.strip();
+const INTERNAL_REGISTRATION_SOURCES = new Set([
+  "erp_staff",
+  "erp_client_directory",
+  "erp_phone_desk",
+]);
 
 type ClaimedEvent = {
   id: string;
@@ -151,6 +160,37 @@ export function resolveStoredRegistrationName(
         `consultations.preferred_name:${request.consultationId}`,
       )
     : request.anonymousLabel;
+}
+
+export function resolveStoredRegistrationIntake(
+  storedIntake: unknown,
+  options: { isKakaoConsultation: boolean; source: string },
+) {
+  const parsedIntake = consultationIntakeAnswersSchema.safeParse(storedIntake);
+  if (parsedIntake.success) return parsedIntake.data;
+
+  const storedResidenceRegion = residenceRegionSchema.safeParse(
+    storedIntake && typeof storedIntake === "object"
+      ? (storedIntake as Record<string, unknown>).residenceRegion
+      : undefined,
+  );
+  if (options.isKakaoConsultation) {
+    return {
+      residenceRegion: storedResidenceRegion.success
+        ? storedResidenceRegion.data
+        : ("overseas_or_other" as const),
+      urgencies: [],
+      incomes: [],
+      concern: "카카오 채팅방에서 상담 내용을 확인",
+    };
+  }
+
+  if (INTERNAL_REGISTRATION_SOURCES.has(options.source)) {
+    const parsedInternalIntake =
+      storedInternalConsultationIntakeSchema.safeParse(storedIntake);
+    if (parsedInternalIntake.success) return parsedInternalIntake.data;
+  }
+  throw new LegalFriendsPayloadError("invalid_consultation_intake");
 }
 
 function deliveryFailure(error: unknown): DeliveryFailure {
@@ -460,6 +500,7 @@ export function createOutboxWorker(options: {
       .select({
         id: consultationRequests.id,
         consultationId: consultationRequests.consultationId,
+        source: consultationRequests.source,
         mode: consultationRequests.mode,
         contactChannel: consultationRequests.contactChannel,
         phoneCiphertext: consultationRequests.phoneCiphertext,
@@ -528,28 +569,15 @@ export function createOutboxWorker(options: {
         `consultation_requests.intake:${request.id}`,
       ),
     );
-    const parsedIntake = consultationIntakeAnswersSchema.safeParse(
-      storedIntake,
-    );
     const storedResidenceRegion = residenceRegionSchema.safeParse(
       storedIntake && typeof storedIntake === "object"
         ? (storedIntake as Record<string, unknown>).residenceRegion
         : undefined,
     );
-    const intake = parsedIntake.success
-      ? parsedIntake.data
-      : isKakaoConsultation
-        ? {
-            residenceRegion: storedResidenceRegion.success
-              ? storedResidenceRegion.data
-              : ("overseas_or_other" as const),
-            urgencies: [],
-            incomes: [],
-            concern: "카카오 채팅방에서 상담 내용을 확인",
-          }
-        : (() => {
-            throw new LegalFriendsPayloadError("invalid_consultation_intake");
-          })();
+    const intake = resolveStoredRegistrationIntake(storedIntake, {
+      isKakaoConsultation,
+      source: request.source,
+    });
     const name = resolveStoredRegistrationName(protection, request);
 
     const assignee = "registrationTarget" in envelope.data
