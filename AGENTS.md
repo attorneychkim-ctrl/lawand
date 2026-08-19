@@ -102,6 +102,33 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-19 — GA4 운영 활성화 준비·국외이전 동의 후보
+- Google 대한민국 Analytics 약관·Ads 데이터 처리 약관, Analytics 재수탁자, 현재 운영
+  데이터센터, 지역 수집·보유·데이터 가림 문서와 개인정보보호위원회 현행 작성지침을
+  대조했다. 계약 주체 Google LLC와 개인정보 보호법 제28조의8제1항제1호 동의를 근거로,
+  이전받는 자·연락처·항목·시기/방법·목적·14개월 보유·거부 효과와 재수탁자/운영
+  데이터센터 37개 국가의 보수적 합집합을 개인정보처리방침 후보에 공개했다. Google의
+  파트너 사이트 처리 안내도 눈에 띄는 링크로 제공한다. 최종 공개·약관 수락은 김충환
+  개인정보 보호책임자·책임 변호사의 승인 게이트다.
+- 국외 이전 범위를 포함한 선택은 동의 v2로 올려 이전 허용을 자동 승계하지 않는다. 초기
+  안내와 재설정 화면은 `분석·국외 이전 허용`을 명시하며 거부해도 열람·상담에 영향이 없다.
+  태그에는 `allow_interest_groups=false`를 추가했다. Measurement ID가 없거나 설정 조회가
+  실패하면 분석을 거부하고 이 도메인에서 삭제 가능한 `_ga` 쿠키도 정리한다.
+- `docs/GA4_OPERATIONS_ACTIVATION_V1.md`에 로앤 조직 계정 소유, 계정 공유 전부 끔,
+  `Asia/Seoul`·`KRW`, 향상된 측정/Google Signals/사용자 제공 데이터/광고 개인화와
+  관심그룹/전 지역 세부 위치·기기 수집 끔, 기기 기반 보고 ID, 14개월·재설정 끔,
+  이메일/금지 query 가림, 식별자 인수인계·배포 canary·AdPilot 연결·중단 절차를 고정했다.
+- 전체 5패키지 typecheck·lint·test·production build와 `git diff --check`를 통과했다.
+  가짜 형식의 Measurement ID를 쓴 로컬 프로덕션에서 동의 전 Google 요청·쿠키·console
+  오류가 0임을 확인했다. 390×844 모바일의 접힌/펼친 안내와 1440×1000 데스크톱은 버튼
+  표시·가로 스크롤·hydration 오류가 없고, 모바일 Lighthouse는 Performance 96,
+  Accessibility 100, Best Practices 100, SEO 100이다.
+- Orca 내장 브라우저는 Google이 안전하지 않은 앱으로 로그인을 거부했다. 우회하지 않고
+  지원되는 일반 브라우저의 로앤 조직 계정 로그인 대기로 남겼다. Analytics 계정·속성·
+  웹 스트림, 운영 Measurement ID, secret, main 병합·배포, 실제 Google 데이터, AdPilot
+  운영 연결, 네이버 광고와 운영 원장은 만들거나 변경하지 않았다. DB migration은 없다.
+  `PROJECT_PLAN.md`는 v1.58이다.
+
 ### 2026-08-19 — 동의 기반 GA4 홈페이지 측정·AdPilot 범용 결손 구현 후보
 - 홈페이지 루트에 결정적인 초기 `null`의 분석 관리자를 추가했다. 서버 런타임
   `LAWAND_GA4_MEASUREMENT_ID`를 same-origin 비캐시 API가 유효한 `G-` 값 또는 `null`로만

@@ -4205,9 +4205,11 @@ svg {
   justify-content: space-between;
   gap: 34px;
   max-width: 920px;
+  max-height: calc(100dvh - 36px);
   margin-inline: auto;
   padding: 26px 28px;
   border-radius: 22px;
+  overflow-y: auto;
 }
 
 .analytics-consent-banner > div:first-child,
@@ -4241,13 +4243,42 @@ svg {
   line-height: 1.35;
 }
 
-.analytics-consent-banner a {
+.analytics-consent-banner a,
+.analytics-settings-dialog a {
   display: inline-block;
   margin-top: 8px;
   color: #dce9e4;
   font-size: 12px;
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+
+.analytics-overseas-details {
+  margin-top: 10px;
+  color: #bdc9c4;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.analytics-overseas-details summary {
+  width: fit-content;
+  color: #dce9e4;
+  cursor: pointer;
+  font-weight: 750;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.analytics-overseas-details p {
+  margin-top: 10px;
+  font-size: inherit;
+}
+
+.analytics-overseas-details ul {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding-left: 18px;
 }
 
 .analytics-consent-actions {
@@ -12986,6 +13017,7 @@ svg {
   .analytics-consent-banner {
     bottom: calc(78px + env(safe-area-inset-bottom));
     display: block;
+    max-height: calc(100dvh - 106px - env(safe-area-inset-bottom));
     padding: 22px 20px;
     border-radius: 18px;
   }

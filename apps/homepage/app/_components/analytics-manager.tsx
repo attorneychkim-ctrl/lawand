@@ -107,6 +107,7 @@ export function AnalyticsManager() {
         .then((configuredId) => {
           if (controller.signal.aborted) return;
           if (!configuredId) {
+            denyGa4AnalyticsConsent(null);
             setConsent("unavailable");
             return;
           }
@@ -127,7 +128,10 @@ export function AnalyticsManager() {
           setConsent("unset");
         })
         .catch(() => {
-          if (!controller.signal.aborted) setConsent("unavailable");
+          if (!controller.signal.aborted) {
+            denyGa4AnalyticsConsent(null);
+            setConsent("unavailable");
+          }
         });
     });
     return () => {
@@ -203,7 +207,7 @@ export function AnalyticsManager() {
   const showInitialChoice = consent === "unset" && !settingsOpen;
   const currentChoiceLabel =
     consent === "granted"
-      ? "서비스 개선 분석 허용"
+      ? "서비스 개선 분석·국외 이전 허용"
       : consent === "denied"
         ? "서비스 개선 분석 거부"
         : "아직 선택하지 않음";
@@ -236,8 +240,37 @@ export function AnalyticsManager() {
               동의한 경우에만 Google Analytics를 불러와 정제된 페이지 방문·세션
               통계와 실제 상담 접수 성과를 측정합니다. 이름·전화번호·상담 내용·
               실제 검색어는 보내지 않으며 맞춤형 광고에는 사용하지 않습니다.
+              허용한 분석정보는 Google LLC(미국)와 Google의 처리시설·재수탁자
+              소재 국가로 이전됩니다.
             </p>
-            <a href="/privacy#automatic">자세한 내용</a>
+            <details className="analytics-overseas-details">
+              <summary>분석 정보와 국외 이전 안내</summary>
+              <p>
+                분석 허용은 「개인정보 보호법」 제28조의8제1항제1호에 따라
+                Google LLC(미국)로 분석정보를 이전하고 Google의 처리시설·
+                재수탁자가 있는 국가에서 처리하는 것에 대한 동의를 포함합니다.
+              </p>
+              <ul>
+                <li>
+                  항목: first-party 이용자·세션 식별값, 접속 시각, 대략적인
+                  지역·브라우저·기기 정보, 정제한 페이지·유입·캠페인 정보와
+                  실제 웹 상담 접수 성공 이벤트
+                </li>
+                <li>
+                  시기·방법: 허용 뒤 페이지 방문·접수 성공 시 암호화된 HTTPS
+                  통신으로 이전
+                </li>
+                <li>
+                  목적·기간: 홈페이지·캠페인 통계 분석, 이용자·이벤트 단위
+                  데이터 14개월(새 활동 시 기간 초기화 안 함)
+                </li>
+                <li>
+                  거부 효과: 분석만 비활성화되며 홈페이지 열람과 상담 요청에는
+                  영향이 없음
+                </li>
+              </ul>
+            </details>
+            <a href="/privacy#overseas">이전 국가·수령자·보유기간 전체 보기</a>
           </div>
           <div className="analytics-consent-actions">
             <button type="button" onClick={() => choose("denied")}>
@@ -248,7 +281,7 @@ export function AnalyticsManager() {
               type="button"
               onClick={() => choose("granted")}
             >
-              분석 허용
+              분석·국외 이전 허용
             </button>
           </div>
         </section>
@@ -283,10 +316,15 @@ export function AnalyticsManager() {
                 </p>
                 <p>
                   허용하면 정제된 페이지 방문·세션 통계와 실제 상담 접수 여부를
-                  측정합니다. 광고 저장소·광고 사용자 데이터·광고 개인화는
-                  항상 거부됩니다. 거부하거나 철회하면 이후 전송을 중단하고
-                  이 도메인에서 삭제할 수 있는 `_ga` 쿠키를 정리합니다.
+                  측정하기 위해 Google LLC(미국)로 분석정보를 국외 이전합니다.
+                  광고 저장소·광고 사용자 데이터·광고 개인화는 항상
+                  거부됩니다. 거부하거나 철회하면 이후 전송을 중단하고 이
+                  도메인에서 삭제할 수 있는 `_ga` 쿠키를 정리합니다. 거부해도
+                  홈페이지 열람과 상담 요청에는 영향이 없습니다.
                 </p>
+                <a href="/privacy#overseas">
+                  이전 국가·항목·방법·보유기간 전체 보기
+                </a>
                 <div className="analytics-consent-actions">
                   <button type="button" onClick={() => choose("denied")}>
                     분석 거부
@@ -296,7 +334,7 @@ export function AnalyticsManager() {
                     type="button"
                     onClick={() => choose("granted")}
                   >
-                    분석 허용
+                    분석·국외 이전 허용
                   </button>
                 </div>
               </>

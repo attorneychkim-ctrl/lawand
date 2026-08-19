@@ -1,6 +1,6 @@
 export const LAWAND_GA4_CANONICAL_ORIGIN = "https://lawandfirm.com";
-export const ANALYTICS_CONSENT_STORAGE_KEY = "lawand.analytics-consent.v1";
-export const ANALYTICS_CONSENT_VERSION = 1;
+export const ANALYTICS_CONSENT_STORAGE_KEY = "lawand.analytics-consent.v2";
+export const ANALYTICS_CONSENT_VERSION = 2;
 export const GA4_LEAD_SUCCESS_MARKER_PREFIX =
   "lawand.ga4.generate-lead-success.v1:";
 

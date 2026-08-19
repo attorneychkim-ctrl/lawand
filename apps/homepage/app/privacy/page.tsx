@@ -34,6 +34,7 @@ const sectionLinks = [
   ["purpose", "처리 목적·항목·기간"],
   ["collection", "수집 방법"],
   ["provision", "제3자 제공·처리위탁"],
+  ["overseas", "GA 분석·국외 이전"],
   ["destruction", "파기"],
   ["rights", "정보주체의 권리"],
   ["security", "안전성 확보 조치"],
@@ -316,10 +317,10 @@ export default function PrivacyPage() {
                       </td>
                       <td>
                         Google Analytics가 생성하는 first-party 이용자·세션
-                        식별값, 접속 시각, 브라우저·기기 정보와 대략적인 지역,
-                        허용 목록으로 일반화한 페이지 경로·유입 origin·페이지 제목, 통제된
-                        UTM·키워드 ID, 실제 상담 접수 성공 이벤트, 방문·세션
-                        측정에 수반되는 `first_visit`·`session_start`·
+                        식별값, 접속 시각, 국가·광역 지역과 브라우저·기기 범주,
+                        허용 목록으로 일반화한 페이지 경로·유입 origin·페이지
+                        제목, 통제된 UTM·키워드 ID, 실제 상담 접수 성공 이벤트,
+                        방문·세션 측정에 수반되는 `first_visit`·`session_start`·
                         `user_engagement` 기본 이벤트
                         <br />
                         <em>
@@ -331,10 +332,11 @@ export default function PrivacyPage() {
                         </em>
                       </td>
                       <td>
-                        GA 이용자·이벤트 데이터는 운영 속성에서 14개월로
-                        설정하고 `_ga` 계열 쿠키는 최초 생성부터 최대 14개월로
-                        제한하며, 동의 철회·브라우저 제한에 따라 더 일찍
-                        중단·삭제될 수 있음
+                        GA 이용자·이벤트 단위 데이터 14개월(새 활동 시 기간
+                        초기화 안 함). `_ga` 계열 쿠키는 최초 생성부터 최대
+                        14개월. 표준 집계 보고서는 이 14개월 설정의 적용 대상이
+                        아니며 분석 목적 종료 또는 속성 삭제 시 종료 절차에 따라
+                        처리
                       </td>
                     </tr>
                     <tr>
@@ -452,22 +454,6 @@ export default function PrivacyPage() {
                       </td>
                       <td>위탁계약과 사건업무상 보유기간 종료 시까지</td>
                     </tr>
-                    <tr>
-                      <th scope="row">
-                        Google Analytics 제공 법인(운영 활성화 전 확정)
-                      </th>
-                      <td>
-                        이용자가 허용한 홈페이지 이용·상담 접수 성과의 통계 분석
-                      </td>
-                      <td>
-                        first-party 이용자·세션 식별값, 정제된 페이지·유입·캠페인
-                        정보, 브라우저·기기 정보, 실제 웹 상담 접수 이벤트
-                      </td>
-                      <td>
-                        운영 속성에서 확정할 최대 14개월의 이용자·이벤트 보유기간
-                        및 서비스 제공에 필요한 기간
-                      </td>
-                    </tr>
                   </tbody>
                 </table>
               </div>
@@ -479,20 +465,181 @@ export default function PrivacyPage() {
               </p>
               <p>
                 현재 이 홈페이지의 상담·후기 접수 개인정보를 별도의 광고
-                플랫폼이나 생성형 AI 서비스에 제공하지 않습니다. 국외 이전이
-                새로 발생하면 이전 국가·시기·방법·항목, 수령자와 거부 방법을
-                관계 법령에 따라 사전에 고지하겠습니다.
-              </p>
-              <p className="legal-callout">
-                Google Analytics 운영 활성화 전 실제 계약 주체, 처리 위치와
-                국외 처리·이전 여부, 이전 시점·방법 및 거부 방법을 확인해 이
-                방침과 운영 설정을 함께 확정합니다. 확인 전에는 운영 Measurement
-                ID를 설정하지 않습니다.
+                플랫폼이나 생성형 AI 서비스에 제공하지 않습니다. 동의 기반
+                Google Analytics 처리위탁·국외 이전은 다음 절에서 별도로
+                안내합니다.
               </p>
             </section>
 
-            <section id="destruction">
+            <section id="overseas">
               <p className="legal-section-number">05</p>
+              <h2>Google Analytics 처리위탁과 개인정보 국외 이전</h2>
+              <p>
+                로앤은 이용자가 분석을 허용한 경우에만 아래 분석정보를 Google
+                Analytics에 처리위탁하고 국외로 이전합니다. 법적 근거는
+                「개인정보 보호법」 제28조의8제1항제1호의 정보주체 동의입니다.
+              </p>
+              <div className="legal-table-wrap">
+                <table>
+                  <caption>Google Analytics 개인정보 국외 이전 내역</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">구분</th>
+                      <th scope="col">내용</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th scope="row">이전받는 자·수탁자</th>
+                      <td>
+                        Google LLC
+                        <br />
+                        1600 Amphitheatre Parkway, Mountain View, CA 94043,
+                        USA
+                        <br />
+                        <a
+                          href="https://policies.google.com/privacy"
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Google 개인정보 문의·정책
+                        </a>
+                        {" · "}
+                        <a
+                          href="https://support.google.com/policies/troubleshooter/9009584"
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Google 데이터 보호 문의
+                        </a>
+                      </td>
+                    </tr>
+                    <tr>
+                      <th scope="row">이전 국가</th>
+                      <td>
+                        미국, 아르헨티나, 호주, 벨기에, 브라질, 캐나다, 칠레,
+                        콜롬비아, 크로아티아, 체코, 덴마크, 핀란드, 프랑스, 독일,
+                        인도, 아일랜드, 이스라엘, 이탈리아, 일본, 케냐, 말레이시아,
+                        멕시코, 네덜란드, 노르웨이, 페루, 필리핀, 폴란드, 포르투갈,
+                        싱가포르, 스페인, 스웨덴, 스위스, 대만, 튀르키예,
+                        아랍에미리트, 영국, 우루과이
+                        <br />
+                        <em>
+                          2026년 8월 19일 기준 Google 처리시설과 Google Analytics
+                          재수탁자 소재지를 합친 목록입니다. Google은 계약상
+                          Google 또는 재수탁자가 시설을 운영하는 국가에서 처리할
+                          수 있습니다.
+                        </em>
+                      </td>
+                    </tr>
+                    <tr>
+                      <th scope="row">이전 항목</th>
+                      <td>
+                        first-party 이용자·세션 식별값, 접속 시각, 국가·광역
+                        지역과 브라우저·기기 범주, 정제한 페이지 경로·유입
+                        origin·페이지 제목, 통제된 UTM·키워드 ID, 실제 웹 상담
+                        접수 성공 이벤트
+                        <br />
+                        <em>
+                          이름, 전화번호, 상담·진단 내용, 접수번호, 실제 검색어와
+                          임의 URL 쿼리는 이전하지 않습니다. IP 주소는 전송
+                          과정에서 최적 수집센터와 대략적 지역을 정하는 데
+                          사용된 뒤 GA 서버에 기록되기 전에 폐기된다고 Google이
+                          안내합니다.
+                        </em>
+                      </td>
+                    </tr>
+                    <tr>
+                      <th scope="row">이전 시기·방법</th>
+                      <td>
+                        분석 허용 뒤 페이지 방문 또는 실제 웹 상담 접수 성공
+                        이벤트가 발생할 때 암호화된 HTTPS 네트워크 통신으로 이전
+                      </td>
+                    </tr>
+                    <tr>
+                      <th scope="row">이용 목적</th>
+                      <td>
+                        공개 페이지 이용 흐름과 웹 상담 접수 성과의 통계 분석,
+                        홈페이지·캠페인 개선
+                      </td>
+                    </tr>
+                    <tr>
+                      <th scope="row">보유·이용기간</th>
+                      <td>
+                        이용자·이벤트 단위 데이터 14개월. 새 활동이 있어도 사용자
+                        데이터의 보유기간을 다시 시작하지 않도록 설정합니다.
+                        `_ga` 계열 쿠키도 최초 생성부터 최대 14개월로 제한합니다.
+                        표준 집계 보고서는 이 보유 설정의 적용 대상이 아니며,
+                        분석 목적 종료 또는 속성 삭제 시 Google 계약의 종료·삭제
+                        절차에 따라 처리합니다. Google의 처리 약관상 삭제 요청이나
+                        계약 종료 뒤 시스템 삭제에는 최대 180일이 걸릴 수 있습니다.
+                      </td>
+                    </tr>
+                    <tr>
+                      <th scope="row">거부 방법·효과</th>
+                      <td>
+                        최초 안내에서 `거부`를 선택하거나 푸터·이 페이지의
+                        `분석 설정 열기`에서 언제든 철회할 수 있습니다. 거부해도
+                        홈페이지 열람과 상담 요청에는 영향이 없으며 분석만
+                        비활성화됩니다. 철회하면 이후 이전을 중단하고 현재
+                        도메인에서 삭제 가능한 `_ga` 쿠키를 지우지만, 이미
+                        적법하게 수집된 과거 통계가 자동으로 소급 삭제되지는
+                        않습니다. 서버 데이터의 권리행사는 아래 개인정보
+                        보호책임자에게 요청할 수 있습니다.
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p className="legal-callout">
+                로앤은 Google 계정의 데이터 공유 선택을 모두 끄고, Google
+                Signals·사용자 제공 데이터·광고 개인화·광고 잠재고객 기능을
+                사용하지 않습니다. 세부 위치·기기 데이터 수집도 전 지역에서
+                끄며, Google의 재수탁자 또는 처리 국가 변경 통지를 받으면 실제
+                설정과 이 방침을 대조하고 필요한 경우 다시 동의를 받습니다.
+              </p>
+              <ul className="legal-resource-list">
+                <li>
+                  <a
+                    href="https://policies.google.com/technologies/partner-sites"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Google이 파트너 사이트 정보를 처리하는 방법
+                  </a>
+                </li>
+                <li>
+                  <a
+                    href="https://business.safety.google/adsprocessorterms/"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Google Ads 데이터 처리 약관
+                  </a>
+                </li>
+                <li>
+                  <a
+                    href="https://business.safety.google/adssubprocessors/"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Google Analytics 재수탁자 목록
+                  </a>
+                </li>
+                <li>
+                  <a
+                    href="https://datacenters.google/locations/"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Google 데이터센터 위치
+                  </a>
+                </li>
+              </ul>
+            </section>
+
+            <section id="destruction">
+              <p className="legal-section-number">06</p>
               <h2>개인정보의 파기 절차와 방법</h2>
               <ol>
                 <li>
@@ -516,7 +663,7 @@ export default function PrivacyPage() {
             </section>
 
             <section id="rights">
-              <p className="legal-section-number">06</p>
+              <p className="legal-section-number">07</p>
               <h2>정보주체와 법정대리인의 권리·행사방법</h2>
               <p>
                 정보주체는 본인 개인정보의 열람, 정정·삭제, 처리정지와 동의
@@ -552,7 +699,7 @@ export default function PrivacyPage() {
             </section>
 
             <section id="security">
-              <p className="legal-section-number">07</p>
+              <p className="legal-section-number">08</p>
               <h2>개인정보의 안전성 확보 조치</h2>
               <ul>
                 <li>
@@ -579,7 +726,7 @@ export default function PrivacyPage() {
             </section>
 
             <section id="automatic">
-              <p className="legal-section-number">08</p>
+              <p className="legal-section-number">09</p>
               <h2>브라우저 저장소·이용 분석과 자동화된 처리</h2>
               <h3>브라우저 저장소</h3>
               <p>
@@ -618,12 +765,18 @@ export default function PrivacyPage() {
                 </li>
                 <li>
                   Google Signals, 맞춤형 광고, 리마케팅, 잠재고객 목록,
-                  User-ID와 사용자 제공 데이터 기능을 사용하지 않습니다.
+                  User-ID, 사용자 제공 데이터와 광고 관심그룹 기능을 사용하지
+                  않습니다.
                 </li>
                 <li>
                   향상된 측정은 전체 비활성화해 스크롤, 외부 링크, 사이트 검색,
                   동영상, 파일 다운로드, 폼 상호작용과 브라우저 히스토리 변경을
                   자동 수집하지 않습니다.
+                </li>
+                <li>
+                  세부 위치·기기 데이터는 전 지역에서 비활성화하고, 스트림의
+                  이메일 주소 가림과 금지 URL 쿼리 가림을 추가 안전장치로
+                  사용합니다.
                 </li>
                 <li>
                   페이지 주소는 정식 도메인·허용된 공개 경로와 통제된 캠페인
@@ -659,7 +812,7 @@ export default function PrivacyPage() {
             </section>
 
             <section id="officer">
-              <p className="legal-section-number">09</p>
+              <p className="legal-section-number">10</p>
               <h2>개인정보 보호책임자와 권리구제</h2>
               <dl className="legal-contact-card">
                 <div>
@@ -740,7 +893,7 @@ export default function PrivacyPage() {
             </section>
 
             <section id="changes">
-              <p className="legal-section-number">10</p>
+              <p className="legal-section-number">11</p>
               <h2>개인정보처리방침의 변경</h2>
               <p>
                 이 방침은 {PRIVACY_POLICY_EFFECTIVE_DATE_LABEL}부터
@@ -765,7 +918,7 @@ export default function PrivacyPage() {
                     개인정보 보호법 확인
                   </a>
                   <a
-                    href="https://www.pipc.go.kr/np/cop/bbs/selectBoardArticle.do?bbsId=BS217&mCode=D010030000&nttId=11134"
+                    href="https://www.pipc.go.kr/np/cop/bbs/selectBoardArticle.do?bbsId=BS217&mCode=G010030000&nttId=12018"
                     target="_blank"
                     rel="noreferrer"
                   >
