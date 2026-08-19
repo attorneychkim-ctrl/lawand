@@ -7427,7 +7427,14 @@ a.inbound-customer:hover { text-decoration: underline; }
 
 .phone-desk-detail-shell { max-width: 1080px; }
 .phone-desk-detail-header { margin-bottom: 24px; }
-.phone-desk-back-link { align-self: flex-end; }
+.phone-desk-detail-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 9px;
+}
+.phone-desk-detail-actions .call-button { white-space: nowrap; }
+.phone-desk-back-link { align-self: flex-start; }
 
 .phone-desk-detail-summary {
   display: grid;
@@ -8852,7 +8859,19 @@ a.inbound-customer:hover { text-decoration: underline; }
   .phone-desk-detail-summary > div:nth-child(3n) { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
   .phone-desk-detail-summary > div:nth-child(2n) { border-right: 0; }
   .phone-desk-detail-summary > div:nth-last-child(-n + 2) { border-bottom: 0; }
-  .phone-desk-back-link { align-self: flex-start; }
+  .phone-desk-detail-actions {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .phone-desk-detail-actions .centrex-call-control,
+  .phone-desk-detail-actions .call-button,
+  .phone-desk-back-link { width: 100%; }
+  .phone-desk-detail-actions .centrex-call-control { justify-items: stretch; }
+  .phone-desk-detail-actions .centrex-call-message {
+    max-width: none;
+    text-align: left;
+  }
   .phone-aftercare-results { grid-template-columns: 1fr 1fr; }
   .phone-aftercare-message-action { align-items: stretch; flex-direction: column; }
   .phone-aftercare-message-action .message-button { width: 100%; }
