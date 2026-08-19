@@ -76,6 +76,7 @@ export function grantGa4AnalyticsConsent(measurementId: string) {
       send_page_view: false,
       allow_google_signals: false,
       allow_ad_personalization_signals: false,
+      allow_interest_groups: false,
       cookie_expires: GA_COOKIE_EXPIRY_SECONDS,
       cookie_update: false,
       cookie_flags: "SameSite=Lax;Secure",

@@ -48,7 +48,7 @@ test("동의 선택은 현재 버전과 명시적인 선택만 복원한다", ()
     null,
   );
   assert.equal(parseStoredAnalyticsConsent("not-json"), null);
-  assert.equal(ANALYTICS_CONSENT_STORAGE_KEY, "lawand.analytics-consent.v1");
+  assert.equal(ANALYTICS_CONSENT_STORAGE_KEY, "lawand.analytics-consent.v2");
 });
 
 test("page_location은 정식 origin과 허용된 캠페인 키만 남긴다", () => {
@@ -276,6 +276,7 @@ test("브라우저 런타임은 동의 뒤 page_view와 논리 제출당 generat
       send_page_view: false,
       allow_google_signals: false,
       allow_ad_personalization_signals: false,
+      allow_interest_groups: false,
       cookie_expires: 36_288_000,
       cookie_update: false,
       cookie_flags: "SameSite=Lax;Secure",

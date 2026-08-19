@@ -144,6 +144,54 @@
   통과했다. core 92개·gateway 180개 테스트가 성공했다. 아직 원격 `main` 푸시·운영 snapshot·
   migration·digest 전환·운영 데이터 변경·외부 발송은 수행하지 않았다. `PROJECT_PLAN.md`는
   v1.59다.
+### 2026-08-19 — GA4 운영 계정·속성·웹 스트림 최소수집 설정 완료
+- 지원되는 Chrome에서 사용자가 `legalflow.co.kr` 조직 계정을 선택하고 Google Analytics
+  대한민국 약관을 직접 수락했다. `법무법인 로앤` 계정, `로앤 홈페이지 운영` 속성,
+  `https://lawandfirm.com`의 `lawandfirm.com 운영` 웹 스트림을 생성했다. 속성은 대한민국
+  GMT+09·KRW, 사법 및 정부 기관, 리드 생성·웹 및 앱 트래픽 목표로 만들었다. 계정 데이터
+  공유 선택은 모두 껐다.
+- 향상된 측정, Google Signals, 사용자 제공 데이터·User-ID, 전 지역 세부 위치/기기 데이터와
+  광고 개인 최적화를 모두 껐다. 광고 개인 최적화 지역 허용은 0/307이며 보고 ID는 기기 기반,
+  이벤트·사용자 데이터 보유는 14개월, 새 활동 시 재설정은 끔이다. 이메일 가림과 금지 쿼리
+  18개 가림을 저장했고, 두 묶음 합성 URL에서 모든 금지 값이 `(redacted)` 처리되는 동안
+  UTM 5종과 `n_keyword_id`가 유지되며 일반 문자열 이메일도 제거되는 것을 확인했다.
+- 생성된 account/property/web stream/Measurement ID는 저장소 정책에 따라 Git에 기록하지
+  않고 AdPilot `ga4_advertisement_with_lawand_session` Orca 터미널에 직접 인계했다. 그
+  세션은 읽기 전용 OAuth, 속성→웹 스트림 선택, 0건 상태, `generate_lead` 보조 목표와 GA4
+  관측 경계를 로컬에서 재확인해 관련 테스트 19개를 통과했다. 핵심 목표 부재 안내와 실제
+  보조·진단 목표 상세 분석 기능의 불일치도 교정하고 회귀 테스트 5개·lint·문서 정합성·
+  `git diff --check`를 통과해 상대 브랜치 커밋
+  `b2ef82111b5f63e9d279f716c77e3a58154d9e5f`로 푸시했다. 외부 OAuth·광고 연결은 실행하지
+  않았다. 홈페이지 운영 Measurement ID secret·재배포 전이라 GA4 데이터 0건이 정상이다.
+  main 병합·main 푸시·운영 secret·배포·운영 DB·Google Ads·네이버 광고·자동화는 변경하지
+  않았다. DB migration은 없다. `PROJECT_PLAN.md`는 v1.59다.
+
+### 2026-08-19 — GA4 운영 활성화 준비·국외이전 동의 후보
+- Google 대한민국 Analytics 약관·Ads 데이터 처리 약관, Analytics 재수탁자, 현재 운영
+  데이터센터, 지역 수집·보유·데이터 가림 문서와 개인정보보호위원회 현행 작성지침을
+  대조했다. 계약 주체 Google LLC와 개인정보 보호법 제28조의8제1항제1호 동의를 근거로,
+  이전받는 자·연락처·항목·시기/방법·목적·14개월 보유·거부 효과와 재수탁자/운영
+  데이터센터 37개 국가의 보수적 합집합을 개인정보처리방침 후보에 공개했다. Google의
+  파트너 사이트 처리 안내도 눈에 띄는 링크로 제공한다. 최종 공개·약관 수락은 김충환
+  개인정보 보호책임자·책임 변호사의 승인 게이트다.
+- 국외 이전 범위를 포함한 선택은 동의 v2로 올려 이전 허용을 자동 승계하지 않는다. 초기
+  안내와 재설정 화면은 `분석·국외 이전 허용`을 명시하며 거부해도 열람·상담에 영향이 없다.
+  태그에는 `allow_interest_groups=false`를 추가했다. Measurement ID가 없거나 설정 조회가
+  실패하면 분석을 거부하고 이 도메인에서 삭제 가능한 `_ga` 쿠키도 정리한다.
+- `docs/GA4_OPERATIONS_ACTIVATION_V1.md`에 로앤 조직 계정 소유, 계정 공유 전부 끔,
+  `Asia/Seoul`·`KRW`, 향상된 측정/Google Signals/사용자 제공 데이터/광고 개인화와
+  관심그룹/전 지역 세부 위치·기기 수집 끔, 기기 기반 보고 ID, 14개월·재설정 끔,
+  이메일/금지 query 가림, 식별자 인수인계·배포 canary·AdPilot 연결·중단 절차를 고정했다.
+- 전체 5패키지 typecheck·lint·test·production build와 `git diff --check`를 통과했다.
+  가짜 형식의 Measurement ID를 쓴 로컬 프로덕션에서 동의 전 Google 요청·쿠키·console
+  오류가 0임을 확인했다. 390×844 모바일의 접힌/펼친 안내와 1440×1000 데스크톱은 버튼
+  표시·가로 스크롤·hydration 오류가 없고, 모바일 Lighthouse는 Performance 96,
+  Accessibility 100, Best Practices 100, SEO 100이다.
+- Orca 내장 브라우저는 Google이 안전하지 않은 앱으로 로그인을 거부했다. 우회하지 않고
+  지원되는 일반 브라우저의 로앤 조직 계정 로그인 대기로 남겼다. Analytics 계정·속성·
+  웹 스트림, 운영 Measurement ID, secret, main 병합·배포, 실제 Google 데이터, AdPilot
+  운영 연결, 네이버 광고와 운영 원장은 만들거나 변경하지 않았다. DB migration은 없다.
+  `PROJECT_PLAN.md`는 v1.58이다.
 
 ### 2026-08-19 — 동의 기반 GA4 홈페이지 측정·AdPilot 범용 결손 구현 후보
 - 홈페이지 루트에 결정적인 초기 `null`의 분석 관리자를 추가했다. 서버 런타임

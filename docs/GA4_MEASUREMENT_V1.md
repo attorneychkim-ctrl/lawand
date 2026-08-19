@@ -2,7 +2,7 @@
 
 > 계약 ID: `lawand-ga4-measurement-v1`
 > 확정일: 2026-08-19
-> 상태: 구현 후보 완료·운영 계정 연결 및 배포 전
+> 상태: 구현·운영 설정·국외이전 고지 후보 완료, 운영 계정 연결 및 배포 전
 > 현재 외부 상태: 로앤 GA4 운영 속성·웹 스트림과 네이버 광고 계정은 아직 연결하지 않음
 > AdPilot 상대 기준: `docs/integrations/lawand-ga4-measurement-v1.md` v1.1.0,
 > 커밋 `59ac8c42a0512525fd9cde7c3a80bbca9ccaf917`
@@ -77,13 +77,15 @@ AdPilot 화면에서 GA4가 반환한 합계는 `GA4 관측 리드`로 부른다
 
 | 동의 유형 | 기본값 | 허용 조건 |
 |---|---|---|
-| `analytics_storage` | `denied` | 사용자가 서비스 개선 분석에 명시적으로 동의한 뒤 `granted` |
+| `analytics_storage` | `denied` | 사용자가 서비스 개선 분석과 이에 필요한 국외 이전에 명시적으로 동의한 뒤 `granted` |
 | `ad_storage` | `denied` | 항상 거부 |
 | `ad_user_data` | `denied` | 항상 거부 |
 | `ad_personalization` | `denied` | 항상 거부 |
 
-동의 선택은 버전과 함께 필요한 최소 first-party 저장소에 보존한다. 푸터와
-개인정보처리방침에서 `분석 설정`을 다시 열 수 있어야 하며, 철회하면 이후 전송을 중단하고
+동의 선택은 버전과 함께 필요한 최소 first-party 저장소에 보존한다. 운영 활성화 후보는
+Google LLC 처리위탁·국외 이전 범위를 포함한 동의 v2이며, 이전 범위의 허용 선택을 자동
+승계하지 않는다. 푸터와 개인정보처리방침에서 `분석 설정`을 다시 열 수 있어야 하며,
+철회하면 이후 전송을 중단하고
 현재 도메인에서 삭제 가능한 `_ga` 계열 쿠키를 정리한다. 거부한 브라우저에는 GA 쿠키를
 만들지 않는다. 동의 뒤 생성하는 쿠키도 `cookie_update=false`와 14개월 만료를 함께 적용해
 최초 생성 시점부터 14개월을 넘겨 갱신하지 않는다.
@@ -95,12 +97,25 @@ GA4 운영 속성은 법무법인 로앤이 소유한다. 시간대는 `Asia/Seo
 - 태그 `config`의 `send_page_view`는 `false`
 - 향상된 측정 전체를 비활성화해 스크롤·외부 링크·사이트 검색·동영상·파일 다운로드·
   폼 상호작용·브라우저 히스토리 페이지 변경을 자동 수집하지 않음
-- Google Signals와 광고 개인화 신호는 비활성화
-- Google Ads·잠재고객·리마케팅·User-ID·사용자 제공 데이터는 연결하지 않음
-- 이벤트·사용자 데이터 보유기간은 출시 전 개인정보 검토에서 확정하고, GA 설정과
-  개인정보처리방침의 기재 기간을 일치시킴. 엔지니어링 기본 후보는 14개월
-- 실제 Google 계약 주체, 처리 국가·시점·방법을 확인하기 전에는 국외 처리 문구를 추측해
-  공개하지 않음
+- 계정 데이터 공유 네 항목을 모두 비활성화
+- Google Signals·사용자 제공 데이터·광고 개인화 신호·광고 관심그룹 기능은 비활성화
+- 세부 위치·기기 데이터 수집은 전 지역에서 비활성화
+- 보고 ID는 기기 기반으로 설정
+- 이벤트·사용자 데이터 보유기간은 14개월, 새 활동 시 보유기간 재설정은 끔
+- 이메일 주소 가림을 켜고 금지 URL 쿼리 키를 데이터 가림 목록에 등록
+- Google Ads·Firebase·BigQuery 등 제품, User-ID, 잠재고객·리마케팅 공유는 연결하지 않음
+
+2026년 8월 19일 공식 문서 기준 계약 주체는 Google LLC이며, Google은 자신 또는
+재수탁자가 시설을 운영하는 국가에서 데이터를 처리할 수 있다. 개인정보처리방침 후보는
+현재 Google Analytics 재수탁자 소재지와 Google 데이터센터 국가를 합친 국가 목록,
+이전 항목·시기·방법·목적·14개월 보유·거부 효과를 고지한다. Google 약관상 시스템 삭제는
+요청 또는 계약 종료 뒤 최대 180일이 걸릴 수 있고, GA 표준 집계 보고서는 이용자·이벤트
+보유 설정의 적용 대상이 아님도 함께 알린다. 실제 활성화 전 책임 변호사·개인정보
+보호책임자가 이 고지와 Google 약관 수락을 승인하고, 국가 목록이 달라지면 먼저 고지와
+동의 버전을 갱신한다.
+
+계정 생성과 운영 검증의 정확한 값·증거·중단 절차는
+[`GA4_OPERATIONS_ACTIVATION_V1.md`](GA4_OPERATIONS_ACTIVATION_V1.md)를 따른다.
 
 홈페이지 서버는 공개값인 Measurement ID만 런타임 환경변수
 `LAWAND_GA4_MEASUREMENT_ID`로 받는다. 내부 same-origin `/api/analytics-config`는 매 요청에
@@ -249,9 +264,10 @@ AdPilot v1.1.0은 **최적화 역할**과 **현재 열어 보는 보고 목표**
 비활성 및 새로고침 후 스크립트 0, 홈페이지 typecheck·lint·production build를 확인했다.
 전체 5패키지 typecheck·lint·test·production build도 통과했다.
 실제 운영 ID가 없으므로 Google 수신 성공, 실제 `_ga` 생성·삭제, DebugView·일반 보고서,
-AdPilot 운영 스트림·목표·키워드 귀속은 아직 성공으로 선언하지 않는다. 개인정보처리방침의
-Google 계약 주체·처리 위치·국외 처리 문구와 14개월 보유 설정도 운영 활성화 전 검토
-게이트로 남긴다.
+AdPilot 운영 스트림·목표·키워드 귀속은 아직 성공으로 선언하지 않는다. 공식 약관과
+처리위치는 대조해 개인정보처리방침·동의 후보에 반영했지만, 책임 변호사·개인정보
+보호책임자의 최종 승인과 Google 관리 화면의 실제 설정 증거는 운영 활성화 전 게이트로
+남긴다.
 
 운영 상담 폼 canary는 실제 상담 원장을 변경하므로 메인 통합·배포 세션의 별도 승인을
 받아야 한다. 구현 worktree는 main 병합, 운영 GA 설정, 운영 배포, 실제 광고 클릭·상담 생성,
@@ -284,6 +300,21 @@ Git에 비밀값으로 저장하지 않고 운영 원장에 변경 시각과 검
   <https://support.google.com/analytics/answer/9234069?hl=ko>
 - GA4 이용자·이벤트 데이터 보유 설정:
   <https://support.google.com/analytics/answer/7667196?hl=ko>
+- GA4 데이터 가림:
+  <https://support.google.com/analytics/answer/13544947?hl=ko>
+- GA4 지역별 데이터 수집과 IP 처리:
+  <https://support.google.com/analytics/answer/11598602?hl=ko>
+- GA4 세부 위치·기기 데이터 수집:
+  <https://support.google.com/analytics/answer/12002752?hl=ko>
+- Google Analytics 서비스 약관(대한민국):
+  <https://marketingplatform.google.com/about/analytics/terms/kr/>
+- Google Ads 데이터 처리 약관:
+  <https://business.safety.google/adsprocessorterms/>
+- Google Analytics 재수탁자와 Google 데이터센터 위치:
+  <https://business.safety.google/adssubprocessors/>,
+  <https://datacenters.google/locations/>
+- Google 파트너 사이트 데이터 처리 안내:
+  <https://policies.google.com/technologies/partner-sites>
 - 네이버 검색광고 API의 `nkw-a001-...` 키워드 ID 예시:
   <https://naver.github.io/searchad-apidoc/release/2025/12/03/release-note/>
 - 개인정보보호위원회 개인정보 처리방침 작성지침:
