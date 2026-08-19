@@ -102,6 +102,26 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-19 — GA4·AdPilot 광고 성과 측정 계약 v1 후보
+- `docs/GA4_MEASUREMENT_V1.md`에 `lawand-ga4-measurement-v1`을 확정했다. GA4는 basic
+  consent로 분석에 동의한 Next.js 방문만 수동·정제 페이지뷰로 관측하고, 광고 관련 동의·
+  Google Signals·맞춤형 광고는 항상 비활성화한다. 전체 URL·`n_query`·실제 검색어·상담
+  식별자·연락처·진단값은 보내지 않으며, 직접 상담과 상담을 생성한 자가진단의 `new`·
+  `suspected_duplicate`만 `generate_lead` 후보로 둔다. gateway·ERP는 전체 운영 성과,
+  GA4·AdPilot은 동의 방문의 `GA4 관측 리드`라는 경계를 유지한다.
+- 네이버 광고와 로앤 GA4 운영 속성·웹 스트림을 연결하지 않은 상태에서 AdPilot의 범용
+  Admin/Data API·goal mapping·`getGa4NaverGoalAttribution`·`nkw-...` 파서를 대조했고
+  조건부 호환으로 확정했다. AdPilot 상대 계약 v1.0.0은 원격 작업 브랜치 커밋
+  `784a783659036b668f56204f9e1d8f722f626a1c`다. 로앤 전용 스키마나 파서는 필요하지 않다.
+- AdPilot은 supporting 목표의 키워드 row를 이미 계산하지만 상세 표는 primary만 보여 주므로,
+  최적화 역할과 상세 보고 목표를 분리하는 범용 UX가 필요하다. 상세 열람을 이유로 로앤
+  `generate_lead`를 primary로 승격하지 않는다. `GA4 전체 발생`의 관측 경계 명칭,
+  `리걸프렌즈` 고정 안내, 서로 다른 `sessionManualTerm`·랜딩 키워드 ID의 무음 우선순위도
+  계정 연결 전 범용 후속 게이트로 기록했다.
+- 이 후보에서는 홈페이지·gateway·ERP·DB 코드, 개인정보처리방침 본문, 외부 계정·OAuth·
+  실데이터·광고 설정·운영 데이터·main 병합·배포를 변경하거나 수행하지 않았다. 문서 정합성
+  검증과 `git diff --check`만 수행하며 `PROJECT_PLAN.md`는 v1.56이다.
+
 ### 2026-08-18 — Orca 완료 작업 6개 통합 운영 배포 완료
 - Orca 완료 worktree 6개를 main에 병합하고 로컬·원격 worktree HEAD가 최종 main
   `b837751660172877c80d2cdcc59cd57293540c64`의 ancestor임을 확인했다. migration 충돌은
