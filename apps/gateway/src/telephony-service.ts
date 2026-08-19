@@ -94,7 +94,13 @@ import type { createDatabaseClient } from "@lawand/db";
 import type { StaffPrincipal } from "./auth.js";
 import type { DataProtection } from "./crypto.js";
 import { createInboundCommandPollGate } from "./inbound-command-poll-gate.js";
-import { phoneDirectoryCustomersQuery } from "./phone-directory.js";
+import {
+  linkedLegalFriendsCaseNamesQuery,
+  linkedLegalFriendsDisplayName,
+  phoneDirectoryCustomersQuery,
+  summarizeLinkedLegalFriendsCaseNames,
+  type LinkedLegalFriendsCaseNameRow,
+} from "./phone-directory.js";
 import {
   inspectMmsJpeg,
   SolapiDeliveryError,
@@ -526,6 +532,16 @@ export type PhoneCustomerMatch =
       }>;
     }
   | null;
+
+export function retainHigherPriorityPhoneCustomerMatch(
+  matches: Map<string, PhoneCustomerMatch>,
+  phone: string,
+  candidate: NonNullable<PhoneCustomerMatch>,
+) {
+  if (matches.get(phone)) return false;
+  matches.set(phone, candidate);
+  return true;
+}
 
 export type PhonebookContact = {
   id: string;
@@ -2133,6 +2149,31 @@ export function createTelephonyService(options: {
     );
   }
 
+  async function linkedLegalFriendsCaseNames(caseIdxs: readonly string[]) {
+    const normalizedCaseIdxs = [
+      ...new Set(caseIdxs.map((caseIdx) => caseIdx.trim()).filter(Boolean)),
+    ];
+    if (normalizedCaseIdxs.length === 0) return new Map<string, string>();
+
+    try {
+      const result = await db.execute(
+        linkedLegalFriendsCaseNamesQuery(normalizedCaseIdxs),
+      );
+      return summarizeLinkedLegalFriendsCaseNames(
+        result.rows as LinkedLegalFriendsCaseNameRow[],
+      );
+    } catch {
+      console.error(
+        JSON.stringify({
+          event: "telephony_linked_legalfriends_case_name_lookup_failed",
+          caseCount: normalizedCaseIdxs.length,
+          occurredAt: now().toISOString(),
+        }),
+      );
+      return new Map<string, string>();
+    }
+  }
+
   async function resolvePhoneCustomersUncached(phones: readonly string[]) {
     const uniquePhones = [...new Set(phones.filter(Boolean))];
     const matches = new Map<string, PhoneCustomerMatch>(
@@ -2163,6 +2204,7 @@ export function createTelephonyService(options: {
         lastRequestedAt: consultations.lastRequestedAt,
         assigneeUserId: consultationAssignments.assigneeUserId,
         assigneeDisplayName: staffProfiles.displayName,
+        legalFriendsCaseIdx: legalFriendsCaseLinks.caseIdx,
       })
       .from(consultations)
       .leftJoin(
@@ -2172,6 +2214,10 @@ export function createTelephonyService(options: {
       .leftJoin(
         staffProfiles,
         eq(staffProfiles.userId, consultationAssignments.assigneeUserId),
+      )
+      .leftJoin(
+        legalFriendsCaseLinks,
+        eq(legalFriendsCaseLinks.consultationId, consultations.id),
       )
       .where(
         and(
@@ -2183,6 +2229,11 @@ export function createTelephonyService(options: {
         ),
       )
       .orderBy(desc(consultations.lastRequestedAt));
+    const linkedCaseNames = await linkedLegalFriendsCaseNames(
+      consultationRows.flatMap((row) =>
+        row.legalFriendsCaseIdx ? [row.legalFriendsCaseIdx] : [],
+      ),
+    );
 
     const consultationMatchedPhones = new Set<string>();
     for (const consultation of consultationRows) {
@@ -2192,7 +2243,7 @@ export function createTelephonyService(options: {
       );
       if (!phone || consultationMatchedPhones.has(phone)) continue;
       consultationMatchedPhones.add(phone);
-      const displayName =
+      const storedDisplayName =
         consultation.preferredNameCiphertext &&
         consultation.preferredNameNonce &&
         consultation.preferredNameKeyVersion
@@ -2205,7 +2256,12 @@ export function createTelephonyService(options: {
               `consultations.preferred_name:${consultation.id}`,
             )
           : consultation.anonymousLabel;
-      matches.set(phone, {
+      const displayName = linkedLegalFriendsDisplayName(
+        storedDisplayName,
+        consultation.legalFriendsCaseIdx,
+        linkedCaseNames,
+      );
+      retainHigherPriorityPhoneCustomerMatch(matches, phone, {
         source: "consultation",
         consultation: {
           id: consultation.id,
@@ -2303,13 +2359,47 @@ export function createTelephonyService(options: {
       ...staffEndpointRows,
     ]);
     for (const [phone, staffMatch] of staffMatches) {
-      matches.set(phone, staffMatch);
+      retainHigherPriorityPhoneCustomerMatch(matches, phone, staffMatch);
     }
 
     const unmatchedAfterStaff = unmatchedAfterConsultations.filter(
       (phone) => !staffMatches.has(phone),
     );
-    const unmatchedFingerprints = unmatchedAfterStaff.map(
+    let legalFriendsMatches = new Map<
+      string,
+      Extract<PhoneCustomerMatch, { source: "legal_friends" }>
+    >();
+    try {
+      legalFriendsMatches = await resolveLegalFriendsPhones(
+        unmatchedAfterStaff,
+      );
+    } catch {
+      console.error(
+        JSON.stringify({
+          event: "telephony_legalfriends_phone_lookup_failed",
+          phoneCount: unmatchedAfterStaff.length,
+          occurredAt: now().toISOString(),
+        }),
+      );
+    }
+    const unmatchedAfterLegalFriends: string[] = [];
+    for (const phone of unmatchedAfterStaff) {
+      const legalFriendsMatch = legalFriendsMatches.get(
+        phone.replace(/[^0-9]/g, ""),
+      );
+      if (legalFriendsMatch) {
+        retainHigherPriorityPhoneCustomerMatch(
+          matches,
+          phone,
+          legalFriendsMatch,
+        );
+      } else {
+        unmatchedAfterLegalFriends.push(phone);
+      }
+    }
+
+    const phonebookEligiblePhones = new Set(unmatchedAfterLegalFriends);
+    const unmatchedFingerprints = unmatchedAfterLegalFriends.map(
       (phone) => fingerprintsByPhone.get(phone)!,
     );
     const phonebookRows = unmatchedFingerprints.length
@@ -2332,7 +2422,6 @@ export function createTelephonyService(options: {
             ),
           )
       : [];
-    const phonebookMatchedPhones = new Set<string>();
     for (const contact of phonebookRows) {
       const displayName = protection.decrypt(
         {
@@ -2378,23 +2467,9 @@ export function createTelephonyService(options: {
       ]) {
         if (!fingerprint) continue;
         const phone = phoneByFingerprint.get(fingerprint.toString("hex"));
-        if (!phone) continue;
-        matches.set(phone, match);
-        phonebookMatchedPhones.add(phone);
+        if (!phone || !phonebookEligiblePhones.has(phone)) continue;
+        retainHigherPriorityPhoneCustomerMatch(matches, phone, match);
       }
-    }
-
-    const unmatchedPhones = unmatchedAfterStaff.filter(
-      (phone) => !phonebookMatchedPhones.has(phone),
-    );
-    const legalFriendsMatches = await resolveLegalFriendsPhones(
-      unmatchedPhones,
-    );
-    for (const phone of unmatchedPhones) {
-      matches.set(
-        phone,
-        legalFriendsMatches.get(phone.replace(/[^0-9]/g, "")) ?? null,
-      );
     }
     return matches;
   }

@@ -102,6 +102,29 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-19 — ERP 리걸 연결 고객명·수신전화 조회 우선순위 후보
+- `legalfriends_case_links.case_idx`가 있는 상담은 최초 접수 고객명 암호문과 요청 이력을
+  수정하지 않고, 목록·상세·수신전화의 표시 경계에서 정확히 연결된 리걸프렌즈 사건의 현재
+  고객명을 우선한다. 연결 이름이 비었거나 조회가 실패하면 기존 ERP 표시명으로 돌아가며 열린
+  페이지 자동 polling은 추가하지 않았다. 수신전화에서는 ERP 상담 상세 링크·상태·담당자 문맥을
+  유지하고 이름만 교정한다.
+- 상담·활성 직원 회선에 연결되지 않은 수신 번호는 리걸프렌즈를 전화번호부보다 먼저 조회한다.
+  리걸 조회 실패는 전화번호부 fallback을 막지 않고, 뒤의 낮은 우선순위 결과가 이미 선택한
+  고객을 덮어쓰지 못하게 했다. migration `0069_legalfriends_linked_case_client_name.sql`은
+  숫자 범위를 검증한 정확한 `Case_idx` 고객명 security-definer 함수만 `lawand_app`에 허용하고
+  비공개 `CB` 테이블 직접 접근 차단을 유지한다.
+- 로컬 `lawand_dev`에 migration을 적용해 원장 70개와 재실행 no-op, 정상 사건 1행·잘못된/범위초과
+  ID 빈 결과, 앱 함수 실행 허용·`CB` 직접 조회 거부를 확인했다. 전체 5패키지 test·typecheck·lint·
+  production build, DB schema check와 `git diff --check`를 통과했고 core 92개·gateway 183개 테스트가
+  성공했다. 첫 gateway 테스트는 새 워크트리의 core·DB dist 부재로 실행 전 중단돼 두 패키지를
+  먼저 build한 뒤 다시 통과했고, 첫 migration 래퍼도 루트 `tsx` 해석 단계에서 DB 실행 전에
+  중단돼 패키지 runner로 적용했다.
+- 운영 구성 대조 결과 평일 5분 주기의 기존 `sync_data`는 구 ERP MariaDB `target_table`을,
+  새 ERP가 읽는 PostgreSQL `CB` 미러는 일일 03:30 `lf_phone_directory` 잡을 갱신한다. 5분 이내
+  이름 반영에는 별도 경량 연결사건명 sync 또는 검증된 timer 변경이 필요하다고 오픈 게이트로
+  남겼다. 타 저장소 timer·운영 데이터·외부 호출·main 병합·운영 배포는 수행하지 않았다.
+  `PROJECT_PLAN.md`는 v1.61이다.
+
 ### 2026-08-19 — Orca 완료 작업 6개 통합 운영 배포 완료
 - Orca 완료 브랜치 6개를 최종 `main` `224e156619f4fab3b9d78f7ca9204e377de5b4c8`에
   통합했고 Actions `32213073096`의 검증과 세 `linux/arm64` 이미지 게시가 성공했다.

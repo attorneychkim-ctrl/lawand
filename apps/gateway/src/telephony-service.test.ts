@@ -14,8 +14,10 @@ import {
   phoneDeskItemAssignees,
   phoneDeskItemMatchesAssignee,
   phoneDeskItemMatchesFilter,
+  retainHigherPriorityPhoneCustomerMatch,
   shouldAutoOpenConnectedAftercare,
   staffPhoneCustomerMatches,
+  type PhoneCustomerMatch,
 } from "./telephony-service.js";
 
 test("담당자 연결 요청 자동문자는 한국 시간의 30분 일정과 담당자를 고정 형식으로 붙인다", () => {
@@ -179,6 +181,35 @@ test("직원 전체 회선번호는 같은 번호의 직원 정보와 내선으�
   });
   assert.deepEqual(matches.get("07046074592"), matches.get("07046074595"));
   assert.equal(matches.size, 2);
+});
+
+test("수신전화 고객 해석은 리걸프렌즈 일치 뒤 전화번호부가 덮어쓰지 못한다", () => {
+  const phone = "01011112222";
+  const matches = new Map<string, PhoneCustomerMatch>([[phone, null]]);
+  const legalFriends = {
+    source: "legal_friends" as const,
+    clientName: "리걸 최신 고객명",
+    cases: [],
+  };
+  const phonebook = {
+    source: "phonebook" as const,
+    contact: {
+      id: "phonebook-1",
+      displayName: "과거 전화번호부 이름",
+      originalPhone: phone,
+      connectedPhone: null,
+    },
+  };
+
+  assert.equal(
+    retainHigherPriorityPhoneCustomerMatch(matches, phone, legalFriends),
+    true,
+  );
+  assert.equal(
+    retainHigherPriorityPhoneCustomerMatch(matches, phone, phonebook),
+    false,
+  );
+  assert.equal(matches.get(phone), legalFriends);
 });
 
 test("수신 알림의 받기 버튼은 본인 소유의 받기 가능한 벨에만 노출한다", () => {

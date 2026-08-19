@@ -484,6 +484,13 @@
       "when": 1787109385756,
       "tag": "0068_centrex_inbound_message_deduplication",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1787122800000,
+      "tag": "0069_legalfriends_linked_case_client_name",
+      "breakpoints": true
     }
   ]
 }

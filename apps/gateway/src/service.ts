@@ -92,9 +92,13 @@ import type { StaffPrincipal } from "./auth.js";
 import {
   excludeOwnLegalFriendsCase,
   existingConsultationPhoneDirectoryCustomersQuery,
+  linkedLegalFriendsCaseNamesQuery,
+  linkedLegalFriendsDisplayName,
   summarizeExistingConsultationPhoneDirectoryCustomers,
+  summarizeLinkedLegalFriendsCaseNames,
   type ConsultationPhoneDirectoryCandidate,
   type ExistingConsultationPhoneDirectoryCustomerRow,
+  type LinkedLegalFriendsCaseNameRow,
 } from "./phone-directory.js";
 import { legalFriendsResidenceRegion } from "./telephony-service.js";
 import {
@@ -616,6 +620,31 @@ export function createConsultationService(options: {
         }),
       );
       return new Map<string, string[]>();
+    }
+  }
+
+  async function linkedLegalFriendsCaseNames(caseIdxs: readonly string[]) {
+    const normalizedCaseIdxs = [
+      ...new Set(caseIdxs.map((caseIdx) => caseIdx.trim()).filter(Boolean)),
+    ];
+    if (normalizedCaseIdxs.length === 0) return new Map<string, string>();
+
+    try {
+      const result = await db.execute(
+        linkedLegalFriendsCaseNamesQuery(normalizedCaseIdxs),
+      );
+      return summarizeLinkedLegalFriendsCaseNames(
+        result.rows as LinkedLegalFriendsCaseNameRow[],
+      );
+    } catch {
+      console.error(
+        JSON.stringify({
+          event: "linked_legalfriends_case_name_lookup_failed",
+          caseCount: normalizedCaseIdxs.length,
+          occurredAt: new Date().toISOString(),
+        }),
+      );
+      return new Map<string, string>();
     }
   }
 
@@ -4679,6 +4708,9 @@ export function createConsultationService(options: {
         row,
       ]),
     );
+    const linkedCaseNames = await linkedLegalFriendsCaseNames(
+      legalFriendsCaseRows.map((row) => row.caseIdx),
+    );
     const homepageEntryRows = await db
       .select({
         consultationId: kakaoHomepageEntries.consultationId,
@@ -4865,11 +4897,16 @@ export function createConsultationService(options: {
           },
           { phone: 0, kakao_channel: 0, naver_booking: 0 },
         );
+        const storedDisplayName = preferredName ?? consultation.anonymousLabel;
         return {
           id: consultation.id,
           publicReceiptCode: consultation.publicReceiptCode,
           state: consultation.state,
-          displayName: preferredName ?? consultation.anonymousLabel,
+          displayName: linkedLegalFriendsDisplayName(
+            storedDisplayName,
+            legalFriendsCaseByConsultation.get(consultation.id)?.caseIdx ?? null,
+            linkedCaseNames,
+          ),
           contactChannel: consultation.contactChannel,
           phone,
           softDeletedAt: consultation.softDeletedAt?.toISOString() ?? null,
@@ -5322,6 +5359,9 @@ export function createConsultationService(options: {
             eq(legalFriendsCaseLinks.consultationId, consultationId),
           )
           .limit(1);
+    const linkedCaseNames = await linkedLegalFriendsCaseNames(
+      legalFriendsCase ? [legalFriendsCase.caseIdx] : [],
+    );
     const telephonyCallRows = await db
       .select({
         id: telephonyCalls.id,
@@ -5552,11 +5592,16 @@ export function createConsultationService(options: {
       kakaoEntries.map((entry) => [entry.consultationId, entry]),
     );
 
+    const storedDisplayName = preferredName ?? consultation.anonymousLabel;
     return {
       id: consultation.id,
       publicReceiptCode: consultation.publicReceiptCode,
       state: consultation.state,
-      displayName: preferredName ?? consultation.anonymousLabel,
+      displayName: linkedLegalFriendsDisplayName(
+        storedDisplayName,
+        legalFriendsCase?.caseIdx ?? null,
+        linkedCaseNames,
+      ),
       contactChannel: consultation.contactChannel,
       phone: latestPhone,
       softDeletedAt: consultation.softDeletedAt?.toISOString() ?? null,
