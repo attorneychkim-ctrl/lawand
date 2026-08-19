@@ -1,6 +1,4 @@
 export const LAWAND_GA4_CANONICAL_ORIGIN = "https://lawandfirm.com";
-export const ANALYTICS_CONSENT_STORAGE_KEY = "lawand.analytics-consent.v2";
-export const ANALYTICS_CONSENT_VERSION = 2;
 export const GA4_LEAD_SUCCESS_MARKER_PREFIX =
   "lawand.ga4.generate-lead-success.v1:";
 
@@ -43,14 +41,6 @@ const GA4_TRACKED_STATIC_PATHS = new Set([
   "/bank/reviews/write",
   "/bank/self-diagnosis",
 ]);
-
-export type AnalyticsConsentChoice = "granted" | "denied";
-
-export type StoredAnalyticsConsent = {
-  version: typeof ANALYTICS_CONSENT_VERSION;
-  choice: AnalyticsConsentChoice;
-  updatedAt: string;
-};
 
 export type GenerateLeadDedupeOutcome =
   | "new"
@@ -111,36 +101,6 @@ export function normalizeTrackedPagePath(pathname: string) {
 export function normalizeGa4MeasurementId(value: string | undefined) {
   const normalized = value?.trim().toUpperCase() ?? "";
   return GA4_MEASUREMENT_ID_PATTERN.test(normalized) ? normalized : null;
-}
-
-export function parseStoredAnalyticsConsent(
-  value: string | null,
-): AnalyticsConsentChoice | null {
-  if (!value) return null;
-  try {
-    const parsed = JSON.parse(value) as Partial<StoredAnalyticsConsent>;
-    if (
-      parsed.version !== ANALYTICS_CONSENT_VERSION ||
-      (parsed.choice !== "granted" && parsed.choice !== "denied") ||
-      typeof parsed.updatedAt !== "string"
-    ) {
-      return null;
-    }
-    return parsed.choice;
-  } catch {
-    return null;
-  }
-}
-
-export function serializeAnalyticsConsent(
-  choice: AnalyticsConsentChoice,
-  updatedAt: string,
-) {
-  return JSON.stringify({
-    version: ANALYTICS_CONSENT_VERSION,
-    choice,
-    updatedAt,
-  } satisfies StoredAnalyticsConsent);
 }
 
 export function sanitizeGa4PageLocation(

@@ -465,8 +465,8 @@ export default function PrivacyPage() {
               </p>
               <p>
                 현재 이 홈페이지의 상담·후기 접수 개인정보를 별도의 광고
-                플랫폼이나 생성형 AI 서비스에 제공하지 않습니다. 동의 기반
-                Google Analytics 처리위탁·국외 이전은 다음 절에서 별도로
+                플랫폼이나 생성형 AI 서비스에 제공하지 않습니다. Google
+                Analytics 처리위탁·국외 이전은 다음 절에서 별도로
                 안내합니다.
               </p>
             </section>
@@ -475,9 +475,9 @@ export default function PrivacyPage() {
               <p className="legal-section-number">05</p>
               <h2>Google Analytics 처리위탁과 개인정보 국외 이전</h2>
               <p>
-                로앤은 이용자가 분석을 허용한 경우에만 아래 분석정보를 Google
-                Analytics에 처리위탁하고 국외로 이전합니다. 법적 근거는
-                「개인정보 보호법」 제28조의8제1항제1호의 정보주체 동의입니다.
+                로앤은 홈페이지와 캠페인의 이용 현황을 통계적으로 분석하기
+                위해 아래 분석정보를 Google Analytics에 처리위탁하고 국외로
+                이전합니다.
               </p>
               <div className="legal-table-wrap">
                 <table>
@@ -552,8 +552,8 @@ export default function PrivacyPage() {
                     <tr>
                       <th scope="row">이전 시기·방법</th>
                       <td>
-                        분석 허용 뒤 페이지 방문 또는 실제 웹 상담 접수 성공
-                        이벤트가 발생할 때 암호화된 HTTPS 네트워크 통신으로 이전
+                        페이지 방문 또는 실제 웹 상담 접수 성공 이벤트가 발생할
+                        때 암호화된 HTTPS 네트워크 통신으로 이전
                       </td>
                     </tr>
                     <tr>
@@ -578,14 +578,11 @@ export default function PrivacyPage() {
                     <tr>
                       <th scope="row">거부 방법·효과</th>
                       <td>
-                        최초 안내에서 `거부`를 선택하거나 푸터·이 페이지의
-                        `분석 설정 열기`에서 언제든 철회할 수 있습니다. 거부해도
-                        홈페이지 열람과 상담 요청에는 영향이 없으며 분석만
-                        비활성화됩니다. 철회하면 이후 이전을 중단하고 현재
-                        도메인에서 삭제 가능한 `_ga` 쿠키를 지우지만, 이미
-                        적법하게 수집된 과거 통계가 자동으로 소급 삭제되지는
-                        않습니다. 서버 데이터의 권리행사는 아래 개인정보
-                        보호책임자에게 요청할 수 있습니다.
+                        브라우저의 쿠키·사이트 데이터 차단 또는 삭제 기능을
+                        사용할 수 있습니다. 브라우저에서 이를 차단해도 홈페이지
+                        열람과 상담 요청에는 영향이 없습니다. 이미 수집된 서버
+                        데이터에 관한 권리행사는 아래 개인정보 보호책임자에게
+                        요청할 수 있습니다.
                       </td>
                     </tr>
                   </tbody>
@@ -759,9 +756,8 @@ export default function PrivacyPage() {
               </p>
               <ul>
                 <li>
-                  `analytics_storage`만 이용자의 허용 뒤 활성화하며
-                  `ad_storage`, `ad_user_data`, `ad_personalization`은 항상
-                  거부합니다.
+                  `analytics_storage`만 활성화하며 `ad_storage`, `ad_user_data`,
+                  `ad_personalization`은 항상 거부합니다.
                 </li>
                 <li>
                   Google Signals, 맞춤형 광고, 리마케팅, 잠재고객 목록,
@@ -784,18 +780,7 @@ export default function PrivacyPage() {
                   알 수 없는 경로는 찾을 수 없음 경로로 일반화하고 실제 검색어와
                   임의 쿼리를 제거합니다.
                 </li>
-                <li>
-                  거부하거나 철회하면 이후 분석 전송을 중단하고 현재 도메인에서
-                  삭제할 수 있는 `_ga` 계열 쿠키를 정리합니다.
-                </li>
               </ul>
-              <button
-                className="button button-outline legal-analytics-settings"
-                data-analytics-settings
-                type="button"
-              >
-                분석 설정 열기
-              </button>
               <h3>자동화된 처리</h3>
               <p>
                 로앤은 중복 접수 분류, 담당자 배정 후 외부 시스템 등록과 알림
