@@ -10,6 +10,16 @@ function candidateValues(phones: readonly string[]): SQL {
   );
 }
 
+function caseIdxCandidateValues(caseIdxs: readonly string[]): SQL {
+  if (caseIdxs.length === 0) {
+    throw new Error("리걸프렌즈 연결 사건명 일괄조회에는 한 개 이상의 사건 ID가 필요합니다.");
+  }
+  return sql.join(
+    caseIdxs.map((caseIdx) => sql`(${caseIdx})`),
+    sql.raw(", "),
+  );
+}
+
 export type ConsultationPhoneDirectoryCandidate = {
   consultationId: string;
   phone: string;
@@ -21,6 +31,11 @@ export type ExistingConsultationPhoneDirectoryCustomerRow = {
   primary_staff_name: string | null;
   secondary_staff_name: string | null;
   tertiary_staff_name: string | null;
+};
+
+export type LinkedLegalFriendsCaseNameRow = {
+  case_idx: string;
+  client_name: string | null;
 };
 
 function consultationCandidateValues(
@@ -109,6 +124,44 @@ export function summarizeExistingConsultationPhoneDirectoryCustomers(
       ),
     ]),
   );
+}
+
+export function linkedLegalFriendsCaseNamesQuery(
+  caseIdxs: readonly string[],
+) {
+  return sql<LinkedLegalFriendsCaseNameRow>`
+    with candidate(case_idx) as (
+      values ${caseIdxCandidateValues(caseIdxs)}
+    )
+    select
+      candidate.case_idx,
+      directory.client_name
+    from candidate
+    cross join lateral
+      public.resolve_linked_legalfriends_case_client(candidate.case_idx) as directory
+  `;
+}
+
+export function summarizeLinkedLegalFriendsCaseNames(
+  rows: readonly LinkedLegalFriendsCaseNameRow[],
+) {
+  const names = new Map<string, string>();
+  for (const row of rows) {
+    const caseIdx = row.case_idx.trim();
+    const clientName = row.client_name?.trim();
+    if (!caseIdx || !clientName || names.has(caseIdx)) continue;
+    names.set(caseIdx, clientName);
+  }
+  return names;
+}
+
+export function linkedLegalFriendsDisplayName(
+  erpDisplayName: string,
+  linkedCaseIdx: string | null,
+  linkedCaseNames: ReadonlyMap<string, string>,
+) {
+  const caseIdx = linkedCaseIdx?.trim();
+  return (caseIdx ? linkedCaseNames.get(caseIdx) : null) ?? erpDisplayName;
 }
 
 export function phoneDirectoryCustomersQuery(phones: readonly string[]) {

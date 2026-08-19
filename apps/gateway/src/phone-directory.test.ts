@@ -7,8 +7,11 @@ import {
   excludeOwnLegalFriendsCase,
   existingConsultationPhoneDirectoryCustomersQuery,
   existingPhoneDirectoryCustomersQuery,
+  linkedLegalFriendsCaseNamesQuery,
+  linkedLegalFriendsDisplayName,
   phoneDirectoryCustomersQuery,
   summarizeExistingConsultationPhoneDirectoryCustomers,
+  summarizeLinkedLegalFriendsCaseNames,
 } from "./phone-directory.js";
 
 const dialect = new PgDialect();
@@ -109,9 +112,44 @@ test("기존고객 과거 사건 담당자명은 상담별로 중복 없이 모�
   );
 });
 
+test("리걸 등록 사건명은 Case_idx를 보안 함수에 일괄 전달한다", () => {
+  const query = dialect.sqlToQuery(
+    linkedLegalFriendsCaseNamesQuery(["202130", "202131"]),
+  );
+
+  assert.match(query.sql, /values \(\$1\), \(\$2\)/);
+  assert.match(query.sql, /resolve_linked_legalfriends_case_client/);
+  assert.match(query.sql, /cross join lateral/);
+  assert.deepEqual(query.params, ["202130", "202131"]);
+});
+
+test("정확히 연결된 리걸 사건 고객명만 ERP 현재 표시명보다 우선한다", () => {
+  const names = summarizeLinkedLegalFriendsCaseNames([
+    { case_idx: " 202130 ", client_name: " 변경된 고객명 " },
+    { case_idx: "202131", client_name: "   " },
+  ]);
+
+  assert.equal(
+    linkedLegalFriendsDisplayName("과거 ERP 이름", "202130", names),
+    "변경된 고객명",
+  );
+  assert.equal(
+    linkedLegalFriendsDisplayName("ERP 이름", "202131", names),
+    "ERP 이름",
+  );
+  assert.equal(
+    linkedLegalFriendsDisplayName("미연결 ERP 이름", null, names),
+    "미연결 ERP 이름",
+  );
+});
+
 test("빈 전화번호 일괄조회는 잘못된 전체 조회를 만들지 않는다", () => {
   assert.throws(
     () => existingPhoneDirectoryCustomersQuery([]),
     /한 개 이상의 번호/,
+  );
+  assert.throws(
+    () => linkedLegalFriendsCaseNamesQuery([]),
+    /한 개 이상의 사건 ID/,
   );
 });
