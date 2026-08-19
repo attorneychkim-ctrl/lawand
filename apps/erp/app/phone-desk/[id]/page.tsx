@@ -2,7 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { getPhoneDeskCall } from "../../../lib/gateway";
+import { getPhoneDeskContactTarget } from "../../../lib/phone-desk-contact-target";
 import { requireStaff } from "../../../lib/session";
+import { ClickToCallButton } from "../../_components/click-to-call-button";
 import { PhoneAftercareForm } from "../../_components/phone-aftercare-form";
 import { PhoneCallResolutionForm } from "../../_components/phone-call-resolution-form";
 import { StaffBar } from "../../_components/staff-bar";
@@ -55,6 +57,9 @@ export default async function PhoneDeskDetailPage({
     notFound();
   }
   const call = detail.call;
+  const contactTarget = call.scope === "external"
+    ? getPhoneDeskContactTarget(detail)
+    : null;
   const customerName = call.scope === "internal"
     ? call.participants
         .map((item) => `${item.displayName ?? "직원 미연결"} ${item.extension}`)
@@ -87,9 +92,28 @@ export default async function PhoneDeskDetailPage({
             </h1>
             <p>{customerName} · 통화 원장과 후처리를 한 화면에서 관리합니다.</p>
           </div>
-          <Link className="secondary-button phone-desk-back-link" href="/phone-desk">
-            전화데스크 목록
-          </Link>
+          <div className="phone-desk-detail-actions">
+            {contactTarget?.source === "consultation" ? (
+              <ClickToCallButton
+                consultationId={contactTarget.consultationId}
+                idleLabel="센트릭스 전화하기"
+                staffName={staff.displayName}
+              />
+            ) : contactTarget?.source === "legal_friends_directory" ? (
+              <ClickToCallButton
+                directoryTarget={{
+                  clientIdx: contactTarget.clientIdx,
+                  caseIdx: contactTarget.caseIdx,
+                  clientName: contactTarget.customerName,
+                }}
+                idleLabel="센트릭스 전화하기"
+                staffName={staff.displayName}
+              />
+            ) : null}
+            <Link className="secondary-button phone-desk-back-link" href="/phone-desk">
+              전화데스크 목록
+            </Link>
+          </div>
         </header>
 
         <section className="phone-desk-detail-summary">

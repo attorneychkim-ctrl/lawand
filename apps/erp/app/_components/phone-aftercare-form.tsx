@@ -10,6 +10,7 @@ import type {
   PhoneDeskCallDetail,
   PhoneDeskCallResult,
 } from "../../lib/gateway";
+import { getPhoneDeskContactTarget } from "../../lib/phone-desk-contact-target";
 import { MessageComposeButton } from "./message-compose-button";
 
 const resultOptions = [
@@ -290,43 +291,6 @@ function suggestedConsultation(
   return resolved;
 }
 
-function messageTarget(detail: PhoneDeskCallDetail) {
-  const consultation = detail.call.clickToCall?.consultation ??
-    (detail.call.customerMatch?.source === "consultation"
-      ? detail.call.customerMatch.consultation
-      : null);
-  if (consultation) {
-    return {
-      source: "consultation" as const,
-      consultationId: consultation.id,
-      customerName: consultation.displayName,
-      receiptCode: consultation.publicReceiptCode,
-    };
-  }
-  const clickedDirectory = detail.call.clickToCall?.directoryClient;
-  if (clickedDirectory) {
-    return {
-      source: "legal_friends_directory" as const,
-      clientIdx: clickedDirectory.clientIdx,
-      caseIdx: clickedDirectory.caseIdx,
-      customerName: clickedDirectory.displayName,
-      receiptCode: "리걸프렌즈",
-    };
-  }
-  const legalFriends = detail.legalFriendsMatch;
-  const latestCase = legalFriends?.cases[0];
-  if (legalFriends && latestCase) {
-    return {
-      source: "legal_friends_directory" as const,
-      clientIdx: latestCase.clientIdx,
-      caseIdx: latestCase.caseIdx,
-      customerName: legalFriends.clientName,
-      receiptCode: latestCase.caseNumber ?? "리걸프렌즈",
-    };
-  }
-  return null;
-}
-
 export function PhoneAftercareForm({
   detail,
   staffName,
@@ -438,7 +402,7 @@ export function PhoneAftercareForm({
   const followUpDueValid = Boolean(
     followUpDueAt && minimumDueAt && followUpDueAt >= minimumDueAt,
   );
-  const safeMessageTarget = messageTarget(detail);
+  const safeMessageTarget = getPhoneDeskContactTarget(detail);
   const selectedAutomation = detail.aftercareAutomations?.find(
     (item) => item.result === result,
   ) ?? null;
@@ -646,12 +610,6 @@ export function PhoneAftercareForm({
                         ? " 발송 결과 확인 필요 · 중복 발송 여부를 먼저 확인하세요."
                         : " 이전 발송 실패 · 다시 시도할 수 있습니다."}
                 </small>
-              ) : null}
-              {selectedAutomation?.templateBody ? (
-                <details>
-                  <summary>발송될 내용 미리보기</summary>
-                  <p style={{ whiteSpace: "pre-wrap" }}>{selectedAutomation.templateBody}</p>
-                </details>
               ) : null}
             </div>
           ) : safeMessageTarget?.source === "consultation" ? (
