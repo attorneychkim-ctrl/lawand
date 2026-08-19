@@ -5,7 +5,11 @@ import {
   classifyConsultationSubmission,
   consultationAssigneeTransferInputSchema,
   consultationAssignmentInputSchema,
+  consultationCustomerNameInputMaxLength,
+  consultationCustomerNameSuffix,
   consultationGroupLinkSchema,
+  formatConsultationCustomerName,
+  stripConsultationCustomerNameSuffixes,
   type ExistingConsultationCandidate,
 } from "./consultation.js";
 import {
@@ -31,6 +35,37 @@ function candidate(
     ...overrides,
   };
 }
+
+test("소개·기존 고객명 접미사는 화면과 저장에서 정확히 한 번만 유지한다", () => {
+  assert.equal(consultationCustomerNameSuffix("existing"), "_기존");
+  assert.equal(consultationCustomerNameSuffix("referral"), "_소개");
+  assert.equal(consultationCustomerNameInputMaxLength("referral"), 47);
+  assert.equal(
+    formatConsultationCustomerName(" 김충환 ", "referral"),
+    "김충환_소개",
+  );
+  assert.equal(
+    formatConsultationCustomerName("김충환_소개_소개", "referral"),
+    "김충환_소개",
+  );
+  assert.equal(
+    formatConsultationCustomerName("김충환_소개_기존", "existing"),
+    "김충환_기존",
+  );
+  assert.equal(
+    formatConsultationCustomerName("김충환_소개", "none"),
+    "김충환_소개",
+  );
+  assert.equal(
+    stripConsultationCustomerNameSuffixes("김충환_기존_소개"),
+    "김충환",
+  );
+  assert.equal(
+    formatConsultationCustomerName("김충환_소개_소개  ", "existing"),
+    "김충환_기존",
+  );
+  assert.equal(formatConsultationCustomerName("_소개", "referral"), "");
+});
 
 test("같은 idempotency key 재시도는 새 레코드와 이벤트를 만들지 않는다", () => {
   const decision = classifyConsultationSubmission(

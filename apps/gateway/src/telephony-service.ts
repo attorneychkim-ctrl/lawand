@@ -31,6 +31,7 @@ import {
   createTelephonyMessageId,
   CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION,
   DEDUPE_WINDOWS,
+  formatConsultationCustomerName,
   type DedupeOutcome,
   type ExistingConsultationCandidate,
   type LegalFriendsDirectoryConsultationCreate,
@@ -704,6 +705,30 @@ export function legalFriendsResidenceRegion(
     }
   }
   return null;
+}
+
+function legalFriendsDirectoryConsultationSnapshot(
+  source: LegalFriendsDirectoryConsultationSourceRow,
+) {
+  return {
+    clientName: source.client_name,
+    phone: source.phone,
+    residenceRegion: legalFriendsResidenceRegion(source.living_place),
+    caseType: source.case_type,
+    caseState: source.case_state,
+    isClosed: source.is_closed === 1,
+    isRepealed: source.is_repealed === 1,
+    courtName: source.court_name,
+    caseNumber: source.case_number,
+    caseName: source.case_name,
+    staffNames: [
+      source.primary_staff_name,
+      source.secondary_staff_name,
+      source.tertiary_staff_name,
+    ].filter((name): name is string => Boolean(name)),
+    caseCreatedOn: source.case_created_on,
+    caseUpdatedOn: source.case_updated_on,
+  };
 }
 
 export class TelephonyCallError extends Error {
@@ -1419,6 +1444,14 @@ export function createTelephonyService(options: {
     actor: StaffPrincipal,
   ) {
     const acceptedAt = now();
+    const customerName = formatConsultationCustomerName(
+      input.customerName,
+      input.directorySource?.relationship === "customer"
+        ? "existing"
+        : input.directorySource?.relationship === "referrer"
+          ? "referral"
+          : "none",
+    );
     const requestSource = input.directorySource
       ? "erp_client_directory"
       : "erp_staff";
@@ -1428,7 +1461,7 @@ export function createTelephonyService(options: {
             source: requestSource,
             clientIdx: input.directorySource.clientIdx,
             caseIdx: input.directorySource.caseIdx,
-            customerName: input.customerName,
+            customerName,
             phone: input.phone,
             residenceRegion: input.residenceRegion,
             caseType: input.caseType,
@@ -1437,7 +1470,7 @@ export function createTelephonyService(options: {
           }
         : {
             source: requestSource,
-            customerName: input.customerName,
+            customerName,
             phone: input.phone,
             residenceRegion: input.residenceRegion,
             caseType: input.caseType,
@@ -1451,7 +1484,7 @@ export function createTelephonyService(options: {
     const phoneFingerprint = protection.fingerprint(input.phone);
     const nameFingerprint = protection.fingerprint({
       kind: "consultation_name",
-      value: normalizeConsultationName(input.customerName),
+      value: normalizeConsultationName(customerName),
     });
 
     return db.transaction(async (tx) => {
@@ -1671,7 +1704,7 @@ export function createTelephonyService(options: {
                 : null;
             return candidateName
               ? normalizeConsultationName(candidateName) ===
-                  normalizeConsultationName(input.customerName)
+                  normalizeConsultationName(customerName)
               : false;
           });
         if (
@@ -1711,7 +1744,7 @@ export function createTelephonyService(options: {
       const dedupeOutcome = staffDedupeOutcome(decision);
       let publicReceiptCode: string;
       const requestNameEncrypted = protection.encrypt(
-        input.customerName,
+        customerName,
         `consultation_requests.name:${requestId}`,
       );
       const phoneEncrypted = protection.encrypt(
@@ -1734,27 +1767,9 @@ export function createTelephonyService(options: {
       );
       const sourceSnapshotEncrypted = source
         ? protection.encrypt(
-            JSON.stringify({
-              clientName: source.client_name,
-              phone: source.phone,
-              residenceRegion: legalFriendsResidenceRegion(
-                source.living_place,
-              ),
-              caseType: source.case_type,
-              caseState: source.case_state,
-              isClosed: source.is_closed === 1,
-              isRepealed: source.is_repealed === 1,
-              courtName: source.court_name,
-              caseNumber: source.case_number,
-              caseName: source.case_name,
-              staffNames: [
-                source.primary_staff_name,
-                source.secondary_staff_name,
-                source.tertiary_staff_name,
-              ].filter((name): name is string => Boolean(name)),
-              caseCreatedOn: source.case_created_on,
-              caseUpdatedOn: source.case_updated_on,
-            }),
+            JSON.stringify(
+              legalFriendsDirectoryConsultationSnapshot(source),
+            ),
             `consultation_directory_sources/${consultationId}/snapshot`,
           )
         : null;
@@ -1762,7 +1777,7 @@ export function createTelephonyService(options: {
       if (createConsultation) {
         publicReceiptCode = createPublicReceiptCode(acceptedAt);
         const nameEncrypted = protection.encrypt(
-          input.customerName,
+          customerName,
           `consultations.preferred_name:${consultationId}`,
         );
         await tx.insert(consultations).values({
@@ -5538,17 +5553,45 @@ export function createTelephonyService(options: {
             "같은 전화번호의 상담이 이미 있습니다. 기존 상담 연결을 선택해 주세요.",
           );
         }
+        let directorySource:
+          | LegalFriendsDirectoryConsultationSourceRow
+          | undefined;
+        if (input.consultation.directorySource) {
+          const sourceResult = await tx.execute(
+            sql<LegalFriendsDirectoryConsultationSourceRow>`SELECT * FROM public.resolve_legalfriends_directory_consultation_source(${input.consultation.directorySource.clientIdx}, ${input.consultation.directorySource.caseIdx})`,
+          );
+          [directorySource] =
+            sourceResult.rows as LegalFriendsDirectoryConsultationSourceRow[];
+          if (!directorySource) {
+            throw new TelephonyCallError(
+              "directory_target_not_found",
+              "삭제되었거나 현재 조회할 수 없는 소개자 사건입니다.",
+            );
+          }
+        }
         consultationId = createConsultationId();
         const requestId = createConsultationRequestId();
         const receiptCode = createPublicReceiptCode(confirmedAt);
-        const nameEncrypted = protection.encrypt(
+        const customerName = formatConsultationCustomerName(
           input.consultation.customerName,
+          input.consultation.customerNameTag ?? "none",
+        );
+        const nameEncrypted = protection.encrypt(
+          customerName,
           `consultations.preferred_name:${consultationId}`,
         );
         const requestNameEncrypted = protection.encrypt(
-          input.consultation.customerName,
+          customerName,
           `consultation_requests.name:${requestId}`,
         );
+        const directorySourceSnapshotEncrypted = directorySource
+          ? protection.encrypt(
+              JSON.stringify(
+                legalFriendsDirectoryConsultationSnapshot(directorySource),
+              ),
+              `consultation_directory_sources/${consultationId}/snapshot`,
+            )
+          : null;
         const phoneEncrypted = protection.encrypt(
           call.remotePhone,
           `consultation_requests.phone:${requestId}`,
@@ -5620,12 +5663,31 @@ export function createTelephonyService(options: {
           submittedAt: confirmedAt,
           createdAt: confirmedAt,
         });
+        if (
+          input.consultation.directorySource &&
+          directorySourceSnapshotEncrypted
+        ) {
+          await tx.insert(consultationDirectorySources).values({
+            consultationId,
+            consultationRequestId: requestId,
+            directoryClientIdx: input.consultation.directorySource.clientIdx,
+            directoryCaseIdx: input.consultation.directorySource.caseIdx,
+            relationship: "referrer",
+            snapshotCiphertext: directorySourceSnapshotEncrypted.ciphertext,
+            snapshotNonce: directorySourceSnapshotEncrypted.nonce,
+            snapshotKeyVersion: directorySourceSnapshotEncrypted.keyVersion,
+            createdByUserId: actor.id,
+            createdAt: confirmedAt,
+          });
+        }
         await tx.insert(consultationStatusHistory).values({
           id: createEventId(),
           consultationId,
           fromState: null,
           toState: "requested",
-          reason: "phone_desk_conversion",
+          reason: input.consultation.directorySource
+            ? "phone_desk_referral_conversion"
+            : "phone_desk_conversion",
           actorType: "staff",
           actorId: actor.id,
           changedAt: confirmedAt,
@@ -5814,6 +5876,14 @@ export function createTelephonyService(options: {
         metadata: {
           result: input.result,
           consultationMode: input.consultation.mode,
+          customerNameTag:
+            input.consultation.mode === "create"
+              ? input.consultation.customerNameTag ?? "none"
+              : null,
+          directorySourceRelationship:
+            input.consultation.mode === "create"
+              ? input.consultation.directorySource?.relationship ?? null
+              : null,
           consultationId,
           followUpEnabled: input.followUp.enabled,
           followUpAssigneeUserId: input.followUp.enabled

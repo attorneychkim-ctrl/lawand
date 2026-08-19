@@ -205,6 +205,33 @@
   179개 테스트, core·DB·gateway·ERP typecheck·lint·production build, DB schema check와
   `git diff --check`를 통과했다. 운영 데이터·main 병합·운영 배포는 수행하지 않았다.
   `PROJECT_PLAN.md`는 v1.56이다.
+### 2026-08-19 — ERP 소개자 담당 표시·전화 후처리 소개자 원장 후보
+- 상담 목록이 새 고객 전화번호로만 리걸프렌즈 기존 담당자를 찾던 경계를 보완했다. 소개건은
+  `consultation_directory_sources`의 암호화 소개자 사건 snapshot에서 담당자명을 읽어
+  `소개건 · 소개자 담당 {이름}` 배지로 표시하고 검색에도 포함한다. 상담 상세 상단과 사건 문맥,
+  상담데스크·고객찾기 등록 모달도 `기존 담당`과 `소개자 담당`을 명확히 구분한다.
+- 전화데스크 후처리의 소개건에는 소개자 이름·전화번호 검색과 사건 선택을 추가했다. 소개자를
+  선택하지 않으면 저장할 수 없고, gateway가 고객·사건 ID를 다시 조회한 뒤 소개자 사건·담당
+  snapshot을 상담 요청·후처리와 같은 트랜잭션에서 AES-GCM 암호화 원장으로 보존한다. 기존
+  소개건은 이미 저장된 snapshot을 목록에서 읽으므로 별도 backfill이 필요 없다.
+- core 92개·gateway 177개 테스트, core·DB·gateway·ERP typecheck/lint와 production build,
+  DB schema check, `git diff --check`를 통과했다. migration·스키마·운영 데이터·외부 호출은
+  변경하지 않았고 main 병합·운영 배포도 수행하지 않았다. `PROJECT_PLAN.md`는 v1.57이다.
+
+### 2026-08-19 — ERP 소개·기존 상담명 자동 접미사 후보
+- 상담데스크 신규등록에서 기존고객·소개건을 선택하면 고객명 입력칸 안에 각각 `_기존`·
+  `_소개`를 수정 불가능한 고정 접미사로 표시한다. 같은 등록 계약을 쓰는 고객찾기 신건 모달도
+  동일하게 맞췄다. 전화데스크 후처리의 `신건상담으로 저장`에는 두 항목을 동시에 선택할 수
+  없도록 기존고객·소개건 체크를 추가하고 같은 입력 UI를 재사용한다.
+- 공통 core 정규화가 끝에 직접 입력했거나 반복된 `_기존`·`_소개`를 모두 제거한 뒤 현재 선택한
+  접미사 하나만 붙이며, gateway는 암호화 고객명·요청명·이름 지문·멱등 payload를 모두 이
+  정규화 이름으로 저장한다. 접미사를 포함한 최종 50자 제한을 계약과 UI 양쪽에서 적용했다.
+  migration·스키마·운영 데이터 변경은 없다.
+- core 92개·gateway 177개 테스트, core·DB·gateway·ERP typecheck/lint와 production build,
+  DB schema check, `git diff --check`를 통과했다. 첫 gateway 테스트는 선행 DB dist가 없어
+  모듈 해석에서 중단됐고 core·DB build 뒤 전체를 다시 실행해 통과했다. `HERDR_ENV`가 없고
+  HERDR 서버도 실행 중이 아니어서 Git 워크트리만 확인했다. main 병합·운영 배포·외부 호출은
+  수행하지 않았다. `PROJECT_PLAN.md`는 v1.56이다.
 
 ### 2026-08-18 — Orca 완료 작업 6개 통합 운영 배포 완료
 - Orca 완료 worktree 6개를 main에 병합하고 로컬·원격 worktree HEAD가 최종 main

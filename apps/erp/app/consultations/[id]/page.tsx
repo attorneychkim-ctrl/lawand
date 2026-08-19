@@ -805,7 +805,10 @@ export default async function ConsultationDetailPage({
                 <span className="flag-badge is-neutral">리걸프렌즈 무효</span>
               ) : null}
               {consultation.directorySource?.relationship === "referrer" ? (
-                <span className="flag-badge is-info">소개 상담</span>
+                <span className="flag-badge is-info">
+                  소개 상담 · 소개자 담당{" "}
+                  {consultation.directorySource.staffNames.join(" · ") || "미지정"}
+                </span>
               ) : null}
             </div>
             <h1 className={isSoftDeleted ? "soft-delete-blur" : undefined}>
@@ -1045,13 +1048,24 @@ export default async function ConsultationDetailPage({
               </a>
             </header>
             <div className="directory-source-alert">
-              <strong>상담 전 확인</strong>
-              <span>기존 수임료·계약 범위·상담 메모는 아래 Case ID로 리걸프렌즈 사건을 찾아 확인해 주세요.</span>
+              <strong>
+                {consultation.directorySource.relationship === "referrer"
+                  ? "소개자 담당 확인"
+                  : "상담 전 확인"}
+              </strong>
+              <span>
+                {consultation.directorySource.relationship === "referrer"
+                  ? "소개받은 고객은 소개자 담당과 상담을 이어가길 원할 수 있으므로 배정 전에 담당자를 확인해 주세요."
+                  : "기존 수임료·계약 범위·상담 메모는 아래 Case ID로 리걸프렌즈 사건을 찾아 확인해 주세요."}
+              </span>
             </div>
             <dl className="directory-source-facts">
               <div><dt>{consultation.directorySource.relationship === "referrer" ? "소개자" : "기존 고객"}</dt><dd>{consultation.directorySource.clientName ?? "이름 미확인"}</dd></div>
               <div><dt>기존 전화</dt><dd>{formatDirectoryPhone(consultation.directorySource.phone)}</dd></div>
-              <div><dt>기존 담당</dt><dd>{consultation.directorySource.staffNames.join(" · ") || "미지정"}</dd></div>
+              <div>
+                <dt>{consultation.directorySource.relationship === "referrer" ? "소개자 담당" : "기존 담당"}</dt>
+                <dd>{consultation.directorySource.staffNames.join(" · ") || "미지정"}</dd>
+              </div>
               <div><dt>사건 유형·상태</dt><dd>{directoryCaseTypeLabel(consultation.directorySource.caseType)} · {directoryCaseStateLabel(consultation.directorySource)}</dd></div>
               <div><dt>사건번호</dt><dd>{consultation.directorySource.caseNumber || "미등록"}</dd></div>
               <div><dt>사건명</dt><dd>{consultation.directorySource.caseName || "미등록"}</dd></div>

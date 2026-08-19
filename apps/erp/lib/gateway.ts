@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 
 import { createSingleFlight } from "@lawand/core";
 import type {
+  ConsultationCustomerNameTag,
   ConsultationAssigneeTransferInput,
   LegalFriendsConsultationHandling,
   LegalFriendsDirectoryConsultationCreate,
@@ -37,6 +38,7 @@ export type ConsultationListItem = {
   staffCreated: boolean;
   existingCustomer: boolean;
   existingCustomerStaffNames: string[];
+  referrerStaffNames: string[] | null;
   legalFriendsRegistered: boolean;
   nameMismatch: boolean;
   requiresLegalFriendsReview: boolean;
@@ -754,6 +756,12 @@ export type PhoneDeskAftercareInput = {
     | {
         mode: "create";
         customerName: string;
+        customerNameTag?: ConsultationCustomerNameTag;
+        directorySource?: {
+          clientIdx: number;
+          caseIdx: number;
+          relationship: "referrer";
+        };
         residenceRegion: ResidenceRegion;
         assigneeUserId?: string;
         transferNote?: string;
