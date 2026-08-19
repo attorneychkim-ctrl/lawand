@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { subscribeReviewRealtime } from "./review-realtime";
 import { subscribeMessageRealtime } from "./message-realtime";
 
-function NavIcon({ kind }: { kind: "consultations" | "clients" | "reviews" | "phone" | "phonebook" | "messages" | "staff" }) {
+function NavIcon({ kind }: { kind: "consultations" | "clients" | "reviews" | "phone" | "phonebook" | "messages" | "staff" | "more" | "manage" }) {
   return kind === "consultations" ? (
     <svg aria-hidden="true" viewBox="0 0 24 24">
       <path d="M7.5 6.5h9M7.5 10.5h9M7.5 14.5h5" />
@@ -37,11 +37,74 @@ function NavIcon({ kind }: { kind: "consultations" | "clients" | "reviews" | "ph
       <path d="M5 4.5h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-8l-5 3v-3H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z" />
       <path d="M7 9h10M7 13h7" />
     </svg>
-  ) : (
+  ) : kind === "staff" ? (
     <svg aria-hidden="true" viewBox="0 0 24 24">
       <circle cx="9" cy="8" r="3" />
       <path d="M3.5 19.5v-2a4.5 4.5 0 0 1 4.5-4.5h2a4.5 4.5 0 0 1 4.5 4.5v2M16 6.5h4M18 4.5v4M16.5 13.5a4.5 4.5 0 0 1 4 4.5v1.5" />
     </svg>
+  ) : kind === "manage" ? (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19 13.5v-3l-2.1-.7a7 7 0 0 0-.6-1.4l1-2-2.1-2.1-2 1a7 7 0 0 0-1.4-.6L11 2.5H8l-.7 2.2a7 7 0 0 0-1.4.6l-2-1-2.1 2.1 1 2a7 7 0 0 0-.6 1.4L0 10.5v3l2.2.7a7 7 0 0 0 .6 1.4l-1 2 2.1 2.1 2-1a7 7 0 0 0 1.4.6l.7 2.2h3l.7-2.2a7 7 0 0 0 1.4-.6l2 1 2.1-2.1-1-2a7 7 0 0 0 .6-1.4Z" transform="translate(1.5 0) scale(.9)" />
+    </svg>
+  ) : (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <circle cx="5" cy="12" r="1.2" />
+      <circle cx="12" cy="12" r="1.2" />
+      <circle cx="19" cy="12" r="1.2" />
+    </svg>
+  );
+}
+
+function NavDisclosure({
+  active,
+  children,
+  icon,
+  label,
+  pathname,
+}: {
+  active: boolean;
+  children: React.ReactNode;
+  icon: "more" | "manage";
+  label: string;
+  pathname: string;
+}) {
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+
+  useEffect(() => {
+    if (detailsRef.current) detailsRef.current.open = false;
+  }, [pathname]);
+
+  useEffect(() => {
+    const closeFromOutside = (event: PointerEvent) => {
+      const details = detailsRef.current;
+      if (details?.open && !details.contains(event.target as Node)) details.open = false;
+    };
+    const closeFromEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && detailsRef.current?.open) {
+        detailsRef.current.open = false;
+        detailsRef.current.querySelector("summary")?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", closeFromOutside);
+    document.addEventListener("keydown", closeFromEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeFromOutside);
+      document.removeEventListener("keydown", closeFromEscape);
+    };
+  }, []);
+
+  return (
+    <details className={`staff-nav-disclosure${active ? " is-active" : ""}`} ref={detailsRef}>
+      <summary aria-current={active ? "page" : undefined}>
+        <NavIcon kind={icon} />
+        <span>{label}</span>
+        <svg aria-hidden="true" className="staff-nav-chevron" viewBox="0 0 12 12">
+          <path d="m3 4.5 3 3 3-3" />
+        </svg>
+      </summary>
+      <div className="staff-nav-menu">{children}</div>
+    </details>
   );
 }
 
@@ -50,6 +113,8 @@ export function ErpNav({ showStaff }: { showStaff: boolean }) {
   const [reviewDutyCount, setReviewDutyCount] = useState(0);
   const [messageDutyCount, setMessageDutyCount] = useState(0);
   const consultationActive = pathname === "/" || pathname.startsWith("/consultations/");
+  const phonebookActive = pathname.startsWith("/phonebook");
+  const staffActive = pathname.startsWith("/staff");
 
   const refreshReviewDutyCount = useCallback(async () => {
     try {
@@ -139,14 +204,6 @@ export function ErpNav({ showStaff }: { showStaff: boolean }) {
         <span>전화</span>
       </Link>
       <Link
-        aria-current={pathname.startsWith("/phonebook") ? "page" : undefined}
-        className={pathname.startsWith("/phonebook") ? "is-active" : undefined}
-        href="/phonebook"
-      >
-        <NavIcon kind="phonebook" />
-        <span>전화번호부</span>
-      </Link>
-      <Link
         aria-current={pathname.startsWith("/messages") ? "page" : undefined}
         className={pathname.startsWith("/messages") ? "is-active" : undefined}
         href="/messages"
@@ -157,15 +214,19 @@ export function ErpNav({ showStaff }: { showStaff: boolean }) {
           {messageDutyCount > 99 ? "99+" : messageDutyCount}
         </span> : null}
       </Link>
-      {showStaff ? (
-        <Link
-          aria-current={pathname.startsWith("/staff") ? "page" : undefined}
-          className={pathname.startsWith("/staff") ? "is-active" : undefined}
-          href="/staff"
-        >
-          <NavIcon kind="staff" />
-          <span>직원 관리</span>
+      <NavDisclosure active={phonebookActive} icon="more" label="더보기" pathname={pathname}>
+        <Link aria-current={phonebookActive ? "page" : undefined} className={phonebookActive ? "is-active" : undefined} href="/phonebook">
+          <NavIcon kind="phonebook" />
+          <span>전화번호부</span>
         </Link>
+      </NavDisclosure>
+      {showStaff ? (
+        <NavDisclosure active={staffActive} icon="manage" label="관리" pathname={pathname}>
+          <Link aria-current={staffActive ? "page" : undefined} className={staffActive ? "is-active" : undefined} href="/staff">
+            <NavIcon kind="staff" />
+            <span>직원 관리</span>
+          </Link>
+        </NavDisclosure>
       ) : null}
     </nav>
   );
