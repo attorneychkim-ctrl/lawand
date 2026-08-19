@@ -75,7 +75,7 @@ export class LegalFriendsPayloadError extends Error {
           ? "담당 직원의 리걸프렌즈 계정 매핑이 없습니다."
           : code === "consultation_phone_not_collected"
             ? "전화번호가 수집되지 않은 상담은 리걸프렌즈에 등록할 수 없습니다."
-            : "저장된 상담정보에 리걸프렌즈 등록에 필요한 거주지역이 없습니다.",
+            : "저장된 상담정보의 거주지역 또는 상담 항목을 확인해 주세요.",
     );
   }
 }

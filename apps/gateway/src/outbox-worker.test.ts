@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createDataProtection } from "./crypto.js";
+import { LegalFriendsPayloadError } from "./legalfriends.js";
 import {
   matchesRestorationAssignmentSnapshot,
   planRestoredConsultation,
+  resolveStoredRegistrationIntake,
   resolveStoredRegistrationName,
 } from "./outbox-worker.js";
 
@@ -52,6 +54,105 @@ test("저장된 선호 이름이 없으면 상담 익명 표시명을 사용한�
       preferredNameKeyVersion: null,
     }),
     "익명-테스트",
+  );
+});
+
+test("ERP 저장 intake는 내부 메타데이터를 제외하고 리걸프렌즈 등록용으로 복원한다", () => {
+  assert.deepEqual(
+    resolveStoredRegistrationIntake(
+      {
+        channel: "phone_desk",
+        callId: "01984c7d-8500-7000-8000-000000000004",
+        direction: "inbound",
+        residenceRegion: "busan",
+        note: "직원이 통화 후 전화데스크에서 생성한 신건상담",
+      },
+      { isKakaoConsultation: false, source: "erp_phone_desk" },
+    ),
+    {
+      residenceRegion: "busan",
+      urgencies: [],
+      incomes: [],
+    },
+  );
+  for (const source of ["erp_staff", "erp_client_directory"]) {
+    assert.deepEqual(
+      resolveStoredRegistrationIntake(
+        {
+          residenceRegion: "gyeongnam",
+          topic: "개인회생",
+          transferNote: "다음 담당자가 확인할 전달사항",
+        },
+        { isKakaoConsultation: false, source },
+      ),
+      {
+        residenceRegion: "gyeongnam",
+        topic: "개인회생",
+        urgencies: [],
+        incomes: [],
+      },
+    );
+  }
+});
+
+test("ERP 저장 intake도 거주지역과 알려진 상담값이 유효해야 한다", () => {
+  for (const storedIntake of [
+    {
+      channel: "phone_desk",
+      note: "거주지역이 없는 과거 상담",
+    },
+    {
+      residenceRegion: "busan",
+      urgencies: "배열이 아닌 잘못된 값",
+      transferNote: "내부 메타데이터만 제외해야 함",
+    },
+  ]) {
+    assert.throws(
+      () =>
+        resolveStoredRegistrationIntake(storedIntake, {
+          isKakaoConsultation: false,
+          source: "erp_staff",
+        }),
+      (error) =>
+        error instanceof LegalFriendsPayloadError &&
+        error.code === "invalid_consultation_intake",
+    );
+  }
+});
+
+test("내부 출처가 아닌 저장 intake는 알 수 없는 필드를 계속 거부한다", () => {
+  assert.throws(
+    () =>
+      resolveStoredRegistrationIntake(
+        {
+          residenceRegion: "busan",
+          topic: "개인회생",
+          transferNote: "공개 접수 경계에서는 허용하지 않는 필드",
+        },
+        { isKakaoConsultation: false, source: "homepage" },
+      ),
+    (error) =>
+      error instanceof LegalFriendsPayloadError &&
+      error.code === "invalid_consultation_intake",
+  );
+});
+
+test("카카오 저장 intake의 기존 자리표시자 계약은 유지한다", () => {
+  assert.deepEqual(
+    resolveStoredRegistrationIntake(
+      {
+        residenceRegion: "seoul",
+        channel: "kakao_channel",
+        entrySource: "homepage_button",
+      },
+      { isKakaoConsultation: true, source: "homepage_kakao" },
+    ),
+    {
+      residenceRegion: "seoul",
+      urgencies: [],
+      incomes: [],
+      concern: "카카오 채팅방에서 상담 내용을 확인",
+    },
   );
 });
 
