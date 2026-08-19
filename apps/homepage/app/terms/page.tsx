@@ -8,8 +8,8 @@ import {
 import {
   ADVERTISING_RESPONSIBLE_LAWYER_LABEL,
   LAWAND_LEGAL_IDENTITY,
-  PRIVACY_POLICY_EFFECTIVE_DATE,
-  PRIVACY_POLICY_EFFECTIVE_DATE_LABEL,
+  TERMS_EFFECTIVE_DATE,
+  TERMS_EFFECTIVE_DATE_LABEL,
 } from "@/lib/legal-identity";
 
 const pagePath = "/terms";
@@ -70,8 +70,8 @@ export default function TermsPage() {
               <div>
                 <dt>시행일</dt>
                 <dd>
-                  <time dateTime={PRIVACY_POLICY_EFFECTIVE_DATE}>
-                    {PRIVACY_POLICY_EFFECTIVE_DATE_LABEL}
+                  <time dateTime={TERMS_EFFECTIVE_DATE}>
+                    {TERMS_EFFECTIVE_DATE_LABEL}
                   </time>
                 </dd>
               </div>
@@ -375,7 +375,7 @@ export default function TermsPage() {
               <div className="legal-source-note">
                 <strong>시행 정보</strong>
                 <p>
-                  이 이용약관은 {PRIVACY_POLICY_EFFECTIVE_DATE_LABEL}부터
+                  이 이용약관은 {TERMS_EFFECTIVE_DATE_LABEL}부터
                   시행합니다.
                 </p>
                 <div>

@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 
+import { AnalyticsManager } from "./_components/analytics-manager";
 import { JourneyTracker } from "./_components/journey-tracker";
 import "./globals.css";
 
@@ -50,6 +51,7 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
   return (
     <html lang="ko" suppressHydrationWarning>
       <body>
+        <AnalyticsManager />
         <JourneyTracker />
         {children}
       </body>

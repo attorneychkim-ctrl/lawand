@@ -8,6 +8,7 @@
     "lighthouse": "lighthouse",
     "lint": "eslint .",
     "start": "next start --port 3020",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test lib/analytics-contract.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

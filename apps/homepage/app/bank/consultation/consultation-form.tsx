@@ -10,6 +10,7 @@ import type {
 import { CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION } from "@lawand/core";
 
 import { KakaoConsultationEntry } from "@/app/_components/kakao-consultation-entry";
+import { recordGa4GenerateLead } from "@/lib/analytics-runtime";
 import { moveAttention } from "@/lib/move-attention";
 
 import { getConsultationAttribution } from "../../_components/journey-tracker";
@@ -380,14 +381,12 @@ export function ConsultationForm() {
   const [receipt, setReceipt] = useState("");
   const [now, setNow] = useState(() => new Date());
   const [customDateOpen, setCustomDateOpen] = useState(false);
-  const [idempotencyKey, setIdempotencyKey] = useState(() =>
-    window.crypto.randomUUID(),
-  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const completeRef = useRef<HTMLElement>(null);
   const entryRef = useRef<HTMLElement>(null);
   const stepCardRef = useRef<HTMLDivElement>(null);
   const attentionRequestedRef = useRef(false);
+  const idempotencyKeyRef = useRef("");
 
   const steps = mode === "detailed" ? DETAIL_STEPS : QUICK_STEPS;
   const currentStep = steps[stepIndex];
@@ -540,6 +539,9 @@ export function ConsultationForm() {
 
     setIsSubmitting(true);
     setError("");
+    const idempotencyKey =
+      idempotencyKeyRef.current || window.crypto.randomUUID();
+    idempotencyKeyRef.current = idempotencyKey;
     const agreedAt = new Date().toISOString();
     const attribution = getConsultationAttribution();
     const scheduledStart =
@@ -601,6 +603,15 @@ export function ConsultationForm() {
             : "상담 요청을 접수하지 못했습니다.",
         );
       }
+      recordGa4GenerateLead({
+        logicalSubmissionKey: idempotencyKey,
+        response: {
+          httpOk: response.ok,
+          publicReceiptCode: result.publicReceiptCode,
+          dedupeOutcome: result.dedupeOutcome,
+          replayed: result.replayed,
+        },
+      });
       attentionRequestedRef.current = true;
       setReceipt(result.publicReceiptCode);
     } catch (submissionError) {
@@ -621,7 +632,7 @@ export function ConsultationForm() {
     setData(initialData);
     setReceipt("");
     setError("");
-    setIdempotencyKey(window.crypto.randomUUID());
+    idempotencyKeyRef.current = "";
   };
 
   if (receipt) {
