@@ -102,6 +102,48 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-19 — 동의 기반 GA4 홈페이지 측정·AdPilot 범용 결손 구현 후보
+- 홈페이지 루트에 결정적인 초기 `null`의 분석 관리자를 추가했다. 서버 런타임
+  `LAWAND_GA4_MEASUREMENT_ID`를 same-origin 비캐시 API가 유효한 `G-` 값 또는 `null`로만
+  전달하며, 값이 없거나 사용자가 허용하기 전에는 Google 태그를 내려받지 않는다. 허용 뒤
+  `analytics_storage`만 열고 `ad_storage`·`ad_user_data`·`ad_personalization`, Google
+  Signals·광고 개인화는 항상 끈다. 선택은 버전·시각과 함께 first-party localStorage에
+  보존하고 푸터·개인정보처리방침에서 다시 열어 철회·`_ga` 계열 쿠키 정리를 실행한다.
+  분석 쿠키는 갱신하지 않고 최초 생성부터 최대 14개월로 제한한다.
+- 모든 Next.js 공개 페이지의 수동 `page_view`는 정식 origin·허용된 공개 pathname과
+  통제된 UTM, `^nkw-[a-z0-9-]{1,124}$` 키워드 ID만 새로 조립한다. `n_query`·실제 검색어·임의 query·
+  fragment는 버리고 외부 referrer는 origin만 남긴다. 사례 상세 slug는 공통 상세 경로,
+  알 수 없는 경로는 `/_not-found`로 일반화하며 `JourneyTracker`의 first-party 여정에도
+  같은 경계를 쓴다. `JourneyTracker`는 `/bank` 밖의 새 랜딩에서도 시작하고
+  `n_keyword_id`를 검증해 운영 귀속에 보존한다. Cafe24 fallback은 태그
+  미적용 집합으로 명시했고 활성 광고 연결 뒤 0건을 확인해야 한다.
+- 직접 상담과 상담을 생성한 자가진단의 HTTP 성공·유효 접수번호·`new` 또는
+  `suspected_duplicate`만 `generate_lead`로 보낸다. 이벤트에는 접수번호·idempotency key·
+  이름·전화·상담/진단값·가치를 넣지 않으며, 같은 논리 제출의 안정적인 UUID와 sessionStorage
+  마커로 재시도 중복을 막는다. 두 폼의 UUID 생성도 SSR state 초깃값에서 제거하고 실제 제출
+  시 ref에 생성해 hydration 경계를 결정적으로 유지했다.
+- 개인정보처리방침 초안은 동의 기반 GA 처리 항목·목적·최대 14개월 후보·설정/철회와
+  맞춤형 광고 미사용을 실제 코드에 맞췄다. GA의 기본 `first_visit`·`session_start`·
+  `user_engagement` 수반 처리를 고지하고 향상된 측정 전체 비활성화를 운영 게이트로 뒀다.
+  Google 계약 주체·처리 위치·국외 처리 및 운영
+  보유 설정은 활성화 전 책임 변호사·개인정보 담당자 확정 게이트로 두고, 그 전에는 운영
+  Measurement ID를 설정하지 않는다. ID는 빌드 입력이 아닌 홈페이지 운영 secret에 보존해
+  같은 commit ECR 이미지가 환경값에 따라 달라지지 않게 했다. DB migration은 없다.
+- 홈페이지 분석 단위 테스트 10개와 전체 5패키지 typecheck·lint·test·production build
+  (core 91개·gateway 177개 포함), `git diff --check`, 배포 스크립트 문법 검사를 통과했다.
+  같은 빌드를 ID 없음/더미 ID 있음으로
+  각각 실행해 설정 API의 `null`/검증값, SSR HTML의 Google 태그 0을 확인했다. Orca Chromium은
+  동의 전 태그·GA 쿠키 0과 네 광고 동의 `denied`, 허용 뒤 Google 태그 1개와 실제 검색어가
+  제거된 페이지뷰, 철회 뒤 `ga-disable`·전체 동의 `denied`, 새로고침 뒤 태그 0, console
+  메시지 0을 확인했다. 실제 운영 ID의 쿠키·DebugView/수신, 모바일 Chrome 실기기는 미검증이다.
+- AdPilot 병렬 브랜치는 최적화 역할과 URL `goal` 상세 선택을 분리하고 `GA4 관측` 명칭,
+  고객명 하드코딩 제거, 상충 키워드의 미귀속+`conflictingEvents` 진단을 범용 구현했다.
+  구현 커밋은 `b7c91dee6d1a2045eb3505aceac9e096803b46a1`, 문서 정합성 후속까지 포함한 최신 원격
+  HEAD는 `59ac8c42a0512525fd9cde7c3a80bbca9ccaf917`이다. 선별 16개·DB suite 제외 147개 테스트,
+  typecheck·lint·production build가 통과했고 기존 DB suite 1개만 `DATABASE_URL` 부재로
+  시작하지 못했다. 양쪽 모두 외부 GA4/Naver 연결·OAuth·실데이터·운영 데이터·광고 변경·
+  main 병합·배포를 수행하지 않았다. `PROJECT_PLAN.md`는 v1.57이다.
+
 ### 2026-08-19 — GA4·AdPilot 광고 성과 측정 계약 v1 후보
 - `docs/GA4_MEASUREMENT_V1.md`에 `lawand-ga4-measurement-v1`을 확정했다. GA4는 basic
   consent로 분석에 동의한 Next.js 방문만 수동·정제 페이지뷰로 관측하고, 광고 관련 동의·
