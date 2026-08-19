@@ -102,6 +102,20 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-19 — Orca 완료 작업 6개 통합 병합 후보
+- Orca 원장과 원격 HEAD를 대조해 `GA4_insert`·`centrex_call_button_add`·
+  `change_manager_althogh_invalidity`·`existing_intro_auto_text`·`navigation_bar_simplify`·
+  `sms_alarm`을 `main`에 병합했다. 여섯 브랜치는 깨끗하고 원격과 일치하며 모두 현재
+  `main`의 ancestor다. `sms_number_problem`은 조사만 완료되어 `main`과 같은 HEAD이고 코드
+  변경이 없어 명시적으로 제외했다. 별도 저장소의 AdPilot 브랜치도 이번 lawand 배포 범위가 아니다.
+- 영향 앱은 홈페이지·ERP·gateway이며 신규 migration은
+  `0068_centrex_inbound_message_deduplication.sql` 하나다. 운영 Measurement ID와 GA4 속성의
+  승인 게이트가 남아 있어 GA4 운영 secret은 이번 릴리스에서 추가하지 않는다.
+- 전체 5패키지 test·typecheck·lint·production build, DB schema check와 `git diff --check`를
+  통과했다. core 92개·gateway 180개 테스트가 성공했다. 아직 원격 `main` 푸시·운영 snapshot·
+  migration·digest 전환·운영 데이터 변경·외부 발송은 수행하지 않았다. `PROJECT_PLAN.md`는
+  v1.59다.
+
 ### 2026-08-19 — 동의 기반 GA4 홈페이지 측정·AdPilot 범용 결손 구현 후보
 - 홈페이지 루트에 결정적인 초기 `null`의 분석 관리자를 추가했다. 서버 런타임
   `LAWAND_GA4_MEASUREMENT_ID`를 same-origin 비캐시 API가 유효한 `G-` 값 또는 `null`로만
