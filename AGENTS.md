@@ -102,6 +102,28 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-19 — GA4 운영 계정·속성·웹 스트림 최소수집 설정 완료
+- 지원되는 Chrome에서 사용자가 `legalflow.co.kr` 조직 계정을 선택하고 Google Analytics
+  대한민국 약관을 직접 수락했다. `법무법인 로앤` 계정, `로앤 홈페이지 운영` 속성,
+  `https://lawandfirm.com`의 `lawandfirm.com 운영` 웹 스트림을 생성했다. 속성은 대한민국
+  GMT+09·KRW, 사법 및 정부 기관, 리드 생성·웹 및 앱 트래픽 목표로 만들었다. 계정 데이터
+  공유 선택은 모두 껐다.
+- 향상된 측정, Google Signals, 사용자 제공 데이터·User-ID, 전 지역 세부 위치/기기 데이터와
+  광고 개인 최적화를 모두 껐다. 광고 개인 최적화 지역 허용은 0/307이며 보고 ID는 기기 기반,
+  이벤트·사용자 데이터 보유는 14개월, 새 활동 시 재설정은 끔이다. 이메일 가림과 금지 쿼리
+  18개 가림을 저장했고, 두 묶음 합성 URL에서 모든 금지 값이 `(redacted)` 처리되는 동안
+  UTM 5종과 `n_keyword_id`가 유지되며 일반 문자열 이메일도 제거되는 것을 확인했다.
+- 생성된 account/property/web stream/Measurement ID는 저장소 정책에 따라 Git에 기록하지
+  않고 AdPilot `ga4_advertisement_with_lawand_session` Orca 터미널에 직접 인계했다. 그
+  세션은 읽기 전용 OAuth, 속성→웹 스트림 선택, 0건 상태, `generate_lead` 보조 목표와 GA4
+  관측 경계를 로컬에서 재확인해 관련 테스트 19개를 통과했다. 핵심 목표 부재 안내와 실제
+  보조·진단 목표 상세 분석 기능의 불일치도 교정하고 회귀 테스트 5개·lint·문서 정합성·
+  `git diff --check`를 통과해 상대 브랜치 커밋
+  `b2ef82111b5f63e9d279f716c77e3a58154d9e5f`로 푸시했다. 외부 OAuth·광고 연결은 실행하지
+  않았다. 홈페이지 운영 Measurement ID secret·재배포 전이라 GA4 데이터 0건이 정상이다.
+  main 병합·main 푸시·운영 secret·배포·운영 DB·Google Ads·네이버 광고·자동화는 변경하지
+  않았다. DB migration은 없다. `PROJECT_PLAN.md`는 v1.59다.
+
 ### 2026-08-19 — GA4 운영 활성화 준비·국외이전 동의 후보
 - Google 대한민국 Analytics 약관·Ads 데이터 처리 약관, Analytics 재수탁자, 현재 운영
   데이터센터, 지역 수집·보유·데이터 가림 문서와 개인정보보호위원회 현행 작성지침을
