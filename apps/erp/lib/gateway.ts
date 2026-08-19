@@ -281,6 +281,7 @@ export type MessageThreadSummary = {
   lastMessagePreview: string;
   lastMessageAt: string;
   needsConnection: boolean;
+  unreadCount: number;
 };
 
 export type MessageMailbox = {

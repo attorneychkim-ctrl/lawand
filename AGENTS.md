@@ -102,6 +102,17 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-19 — ERP 문자 미읽음 우선 정렬 후보
+- 문자 내비게이션 미읽음 숫자는 직원별 수신문자 알림 원장에서 계산하지만 기존 대화 목록은
+  최근 문자 시각순이고 미읽음 상태를 표시하지 않아 오래된 미읽음 대화를 찾기 어려웠다.
+  gateway 문자 허브가 현재 직원의 대화별 미읽음 건수를 함께 계산해 미읽음 대화를 최상단에
+  모으고, 같은 상태 안에서는 최신순을 유지하도록 keyset cursor까지 확장했다.
+- ERP 대화 목록에 대화별 미읽음 숫자를 표시하며 대화 조회 성공 뒤 해당 표시를 즉시 지우고
+  기존 전역 배지 재조회 이벤트를 유지한다. core·DB 선행 build 뒤 gateway 177개 테스트와
+  gateway·ERP typecheck/lint, `git diff --check`를 통과했다. migration·운영 데이터·main 병합·
+  운영 배포는 수행하지 않았다.
+  `PROJECT_PLAN.md`는 v1.56이다.
+
 ### 2026-08-18 — Orca 완료 작업 6개 통합 운영 배포 완료
 - Orca 완료 worktree 6개를 main에 병합하고 로컬·원격 worktree HEAD가 최종 main
   `b837751660172877c80d2cdcc59cd57293540c64`의 ancestor임을 확인했다. migration 충돌은

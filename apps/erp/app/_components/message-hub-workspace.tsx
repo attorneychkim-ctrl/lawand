@@ -334,6 +334,12 @@ export function MessageHubWorkspace({
             : result,
         );
         setLoadError("");
+        setHub((current) => ({
+          ...current,
+          items: current.items.map((item) =>
+            item.key === key ? { ...item, unreadCount: 0 } : item,
+          ),
+        }));
         window.dispatchEvent(new Event("lawand:message-read"));
         if (shouldStickToBottom) {
           timelineNearBottomRef.current = true;
@@ -669,7 +675,14 @@ export function MessageHubWorkspace({
                 >
                   <span className="message-thread-heading">
                     <strong>{item.customerName}</strong>
-                    <time>{formatKst(item.lastMessageAt)}</time>
+                    <span className="message-thread-status">
+                      {item.unreadCount > 0 ? (
+                        <i aria-label={`읽지 않은 문자 ${item.unreadCount}건`} className="message-thread-unread">
+                          {item.unreadCount > 99 ? "99+" : item.unreadCount}
+                        </i>
+                      ) : null}
+                      <time>{formatKst(item.lastMessageAt)}</time>
+                    </span>
                   </span>
                   <span className="message-thread-context">
                     {item.caseIdx

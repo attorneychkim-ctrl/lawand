@@ -131,6 +131,7 @@ type MessagePageCursor = {
   occurredAt: string;
   id: string;
   direction?: "outbound" | "inbound";
+  unread?: boolean;
 };
 
 function encodeMessagePageCursor(cursor: MessagePageCursor) {
@@ -150,7 +151,8 @@ function decodeMessagePageCursor(value: string | undefined) {
       parsed.id.length < 1 ||
       (parsed.direction !== undefined &&
         parsed.direction !== "outbound" &&
-        parsed.direction !== "inbound")
+        parsed.direction !== "inbound") ||
+      (parsed.unread !== undefined && typeof parsed.unread !== "boolean")
     ) {
       return null;
     }
@@ -6855,6 +6857,7 @@ export function createTelephonyService(options: {
     occurred_at: Date | string;
     message_count: number;
     needs_connection: boolean;
+    unread_count: number;
     total_threads: number;
     needs_connection_total: number;
   };
@@ -6866,10 +6869,10 @@ export function createTelephonyService(options: {
     occurred_at: Date | string;
   };
 
-  async function loadMessageHubPage(input?: {
-    cursor?: string;
-    limit?: number;
-  }) {
+  async function loadMessageHubPage(
+    actor: StaffPrincipal,
+    input?: { cursor?: string; limit?: number },
+  ) {
     const limit = messagePageLimit(input?.limit);
     const cursor = decodeMessagePageCursor(input?.cursor);
     if (input?.cursor && (!cursor || !isMessageThreadKey(cursor.id))) {
@@ -6879,7 +6882,7 @@ export function createTelephonyService(options: {
       );
     }
     const cursorCondition = cursor
-      ? sql`and (occurred_at, thread_key) < (${new Date(cursor.occurredAt)}, ${cursor.id})`
+      ? sql`and (has_unread, occurred_at, thread_key) < (${cursor.unread ?? false}, ${new Date(cursor.occurredAt)}, ${cursor.id})`
       : sql``;
     const result = await db.execute(sql<MessageHubPageRow>`
       with message_records as (${messageRecordUnion}),
@@ -6893,8 +6896,16 @@ export function createTelephonyService(options: {
           count(*) over (partition by thread_key)::int as message_count,
           bool_or(needs_connection) over (
             partition by thread_key
-          ) as thread_needs_connection
+          ) as thread_needs_connection,
+          count(notification.inbound_message_id) over (
+            partition by thread_key
+          )::int as unread_count
         from message_records
+        left join telephony_inbound_message_notifications as notification
+          on message_records.direction = 'inbound'
+          and notification.inbound_message_id = message_records.message_id
+          and notification.staff_user_id = ${actor.id}
+          and notification.read_at is null
         where thread_key is not null
       ),
       thread_heads as (
@@ -6905,7 +6916,9 @@ export function createTelephonyService(options: {
           message_kind,
           occurred_at,
           message_count,
-          thread_needs_connection as needs_connection
+          thread_needs_connection as needs_connection,
+          unread_count,
+          unread_count > 0 as has_unread
         from ranked
         where thread_rank = 1
       )
@@ -6919,7 +6932,7 @@ export function createTelephonyService(options: {
         ) as needs_connection_total
       from thread_heads
       where true ${cursorCondition}
-      order by occurred_at desc, thread_key desc
+      order by has_unread desc, occurred_at desc, thread_key desc
       limit ${limit + 1}
     `);
     const rows = result.rows as MessageHubPageRow[];
@@ -6935,6 +6948,7 @@ export function createTelephonyService(options: {
           ? encodeMessagePageCursor({
               occurredAt: new Date(last.occurred_at).toISOString(),
               id: last.thread_key,
+              unread: last.unread_count > 0,
             })
           : null,
     };
@@ -7022,7 +7036,7 @@ export function createTelephonyService(options: {
     actor: StaffPrincipal,
     query?: { cursor?: string; limit?: number },
   ) {
-    const page = await loadMessageHubPage(query);
+    const page = await loadMessageHubPage(actor, query);
     const outgoingIds = page.items
       .filter((item) => item.direction === "outbound")
       .map((item) => item.message_id);
@@ -7042,6 +7056,7 @@ export function createTelephonyService(options: {
       lastMessagePreview: string;
       lastMessageAt: string;
       needsConnection: boolean;
+      unreadCount: number;
     };
     const items = page.items.flatMap<MessageThreadSummary>((record) => {
       if (record.direction === "outbound") {
@@ -7065,6 +7080,7 @@ export function createTelephonyService(options: {
           lastMessagePreview: body.slice(0, 90),
           lastMessageAt: row.requestedAt.toISOString(),
           needsConnection: record.needs_connection,
+          unreadCount: record.unread_count,
         }];
       }
       const row = incomingById.get(record.message_id);
@@ -7085,6 +7101,7 @@ export function createTelephonyService(options: {
         lastMessagePreview: body.slice(0, 90),
         lastMessageAt: row.receivedAt.toISOString(),
         needsConnection: record.needs_connection,
+        unreadCount: record.unread_count,
       }];
     });
     await auditMessageView({
