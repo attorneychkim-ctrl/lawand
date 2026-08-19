@@ -102,6 +102,25 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-19 — GA4 운영 Measurement ID 설정 활성화 완료
+- Windows Chrome 클립보드를 비출력 입력 경로로 사용해 운영 Measurement ID를 회수했다. 전체
+  값은 터미널·Git·문서·작업 코멘트에 남기지 않았고, 권한 600 임시 파일은 즉시 파기하고 OS
+  클립보드도 비웠다. 홈페이지 Secrets Manager JSON의 기존 4개 키는 해시 기준으로 보존한 채
+  `LAWAND_GA4_MEASUREMENT_ID` 하나만 병합했다. 최종 key는 5개이며 대상 키 존재·`G-` 형식만
+  마스킹 검증했다.
+- 코드 재빌드 없이 릴리스 `20260819T075837Z-ga4-config-activation-v1`로 홈페이지를 현재 검증
+  digest `sha256:99fab4666dba02727b52cb40dafe6aa49c9542ff1f56eaa41eda6c5fe63d7998`와
+  image ID `sha256:c422c640286252f4df42958f9f2ea1917f82306dbd8d7acbd81cc06ee08b4fa9` 그대로
+  재기동했다. 최초 설정 재기동은 운영 포트 3020 대신 3000을 기록해 Caddy upstream이 잠시
+  502가 됐고, 즉시 `20260819T075837Z-ga4-config-activation-v1-recovery`로 포트 3020을 복원했다.
+  원인·복구 내역은 서버 배포 로그에 모두 기록했다.
+- 복구 뒤 정식·EIP `/bank`와 `/api/analytics-config`를 3회 연속 확인해 모두 200, 공개
+  `measurementId`는 non-null `G-` 형식으로 확인했다. 루트 리다이렉트 최종 응답도 3회 연속
+  200이다. 홈페이지·Caddy active, 컨테이너 restart 0, 환경파일 600, 대상 env 키 존재,
+  복구 뒤 error journal 0이다. 세 EC2 status ok, CloudWatch OK 14이며 gateway health와 ERP
+  로그인도 200이다. gateway·ERP·DB·광고 계정은 변경하지 않았다. 다음 단계의 동의/거부/
+  page_view/철회 canary는 GA4_insert 세션이 수행한다. `PROJECT_PLAN.md`는 v1.65다.
+
 ### 2026-08-19 — 완료 작업 4개 통합 운영 배포 완료
 - 네 완료 브랜치를 최종 `main` `299bb56eea7769f211d96918ab8b5c28464f1cb4`에 통합했고,
   Actions `32226220654`의 검증과 세 ARM64 이미지 게시가 성공했다. 전체 5패키지 test·

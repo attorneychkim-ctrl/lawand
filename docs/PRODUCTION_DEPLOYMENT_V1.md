@@ -4,7 +4,7 @@
 CloudFormation 스택: `lawand-prod`
 리전: 서울(`ap-northeast-2`)
 최초 배포 릴리스: `20260804T085006Z-84e8708`
-현재 홈페이지 릴리스: `20260819T071714Z-four-worktrees-v1`
+현재 홈페이지 릴리스: `20260819T075837Z-ga4-config-activation-v1-recovery`
 현재 ERP 릴리스: `20260819T035353Z-orca-integrated-ops-v3`
 현재 gateway 릴리스: `20260819T071714Z-four-worktrees-v1`
 현재 Windows bridge: `v0.8.3.0`
@@ -18,6 +18,24 @@ CloudFormation 스택: `lawand-prod`
 이 문서는 정식 도메인 전환 이후를 포함한 실제 AWS 구성, 접속점, 데이터 이관 범위와
 운영 체크리스트를 기록한다. 비밀번호·API 키·AWS 계정 ID·RDS 마스터 시크릿 ARN은
 기록하지 않는다.
+
+## 2026-08-19 GA4 운영 Measurement ID 설정 활성화
+
+- Windows Chrome 클립보드를 WSL 비출력 입력으로 받아 권한 600 임시 파일에서 `G-` 형식만
+  확인했다. 전체 Measurement ID는 출력·Git·문서에 남기지 않았고, 기존 홈페이지 secret 4개
+  키의 값 해시를 보존하며 대상 키 하나만 원자 병합했다. 최종 5개 키와 대상 키 존재·형식을
+  마스킹 검증한 뒤 임시 파일과 Windows 클립보드를 비웠다.
+- 코드 재빌드 없이 릴리스 `20260819T075837Z-ga4-config-activation-v1`로 현재 홈페이지 parent
+  digest `sha256:99fab4666dba02727b52cb40dafe6aa49c9542ff1f56eaa41eda6c5fe63d7998`와
+  image ID `sha256:c422c640286252f4df42958f9f2ea1917f82306dbd8d7acbd81cc06ee08b4fa9`를
+  그대로 재사용했다. 최초 환경 파일에 `PORT=3000`을 잘못 넣어 Caddy가 사용하는 3020과
+  불일치하면서 외부 502가 발생했다. `20260819T075837Z-ga4-config-activation-v1-recovery`에서
+  즉시 3020으로 복원했고 두 시도와 원인을 `/var/log/lawand/deployments.log`에 기록했다.
+- 복구 뒤 정식·EIP `/bank`와 `/api/analytics-config`는 3회 연속 200이고, 루트 리다이렉트의
+  최종 응답도 3회 연속 200이다. 공개 `measurementId`는 non-null `G-` 형식이다. 홈페이지·
+  Caddy active, 컨테이너 restart 0, 환경파일 600, 컨테이너 env 키 존재, 로컬 health 200,
+  복구 뒤 error journal 0을 확인했다. 세 EC2 status ok, CloudWatch OK 14, gateway health와
+  ERP 로그인 200이며 gateway·ERP·DB·광고 계정은 변경하지 않았다.
 
 ## 2026-08-19 완료 작업 4개 통합 운영 배포
 
