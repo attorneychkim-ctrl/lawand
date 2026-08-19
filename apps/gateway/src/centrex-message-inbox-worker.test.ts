@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   centrexInboundSourceIdentity,
+  centrexInboundStableIdentity,
   centrexMailboxNextCheckpoint,
   centrexMailboxPollPage,
   parseCentrexReceivedAt,
@@ -50,6 +51,37 @@ test("센트릭스 특수 발신 식별자는 고객 전화번호 매칭에서 �
   );
   assert.equal(messagePhoneDisplay("1w234567"), "발신번호 확인 필요");
   assert.equal(messagePhoneDisplay("01012345678"), "01012345678");
+});
+
+test("센트릭스 수신문자 중복키는 새 문자에 따라 밀리는 목록 순번을 무시한다", () => {
+  const endpointId = "9d49e914-98c8-42ab-a409-b1227e381a70";
+  const message = {
+    time: "2026-08-19 09:26:45",
+    source: "01012345678",
+    sourceKind: "phone" as const,
+    message: "테스트일까요?",
+  };
+
+  assert.deepEqual(
+    centrexInboundStableIdentity({
+      endpointId,
+      record: { ...message, number: "1" },
+    }),
+    centrexInboundStableIdentity({
+      endpointId,
+      record: { ...message, number: "7" },
+    }),
+  );
+  assert.notDeepEqual(
+    centrexInboundStableIdentity({
+      endpointId,
+      record: { ...message, number: "1" },
+    }),
+    centrexInboundStableIdentity({
+      endpointId,
+      record: { ...message, number: "1", message: "다른 문자" },
+    }),
+  );
 });
 
 test("최신 수신함과 과거 페이지를 번갈아 읽고 backfill 완료를 보존한다", () => {

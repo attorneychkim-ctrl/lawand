@@ -112,6 +112,23 @@ export function centrexInboundSourceIdentity(
   };
 }
 
+export function centrexInboundStableIdentity(input: {
+  endpointId: string;
+  record: Pick<
+    CentrexReceivedMessageRecord,
+    "number" | "time" | "source" | "sourceKind" | "message"
+  >;
+}) {
+  return {
+    provider: "centrex" as const,
+    endpointId: input.endpointId,
+    time: input.record.time,
+    source: input.record.source,
+    sourceKind: input.record.sourceKind,
+    message: input.record.message,
+  };
+}
+
 function workerFailureCode(error: unknown): string {
   if (error instanceof CentrexDeliveryError) return error.code;
   if (error instanceof Error && /^[a-z0-9_]{3,100}$/.test(error.message)) {
@@ -245,14 +262,10 @@ export function createCentrexMessageInboxWorker(options: {
     const remotePhoneFingerprint = protection.fingerprint(
       sourceIdentity.fingerprintInput,
     );
-    const providerIdentityFingerprint = protection.fingerprint({
-      provider: "centrex",
-      endpointId,
-      sequence: record.number,
-      time: record.time,
-      source: record.source,
-      message: record.message,
-    });
+    const bodyFingerprint = protection.fingerprint(record.message);
+    const providerIdentityFingerprint = protection.fingerprint(
+      centrexInboundStableIdentity({ endpointId, record }),
+    );
     const [existing] = await db
       .select({ id: telephonyInboundMessages.id })
       .from(telephonyInboundMessages)
@@ -260,9 +273,11 @@ export function createCentrexMessageInboxWorker(options: {
         and(
           eq(telephonyInboundMessages.endpointId, endpointId),
           eq(
-            telephonyInboundMessages.providerIdentityFingerprint,
-            providerIdentityFingerprint,
+            telephonyInboundMessages.remotePhoneFingerprint,
+            remotePhoneFingerprint,
           ),
+          eq(telephonyInboundMessages.receivedAt, receivedAt),
+          eq(telephonyInboundMessages.bodyFingerprint, bodyFingerprint),
         ),
       )
       .limit(1);
@@ -296,7 +311,7 @@ export function createCentrexMessageInboxWorker(options: {
         bodyCiphertext: bodyEncrypted.ciphertext,
         bodyNonce: bodyEncrypted.nonce,
         bodyKeyVersion: bodyEncrypted.keyVersion,
-        bodyFingerprint: protection.fingerprint(record.message),
+        bodyFingerprint,
         messageKind,
         bodyByteLength,
         matchedOutboundMessageId: match?.id ?? null,
@@ -326,7 +341,9 @@ export function createCentrexMessageInboxWorker(options: {
       .onConflictDoNothing({
         target: [
           telephonyInboundMessages.endpointId,
-          telephonyInboundMessages.providerIdentityFingerprint,
+          telephonyInboundMessages.remotePhoneFingerprint,
+          telephonyInboundMessages.receivedAt,
+          telephonyInboundMessages.bodyFingerprint,
         ],
       })
       .returning({ id: telephonyInboundMessages.id });

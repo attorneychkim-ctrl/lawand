@@ -102,6 +102,23 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-19 — 센트릭스 수신문자 안정 중복키·기존 원장 정리 후보
+- 센트릭스 수신 목록의 `NO`가 새 문자에 따라 바뀌어 같은 문자를 반복 저장하던 결함을
+  수정했다. worker는 endpoint·발신번호 지문·수신 시각·본문 지문을 안정 중복키로 선조회하고,
+  같은 4개 컬럼의 DB unique index와 충돌 무시를 함께 사용해 순차·동시 재수집을 차단한다.
+  provider identity 지문도 목록 순번을 제외한 같은 안정 identity로 기록한다.
+- migration `0068_centrex_inbound_message_deduplication.sql`은 적용 시점의 기존 중복을 동적으로
+  찾는다. 최신 발신 연결이 가장 강한 수신문자 행을 canonical로 보존하고, 직원별 알림은
+  `latest_sender`·`consultation_assignee`·`unmatched_admin` 우선순위로 합치며 하나라도 읽은
+  복제본이 있으면 읽은 시각을 보존한다. 그 뒤 초과 행을 제거하고 안정 unique index를 만든다.
+  마지막 읽기 전용 운영 표본은 31그룹·초과 56행이며 연결 대상이 갈리거나 읽음 상태가 섞인
+  그룹은 없었다.
+- 로컬 PostgreSQL 트랜잭션 fixture에서 두 중복 원장과 직원 알림을 1개로 병합하고 읽음 상태를
+  유지하며 같은 문자의 재삽입이 0행인 것을 확인한 뒤 rollback했다. 전체 5패키지 typecheck·
+  lint·production build, core 91개·gateway 178개 테스트, DB schema check와 `git diff --check`를
+  통과했다. 이 브랜치에서는 운영 migration·운영 데이터·main 병합·운영 배포·외부 발송을
+  수행하지 않았다. `PROJECT_PLAN.md`는 v1.58이다.
+
 ### 2026-08-19 — 센트릭스 수신문자 중복 원인 운영 진단
 - 사용자 휴대전화 캡처의 `02-555-7465` 대화와 운영 원장을 읽기 전용으로 대조했다.
   끝번호·상담 `김충환3_테스트`·대표번호 연결과 최신 발신 연결은 정확해 다른 고객 오매칭은
