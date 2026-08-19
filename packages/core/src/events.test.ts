@@ -15,6 +15,7 @@ import {
   LEGALFRIENDS_INVALID_MANAGER_MEMBER_IDX,
   legalfriendsInvalidationRequestedEventSchema,
   legalfriendsManagerChangeRequestedEventSchema,
+  legalfriendsRestorationRequestedEventSchema,
   legalfriendsRegistrationRequestedEventSchema,
   telephonyCallRequestedEventSchema,
   telephonyMessageRequestedEventSchema,
@@ -349,6 +350,31 @@ test("리걸프렌즈 무효 처리는 고정 담당자와 사건 연결 참조�
       },
     }).success,
     false,
+  );
+});
+
+test("무효 상담 복원 이벤트는 기존 배정이 없는 경우도 명시적으로 표현한다", () => {
+  assert.equal(
+    legalfriendsRestorationRequestedEventSchema.safeParse({
+      ...assignmentEnvelope,
+      eventType: "legalfriends.consultation.restoration.requested",
+      data: {
+        consultationId: assignmentEnvelope.correlationId,
+        caseLinkRef:
+          `legalfriends_case_links/${assignmentEnvelope.correlationId}`,
+        requestedByUserId: "01984c7d-8500-7000-8000-000000000006",
+        targetAssigneeUserId: "01984c7d-8500-7000-8000-000000000006",
+        targetAssigneeMembershipId:
+          "01984c7d-8500-7000-8000-000000000007",
+        targetAssignmentId: "01984c7d-8500-7000-8000-000000000008",
+        previousAssignmentId: null,
+        previousAssigneeUserId: null,
+        previousAssigneeMembershipId: null,
+        targetManagerExternalAccountId: "lawandfirm_s",
+        targetManagerMemberIdx: 138,
+      },
+    }).success,
+    true,
   );
 });
 

@@ -23,6 +23,71 @@ export const dedupeOutcomeSchema = z.enum([
   "suspected_duplicate",
 ]);
 
+export const consultationCustomerNameTagSchema = z.enum([
+  "none",
+  "existing",
+  "referral",
+]);
+
+export type ConsultationCustomerNameTag = z.infer<
+  typeof consultationCustomerNameTagSchema
+>;
+
+export const CONSULTATION_CUSTOMER_NAME_MAX_LENGTH = 50;
+
+const consultationCustomerNameSuffixes = {
+  none: "",
+  existing: "_기존",
+  referral: "_소개",
+} as const satisfies Record<ConsultationCustomerNameTag, string>;
+
+const removableConsultationCustomerNameSuffixes = [
+  consultationCustomerNameSuffixes.existing,
+  consultationCustomerNameSuffixes.referral,
+] as const;
+
+export function consultationCustomerNameSuffix(
+  tag: ConsultationCustomerNameTag,
+): string {
+  return consultationCustomerNameSuffixes[tag];
+}
+
+export function stripConsultationCustomerNameSuffixes(value: string): string {
+  let stripped = value;
+  let removedSuffix = false;
+
+  while (true) {
+    const candidate = stripped.trimEnd();
+    const suffix = removableConsultationCustomerNameSuffixes.find((item) =>
+      candidate.endsWith(item),
+    );
+    if (!suffix) return removedSuffix ? candidate : value;
+    stripped = candidate.slice(0, -suffix.length);
+    removedSuffix = true;
+  }
+}
+
+export function formatConsultationCustomerName(
+  value: string,
+  tag: ConsultationCustomerNameTag,
+): string {
+  const trimmed = value.trim();
+  if (tag === "none") return trimmed;
+  const baseName = stripConsultationCustomerNameSuffixes(trimmed).trim();
+  return baseName
+    ? `${baseName}${consultationCustomerNameSuffix(tag)}`
+    : "";
+}
+
+export function consultationCustomerNameInputMaxLength(
+  tag: ConsultationCustomerNameTag,
+): number {
+  return (
+    CONSULTATION_CUSTOMER_NAME_MAX_LENGTH -
+    consultationCustomerNameSuffix(tag).length
+  );
+}
+
 export type ConsultationState = z.infer<typeof consultationStateSchema>;
 export type DedupeOutcome = z.infer<typeof dedupeOutcomeSchema>;
 

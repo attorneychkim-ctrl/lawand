@@ -18,6 +18,7 @@ import {
 } from "@lawand/core";
 
 import { getConsultationAttribution } from "@/app/_components/journey-tracker";
+import { recordGa4GenerateLead } from "@/lib/analytics-runtime";
 import { moveAttention } from "@/lib/move-attention";
 
 import { ArrowIcon } from "../_components/site-chrome";
@@ -314,6 +315,7 @@ export function SelfDiagnosisForm() {
   const [result, setResult] = useState<SelfDiagnosisSubmissionResponse | null>(
     null,
   );
+  const idempotencyKeyRef = useRef("");
 
   const totalDebt = useMemo(
     () => numberValue(data.unsecuredDebt) + numberValue(data.securedDebt),
@@ -457,6 +459,9 @@ export function SelfDiagnosisForm() {
   ) => {
     setSubmitting(true);
     setError("");
+    const idempotencyKey =
+      idempotencyKeyRef.current || window.crypto.randomUUID();
+    idempotencyKeyRef.current = idempotencyKey;
     try {
       const unitConfirmedFields = confirmedMoneyUnitFields(
         candidateData,
@@ -467,7 +472,7 @@ export function SelfDiagnosisForm() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           source: "homepage",
-          idempotencyKey: window.crypto.randomUUID(),
+          idempotencyKey,
           phone: candidateData.phone,
           name: candidateData.name.trim(),
           privacyNoticeVersion: CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION,
@@ -497,6 +502,15 @@ export function SelfDiagnosisForm() {
       if (!response.ok) {
         throw new Error(body.message ?? "자가진단 결과를 만들지 못했습니다.");
       }
+      recordGa4GenerateLead({
+        logicalSubmissionKey: idempotencyKey,
+        response: {
+          httpOk: response.ok,
+          publicReceiptCode: body.publicReceiptCode,
+          dedupeOutcome: body.dedupeOutcome,
+          replayed: body.replayed,
+        },
+      });
       attentionRequestedRef.current = true;
       setResult(body);
     } catch (caught) {
@@ -743,6 +757,7 @@ export function SelfDiagnosisForm() {
                 setResult(null);
                 setStep(0);
                 setError("");
+                idempotencyKeyRef.current = "";
               }}
             >
               다시 진단하기

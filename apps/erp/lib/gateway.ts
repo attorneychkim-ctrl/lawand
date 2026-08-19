@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 
 import { createSingleFlight } from "@lawand/core";
 import type {
+  ConsultationCustomerNameTag,
   ConsultationAssigneeTransferInput,
   LegalFriendsConsultationHandling,
   LegalFriendsDirectoryConsultationCreate,
@@ -37,6 +38,7 @@ export type ConsultationListItem = {
   staffCreated: boolean;
   existingCustomer: boolean;
   existingCustomerStaffNames: string[];
+  referrerStaffNames: string[] | null;
   legalFriendsRegistered: boolean;
   nameMismatch: boolean;
   requiresLegalFriendsReview: boolean;
@@ -281,6 +283,7 @@ export type MessageThreadSummary = {
   lastMessagePreview: string;
   lastMessageAt: string;
   needsConnection: boolean;
+  unreadCount: number;
 };
 
 export type MessageMailbox = {
@@ -754,6 +757,12 @@ export type PhoneDeskAftercareInput = {
     | {
         mode: "create";
         customerName: string;
+        customerNameTag?: ConsultationCustomerNameTag;
+        directorySource?: {
+          clientIdx: number;
+          caseIdx: number;
+          relationship: "referrer";
+        };
         residenceRegion: ResidenceRegion;
         assigneeUserId?: string;
         transferNote?: string;
@@ -1553,7 +1562,6 @@ export async function invalidateLegalFriendsCase(id: string): Promise<{
 
 export async function restoreInvalidatedLegalFriendsCase(id: string): Promise<{
   consultationId: string;
-  transferId: string;
   eventId: string;
   state: "queued";
   replayed: boolean;
@@ -1571,7 +1579,6 @@ export async function restoreInvalidatedLegalFriendsCase(id: string): Promise<{
   }
   return (await response.json()) as {
     consultationId: string;
-    transferId: string;
     eventId: string;
     state: "queued";
     replayed: boolean;

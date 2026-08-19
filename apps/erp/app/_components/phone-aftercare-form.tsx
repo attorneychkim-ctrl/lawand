@@ -2,14 +2,25 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 
+import {
+  formatConsultationCustomerName,
+  stripConsultationCustomerNameSuffixes,
+  type ConsultationCustomerNameTag,
+} from "@lawand/core";
+
 import type {
+  LegalFriendsClientDirectoryItem,
+  LegalFriendsClientDirectorySearch,
   PhoneDeskAftercareInput,
   PhoneDeskCallDetail,
   PhoneDeskCallResult,
 } from "../../lib/gateway";
+import { getPhoneDeskContactTarget } from "../../lib/phone-desk-contact-target";
+import { ConsultationCustomerNameInput } from "./consultation-customer-name-input";
 import { MessageComposeButton } from "./message-compose-button";
 
 const resultOptions = [
@@ -271,6 +282,12 @@ function formatPhone(phone: string | null) {
   return phone;
 }
 
+function directoryCaseLabel(item: LegalFriendsClientDirectoryItem) {
+  return `${caseTypeLabel(item.caseType)} · ${
+    item.caseNumber || item.caseName || `Case ${item.caseIdx}`
+  }`;
+}
+
 function suggestedConsultation(
   detail: PhoneDeskCallDetail,
 ): LinkedConsultationContext | null {
@@ -288,43 +305,6 @@ function suggestedConsultation(
     };
   }
   return resolved;
-}
-
-function messageTarget(detail: PhoneDeskCallDetail) {
-  const consultation = detail.call.clickToCall?.consultation ??
-    (detail.call.customerMatch?.source === "consultation"
-      ? detail.call.customerMatch.consultation
-      : null);
-  if (consultation) {
-    return {
-      source: "consultation" as const,
-      consultationId: consultation.id,
-      customerName: consultation.displayName,
-      receiptCode: consultation.publicReceiptCode,
-    };
-  }
-  const clickedDirectory = detail.call.clickToCall?.directoryClient;
-  if (clickedDirectory) {
-    return {
-      source: "legal_friends_directory" as const,
-      clientIdx: clickedDirectory.clientIdx,
-      caseIdx: clickedDirectory.caseIdx,
-      customerName: clickedDirectory.displayName,
-      receiptCode: "리걸프렌즈",
-    };
-  }
-  const legalFriends = detail.legalFriendsMatch;
-  const latestCase = legalFriends?.cases[0];
-  if (legalFriends && latestCase) {
-    return {
-      source: "legal_friends_directory" as const,
-      clientIdx: latestCase.clientIdx,
-      caseIdx: latestCase.caseIdx,
-      customerName: legalFriends.clientName,
-      receiptCode: latestCase.caseNumber ?? "리걸프렌즈",
-    };
-  }
-  return null;
 }
 
 export function PhoneAftercareForm({
@@ -377,6 +357,15 @@ export function PhoneAftercareForm({
         ? detail.call.customerMatch.clientName
         : ""),
   );
+  const [customerNameTag, setCustomerNameTag] =
+    useState<ConsultationCustomerNameTag>("none");
+  const [selectedReferrer, setSelectedReferrer] =
+    useState<LegalFriendsClientDirectoryItem | null>(null);
+  const [referrerQuery, setReferrerQuery] = useState("");
+  const [referrerResult, setReferrerResult] =
+    useState<LegalFriendsClientDirectorySearch | null>(null);
+  const [referrerLoading, setReferrerLoading] = useState(false);
+  const [referrerError, setReferrerError] = useState("");
   const [residenceRegion, setResidenceRegion] = useState("");
   const [transferNote, setTransferNote] = useState("");
   const [consultationAssignee, setConsultationAssignee] = useState(
@@ -438,7 +427,7 @@ export function PhoneAftercareForm({
   const followUpDueValid = Boolean(
     followUpDueAt && minimumDueAt && followUpDueAt >= minimumDueAt,
   );
-  const safeMessageTarget = messageTarget(detail);
+  const safeMessageTarget = getPhoneDeskContactTarget(detail);
   const selectedAutomation = detail.aftercareAutomations?.find(
     (item) => item.result === result,
   ) ?? null;
@@ -467,7 +456,10 @@ export function PhoneAftercareForm({
     result &&
       (result !== "other" || otherText.trim()) &&
       (consultationMode !== "link" || linkedConsultationId) &&
-      (consultationMode !== "create" || (customerName.trim() && residenceRegion)) &&
+      (consultationMode !== "create" ||
+        (formatConsultationCustomerName(customerName, customerNameTag) &&
+          residenceRegion &&
+          (customerNameTag !== "referral" || selectedReferrer))) &&
       (!followUpEnabled || (followUpDueValid && followUpAssignee)) &&
       (!phonebookEnabled ||
         (phonebookName.trim() &&
@@ -489,6 +481,58 @@ export function PhoneAftercareForm({
     setSaved(false);
   }
 
+  function changeCustomerNameTag(
+    next: Exclude<ConsultationCustomerNameTag, "none">,
+  ) {
+    const nextTag = customerNameTag === next ? "none" : next;
+    setCustomerName((current) =>
+      stripConsultationCustomerNameSuffixes(current),
+    );
+    setCustomerNameTag(nextTag);
+    if (nextTag !== "referral") {
+      setSelectedReferrer(null);
+      setReferrerQuery("");
+      setReferrerResult(null);
+      setReferrerError("");
+    }
+    setSaved(false);
+  }
+
+  async function searchReferrer() {
+    setReferrerLoading(true);
+    setReferrerError("");
+    try {
+      const response = await fetch(
+        `/api/client-directory?q=${encodeURIComponent(referrerQuery)}`,
+        { cache: "no-store" },
+      );
+      const body = (await response.json().catch(() => null)) as
+        | (LegalFriendsClientDirectorySearch & { message?: string })
+        | null;
+      if (!response.ok || !body) {
+        throw new Error(body?.message ?? "소개자를 조회하지 못했습니다.");
+      }
+      setReferrerResult(body);
+    } catch (reason) {
+      setReferrerResult(null);
+      setReferrerError(
+        reason instanceof Error
+          ? reason.message
+          : "소개자를 조회하지 못했습니다.",
+      );
+    } finally {
+      setReferrerLoading(false);
+    }
+  }
+
+  function handleReferrerQueryKeyDown(
+    event: ReactKeyboardEvent<HTMLInputElement>,
+  ) {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    if (!referrerLoading) void searchReferrer();
+  }
+
   async function save() {
     if (!result || !canSave) return;
     setSaving(true);
@@ -501,6 +545,16 @@ export function PhoneAftercareForm({
           ? {
               mode: "create",
               customerName: customerName.trim(),
+              customerNameTag,
+              ...(customerNameTag === "referral" && selectedReferrer
+                ? {
+                    directorySource: {
+                      clientIdx: selectedReferrer.clientIdx,
+                      caseIdx: selectedReferrer.caseIdx,
+                      relationship: "referrer" as const,
+                    },
+                  }
+                : {}),
               residenceRegion: residenceRegion as Extract<
                 PhoneDeskAftercareInput["consultation"],
                 { mode: "create" }
@@ -646,12 +700,6 @@ export function PhoneAftercareForm({
                         ? " 발송 결과 확인 필요 · 중복 발송 여부를 먼저 확인하세요."
                         : " 이전 발송 실패 · 다시 시도할 수 있습니다."}
                 </small>
-              ) : null}
-              {selectedAutomation?.templateBody ? (
-                <details>
-                  <summary>발송될 내용 미리보기</summary>
-                  <p style={{ whiteSpace: "pre-wrap" }}>{selectedAutomation.templateBody}</p>
-                </details>
               ) : null}
             </div>
           ) : safeMessageTarget?.source === "consultation" ? (
@@ -809,13 +857,170 @@ export function PhoneAftercareForm({
         </label>
         {consultationMode === "create" ? (
           <>
+            <div
+              aria-label="고객 이름 사내 구분"
+              className="client-consultation-source-options phone-aftercare-name-tags"
+              role="group"
+            >
+              <label
+                className={`client-consultation-referral${
+                  customerNameTag === "existing" ? " is-selected" : ""
+                }`}
+              >
+                <input
+                  checked={customerNameTag === "existing"}
+                  onChange={() => changeCustomerNameTag("existing")}
+                  type="checkbox"
+                />
+                <span>
+                  <strong>기존고객</strong>
+                  <small>이름 뒤에 _기존을 자동으로 붙입니다.</small>
+                </span>
+              </label>
+              <label
+                className={`client-consultation-referral${
+                  customerNameTag === "referral" ? " is-selected" : ""
+                }`}
+              >
+                <input
+                  checked={customerNameTag === "referral"}
+                  onChange={() => changeCustomerNameTag("referral")}
+                  type="checkbox"
+                />
+                <span>
+                  <strong>소개건</strong>
+                  <small>이름 뒤에 _소개를 자동으로 붙입니다.</small>
+                </span>
+              </label>
+            </div>
+            <small className="phone-aftercare-name-tag-help">
+              두 항목은 동시에 선택할 수 없습니다. 소개건은 소개자 담당 연결을
+              위해 소개자까지 선택해 주세요.
+            </small>
+            {customerNameTag === "referral" ? (
+              <section
+                aria-label="소개자 찾기"
+                className="consultation-source-picker phone-aftercare-referrer-picker"
+              >
+                <div className="consultation-source-search">
+                  <label htmlFor={`phone-aftercare-referrer-${detail.call.id}`}>
+                    소개자 찾기
+                  </label>
+                  <div>
+                    <input
+                      autoComplete="off"
+                      id={`phone-aftercare-referrer-${detail.call.id}`}
+                      maxLength={30}
+                      onChange={(event) => {
+                        setReferrerQuery(event.target.value);
+                        setSelectedReferrer(null);
+                        setReferrerResult(null);
+                        setReferrerError("");
+                        setSaved(false);
+                      }}
+                      onKeyDown={handleReferrerQueryKeyDown}
+                      placeholder="소개자 이름 또는 전화번호 끝 4자리"
+                      value={referrerQuery}
+                    />
+                    <button
+                      className="secondary-button"
+                      disabled={referrerLoading}
+                      onClick={() => void searchReferrer()}
+                      type="button"
+                    >
+                      {referrerLoading ? "찾는 중…" : "소개자 찾기"}
+                    </button>
+                  </div>
+                </div>
+
+                {referrerError ? (
+                  <p className="client-consultation-error" role="alert">
+                    {referrerError}
+                  </p>
+                ) : null}
+
+                {selectedReferrer ? (
+                  <div className="client-consultation-source consultation-create-source">
+                    <div>
+                      <span>소개자</span>
+                      <strong>{selectedReferrer.clientName}</strong>
+                    </div>
+                    <div>
+                      <span>소개자 사건</span>
+                      <strong>{directoryCaseLabel(selectedReferrer)}</strong>
+                    </div>
+                    <div>
+                      <span>소개자 담당</span>
+                      <strong>
+                        {selectedReferrer.staffNames.join(" · ") || "미지정"}
+                      </strong>
+                    </div>
+                  </div>
+                ) : null}
+
+                {referrerResult ? (
+                  referrerResult.items.length === 0 ? (
+                    <p className="consultation-source-empty">
+                      일치하는 소개자 사건을 찾지 못했습니다.
+                    </p>
+                  ) : (
+                    <div
+                      aria-label="소개자 검색 결과"
+                      className="consultation-source-results"
+                      role="listbox"
+                    >
+                      {referrerResult.items.map((item) => {
+                        const selected =
+                          selectedReferrer?.clientIdx === item.clientIdx &&
+                          selectedReferrer.caseIdx === item.caseIdx;
+                        return (
+                          <button
+                            aria-selected={selected}
+                            className={selected ? "is-selected" : undefined}
+                            key={`${item.clientIdx}:${item.caseIdx}`}
+                            onClick={() => {
+                              setSelectedReferrer(item);
+                              setReferrerError("");
+                              setSaved(false);
+                            }}
+                            role="option"
+                            type="button"
+                          >
+                            <span>
+                              <strong>{item.clientName}</strong>
+                              <small>
+                                {formatPhone(item.phone) || "전화번호 미등록"}
+                              </small>
+                            </span>
+                            <span>
+                              <strong>{directoryCaseLabel(item)}</strong>
+                              <small>
+                                소개자 담당{" "}
+                                {item.staffNames.join(" · ") || "미지정"}
+                              </small>
+                            </span>
+                            <b>{selected ? "선택됨" : "선택"}</b>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )
+                ) : null}
+                {!selectedReferrer ? (
+                  <p className="phone-aftercare-name-tag-help">
+                    소개건 저장 전 소개자를 선택해야 담당자를 상담 목록에 표시할 수 있습니다.
+                  </p>
+                ) : null}
+              </section>
+            ) : null}
             <div className="phone-aftercare-grid">
               <label className="phone-aftercare-field">
                 <span>고객명</span>
-                <input
-                  maxLength={50}
-                  onChange={(event) => setCustomerName(event.target.value)}
+                <ConsultationCustomerNameInput
+                  onValueChange={setCustomerName}
                   placeholder="고객명"
+                  required
+                  tag={customerNameTag}
                   value={customerName}
                 />
               </label>

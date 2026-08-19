@@ -90,6 +90,13 @@ test("고객찾기 신건상담은 수정된 고객정보와 소개 여부를 �
     }).success,
     false,
   );
+  assert.equal(
+    legalFriendsDirectoryConsultationCreateSchema.safeParse({
+      ...input,
+      customerName: "가".repeat(48),
+    }).success,
+    false,
+  );
 });
 
 test("직원 신규상담은 일반·기존고객·소개 등록 문맥을 엄격히 검증한다", () => {
@@ -118,6 +125,18 @@ test("직원 신규상담은 일반·기존고객·소개 등록 문맥을 엄�
       },
     }).success,
     true,
+  );
+  assert.equal(
+    staffConsultationCreateSchema.safeParse({
+      ...input,
+      customerName: "가".repeat(48),
+      directorySource: {
+        clientIdx: 10,
+        caseIdx: 20,
+        relationship: "referrer",
+      },
+    }).success,
+    false,
   );
   assert.equal(
     staffConsultationCreateSchema.safeParse({
@@ -312,10 +331,69 @@ test("전화데스크 후처리는 기타 설명과 재통화 담당·일시를 
       consultation: {
         mode: "create",
         customerName: "통화 고객",
+        customerNameTag: "referral",
+        directorySource: {
+          clientIdx: 123,
+          caseIdx: 456,
+          relationship: "referrer",
+        },
         residenceRegion: "seoul",
       },
     }).success,
     true,
+  );
+  assert.equal(
+    phoneDeskAftercareSaveSchema.safeParse({
+      ...base,
+      consultation: {
+        mode: "create",
+        customerName: "통화 고객",
+        customerNameTag: "referral",
+        residenceRegion: "seoul",
+      },
+    }).success,
+    false,
+  );
+  assert.equal(
+    phoneDeskAftercareSaveSchema.safeParse({
+      ...base,
+      consultation: {
+        mode: "create",
+        customerName: "통화 고객",
+        customerNameTag: "existing",
+        directorySource: {
+          clientIdx: 123,
+          caseIdx: 456,
+          relationship: "referrer",
+        },
+        residenceRegion: "seoul",
+      },
+    }).success,
+    false,
+  );
+  assert.equal(
+    phoneDeskAftercareSaveSchema.safeParse({
+      ...base,
+      consultation: {
+        mode: "create",
+        customerName: "가".repeat(48),
+        customerNameTag: "existing",
+        residenceRegion: "seoul",
+      },
+    }).success,
+    false,
+  );
+  assert.equal(
+    phoneDeskAftercareSaveSchema.safeParse({
+      ...base,
+      consultation: {
+        mode: "create",
+        customerName: "통화 고객",
+        customerNameTag: "unknown",
+        residenceRegion: "seoul",
+      },
+    }).success,
+    false,
   );
   assert.equal(
     phoneDeskAftercareSaveSchema.safeParse({

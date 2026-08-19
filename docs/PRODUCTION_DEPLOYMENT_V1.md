@@ -1,12 +1,12 @@
 # AWS 운영 배포 기준선 v2
 
-기준 시각: 2026-08-18 KST
+기준 시각: 2026-08-19 KST
 CloudFormation 스택: `lawand-prod`
 리전: 서울(`ap-northeast-2`)
 최초 배포 릴리스: `20260804T085006Z-84e8708`
-현재 홈페이지 릴리스: `20260818T051852Z-integrated-notifications-memo-sms-gifts-v1`
-현재 ERP 릴리스: `20260818T090149Z-orca-integrated-ops-v2`
-현재 gateway 릴리스: `20260818T090149Z-orca-integrated-ops-v2`
+현재 홈페이지 릴리스: `20260819T035353Z-orca-integrated-ops-v3`
+현재 ERP 릴리스: `20260819T035353Z-orca-integrated-ops-v3`
+현재 gateway 릴리스: `20260819T035353Z-orca-integrated-ops-v3`
 현재 Windows bridge: `v0.8.3.0`
 
 완료된 모든 worktree를 main에 통합한 기준선 위에 공개 후기 작성자 자동 마스킹과 ERP 후기
@@ -18,6 +18,21 @@ CloudFormation 스택: `lawand-prod`
 이 문서는 정식 도메인 전환 이후를 포함한 실제 AWS 구성, 접속점, 데이터 이관 범위와
 운영 체크리스트를 기록한다. 비밀번호·API 키·AWS 계정 ID·RDS 마스터 시크릿 ARN은
 기록하지 않는다.
+
+## 2026-08-19 Orca 완료 작업 6개 통합 운영 배포
+
+- 검증된 main `224e156619f4fab3b9d78f7ca9204e377de5b4c8`과 Actions
+  `32213073096`이 세 앱의 ARM64 이미지를 게시했다. 영향 앱은 홈페이지·ERP·gateway다.
+- 암호화 snapshot `lawand-prod-pre-orca-integrated-ops-20260819t035353z` 뒤 gateway digest로
+  migration `0068`을 적용했다. 운영 migration 69개, 안정 중복 index 1개, 잔여 중복 그룹
+  0이며 재실행은 no-op이다.
+- 릴리스 `20260819T035353Z-orca-integrated-ops-v3`의 parent digest는 홈페이지
+  `sha256:9e23a81fa6c27cfe5557cc522e76672e256219df9a0b0a289dae0132c5085679`, ERP
+  `sha256:49d10a433437020113692be2902fa0f4b34135e8a364744684c1e6b4711bb08e`, gateway
+  `sha256:10735fbeb4968edacf56cfcdd52872dabbb250f613e9abb548695e8300210a3e`다.
+- 정식·EIP HTTPS 200, 앱·Caddy active, restart 0, error journal 0과 request/LISTEN waiting
+  0/20·0/5를 확인했다. GA4 운영 Measurement ID, AdPilot, Windows bridge와 외부 발송은
+  변경하지 않았다.
 
 ## 현재 접속점
 

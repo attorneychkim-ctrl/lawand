@@ -219,11 +219,31 @@ const gatewaySecret = {
     existingGateway.LAWAND_CENTREX_INBOUND_HISTORY_POLL_SECONDS ?? "15",
 };
 
+const existingHomepage = readExistingSecret("lawand/prod/homepage");
+const homepageGa4MeasurementIdRaw =
+  process.env.LAWAND_GA4_MEASUREMENT_ID ??
+  existingHomepage.LAWAND_GA4_MEASUREMENT_ID;
+const homepageGa4MeasurementId = homepageGa4MeasurementIdRaw
+  ?.trim()
+  .toUpperCase();
+if (
+  homepageGa4MeasurementId &&
+  !/^G-[A-Z0-9]{6,20}$/.test(homepageGa4MeasurementId)
+) {
+  throw new Error(
+    "LAWAND_GA4_MEASUREMENT_ID는 유효한 G- 형식이어야 합니다.",
+  );
+}
 const homepageSecret = {
   LAWAND_APP_DATABASE_URL: databaseSecret.appDatabaseUrl,
   LAWAND_GATEWAY_URL: gatewayUrl,
   LAWAND_PUBLIC_INTAKE_API_KEY: shared.publicIntakeApiKey,
   LAWAND_TRUSTED_PROXY_HOPS: "1",
+  ...(homepageGa4MeasurementId
+    ? {
+        LAWAND_GA4_MEASUREMENT_ID: homepageGa4MeasurementId,
+      }
+    : {}),
 };
 
 const erpSecret = {

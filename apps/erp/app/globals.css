@@ -2563,7 +2563,8 @@ svg {
   gap: 4px;
 }
 
-.staff-primary-nav a {
+.staff-primary-nav > a,
+.staff-nav-disclosure > summary {
   position: relative;
   display: inline-flex;
   min-height: 42px;
@@ -2574,21 +2575,25 @@ svg {
   color: var(--muted);
   font-size: .82rem;
   font-weight: 750;
+  white-space: nowrap;
   text-decoration: none;
   transition: color .16s ease, background .16s ease;
 }
 
-.staff-primary-nav a:hover {
+.staff-primary-nav > a:hover,
+.staff-nav-disclosure > summary:hover {
   background: var(--surface-muted);
   color: var(--ink);
 }
 
-.staff-primary-nav a.is-active {
+.staff-primary-nav > a.is-active,
+.staff-nav-disclosure.is-active > summary {
   background: var(--brand-soft);
   color: var(--brand-strong);
 }
 
-.staff-primary-nav a.is-active::after {
+.staff-primary-nav > a.is-active::after,
+.staff-nav-disclosure.is-active > summary::after {
   position: absolute;
   right: 14px;
   bottom: -13px;
@@ -2599,7 +2604,9 @@ svg {
   content: "";
 }
 
-.staff-primary-nav svg {
+.staff-primary-nav > a > svg,
+.staff-nav-disclosure > summary > svg,
+.staff-nav-menu a > svg {
   width: 18px;
   height: 18px;
   fill: none;
@@ -2608,6 +2615,64 @@ svg {
   stroke-linejoin: round;
   stroke-width: 1.7;
 }
+
+.staff-nav-disclosure {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.staff-nav-disclosure > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.staff-nav-disclosure > summary::-webkit-details-marker { display: none; }
+
+.staff-nav-disclosure[open] > summary {
+  background: var(--surface-muted);
+  color: var(--ink);
+}
+
+.staff-nav-disclosure > summary .staff-nav-chevron {
+  width: 12px;
+  height: 12px;
+  transition: transform .16s ease;
+}
+
+.staff-nav-disclosure[open] > summary .staff-nav-chevron { transform: rotate(180deg); }
+
+.staff-nav-menu {
+  position: absolute;
+  z-index: 70;
+  top: calc(100% - 7px);
+  left: 0;
+  display: grid;
+  min-width: 180px;
+  gap: 4px;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface);
+  box-shadow: 0 16px 38px rgb(12 32 24 / 18%);
+}
+
+.staff-nav-menu a {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 9px;
+  padding: 0 11px;
+  border-radius: 9px;
+  color: var(--ink-soft);
+  font-size: .78rem;
+  font-weight: 750;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.staff-nav-menu a:hover { background: var(--surface-muted); color: var(--ink); }
+.staff-nav-menu a.is-active { background: var(--brand-soft); color: var(--brand-strong); }
 
 .staff-actions {
   flex: 0 0 auto;
@@ -7427,7 +7492,14 @@ a.inbound-customer:hover { text-decoration: underline; }
 
 .phone-desk-detail-shell { max-width: 1080px; }
 .phone-desk-detail-header { margin-bottom: 24px; }
-.phone-desk-back-link { align-self: flex-end; }
+.phone-desk-detail-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 9px;
+}
+.phone-desk-detail-actions .call-button { white-space: nowrap; }
+.phone-desk-back-link { align-self: flex-start; }
 
 .phone-desk-detail-summary {
   display: grid;
@@ -7795,6 +7867,51 @@ a.inbound-customer:hover { text-decoration: underline; }
 .phone-aftercare-field input:focus,
 .phone-aftercare-field select:focus,
 .phone-aftercare-field textarea:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+.phone-aftercare-field .consultation-customer-name-input {
+  display: flex;
+  align-items: center;
+  min-height: 42px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.phone-aftercare-field .consultation-customer-name-input:focus-within {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-soft);
+}
+.phone-aftercare-field .consultation-customer-name-input > input,
+.phone-aftercare-field .consultation-customer-name-input > input:focus {
+  min-width: 0;
+  flex: 1;
+  width: auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.consultation-customer-name-input > span {
+  display: flex;
+  align-self: stretch;
+  align-items: center;
+  flex: none;
+  padding: 0 12px 0 5px;
+  color: var(--brand-strong);
+  font-size: .78rem;
+  font-weight: 850;
+  white-space: nowrap;
+  user-select: none;
+}
+.phone-aftercare-name-tags { margin-top: 2px; }
+.phone-aftercare-name-tag-help {
+  margin-top: -9px;
+  color: var(--muted);
+  font-size: .62rem;
+  line-height: 1.5;
+}
+.phone-aftercare-referrer-picker > .phone-aftercare-name-tag-help {
+  margin: 0;
+}
 .phone-aftercare-error,
 .phone-aftercare-success { margin: 0; padding: 10px 12px; border-radius: 9px; font-size: .7rem; }
 .phone-aftercare-error { background: var(--danger-soft); color: var(--danger); }
@@ -8169,6 +8286,8 @@ a.inbound-customer:hover { text-decoration: underline; }
 .message-thread-context,
 .message-thread-preview { display: flex; min-width: 0; align-items: center; gap: 7px; }
 .message-thread-heading { justify-content: space-between; }
+.message-thread-status { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; }
+.message-thread-unread { min-width: 18px; padding: 2px 5px; border-radius: 999px; background: var(--brand); color: #fff; font-size: .54rem; font-style: normal; font-weight: 850; line-height: 1.35; text-align: center; }
 .message-thread-heading strong { overflow: hidden; color: var(--ink); font-size: .75rem; text-overflow: ellipsis; white-space: nowrap; }
 .message-thread-heading time,
 .message-thread-list small { color: var(--muted); font-size: .57rem; white-space: nowrap; }
@@ -8488,9 +8607,16 @@ a.inbound-customer:hover { text-decoration: underline; }
 }
 .consultation-restoration-button:hover:not(:disabled) { background: var(--brand-softer); }
 
-.workflow-assignment-value { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.workflow-assignment-value {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+.workflow-assignee-name { min-width: 0; overflow-wrap: anywhere; }
 .assignee-transfer-control { display: grid; justify-items: end; gap: 7px; }
 .assignee-transfer-trigger {
+  width: 64px;
   min-height: 28px;
   padding: 0 9px;
   border: 1px solid color-mix(in srgb, var(--brand) 35%, var(--line));
@@ -8669,8 +8795,10 @@ a.inbound-customer:hover { text-decoration: underline; }
 
   .staff-bar-leading { gap: 8px; }
   .staff-primary-nav { gap: 1px; }
-  .staff-primary-nav a { min-height: 38px; padding-inline: 9px; }
-  .staff-primary-nav a.is-active::after { bottom: -12px; right: 9px; left: 9px; }
+  .staff-primary-nav > a,
+  .staff-nav-disclosure > summary { min-height: 38px; padding-inline: 9px; }
+  .staff-primary-nav > a.is-active::after,
+  .staff-nav-disclosure.is-active > summary::after { bottom: -12px; right: 9px; left: 9px; }
   .staff-actions { gap: 6px; }
   .browser-notification-toggle { width: 38px; padding: 0; justify-content: center; }
   .browser-notification-toggle span { display: none; }
@@ -8852,7 +8980,19 @@ a.inbound-customer:hover { text-decoration: underline; }
   .phone-desk-detail-summary > div:nth-child(3n) { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
   .phone-desk-detail-summary > div:nth-child(2n) { border-right: 0; }
   .phone-desk-detail-summary > div:nth-last-child(-n + 2) { border-bottom: 0; }
-  .phone-desk-back-link { align-self: flex-start; }
+  .phone-desk-detail-actions {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .phone-desk-detail-actions .centrex-call-control,
+  .phone-desk-detail-actions .call-button,
+  .phone-desk-back-link { width: 100%; }
+  .phone-desk-detail-actions .centrex-call-control { justify-items: stretch; }
+  .phone-desk-detail-actions .centrex-call-message {
+    max-width: none;
+    text-align: left;
+  }
   .phone-aftercare-results { grid-template-columns: 1fr 1fr; }
   .phone-aftercare-message-action { align-items: stretch; flex-direction: column; }
   .phone-aftercare-message-action .message-button { width: 100%; }
@@ -8956,8 +9096,8 @@ a.inbound-customer:hover { text-decoration: underline; }
   .detail-actions .consultation-invalidation-button,
   .detail-actions .consultation-soft-delete-button { width: 100%; }
   .consultation-invalidation-error { max-width: none; text-align: left; }
-  .workflow-assignment-value { align-items: flex-start; flex-direction: column; }
-  .assignee-transfer-control { width: 100%; justify-items: stretch; }
+  .workflow-assignment-value { grid-template-columns: minmax(0, 1fr) 64px; }
+  .assignee-transfer-control { justify-items: end; }
   .assignee-transfer-state { justify-items: start; text-align: left; }
   .assignee-transfer-state small { max-width: none; }
   .assignee-transfer-trigger { min-height: 34px; }
@@ -9048,8 +9188,11 @@ a.inbound-customer:hover { text-decoration: underline; }
   .staff-actions { flex: 0 0 auto; margin-left: auto; }
   .staff-brand .lawand-os-copy { display: none; }
   .staff-brand .lawand-os-symbol { width: 31px; height: 31px; border-radius: 9px; }
-  .staff-primary-nav a { padding-inline: 7px; }
-  .staff-primary-nav a span { display: none; }
+  .staff-primary-nav > a,
+  .staff-nav-disclosure > summary { padding-inline: 7px; }
+  .staff-primary-nav > a > span,
+  .staff-nav-disclosure > summary > span,
+  .staff-nav-disclosure > summary .staff-nav-chevron { display: none; }
   .staff-identity { display: flex; padding-left: 0; }
   .staff-identity .staff-avatar { width: 31px; height: 31px; }
   .text-button { font-size: .62rem; }
@@ -9499,6 +9642,32 @@ a.inbound-customer:hover { text-decoration: underline; }
   background: var(--surface);
 }
 
+.client-consultation-fields .consultation-customer-name-input {
+  display: flex;
+  align-items: center;
+  min-height: 43px;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--surface-subtle);
+}
+
+.client-consultation-fields .consultation-customer-name-input:focus-within {
+  border-color: var(--brand);
+  background: var(--surface);
+}
+
+.client-consultation-fields .consultation-customer-name-input > input,
+.client-consultation-fields .consultation-customer-name-input > input:focus {
+  min-width: 0;
+  flex: 1;
+  width: auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
 .client-consultation-referral {
   display: flex;
   align-items: flex-start;
@@ -9780,6 +9949,11 @@ a.inbound-customer:hover { text-decoration: underline; }
 }
 
 @media (max-width: 620px) {
+  .consultation-customer-name-input > input,
+  .phone-aftercare-referrer-picker input {
+    font-size: 16px;
+  }
+
   .queue-toolbar-heading {
     align-items: stretch;
     flex-direction: column;

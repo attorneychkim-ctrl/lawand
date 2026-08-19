@@ -40,7 +40,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     },
     {
       url: "https://lawandfirm.com/privacy",
-      lastModified: new Date("2026-07-31"),
+      lastModified: new Date("2026-08-19"),
       changeFrequency: "yearly",
       priority: 0.3,
     },

@@ -242,7 +242,6 @@ export class ConsultationAssigneeTransferError extends Error {
       | "consultation_not_found"
       | "assignment_not_found"
       | "consultation_not_transferable"
-      | "transfer_forbidden"
       | "target_assignee_invalid"
       | "same_assignee"
       | "case_not_registered"
@@ -3227,7 +3226,6 @@ export function createConsultationService(options: {
     consultationId: string,
     input: ConsultationAssigneeTransferInput,
     actor: StaffPrincipal,
-    options: { restoreInvalidated?: boolean } = {},
   ) {
     const now = new Date();
     return db.transaction(async (tx) => {
@@ -3270,20 +3268,7 @@ export function createConsultationService(options: {
           "담당자가 배정된 상담만 변경할 수 있습니다.",
         );
       }
-      if (
-        !options.restoreInvalidated &&
-        assignment.assigneeUserId !== actor.id &&
-        !actor.roles.includes("admin")
-      ) {
-        throw new ConsultationAssigneeTransferError(
-          "transfer_forbidden",
-          "현재 상담 담당자 또는 관리자만 담당자를 변경할 수 있습니다.",
-        );
-      }
-      if (
-        !options.restoreInvalidated &&
-        assignment.assigneeUserId === input.targetStaffUserId
-      ) {
+      if (assignment.assigneeUserId === input.targetStaffUserId) {
         throw new ConsultationAssigneeTransferError(
           "same_assignee",
           "현재 담당자와 다른 직원을 선택해 주세요.",
@@ -3306,15 +3291,13 @@ export function createConsultationService(options: {
           "리걸프렌즈 사건 등록이 완료된 상담만 담당자를 변경할 수 있습니다.",
         );
       }
-      const caseInvalidated =
+      if (
         caseLink.managerExternalAccountId ===
-        LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID;
-      if (options.restoreInvalidated ? !caseInvalidated : caseInvalidated) {
+        LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID
+      ) {
         throw new ConsultationAssigneeTransferError(
           "case_invalidated",
-          options.restoreInvalidated
-            ? "무효 처리된 사건만 되돌릴 수 있습니다."
-            : "무효 처리된 사건은 되돌리기 버튼으로 복원해 주세요.",
+          "무효 처리된 사건은 되돌리기 버튼으로 복원해 주세요.",
         );
       }
 
@@ -3473,9 +3456,7 @@ export function createConsultationService(options: {
       await tx.insert(staffAuditLogs).values({
         id: createEventId(),
         actorUserId: actor.id,
-        action: options.restoreInvalidated
-          ? "legalfriends.case.restoration_requested"
-          : "consultation.assignment_transfer_requested",
+        action: "consultation.assignment_transfer_requested",
         targetType: "consultation",
         targetId: consultationId,
         metadata: {
@@ -3485,7 +3466,6 @@ export function createConsultationService(options: {
           previousAssigneeUserId: assignment.assigneeUserId,
           targetAssigneeUserId: target.userId,
           reason: input.reason,
-          ...(options.restoreInvalidated ? { restoration: true } : {}),
         },
         occurredAt: now,
         createdAt: now,
@@ -3509,12 +3489,204 @@ export function createConsultationService(options: {
     consultationId: string,
     actor: StaffPrincipal,
   ) {
-    return requestAssigneeTransfer(
-      consultationId,
-      { targetStaffUserId: actor.id, reason: "other" },
-      actor,
-      { restoreInvalidated: true },
-    );
+    const now = new Date();
+    return db.transaction(async (tx) => {
+      const [consultation] = await tx
+        .select({ id: consultations.id, softDeletedAt: consultations.softDeletedAt })
+        .from(consultations)
+        .where(eq(consultations.id, consultationId))
+        .limit(1)
+        .for("update");
+      if (!consultation) {
+        throw new ConsultationAssigneeTransferError(
+          "consultation_not_found",
+          "상담을 찾을 수 없습니다.",
+        );
+      }
+      if (consultation.softDeletedAt) {
+        throw new ConsultationAssigneeTransferError(
+          "consultation_not_transferable",
+          "삭제된 상담은 되돌릴 수 없습니다.",
+        );
+      }
+
+      const [caseLink] = await tx
+        .select({
+          outboxEventId: legalFriendsCaseLinks.outboxEventId,
+          managerExternalAccountId:
+            legalFriendsCaseLinks.managerExternalAccountId,
+        })
+        .from(legalFriendsCaseLinks)
+        .where(eq(legalFriendsCaseLinks.consultationId, consultationId))
+        .limit(1)
+        .for("update");
+      if (!caseLink) {
+        throw new ConsultationAssigneeTransferError(
+          "case_not_registered",
+          "리걸프렌즈 사건을 찾을 수 없습니다.",
+        );
+      }
+      if (
+        caseLink.managerExternalAccountId !==
+        LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID
+      ) {
+        throw new ConsultationAssigneeTransferError(
+          "case_invalidated",
+          "현재 리걸프렌즈 담당자가 무효인 사건만 되돌릴 수 있습니다.",
+        );
+      }
+
+      const [pendingConflict] = await tx
+        .select({ id: outboxEvents.id, eventType: outboxEvents.eventType })
+        .from(outboxEvents)
+        .where(
+          and(
+            eq(outboxEvents.aggregateId, consultationId),
+            inArray(outboxEvents.eventType, [
+              "legalfriends.consultation.invalidation.requested",
+              "legalfriends.consultation.manager_change.requested",
+              "legalfriends.consultation.restoration.requested",
+            ]),
+            eq(outboxEvents.status, "pending"),
+          ),
+        )
+        .orderBy(desc(outboxEvents.occurredAt))
+        .limit(1);
+      if (pendingConflict) {
+        if (
+          pendingConflict.eventType ===
+          "legalfriends.consultation.restoration.requested"
+        ) {
+          return {
+            consultationId,
+            eventId: pendingConflict.id,
+            state: "queued" as const,
+            replayed: true,
+          };
+        }
+        throw new ConsultationAssigneeTransferError(
+          "transfer_already_pending",
+          "무효 처리 또는 담당자 변경이 끝난 뒤 되돌릴 수 있습니다.",
+        );
+      }
+
+      const [pendingTransfer] = await tx
+        .select({ id: consultationAssignmentTransfers.id })
+        .from(consultationAssignmentTransfers)
+        .where(
+          and(
+            eq(consultationAssignmentTransfers.consultationId, consultationId),
+            eq(consultationAssignmentTransfers.status, "pending"),
+          ),
+        )
+        .limit(1);
+      if (pendingTransfer) {
+        throw new ConsultationAssigneeTransferError(
+          "transfer_already_pending",
+          "담당자 변경이 끝난 뒤 되돌릴 수 있습니다.",
+        );
+      }
+
+      const [target] = await tx
+        .select({
+          userId: staffUsers.id,
+          membershipId: staffMemberships.id,
+          externalAccountId: staffExternalAccounts.externalAccountId,
+          externalMemberIdx: staffExternalAccounts.externalMemberIdx,
+        })
+        .from(staffUsers)
+        .innerJoin(
+          staffMemberships,
+          and(
+            eq(staffMemberships.userId, staffUsers.id),
+            eq(staffMemberships.isPrimary, true),
+            eq(staffMemberships.isActive, true),
+          ),
+        )
+        .innerJoin(
+          staffExternalAccounts,
+          and(
+            eq(staffExternalAccounts.staffUserId, staffUsers.id),
+            eq(staffExternalAccounts.provider, "legalfriends"),
+            eq(staffExternalAccounts.isActive, true),
+            isNotNull(staffExternalAccounts.externalMemberIdx),
+          ),
+        )
+        .where(
+          and(eq(staffUsers.id, actor.id), eq(staffUsers.status, "active")),
+        )
+        .limit(1);
+      if (
+        !target?.externalMemberIdx ||
+        target.externalAccountId ===
+          LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID
+      ) {
+        throw new ConsultationAssigneeTransferError(
+          "target_assignee_invalid",
+          "활성 리걸프렌즈 계정과 주 멤버십이 연결된 직원만 되돌릴 수 있습니다.",
+        );
+      }
+
+      const [assignment] = await tx
+        .select({
+          id: consultationAssignments.id,
+          assigneeUserId: consultationAssignments.assigneeUserId,
+          assigneeMembershipId:
+            consultationAssignments.assigneeMembershipId,
+        })
+        .from(consultationAssignments)
+        .where(eq(consultationAssignments.consultationId, consultationId))
+        .limit(1)
+        .for("update");
+      const eventId = createEventId();
+      const targetAssignmentId = assignment?.id ?? createEventId();
+      const event: PlatformEvent = {
+        eventId,
+        eventType: "legalfriends.consultation.restoration.requested",
+        eventVersion: 1,
+        occurredAt: now.toISOString(),
+        producer: "lawand.gateway",
+        correlationId: consultationId,
+        causationId: caseLink.outboxEventId,
+        data: {
+          consultationId,
+          caseLinkRef: `legalfriends_case_links/${consultationId}`,
+          requestedByUserId: actor.id,
+          targetAssigneeUserId: target.userId,
+          targetAssigneeMembershipId: target.membershipId,
+          targetAssignmentId,
+          previousAssignmentId: assignment?.id ?? null,
+          previousAssigneeUserId: assignment?.assigneeUserId ?? null,
+          previousAssigneeMembershipId:
+            assignment?.assigneeMembershipId ?? null,
+          targetManagerExternalAccountId: target.externalAccountId,
+          targetManagerMemberIdx: target.externalMemberIdx,
+        },
+      };
+      assertPlatformEvent(event);
+      await tx.insert(outboxEvents).values(eventRow(event));
+      await tx.insert(staffAuditLogs).values({
+        id: createEventId(),
+        actorUserId: actor.id,
+        action: "legalfriends.case.restoration_requested",
+        targetType: "consultation",
+        targetId: consultationId,
+        metadata: {
+          eventId,
+          previousAssignmentId: assignment?.id ?? null,
+          targetAssignmentId,
+          targetAssigneeUserId: target.userId,
+        },
+        occurredAt: now,
+        createdAt: now,
+      });
+      return {
+        consultationId,
+        eventId,
+        state: "queued" as const,
+        replayed: false,
+      };
+    });
   }
 
   async function linkConsultationGroup(
@@ -4450,15 +4622,40 @@ export function createConsultationService(options: {
       );
     }
     const directorySourceRows = await db
-      .select({ consultationId: consultationDirectorySources.consultationId })
+      .select({
+        consultationId: consultationDirectorySources.consultationId,
+        relationship: consultationDirectorySources.relationship,
+        snapshotCiphertext: consultationDirectorySources.snapshotCiphertext,
+        snapshotNonce: consultationDirectorySources.snapshotNonce,
+        snapshotKeyVersion: consultationDirectorySources.snapshotKeyVersion,
+      })
       .from(consultationDirectorySources)
-      .where(inArray(consultationDirectorySources.consultationId, ids));
+      .where(inArray(consultationDirectorySources.consultationId, ids))
+      .orderBy(desc(consultationDirectorySources.createdAt));
     const directorySourceIds = new Set(
       directorySourceRows.map(
         (row) =>
           canonicalByMember.get(row.consultationId) ?? row.consultationId,
       ),
     );
+    const referrerStaffNamesByConsultation = new Map<string, string[]>();
+    for (const row of directorySourceRows) {
+      if (row.relationship !== "referrer") continue;
+      const canonicalId =
+        canonicalByMember.get(row.consultationId) ?? row.consultationId;
+      if (referrerStaffNamesByConsultation.has(canonicalId)) continue;
+      const snapshot = JSON.parse(
+        protection.decrypt(
+          {
+            ciphertext: row.snapshotCiphertext,
+            nonce: row.snapshotNonce,
+            keyVersion: row.snapshotKeyVersion,
+          },
+          `consultation_directory_sources/${row.consultationId}/snapshot`,
+        ),
+      ) as ConsultationDirectorySnapshot;
+      referrerStaffNamesByConsultation.set(canonicalId, snapshot.staffNames);
+    }
     const handlingRows = await db
       .select({ consultationId: consultationLegalFriendsHandlings.consultationId })
       .from(consultationLegalFriendsHandlings)
@@ -4752,6 +4949,8 @@ export function createConsultationService(options: {
           existingCustomer,
           existingCustomerStaffNames:
             existingCustomersByConsultation.get(item.id) ?? [],
+          referrerStaffNames:
+            referrerStaffNamesByConsultation.get(item.id) ?? null,
           legalFriendsRegistered,
           requiresLegalFriendsReview:
             existingCustomer &&
@@ -5042,6 +5241,7 @@ export function createConsultationService(options: {
       "legalfriends.consultation.registration.requested",
       "legalfriends.consultation.invalidation.requested",
       "legalfriends.consultation.manager_change.requested",
+      "legalfriends.consultation.restoration.requested",
       "alimtalk.consultation.assignment_notification.requested",
     ];
     const integrationRows = await db
@@ -5109,8 +5309,7 @@ export function createConsultationService(options: {
         delivery,
       ]),
     );
-    const [legalFriendsCase] = assignment
-      ? await db
+    const [legalFriendsCase] = await db
           .select({
             caseIdx: legalFriendsCaseLinks.caseIdx,
             managerExternalAccountId:
@@ -5122,8 +5321,7 @@ export function createConsultationService(options: {
           .where(
             eq(legalFriendsCaseLinks.consultationId, consultationId),
           )
-          .limit(1)
-      : [];
+          .limit(1);
     const telephonyCallRows = await db
       .select({
         id: telephonyCalls.id,

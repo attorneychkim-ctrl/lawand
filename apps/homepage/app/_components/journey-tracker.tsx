@@ -3,6 +3,11 @@
 import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 
+import {
+  NAVER_KEYWORD_ID_PATTERN,
+  normalizeTrackedPagePath,
+} from "@/lib/analytics-contract";
+
 export const JOURNEY_STORAGE_KEY = "lawand.bank.journey.v1";
 export const CTA_STORAGE_KEY = "lawand.bank.consultation-cta.v1";
 export const ATTRIBUTION_STORAGE_KEY = "lawand.bank.attribution.v1";
@@ -53,7 +58,6 @@ const PARAMETER_MAP = {
   externalAdGroupId: ["adgroup_id", "ad_group_id", "external_ad_group_id"],
   externalKeywordId: ["keyword_id", "external_keyword_id"],
   externalCreativeId: ["creative_id", "external_creative_id"],
-  matchedKeyword: ["matched_keyword"],
 } as const;
 
 function readJourney(): JourneyEntry[] {
@@ -93,6 +97,11 @@ function captureAttribution(path: string): AttributionSession {
     if (value) {
       source[field as keyof typeof PARAMETER_MAP] = value.slice(0, 200);
     }
+  }
+
+  const naverKeywordId = firstParameter(searchParams, ["n_keyword_id"]);
+  if (naverKeywordId && NAVER_KEYWORD_ID_PATTERN.test(naverKeywordId)) {
+    source.externalKeywordId = naverKeywordId;
   }
 
   source.platformClickId = firstParameter(searchParams, [
@@ -174,19 +183,20 @@ export function getConsultationCtaContext(): ConsultationCtaContext | null {
 }
 
 export function getConsultationAttribution() {
+  const path = normalizeTrackedPagePath(window.location.pathname);
   const session =
     readAttributionSession() ??
-    captureAttribution(window.location.pathname);
+    captureAttribution(path);
   return {
     ...session,
     journey: readJourney(),
     consultationCta: getConsultationCtaContext() ?? undefined,
-    submittedFromPath: window.location.pathname,
+    submittedFromPath: path,
   };
 }
 
 export function getConsultationAttributionForCta(placement: string) {
-  const path = window.location.pathname;
+  const path = normalizeTrackedPagePath(window.location.pathname);
   const session =
     readAttributionSession() ?? captureAttribution(path);
   return {
@@ -205,23 +215,22 @@ export function JourneyTracker() {
   const pathname = usePathname();
 
   useEffect(() => {
-    if (!pathname.startsWith("/bank")) return;
-
+    const trackedPath = normalizeTrackedPagePath(pathname);
     if (!readAttributionSession()) {
       window.sessionStorage.setItem(
         ATTRIBUTION_STORAGE_KEY,
-        JSON.stringify(captureAttribution(pathname)),
+        JSON.stringify(captureAttribution(trackedPath)),
       );
     }
 
     const journey = readJourney();
     const previous = journey.at(-1);
-    if (previous?.path !== pathname && journey.length < 20) {
+    if (previous?.path !== trackedPath && journey.length < 20) {
       window.sessionStorage.setItem(
         JOURNEY_STORAGE_KEY,
         JSON.stringify([
           ...journey,
-          { path: pathname, visitedAt: new Date().toISOString() },
+          { path: trackedPath, visitedAt: new Date().toISOString() },
         ]),
       );
     }
@@ -234,7 +243,7 @@ export function JourneyTracker() {
       );
       if (!link) return;
       const context: ConsultationCtaContext = {
-        path: pathname,
+        path: trackedPath,
         placement: link.dataset.consultationCta ?? "link",
         clickedAt: new Date().toISOString(),
       };

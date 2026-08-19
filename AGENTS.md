@@ -116,8 +116,234 @@
   현재 회신 연결은 수신 mailbox를 조건으로 삼지 않고 고객번호의 전역 최신 발송을 고르는
   구조이므로, 공용 회선 제품화 전에는 발송 시점 회신 mailbox snapshot과 mailbox별 매칭으로
   보강해야 한다. SOLAPI MMS `02-555-7455`도 별도 회신 mailbox mapping이 필요하다.
-  `PROJECT_PLAN.md`를 v1.56으로 갱신했으며 소스·migration·배포는 변경하지 않았고 운영에는
+  `PROJECT_PLAN.md`를 v1.61로 갱신했으며 소스·migration·배포는 변경하지 않았고 운영에는
   통제 발신·수신 각 1건과 그 감사·알림 원장만 추가됐다.
+
+### 2026-08-19 — Orca 완료 작업 6개 통합 운영 배포 완료
+- Orca 완료 브랜치 6개를 최종 `main` `224e156619f4fab3b9d78f7ca9204e377de5b4c8`에
+  통합했고 Actions `32213073096`의 검증과 세 `linux/arm64` 이미지 게시가 성공했다.
+  `sms_number_problem`은 코드 변경 없이 main과 같은 HEAD라 제외했고, 별도 AdPilot 저장소도
+  이번 lawand 릴리스에 포함하지 않았다. 전체 5패키지 test·typecheck·lint·production build,
+  DB schema check와 `git diff --check`, core 92개·gateway 180개 테스트를 통과했다.
+- 암호화 snapshot `lawand-prod-pre-orca-integrated-ops-20260819t035353z`을 available·100%로
+  확보한 뒤 gateway digest로 migration `0068`을 적용하고 재실행 no-op을 확인했다. 운영
+  migration은 69개이고 `0068` SHA-256은
+  `2501c6e125577791d4b45e0305db1f1369fdf275d12cde90d3ad590907d20204`다. 안정 unique index
+  1개와 중복 그룹 0을 확인했다. 첫 두 migration 명령은 각각 이미지 검사 인용과
+  `DATABASE_URL` 이름 불일치로 DB 실행 전에 중단됐고, migrator 전용 URL을 명시 매핑한
+  최종 명령만 성공했다.
+- 릴리스 `20260819T035353Z-orca-integrated-ops-v3`로 gateway→ERP→홈페이지를 digest 전환했다.
+  parent digest/image ID는 gateway
+  `sha256:10735fbeb4968edacf56cfcdd52872dabbb250f613e9abb548695e8300210a3e`·
+  `sha256:dce53948efe1518c90a60ef62b194057663e51d6e66921f03b34cd817fb7c465`, ERP
+  `sha256:49d10a433437020113692be2902fa0f4b34135e8a364744684c1e6b4711bb08e`·
+  `sha256:944686691a7080ddd6730e759d2bd223de8a7691abadf811322d027cc31c5666`, 홈페이지
+  `sha256:9e23a81fa6c27cfe5557cc522e76672e256219df9a0b0a289dae0132c5085679`·
+  `sha256:37f55f653cfa04e552a00818c5e5586fa1e829c422f72737bbb0d2267445cd13`이다.
+  세 ARM64 child scan은 CRITICAL 3·HIGH 11·MEDIUM 11·LOW 1이다.
+- health 뒤 gateway·ERP·홈페이지 cache는 각각 1,381,000,000·1,429,000,000·
+  1,421,000,000 bytes이고 회수량은 856,387,584·879,525,888·880,054,272 bytes다. 정식·
+  EIP HTTPS는 모두 200, 앱·Caddy active, restart 0, 환경파일 600, error journal 0이며
+  gateway request/LISTEN waiting은 0/20·0/5다. 세 EC2 status ok·SSM Online, RDS
+  available·암호화·삭제 방지, CloudWatch OK 14다. GA4 운영 Measurement ID·AdPilot·Windows
+  bridge·외부 발송은 변경하지 않았다. `PROJECT_PLAN.md`는 v1.60이다.
+
+### 2026-08-19 — Orca 완료 작업 6개 통합 병합 후보
+- Orca 원장과 원격 HEAD를 대조해 `GA4_insert`·`centrex_call_button_add`·
+  `change_manager_althogh_invalidity`·`existing_intro_auto_text`·`navigation_bar_simplify`·
+  `sms_alarm`을 `main`에 병합했다. 여섯 브랜치는 깨끗하고 원격과 일치하며 모두 현재
+  `main`의 ancestor다. `sms_number_problem`은 조사만 완료되어 `main`과 같은 HEAD이고 코드
+  변경이 없어 명시적으로 제외했다. 별도 저장소의 AdPilot 브랜치도 이번 lawand 배포 범위가 아니다.
+- 영향 앱은 홈페이지·ERP·gateway이며 신규 migration은
+  `0068_centrex_inbound_message_deduplication.sql` 하나다. 운영 Measurement ID와 GA4 속성의
+  승인 게이트가 남아 있어 GA4 운영 secret은 이번 릴리스에서 추가하지 않는다.
+- 전체 5패키지 test·typecheck·lint·production build, DB schema check와 `git diff --check`를
+  통과했다. core 92개·gateway 180개 테스트가 성공했다. 아직 원격 `main` 푸시·운영 snapshot·
+  migration·digest 전환·운영 데이터 변경·외부 발송은 수행하지 않았다. `PROJECT_PLAN.md`는
+  v1.59다.
+
+### 2026-08-19 — 동의 기반 GA4 홈페이지 측정·AdPilot 범용 결손 구현 후보
+- 홈페이지 루트에 결정적인 초기 `null`의 분석 관리자를 추가했다. 서버 런타임
+  `LAWAND_GA4_MEASUREMENT_ID`를 same-origin 비캐시 API가 유효한 `G-` 값 또는 `null`로만
+  전달하며, 값이 없거나 사용자가 허용하기 전에는 Google 태그를 내려받지 않는다. 허용 뒤
+  `analytics_storage`만 열고 `ad_storage`·`ad_user_data`·`ad_personalization`, Google
+  Signals·광고 개인화는 항상 끈다. 선택은 버전·시각과 함께 first-party localStorage에
+  보존하고 푸터·개인정보처리방침에서 다시 열어 철회·`_ga` 계열 쿠키 정리를 실행한다.
+  분석 쿠키는 갱신하지 않고 최초 생성부터 최대 14개월로 제한한다.
+- 모든 Next.js 공개 페이지의 수동 `page_view`는 정식 origin·허용된 공개 pathname과
+  통제된 UTM, `^nkw-[a-z0-9-]{1,124}$` 키워드 ID만 새로 조립한다. `n_query`·실제 검색어·임의 query·
+  fragment는 버리고 외부 referrer는 origin만 남긴다. 사례 상세 slug는 공통 상세 경로,
+  알 수 없는 경로는 `/_not-found`로 일반화하며 `JourneyTracker`의 first-party 여정에도
+  같은 경계를 쓴다. `JourneyTracker`는 `/bank` 밖의 새 랜딩에서도 시작하고
+  `n_keyword_id`를 검증해 운영 귀속에 보존한다. Cafe24 fallback은 태그
+  미적용 집합으로 명시했고 활성 광고 연결 뒤 0건을 확인해야 한다.
+- 직접 상담과 상담을 생성한 자가진단의 HTTP 성공·유효 접수번호·`new` 또는
+  `suspected_duplicate`만 `generate_lead`로 보낸다. 이벤트에는 접수번호·idempotency key·
+  이름·전화·상담/진단값·가치를 넣지 않으며, 같은 논리 제출의 안정적인 UUID와 sessionStorage
+  마커로 재시도 중복을 막는다. 두 폼의 UUID 생성도 SSR state 초깃값에서 제거하고 실제 제출
+  시 ref에 생성해 hydration 경계를 결정적으로 유지했다.
+- 개인정보처리방침 초안은 동의 기반 GA 처리 항목·목적·최대 14개월 후보·설정/철회와
+  맞춤형 광고 미사용을 실제 코드에 맞췄다. GA의 기본 `first_visit`·`session_start`·
+  `user_engagement` 수반 처리를 고지하고 향상된 측정 전체 비활성화를 운영 게이트로 뒀다.
+  Google 계약 주체·처리 위치·국외 처리 및 운영
+  보유 설정은 활성화 전 책임 변호사·개인정보 담당자 확정 게이트로 두고, 그 전에는 운영
+  Measurement ID를 설정하지 않는다. ID는 빌드 입력이 아닌 홈페이지 운영 secret에 보존해
+  같은 commit ECR 이미지가 환경값에 따라 달라지지 않게 했다. DB migration은 없다.
+- 홈페이지 분석 단위 테스트 10개와 전체 5패키지 typecheck·lint·test·production build
+  (core 91개·gateway 177개 포함), `git diff --check`, 배포 스크립트 문법 검사를 통과했다.
+  같은 빌드를 ID 없음/더미 ID 있음으로
+  각각 실행해 설정 API의 `null`/검증값, SSR HTML의 Google 태그 0을 확인했다. Orca Chromium은
+  동의 전 태그·GA 쿠키 0과 네 광고 동의 `denied`, 허용 뒤 Google 태그 1개와 실제 검색어가
+  제거된 페이지뷰, 철회 뒤 `ga-disable`·전체 동의 `denied`, 새로고침 뒤 태그 0, console
+  메시지 0을 확인했다. 실제 운영 ID의 쿠키·DebugView/수신, 모바일 Chrome 실기기는 미검증이다.
+- AdPilot 병렬 브랜치는 최적화 역할과 URL `goal` 상세 선택을 분리하고 `GA4 관측` 명칭,
+  고객명 하드코딩 제거, 상충 키워드의 미귀속+`conflictingEvents` 진단을 범용 구현했다.
+  구현 커밋은 `b7c91dee6d1a2045eb3505aceac9e096803b46a1`, 문서 정합성 후속까지 포함한 최신 원격
+  HEAD는 `59ac8c42a0512525fd9cde7c3a80bbca9ccaf917`이다. 선별 16개·DB suite 제외 147개 테스트,
+  typecheck·lint·production build가 통과했고 기존 DB suite 1개만 `DATABASE_URL` 부재로
+  시작하지 못했다. 양쪽 모두 외부 GA4/Naver 연결·OAuth·실데이터·운영 데이터·광고 변경·
+  main 병합·배포를 수행하지 않았다. `PROJECT_PLAN.md`는 v1.57이다.
+
+### 2026-08-19 — GA4·AdPilot 광고 성과 측정 계약 v1 후보
+- `docs/GA4_MEASUREMENT_V1.md`에 `lawand-ga4-measurement-v1`을 확정했다. GA4는 basic
+  consent로 분석에 동의한 Next.js 방문만 수동·정제 페이지뷰로 관측하고, 광고 관련 동의·
+  Google Signals·맞춤형 광고는 항상 비활성화한다. 전체 URL·`n_query`·실제 검색어·상담
+  식별자·연락처·진단값은 보내지 않으며, 직접 상담과 상담을 생성한 자가진단의 `new`·
+  `suspected_duplicate`만 `generate_lead` 후보로 둔다. gateway·ERP는 전체 운영 성과,
+  GA4·AdPilot은 동의 방문의 `GA4 관측 리드`라는 경계를 유지한다.
+- 네이버 광고와 로앤 GA4 운영 속성·웹 스트림을 연결하지 않은 상태에서 AdPilot의 범용
+  Admin/Data API·goal mapping·`getGa4NaverGoalAttribution`·`nkw-...` 파서를 대조했고
+  조건부 호환으로 확정했다. AdPilot 상대 계약 v1.0.0은 원격 작업 브랜치 커밋
+  `784a783659036b668f56204f9e1d8f722f626a1c`다. 로앤 전용 스키마나 파서는 필요하지 않다.
+- AdPilot은 supporting 목표의 키워드 row를 이미 계산하지만 상세 표는 primary만 보여 주므로,
+  최적화 역할과 상세 보고 목표를 분리하는 범용 UX가 필요하다. 상세 열람을 이유로 로앤
+  `generate_lead`를 primary로 승격하지 않는다. `GA4 전체 발생`의 관측 경계 명칭,
+  `리걸프렌즈` 고정 안내, 서로 다른 `sessionManualTerm`·랜딩 키워드 ID의 무음 우선순위도
+  계정 연결 전 범용 후속 게이트로 기록했다.
+- 이 후보에서는 홈페이지·gateway·ERP·DB 코드, 개인정보처리방침 본문, 외부 계정·OAuth·
+  실데이터·광고 설정·운영 데이터·main 병합·배포를 변경하거나 수행하지 않았다. 문서 정합성
+  검증과 `git diff --check`만 수행하며 `PROJECT_PLAN.md`는 v1.56이다.
+### 2026-08-19 — ERP 전화데스크 상세 센트릭스 재통화 후보
+- 전화데스크 통화 상세 헤더에 기존 `ClickToCallButton`을 연결했다. 통화에서 상담 또는
+  리걸프렌즈 고객 대상을 확인할 수 있으면 상담 담당자 여부와 무관하게 모든 인증 직원에게
+  버튼이 보이며, 실제 발신은 누른 직원 본인의 활성 센트릭스 주 회선과 기존 중복 방지·감사
+  계약을 사용한다. 내선 통화나 안전한 고객 대상을 특정할 수 없는 통화에는 버튼을 만들지 않는다.
+- 전화 후처리의 `고객에게 문자 남기기`에서 실제 개인 링크를 반영하지 못하던
+  `발송될 내용 미리보기` 영역을 제거했다. 문자와 재통화가 같은 상담·리걸프렌즈 대상 판정을
+  사용하도록 공통 helper로 정리했고, 모바일에서는 발신 버튼과 목록 복귀가 세로 전체 너비로
+  배치된다.
+- ERP typecheck·lint·production build와 `git diff --check`를 통과했다. 최초 ERP build는
+  이 워크트리에 `@lawand/core` dist가 없어 모듈 해석 단계에서 중단됐고 core를 먼저 build한 뒤
+  ERP 전체 build를 다시 실행해 통과했다. migration·스키마·gateway·운영 데이터·외부 발신·
+  main 병합·운영 배포는 수행하지 않았다. `PROJECT_PLAN.md`는 v1.56이다.
+### 2026-08-19 — ERP 담당자 변경 전 직원 허용·버튼 정렬 후보
+- 일반 담당자 변경은 ERP의 `canChangeAssignee`와 gateway의 `transfer_forbidden` 검사 양쪽에서
+  현재 담당자 또는 관리자에게만 제한돼 있었다. 상담 접근 권한이 있는 인증 직원이면 누구나
+  변경 버튼을 보고 요청할 수 있도록 두 제한을 제거했다. 대상 직원 활성 계정 검증, 같은 담당자
+  차단, 리걸프렌즈 등록·무효·상담 상태 조건, pending 멱등 처리와 외부 성공 뒤 ERP 확정은
+  그대로 유지한다.
+- 처리 현황 카드의 담당자명과 변경 버튼을 `minmax(0, 1fr) + 64px` 그리드로 정렬하고 버튼 폭을
+  고정해 이름 길이와 화면 폭에 따라 버튼 위치가 흔들리지 않게 했다. migration·운영 데이터·
+  main 병합·운영 배포는 수행하지 않았다. gateway 179개 테스트, gateway·ERP typecheck·lint·
+  production build와 core·DB 선행 build, `git diff --check`를 통과했다. `PROJECT_PLAN.md`는
+  v1.57이다.
+
+### 2026-08-19 — ERP closed·미배정 무효 상담 복원 후속 후보
+- 운영 사례 `LA-260819-MD4J5HPA`는 리걸프렌즈 담당자가 `lawandfirm_s999`였지만 ERP 상태가
+  `closed`이고 `consultation_assignments`가 없어 기존 복원 UI와 API 전제에서 빠졌다. 무효는
+  상담 상태가 아니라 리걸프렌즈 특수 담당자라는 규칙으로 교정해, gateway 상세가 배정 없이도
+  `legalFriendsCase`를 반환하고 soft-delete가 아닌 무효 사건에는 상태·배정과 무관하게
+  `상담으로 되돌리기`를 노출한다.
+- 복원 전용 outbox 이벤트는 실행 직원의 활성 주 멤버십·리걸프렌즈 계정을 snapshot으로
+  검증·보존한다. 외부 `changeManager` 성공 뒤 한 트랜잭션에서 기존 배정은 실행 직원으로
+  갱신하고, 배정이 없으면 새로 생성하며, `closed`·`requested` 등은 업무 가능한 `assigned`로
+  바꾸고 상태 이력·완료 감사·실시간 상담 변경 이벤트를 남긴다. 외부 실패·불명 전에는 ERP
+  배정과 상태를 바꾸지 않으며 pending 복원 재클릭은 같은 이벤트를 반환하고 무효·일반 담당자
+  변경과의 충돌을 차단한다.
+- 기존 outbox·배정·상태 이력 원장만 사용해 migration은 추가하지 않았다. 기존 배정 보유 무효
+  건과 `closed`·미배정 무효 건의 정합화 계획 회귀 테스트를 추가했다. core 92개·gateway
+  179개 테스트, core·DB·gateway·ERP typecheck·lint·production build, DB schema check와
+  `git diff --check`를 통과했다. 운영 데이터·main 병합·운영 배포는 수행하지 않았다.
+  `PROJECT_PLAN.md`는 v1.56이다.
+### 2026-08-19 — ERP 소개자 담당 표시·전화 후처리 소개자 원장 후보
+- 상담 목록이 새 고객 전화번호로만 리걸프렌즈 기존 담당자를 찾던 경계를 보완했다. 소개건은
+  `consultation_directory_sources`의 암호화 소개자 사건 snapshot에서 담당자명을 읽어
+  `소개건 · 소개자 담당 {이름}` 배지로 표시하고 검색에도 포함한다. 상담 상세 상단과 사건 문맥,
+  상담데스크·고객찾기 등록 모달도 `기존 담당`과 `소개자 담당`을 명확히 구분한다.
+- 전화데스크 후처리의 소개건에는 소개자 이름·전화번호 검색과 사건 선택을 추가했다. 소개자를
+  선택하지 않으면 저장할 수 없고, gateway가 고객·사건 ID를 다시 조회한 뒤 소개자 사건·담당
+  snapshot을 상담 요청·후처리와 같은 트랜잭션에서 AES-GCM 암호화 원장으로 보존한다. 기존
+  소개건은 이미 저장된 snapshot을 목록에서 읽으므로 별도 backfill이 필요 없다.
+- core 92개·gateway 177개 테스트, core·DB·gateway·ERP typecheck/lint와 production build,
+  DB schema check, `git diff --check`를 통과했다. migration·스키마·운영 데이터·외부 호출은
+  변경하지 않았고 main 병합·운영 배포도 수행하지 않았다. `PROJECT_PLAN.md`는 v1.57이다.
+
+### 2026-08-19 — ERP 소개·기존 상담명 자동 접미사 후보
+- 상담데스크 신규등록에서 기존고객·소개건을 선택하면 고객명 입력칸 안에 각각 `_기존`·
+  `_소개`를 수정 불가능한 고정 접미사로 표시한다. 같은 등록 계약을 쓰는 고객찾기 신건 모달도
+  동일하게 맞췄다. 전화데스크 후처리의 `신건상담으로 저장`에는 두 항목을 동시에 선택할 수
+  없도록 기존고객·소개건 체크를 추가하고 같은 입력 UI를 재사용한다.
+- 공통 core 정규화가 끝에 직접 입력했거나 반복된 `_기존`·`_소개`를 모두 제거한 뒤 현재 선택한
+  접미사 하나만 붙이며, gateway는 암호화 고객명·요청명·이름 지문·멱등 payload를 모두 이
+  정규화 이름으로 저장한다. 접미사를 포함한 최종 50자 제한을 계약과 UI 양쪽에서 적용했다.
+  migration·스키마·운영 데이터 변경은 없다.
+- core 92개·gateway 177개 테스트, core·DB·gateway·ERP typecheck/lint와 production build,
+  DB schema check, `git diff --check`를 통과했다. 첫 gateway 테스트는 선행 DB dist가 없어
+  모듈 해석에서 중단됐고 core·DB build 뒤 전체를 다시 실행해 통과했다. `HERDR_ENV`가 없고
+  HERDR 서버도 실행 중이 아니어서 Git 워크트리만 확인했다. main 병합·운영 배포·외부 호출은
+  수행하지 않았다. `PROJECT_PLAN.md`는 v1.56이다.
+### 2026-08-19 — ERP 상단 내비게이션 단순화 후보
+- ERP의 상담·고객 찾기·후기·전화·문자는 핵심 1차 메뉴로 유지하고, 모든 직원이 쓰는
+  전화번호부는 `더보기`, 관리자 전용 직원 관리는 별도 `관리` 드롭다운으로 분리했다.
+  전화번호부를 관리자 기능으로 분류하지 않으며 향후 일반 저빈도 기능과 관리자 기능이
+  서로 다른 확장 지점을 갖도록 했다.
+- 전화번호부·직원 관리 화면에서는 각각 상위 메뉴와 하위 항목을 활성 표시한다. 기본
+  `details` 키보드 동작에 바깥 클릭·Escape·페이지 이동 닫기를 더했고, 메뉴 텍스트의
+  줄바꿈을 차단하면서 480px 이하에서는 기존 아이콘 중심 표시를 유지했다.
+- ERP typecheck·lint, core 선행 build 뒤 ERP production build와 `git diff --check`를
+  통과했다. 첫 ERP build는 이 워크트리에 core dist가 없어 `@lawand/core` 해석에 실패했으나
+  core를 먼저 빌드한 뒤 동일 ERP build가 성공했다. migration·스키마·운영 데이터·main 병합·
+  운영 배포는 수행하지 않았다. `PROJECT_PLAN.md`는 v1.56이다.
+### 2026-08-19 — 센트릭스 수신문자 안정 중복키·기존 원장 정리 후보
+- 센트릭스 수신 목록의 `NO`가 새 문자에 따라 바뀌어 같은 문자를 반복 저장하던 결함을
+  수정했다. worker는 endpoint·발신번호 지문·수신 시각·본문 지문을 안정 중복키로 선조회하고,
+  같은 4개 컬럼의 DB unique index와 충돌 무시를 함께 사용해 순차·동시 재수집을 차단한다.
+  provider identity 지문도 목록 순번을 제외한 같은 안정 identity로 기록한다.
+- migration `0068_centrex_inbound_message_deduplication.sql`은 적용 시점의 기존 중복을 동적으로
+  찾는다. 최신 발신 연결이 가장 강한 수신문자 행을 canonical로 보존하고, 직원별 알림은
+  `latest_sender`·`consultation_assignee`·`unmatched_admin` 우선순위로 합치며 하나라도 읽은
+  복제본이 있으면 읽은 시각을 보존한다. 그 뒤 초과 행을 제거하고 안정 unique index를 만든다.
+  마지막 읽기 전용 운영 표본은 31그룹·초과 56행이며 연결 대상이 갈리거나 읽음 상태가 섞인
+  그룹은 없었다.
+- 로컬 PostgreSQL 트랜잭션 fixture에서 두 중복 원장과 직원 알림을 1개로 병합하고 읽음 상태를
+  유지하며 같은 문자의 재삽입이 0행인 것을 확인한 뒤 rollback했다. 전체 5패키지 typecheck·
+  lint·production build, core 91개·gateway 178개 테스트, DB schema check와 `git diff --check`를
+  통과했다. 이 브랜치에서는 운영 migration·운영 데이터·main 병합·운영 배포·외부 발송을
+  수행하지 않았다. `PROJECT_PLAN.md`는 v1.58이다.
+
+### 2026-08-19 — 센트릭스 수신문자 중복 원인 운영 진단
+- 사용자 휴대전화 캡처의 `02-555-7465` 대화와 운영 원장을 읽기 전용으로 대조했다.
+  끝번호·상담 `김충환3_테스트`·대표번호 연결과 최신 발신 연결은 정확해 다른 고객 오매칭은
+  아니다. 캡처의 수신 문구와 시각도 원장에 도착했다.
+- 센트릭스 `getrecvsmslist` 응답의 `NO`가 영구 식별자가 아니라 새 문자에 따라 밀리는 목록
+  순번인데 provider identity 지문에 포함돼 있다. 같은 시각·발신번호·본문이 `NO 1→2→3`으로
+  바뀔 때 새 수신문자와 알림으로 반복 저장된다. 해당 상담은 실제 5건이 16행이며 운영 전체는
+  중복 그룹 31개·초과 56행이다. 최신 캡처의 한 문자는 휴대전화 화면과 달리 센트릭스 API
+  원문 단계에서 한 글자가 `?`로 반환된 별도 전달 충실도 문제도 확인했다.
+- 후속 수정은 endpoint·발신번호 지문·수신 시각·본문 지문을 안정 중복키로 사용하고, 기존
+  중복 수신문자와 직원별 읽음 원장을 보수적으로 병합해야 한다. 이 진단에서는 운영 원장·배포·
+  외부 발송을 변경하지 않았다. `PROJECT_PLAN.md`는 v1.57이다.
+
+### 2026-08-19 — ERP 문자 미읽음 우선 정렬 후보
+- 문자 내비게이션 미읽음 숫자는 직원별 수신문자 알림 원장에서 계산하지만 기존 대화 목록은
+  최근 문자 시각순이고 미읽음 상태를 표시하지 않아 오래된 미읽음 대화를 찾기 어려웠다.
+  gateway 문자 허브가 현재 직원의 대화별 미읽음 건수를 함께 계산해 미읽음 대화를 최상단에
+  모으고, 같은 상태 안에서는 최신순을 유지하도록 keyset cursor까지 확장했다.
+- ERP 대화 목록에 대화별 미읽음 숫자를 표시하며 대화 조회 성공 뒤 해당 표시를 즉시 지우고
+  기존 전역 배지 재조회 이벤트를 유지한다. core·DB 선행 build 뒤 gateway 177개 테스트와
+  gateway·ERP typecheck/lint, `git diff --check`를 통과했다. migration·운영 데이터·main 병합·
+  운영 배포는 수행하지 않았다.
+  `PROJECT_PLAN.md`는 v1.56이다.
 
 ### 2026-08-18 — Orca 완료 작업 6개 통합 운영 배포 완료
 - Orca 완료 worktree 6개를 main에 병합하고 로컬·원격 worktree HEAD가 최종 main

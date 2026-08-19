@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createDataProtection } from "./crypto.js";
-import { resolveStoredRegistrationName } from "./outbox-worker.js";
+import {
+  matchesRestorationAssignmentSnapshot,
+  planRestoredConsultation,
+  resolveStoredRegistrationName,
+} from "./outbox-worker.js";
 
 const protection = createDataProtection({
   encryptionKey: Buffer.alloc(32, 1).toString("base64"),
@@ -48,5 +52,45 @@ test("저장된 선호 이름이 없으면 상담 익명 표시명을 사용한�
       preferredNameKeyVersion: null,
     }),
     "익명-테스트",
+  );
+});
+
+test("기존 배정이 남은 무효 상담은 같은 배정 행을 실행 직원으로 갱신한다", () => {
+  assert.deepEqual(
+    planRestoredConsultation({
+      currentState: "contacted",
+      assignmentId: "01984c7d-8500-7000-8000-000000000010",
+      targetAssignmentId: "01984c7d-8500-7000-8000-000000000011",
+    }),
+    {
+      assignmentOperation: "update",
+      assignmentId: "01984c7d-8500-7000-8000-000000000010",
+      nextState: "assigned",
+      recordStateTransition: true,
+    },
+  );
+});
+
+test("closed이면서 배정 없는 무효 상담은 새 배정을 만들고 assigned로 복원한다", () => {
+  assert.equal(
+    matchesRestorationAssignmentSnapshot(undefined, {
+      id: null,
+      assigneeUserId: null,
+      assigneeMembershipId: null,
+    }),
+    true,
+  );
+  assert.deepEqual(
+    planRestoredConsultation({
+      currentState: "closed",
+      assignmentId: null,
+      targetAssignmentId: "01984c7d-8500-7000-8000-000000000012",
+    }),
+    {
+      assignmentOperation: "insert",
+      assignmentId: "01984c7d-8500-7000-8000-000000000012",
+      nextState: "assigned",
+      recordStateTransition: true,
+    },
   );
 });
