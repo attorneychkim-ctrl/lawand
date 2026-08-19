@@ -164,7 +164,7 @@ Measurement ID 자체는 브라우저에 공개되는 값이지만, 배포 입�
 Secrets Manager의 홈페이지 환경에만 설정한다. property ID와 OAuth 자격증명을 홈페이지에
 넣지 않는다. AdPilot OAuth 토큰은 AdPilot의 암호화된 자격증명 경계에만 둔다.
 
-2026-08-19에 네 식별자 생성과 화면 대조를 완료했다. 정확한 값은 이 Git 문서에 기록하지
+2026-08-19에 식별자 4개 생성과 화면 대조를 완료했다. 정확한 값은 이 Git 문서에 기록하지
 않고 AdPilot `ga4_advertisement_with_lawand_session` Orca 터미널에 직접 인계했다. 메인
 통합·배포 세션에는 운영 secret 반영 직전에 별도 보안 경로로 Measurement ID만 전달한다.
 
@@ -172,7 +172,7 @@ Secrets Manager의 홈페이지 환경에만 설정한다. property ID와 OAuth 
 
 ### 6-1. 배포 전
 
-- [ ] 이 브랜치의 homepage test·typecheck·lint·production build 성공
+- [x] 이 브랜치의 homepage test·typecheck·lint·production build 성공
 - [ ] 개인정보 보호책임자 승인과 GA 관리 설정 증거 완료
 - [ ] 메인 세션에서 현재 `main`과 모든 완료 worktree 포함 여부 대조
 - [ ] 운영 Measurement ID를 secret에 설정하되 로그·커밋에 전체 값을 출력하지 않음
