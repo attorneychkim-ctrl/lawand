@@ -176,6 +176,35 @@
   이 워크트리에 `@lawand/core` dist가 없어 모듈 해석 단계에서 중단됐고 core를 먼저 build한 뒤
   ERP 전체 build를 다시 실행해 통과했다. migration·스키마·gateway·운영 데이터·외부 발신·
   main 병합·운영 배포는 수행하지 않았다. `PROJECT_PLAN.md`는 v1.56이다.
+### 2026-08-19 — ERP 담당자 변경 전 직원 허용·버튼 정렬 후보
+- 일반 담당자 변경은 ERP의 `canChangeAssignee`와 gateway의 `transfer_forbidden` 검사 양쪽에서
+  현재 담당자 또는 관리자에게만 제한돼 있었다. 상담 접근 권한이 있는 인증 직원이면 누구나
+  변경 버튼을 보고 요청할 수 있도록 두 제한을 제거했다. 대상 직원 활성 계정 검증, 같은 담당자
+  차단, 리걸프렌즈 등록·무효·상담 상태 조건, pending 멱등 처리와 외부 성공 뒤 ERP 확정은
+  그대로 유지한다.
+- 처리 현황 카드의 담당자명과 변경 버튼을 `minmax(0, 1fr) + 64px` 그리드로 정렬하고 버튼 폭을
+  고정해 이름 길이와 화면 폭에 따라 버튼 위치가 흔들리지 않게 했다. migration·운영 데이터·
+  main 병합·운영 배포는 수행하지 않았다. gateway 179개 테스트, gateway·ERP typecheck·lint·
+  production build와 core·DB 선행 build, `git diff --check`를 통과했다. `PROJECT_PLAN.md`는
+  v1.57이다.
+
+### 2026-08-19 — ERP closed·미배정 무효 상담 복원 후속 후보
+- 운영 사례 `LA-260819-MD4J5HPA`는 리걸프렌즈 담당자가 `lawandfirm_s999`였지만 ERP 상태가
+  `closed`이고 `consultation_assignments`가 없어 기존 복원 UI와 API 전제에서 빠졌다. 무효는
+  상담 상태가 아니라 리걸프렌즈 특수 담당자라는 규칙으로 교정해, gateway 상세가 배정 없이도
+  `legalFriendsCase`를 반환하고 soft-delete가 아닌 무효 사건에는 상태·배정과 무관하게
+  `상담으로 되돌리기`를 노출한다.
+- 복원 전용 outbox 이벤트는 실행 직원의 활성 주 멤버십·리걸프렌즈 계정을 snapshot으로
+  검증·보존한다. 외부 `changeManager` 성공 뒤 한 트랜잭션에서 기존 배정은 실행 직원으로
+  갱신하고, 배정이 없으면 새로 생성하며, `closed`·`requested` 등은 업무 가능한 `assigned`로
+  바꾸고 상태 이력·완료 감사·실시간 상담 변경 이벤트를 남긴다. 외부 실패·불명 전에는 ERP
+  배정과 상태를 바꾸지 않으며 pending 복원 재클릭은 같은 이벤트를 반환하고 무효·일반 담당자
+  변경과의 충돌을 차단한다.
+- 기존 outbox·배정·상태 이력 원장만 사용해 migration은 추가하지 않았다. 기존 배정 보유 무효
+  건과 `closed`·미배정 무효 건의 정합화 계획 회귀 테스트를 추가했다. core 92개·gateway
+  179개 테스트, core·DB·gateway·ERP typecheck·lint·production build, DB schema check와
+  `git diff --check`를 통과했다. 운영 데이터·main 병합·운영 배포는 수행하지 않았다.
+  `PROJECT_PLAN.md`는 v1.56이다.
 
 ### 2026-08-18 — Orca 완료 작업 6개 통합 운영 배포 완료
 - Orca 완료 worktree 6개를 main에 병합하고 로컬·원격 worktree HEAD가 최종 main

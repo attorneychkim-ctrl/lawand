@@ -3791,9 +3791,7 @@ export function createGatewayServer(options?: {
           response,
           error.code === "consultation_not_found"
             ? 404
-            : error.code === "transfer_forbidden"
-              ? 403
-              : 409,
+            : 409,
           {
             error: error.code,
             message: error.message,

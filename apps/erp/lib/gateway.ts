@@ -1553,7 +1553,6 @@ export async function invalidateLegalFriendsCase(id: string): Promise<{
 
 export async function restoreInvalidatedLegalFriendsCase(id: string): Promise<{
   consultationId: string;
-  transferId: string;
   eventId: string;
   state: "queued";
   replayed: boolean;
@@ -1571,7 +1570,6 @@ export async function restoreInvalidatedLegalFriendsCase(id: string): Promise<{
   }
   return (await response.json()) as {
     consultationId: string;
-    transferId: string;
     eventId: string;
     state: "queued";
     replayed: boolean;

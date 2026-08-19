@@ -8495,9 +8495,16 @@ a.inbound-customer:hover { text-decoration: underline; }
 }
 .consultation-restoration-button:hover:not(:disabled) { background: var(--brand-softer); }
 
-.workflow-assignment-value { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.workflow-assignment-value {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+.workflow-assignee-name { min-width: 0; overflow-wrap: anywhere; }
 .assignee-transfer-control { display: grid; justify-items: end; gap: 7px; }
 .assignee-transfer-trigger {
+  width: 64px;
   min-height: 28px;
   padding: 0 9px;
   border: 1px solid color-mix(in srgb, var(--brand) 35%, var(--line));
@@ -8975,8 +8982,8 @@ a.inbound-customer:hover { text-decoration: underline; }
   .detail-actions .consultation-invalidation-button,
   .detail-actions .consultation-soft-delete-button { width: 100%; }
   .consultation-invalidation-error { max-width: none; text-align: left; }
-  .workflow-assignment-value { align-items: flex-start; flex-direction: column; }
-  .assignee-transfer-control { width: 100%; justify-items: stretch; }
+  .workflow-assignment-value { grid-template-columns: minmax(0, 1fr) 64px; }
+  .assignee-transfer-control { justify-items: end; }
   .assignee-transfer-state { justify-items: start; text-align: left; }
   .assignee-transfer-state small { max-width: none; }
   .assignee-transfer-trigger { min-height: 34px; }

@@ -185,6 +185,24 @@ const legalFriendsManagerChangeReferenceDataSchema =
     })
     .strict();
 
+const legalFriendsRestorationReferenceDataSchema = z
+  .object({
+    consultationId: z.uuid(),
+    caseLinkRef: z
+      .string()
+      .regex(/^legalfriends_case_links\/[0-9a-f-]{36}$/),
+    requestedByUserId: z.uuid(),
+    targetAssigneeUserId: z.uuid(),
+    targetAssigneeMembershipId: z.uuid(),
+    targetAssignmentId: z.uuid(),
+    previousAssignmentId: z.uuid().nullable(),
+    previousAssigneeUserId: z.uuid().nullable(),
+    previousAssigneeMembershipId: z.uuid().nullable(),
+    targetManagerExternalAccountId: z.string().trim().min(1).max(200),
+    targetManagerMemberIdx: z.number().int().positive(),
+  })
+  .strict();
+
 const requestReferenceDataSchema = z
   .object({
     consultationId: z.uuid(),
@@ -412,6 +430,23 @@ export const legalfriendsManagerChangeRequestedEventSchema =
     })
     .strict();
 
+export const legalfriendsRestorationRequestedEventSchema =
+  eventEnvelopeSchema
+    .extend({
+      eventType: z.literal(
+        "legalfriends.consultation.restoration.requested",
+      ),
+      data: legalFriendsRestorationReferenceDataSchema,
+    })
+    .strict();
+
+export const consultationRestoredEventSchema = eventEnvelopeSchema
+  .extend({
+    eventType: z.literal("consultation.restored"),
+    data: legalFriendsRestorationReferenceDataSchema,
+  })
+  .strict();
+
 export const consultationAssignmentTransferredEventSchema =
   eventEnvelopeSchema
     .extend({
@@ -466,6 +501,7 @@ export const platformEventSchema = z.discriminatedUnion("eventType", [
   consultationGroupUpdatedEventSchema,
   consultationAssignedEventSchema,
   consultationAssignmentTransferredEventSchema,
+  consultationRestoredEventSchema,
   consultationKakaoChatConfirmedEventSchema,
   consultationKakaoEntryInvalidatedEventSchema,
   telephonyCallRequestedEventSchema,
@@ -473,6 +509,7 @@ export const platformEventSchema = z.discriminatedUnion("eventType", [
   legalfriendsRegistrationRequestedEventSchema,
   legalfriendsInvalidationRequestedEventSchema,
   legalfriendsManagerChangeRequestedEventSchema,
+  legalfriendsRestorationRequestedEventSchema,
   alimtalkRequestNotificationRequestedEventSchema,
   alimtalkAssignmentNotificationRequestedEventSchema,
 ]);
@@ -498,6 +535,9 @@ export type ConsultationAssignedEvent = z.infer<
 export type ConsultationAssignmentTransferredEvent = z.infer<
   typeof consultationAssignmentTransferredEventSchema
 >;
+export type ConsultationRestoredEvent = z.infer<
+  typeof consultationRestoredEventSchema
+>;
 export type ConsultationKakaoChatConfirmedEvent = z.infer<
   typeof consultationKakaoChatConfirmedEventSchema
 >;
@@ -512,6 +552,9 @@ export type LegalFriendsInvalidationRequestedEvent = z.infer<
 >;
 export type LegalFriendsManagerChangeRequestedEvent = z.infer<
   typeof legalfriendsManagerChangeRequestedEventSchema
+>;
+export type LegalFriendsRestorationRequestedEvent = z.infer<
+  typeof legalfriendsRestorationRequestedEventSchema
 >;
 export type TelephonyCallRequestedEvent = z.infer<
   typeof telephonyCallRequestedEventSchema
