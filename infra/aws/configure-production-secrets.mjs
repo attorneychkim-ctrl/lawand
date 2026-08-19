@@ -165,6 +165,7 @@ const shared = {
 const gatewayUrl = `http://${outputs.GatewayPrivateIp}:3022`;
 const erpBaseUrl = "https://erp.lawandfirm.com";
 const solapiMmsSender = "025557455";
+const centrexMessageSenderLine = "07046070588";
 
 const gatewaySecret = {
   ...existingGateway,
@@ -191,6 +192,7 @@ const gatewaySecret = {
   LAWAND_SOLAPI_API_KEY: gatewayLocal.LAWAND_SOLAPI_API_KEY ?? "",
   LAWAND_SOLAPI_API_SECRET: gatewayLocal.LAWAND_SOLAPI_API_SECRET ?? "",
   LAWAND_SOLAPI_MMS_SENDER: solapiMmsSender,
+  LAWAND_CENTREX_MESSAGE_SENDER_LINE: centrexMessageSenderLine,
   LAWAND_SOLAPI_PF_ID: gatewayLocal.LAWAND_SOLAPI_PF_ID ?? "",
   LAWAND_SOLAPI_REQUEST_TEMPLATE_ID:
     gatewayLocal.LAWAND_SOLAPI_REQUEST_TEMPLATE_ID ?? "",

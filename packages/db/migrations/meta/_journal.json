@@ -491,6 +491,13 @@
       "when": 1787122800000,
       "tag": "0069_legalfriends_linked_case_client_name",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1787122996692,
+      "tag": "0070_good_earthquake",
+      "breakpoints": true
     }
   ]
 }

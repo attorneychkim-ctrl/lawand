@@ -142,6 +142,42 @@
   사용했지만 로컬 DB가 migration `0066` 전이라 `created_by_user_id` 조회 전에 중단됐고,
   fixture가 만든 임시 행은 `finally` 정리 후 0건임을 확인했다. `HERDR_ENV`와 실행 중인 HERDR
   서버가 없어 Git 워크트리만 확인했다. `PROJECT_PLAN.md`는 v1.61이다.
+### 2026-08-19 — 센트릭스 0588 공용 SMS/LMS 라우팅·회신 수신함 매칭 후보
+- 센트릭스 텍스트 전용 SMS/LMS는 발송 직원의 개인 주 회선 대신 활성·인증 대표 endpoint
+  `070-4607-0588`로 요청한다. 발송 직원 ID는 그대로 보존하고 endpoint만 공용 회선으로
+  snapshot한다. 운영 설정 `LAWAND_CENTREX_MESSAGE_SENDER_LINE`의 기본값과 secret 생성 기준도
+  0588이며, 해당 endpoint가 없거나 인증 원장이 없으면 개인 회선으로 fallback하지 않고 503으로
+  중단한다. 개인 회선의 전화·Windows bridge 동작은 바꾸지 않았다.
+- migration `0069_talented_meltdown.sql`은 발송 원장에 표시 발신번호와 회신 mailbox endpoint
+  snapshot을 추가했다. 새 수신문자는 동일 mailbox·동일 고객번호 지문·수신시각 이전 조건을
+  모두 만족하는 최신 성공/결과불명 발송만 `reply_mailbox_latest_outbound`로 연결한다. snapshot이
+  없는 과거 발송과 다른 mailbox 발송은 번호만으로 추측하지 않고 미연결 원장·활성 관리자
+  알림으로 보존한다. ERP 대화는 고객번호만으로 합치지 않고 기존 Case_idx·상담·직접 연락처별
+  구분을 유지한다.
+- SOLAPI JPG MMS는 기존 직원 endpoint 원장과 `02-555-7455` 발신을 유지한다. 유일한
+  활성·인증 `public_number=025557455` 대표 endpoint가 있을 때만 7455를 회신 mailbox로
+  snapshot하며, 매핑 부재·중복은 기존 MMS 발송을 막지 않고 이후 회신만 안전하게 미연결 처리한다.
+- 전체 5패키지 test·typecheck·lint·production build, core 92개·gateway 183개 테스트,
+  DB schema check·재생성 no-op과 `git diff --check`를 통과했다. `PROJECT_PLAN.md`는 v1.62다.
+  이 브랜치에서는 main 병합·운영 migration·secret 갱신·배포·추가 외부 문자 발송을 수행하지
+  않았다.
+
+### 2026-08-19 — 센트릭스 0588 공용 문자 회선 운영 canary
+- 사용자의 명시적 승인으로 활성 대표 endpoint `070-4607-0588`을 발신 계정으로 고정해
+  통제 SMS 1건을 운영 발송했다. 김충환 직원 원장과 수동 연락처·outbox·감사 원장을 보존했고,
+  센트릭스는 2026-08-19 15:25:28 KST에 `SVC_RT=0000`으로 수락했다. 선행 등록 시도 1회는
+  외부 발송 전에 DB 잠금 문법 오류로 트랜잭션 전체가 취소되어 중복 발송되지 않았다.
+- 고객의 `하나둘0588` 회신은 전화 단말 전원·인터넷이 연결되지 않은 상태에서도 15:31:48 KST에
+  같은 0588 대표 수신함으로 들어왔고, gateway가 15:32:02 KST에 가져와 정확한 통제 발송
+  원장과 `latest_outbound`로 연결했다. 최신 발송 직원 김충환에게 `latest_sender` 알림도
+  생성됐으며 mailbox 오류는 없다. 따라서 0588 계정을 여러 직원의 공용 SMS/LMS 발신·회신
+  회선으로 쓰는 수직 경로와 단말 비의존 수신은 운영에서 확인됐다.
+- 고객 단말에서도 RID 제거 뒤 발신번호가 `070-4607-0588`로 표시된 것을 사용자가 확인했다.
+  현재 회신 연결은 수신 mailbox를 조건으로 삼지 않고 고객번호의 전역 최신 발송을 고르는
+  구조이므로, 공용 회선 제품화 전에는 발송 시점 회신 mailbox snapshot과 mailbox별 매칭으로
+  보강해야 한다. SOLAPI MMS `02-555-7455`도 별도 회신 mailbox mapping이 필요하다.
+  `PROJECT_PLAN.md`를 v1.61로 갱신했으며 소스·migration·배포는 변경하지 않았고 운영에는
+  통제 발신·수신 각 1건과 그 감사·알림 원장만 추가됐다.
 
 ### 2026-08-19 — Orca 완료 작업 6개 통합 운영 배포 완료
 - Orca 완료 브랜치 6개를 최종 `main` `224e156619f4fab3b9d78f7ca9204e377de5b4c8`에

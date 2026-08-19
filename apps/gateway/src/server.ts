@@ -124,6 +124,7 @@ const telephonyService = createTelephonyService({
   dispatchEnabled: config.centrexWorkerEnabled,
   solapiClient,
   solapiMmsSender: config.solapiMmsSender,
+  centrexMessageSenderLine: config.centrexMessageSenderLine,
   answerableBridgeIds: new Set(Object.keys(config.centrexBridgeKeys ?? {})),
 });
 const reviewManagementService = createReviewManagementService({
