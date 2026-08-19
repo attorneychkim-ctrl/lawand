@@ -3363,6 +3363,12 @@ export const telephonyInboundMessages = pgTable(
       table.endpointId,
       table.providerIdentityFingerprint,
     ),
+    uniqueIndex("telephony_inbound_messages_stable_identity_uidx").on(
+      table.endpointId,
+      table.remotePhoneFingerprint,
+      table.receivedAt,
+      table.bodyFingerprint,
+    ),
     index("telephony_inbound_messages_endpoint_received_idx").on(
       table.endpointId,
       table.receivedAt,

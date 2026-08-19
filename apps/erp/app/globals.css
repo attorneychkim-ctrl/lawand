@@ -8286,6 +8286,8 @@ a.inbound-customer:hover { text-decoration: underline; }
 .message-thread-context,
 .message-thread-preview { display: flex; min-width: 0; align-items: center; gap: 7px; }
 .message-thread-heading { justify-content: space-between; }
+.message-thread-status { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; }
+.message-thread-unread { min-width: 18px; padding: 2px 5px; border-radius: 999px; background: var(--brand); color: #fff; font-size: .54rem; font-style: normal; font-weight: 850; line-height: 1.35; text-align: center; }
 .message-thread-heading strong { overflow: hidden; color: var(--ink); font-size: .75rem; text-overflow: ellipsis; white-space: nowrap; }
 .message-thread-heading time,
 .message-thread-list small { color: var(--muted); font-size: .57rem; white-space: nowrap; }
