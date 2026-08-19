@@ -740,6 +740,12 @@ export default async function ConsultationDetailPage({
       : invalidationRequest
         ? "failed"
         : "ready";
+  const restorationPending = consultation.integrationRequests.some(
+    (request) =>
+      request.eventType ===
+        "legalfriends.consultation.restoration.requested" &&
+      request.status === "pending",
+  );
   const canInvalidateLegalFriendsCase =
     !isSoftDeleted &&
     !legalFriendsInvalidated &&
@@ -836,7 +842,7 @@ export default async function ConsultationDetailPage({
             {!isSoftDeleted && legalFriendsInvalidated ? (
               <LegalFriendsRestorationButton
                 consultationId={consultation.id}
-                pending={consultation.assignmentTransfers[0]?.status === "pending"}
+                pending={restorationPending}
               />
             ) : null}
             {!isSoftDeleted && consultation.kakaoEntry?.status === "pending" ? (

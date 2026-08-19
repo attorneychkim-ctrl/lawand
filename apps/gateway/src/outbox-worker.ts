@@ -19,6 +19,7 @@ import {
   LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
   legalfriendsInvalidationRequestedEventSchema,
   legalfriendsManagerChangeRequestedEventSchema,
+  legalfriendsRestorationRequestedEventSchema,
   legalfriendsRegistrationRequestedEventSchema,
   type PlatformEvent,
   residenceRegionSchema,
@@ -29,6 +30,7 @@ import {
   consultationGroupMembers,
   consultationGroups,
   consultationRequests,
+  consultationStatusHistory,
   consultations,
   legalFriendsCaseLinks,
   outboxDeliveryAttempts,
@@ -56,10 +58,13 @@ const INVALIDATION_EVENT_TYPE =
   "legalfriends.consultation.invalidation.requested" as const;
 const MANAGER_CHANGE_EVENT_TYPE =
   "legalfriends.consultation.manager_change.requested" as const;
+const RESTORATION_EVENT_TYPE =
+  "legalfriends.consultation.restoration.requested" as const;
 const EVENT_TYPES = [
   REGISTRATION_EVENT_TYPE,
   INVALIDATION_EVENT_TYPE,
   MANAGER_CHANGE_EVENT_TYPE,
+  RESTORATION_EVENT_TYPE,
 ] as const;
 const MAX_ATTEMPTS = 5;
 const LEASE_TIMEOUT_MS = 2 * 60 * 1_000;
@@ -73,6 +78,39 @@ type ClaimedEvent = {
   attemptId: string;
   attemptNumber: number;
 };
+
+export function planRestoredConsultation(input: {
+  currentState: "requested" | "assigned" | "contacted" | "completed" | "engaged" | "closed";
+  assignmentId: string | null;
+  targetAssignmentId: string;
+}) {
+  return {
+    assignmentOperation: input.assignmentId ? "update" as const : "insert" as const,
+    assignmentId: input.assignmentId ?? input.targetAssignmentId,
+    nextState: "assigned" as const,
+    recordStateTransition: input.currentState !== "assigned",
+  };
+}
+
+export function matchesRestorationAssignmentSnapshot(
+  assignment: {
+    id: string;
+    assigneeUserId: string;
+    assigneeMembershipId: string;
+  } | undefined,
+  expected: {
+    id: string | null;
+    assigneeUserId: string | null;
+    assigneeMembershipId: string | null;
+  },
+) {
+  return (
+    (assignment?.id ?? null) === expected.id &&
+    (assignment?.assigneeUserId ?? null) === expected.assigneeUserId &&
+    (assignment?.assigneeMembershipId ?? null) ===
+      expected.assigneeMembershipId
+  );
+}
 
 type DeliveryFailure = {
   code: string;
@@ -1071,6 +1109,219 @@ export function createOutboxWorker(options: {
     return httpStatus;
   }
 
+  async function deliverRestoration(event: ClaimedEvent) {
+    const envelope = legalfriendsRestorationRequestedEventSchema.parse(
+      event.payload,
+    );
+    if (
+      envelope.correlationId !== event.aggregateId ||
+      envelope.data.consultationId !== event.aggregateId ||
+      envelope.data.caseLinkRef !==
+        `legalfriends_case_links/${event.aggregateId}`
+    ) {
+      throw new Error("legalfriends_restoration_event_mismatch");
+    }
+
+    const [consultation] = await db
+      .select({ state: consultations.state, softDeletedAt: consultations.softDeletedAt })
+      .from(consultations)
+      .where(eq(consultations.id, event.aggregateId))
+      .limit(1);
+    const [assignment] = await db
+      .select({
+        id: consultationAssignments.id,
+        assigneeUserId: consultationAssignments.assigneeUserId,
+        assigneeMembershipId: consultationAssignments.assigneeMembershipId,
+      })
+      .from(consultationAssignments)
+      .where(eq(consultationAssignments.consultationId, event.aggregateId))
+      .limit(1);
+    const [link] = await db
+      .select()
+      .from(legalFriendsCaseLinks)
+      .where(eq(legalFriendsCaseLinks.consultationId, event.aggregateId))
+      .limit(1);
+    if (!consultation || consultation.softDeletedAt) {
+      throw new Error("consultation_not_restorable");
+    }
+    if (!link) throw new Error("legalfriends_case_link_not_found");
+    if (
+      link.managerExternalAccountId !==
+      LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID
+    ) {
+      if (
+        link.managerExternalAccountId ===
+          envelope.data.targetManagerExternalAccountId &&
+        assignment?.assigneeUserId === envelope.data.targetAssigneeUserId &&
+        assignment.assigneeMembershipId ===
+          envelope.data.targetAssigneeMembershipId &&
+        consultation.state === "assigned"
+      ) {
+        return 200;
+      }
+      throw new Error("legalfriends_case_not_invalidated");
+    }
+    if (!matchesRestorationAssignmentSnapshot(assignment, {
+      id: envelope.data.previousAssignmentId,
+      assigneeUserId: envelope.data.previousAssigneeUserId,
+      assigneeMembershipId: envelope.data.previousAssigneeMembershipId,
+    })) {
+      throw new Error("restoration_assignment_source_changed");
+    }
+
+    const changed = await legalFriendsClient.changeManager(
+      link.caseIdx,
+      envelope.data.targetManagerExternalAccountId,
+      { eventId: event.id, consultationId: event.aggregateId },
+    );
+    const changedAt = now();
+    try {
+      await db.transaction(async (tx) => {
+        const [lockedConsultation] = await tx
+          .select({ state: consultations.state, softDeletedAt: consultations.softDeletedAt })
+          .from(consultations)
+          .where(eq(consultations.id, event.aggregateId))
+          .limit(1)
+          .for("update");
+        const [lockedAssignment] = await tx
+          .select({
+            id: consultationAssignments.id,
+            assigneeUserId: consultationAssignments.assigneeUserId,
+            assigneeMembershipId: consultationAssignments.assigneeMembershipId,
+          })
+          .from(consultationAssignments)
+          .where(eq(consultationAssignments.consultationId, event.aggregateId))
+          .limit(1)
+          .for("update");
+        const [lockedLink] = await tx
+          .select({ managerExternalAccountId: legalFriendsCaseLinks.managerExternalAccountId })
+          .from(legalFriendsCaseLinks)
+          .where(eq(legalFriendsCaseLinks.consultationId, event.aggregateId))
+          .limit(1)
+          .for("update");
+        if (!lockedConsultation || lockedConsultation.softDeletedAt) {
+          throw new Error("restoration_consultation_commit_conflict");
+        }
+        if (
+          lockedLink?.managerExternalAccountId !==
+            LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID ||
+          !matchesRestorationAssignmentSnapshot(lockedAssignment, {
+            id: envelope.data.previousAssignmentId,
+            assigneeUserId: envelope.data.previousAssigneeUserId,
+            assigneeMembershipId:
+              envelope.data.previousAssigneeMembershipId,
+          })
+        ) {
+          throw new Error("restoration_commit_conflict");
+        }
+
+        const reconciliation = planRestoredConsultation({
+          currentState: lockedConsultation.state,
+          assignmentId: lockedAssignment?.id ?? null,
+          targetAssignmentId: envelope.data.targetAssignmentId,
+        });
+
+        await tx
+          .update(legalFriendsCaseLinks)
+          .set({
+            managerExternalAccountId:
+              envelope.data.targetManagerExternalAccountId,
+            managerAssignedAt: changedAt,
+            updatedAt: changedAt,
+          })
+          .where(eq(legalFriendsCaseLinks.consultationId, event.aggregateId));
+        if (reconciliation.assignmentOperation === "update") {
+          await tx
+            .update(consultationAssignments)
+            .set({
+              assigneeUserId: envelope.data.targetAssigneeUserId,
+              assigneeMembershipId:
+                envelope.data.targetAssigneeMembershipId,
+              assignedByUserId: envelope.data.requestedByUserId,
+              assignmentMethod: "transfer",
+              assignedAt: changedAt,
+            })
+            .where(eq(consultationAssignments.id, reconciliation.assignmentId));
+        } else {
+          await tx.insert(consultationAssignments).values({
+            id: reconciliation.assignmentId,
+            consultationId: event.aggregateId,
+            assigneeUserId: envelope.data.targetAssigneeUserId,
+            assigneeMembershipId: envelope.data.targetAssigneeMembershipId,
+            assignedByUserId: envelope.data.requestedByUserId,
+            assignmentMethod: "transfer",
+            assignedAt: changedAt,
+            createdAt: changedAt,
+          });
+        }
+        if (reconciliation.recordStateTransition) {
+          await tx
+            .update(consultations)
+            .set({ state: "assigned", updatedAt: changedAt })
+            .where(eq(consultations.id, event.aggregateId));
+          await tx.insert(consultationStatusHistory).values({
+            id: createEventId(),
+            consultationId: event.aggregateId,
+            fromState: lockedConsultation.state,
+            toState: "assigned",
+            reason: "legalfriends_invalid_case_restored",
+            actorType: "staff",
+            actorId: envelope.data.requestedByUserId,
+            changedAt,
+            createdAt: changedAt,
+          });
+        }
+        const restoredEvent: PlatformEvent = {
+          ...envelope,
+          eventId: createEventId(),
+          eventType: "consultation.restored",
+          occurredAt: changedAt.toISOString(),
+          causationId: event.id,
+        };
+        assertPlatformEvent(restoredEvent);
+        await tx.insert(outboxEvents).values({
+          id: restoredEvent.eventId,
+          aggregateType: "consultation",
+          aggregateId: event.aggregateId,
+          eventType: restoredEvent.eventType,
+          eventVersion: restoredEvent.eventVersion,
+          correlationId: restoredEvent.correlationId,
+          causationId: restoredEvent.causationId ?? null,
+          payload: restoredEvent,
+          status: "pending",
+          availableAt: changedAt,
+          occurredAt: changedAt,
+          createdAt: changedAt,
+        });
+        await tx.insert(staffAuditLogs).values({
+          id: createEventId(),
+          actorUserId: envelope.data.requestedByUserId,
+          action: "legalfriends.case.restoration_completed",
+          targetType: "consultation",
+          targetId: event.aggregateId,
+          metadata: {
+            eventId: event.id,
+            caseIdx: link.caseIdx,
+            previousAssignmentId: envelope.data.previousAssignmentId,
+            assignmentId: envelope.data.targetAssignmentId,
+            targetAssigneeUserId: envelope.data.targetAssigneeUserId,
+            previousState: lockedConsultation.state,
+            restoredState: "assigned",
+          },
+          occurredAt: changedAt,
+          createdAt: changedAt,
+        });
+      });
+    } catch {
+      throw new LegalFriendsDeliveryError(
+        "ambiguous_delivery",
+        "리걸프렌즈 담당자는 변경됐지만 ERP 복원을 확정하지 못했습니다. 두 시스템의 현재 상태를 확인해 주세요.",
+        { retryable: false },
+      );
+    }
+    return changed.httpStatus;
+  }
+
   async function runOnce(): Promise<boolean> {
     const currentTime = now();
     await recoverExpiredLeases(currentTime);
@@ -1085,6 +1336,8 @@ export function createOutboxWorker(options: {
             ? await deliverInvalidation(event)
             : event.eventType === MANAGER_CHANGE_EVENT_TYPE
               ? await deliverManagerChange(event)
+              : event.eventType === RESTORATION_EVENT_TYPE
+                ? await deliverRestoration(event)
               : (() => {
                   throw new Error("unsupported_legalfriends_event");
                 })();
