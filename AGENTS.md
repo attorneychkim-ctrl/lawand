@@ -102,6 +102,26 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-19 — 센트릭스 0588 공용 SMS/LMS 라우팅·회신 수신함 매칭 후보
+- 센트릭스 텍스트 전용 SMS/LMS는 발송 직원의 개인 주 회선 대신 활성·인증 대표 endpoint
+  `070-4607-0588`로 요청한다. 발송 직원 ID는 그대로 보존하고 endpoint만 공용 회선으로
+  snapshot한다. 운영 설정 `LAWAND_CENTREX_MESSAGE_SENDER_LINE`의 기본값과 secret 생성 기준도
+  0588이며, 해당 endpoint가 없거나 인증 원장이 없으면 개인 회선으로 fallback하지 않고 503으로
+  중단한다. 개인 회선의 전화·Windows bridge 동작은 바꾸지 않았다.
+- migration `0069_talented_meltdown.sql`은 발송 원장에 표시 발신번호와 회신 mailbox endpoint
+  snapshot을 추가했다. 새 수신문자는 동일 mailbox·동일 고객번호 지문·수신시각 이전 조건을
+  모두 만족하는 최신 성공/결과불명 발송만 `reply_mailbox_latest_outbound`로 연결한다. snapshot이
+  없는 과거 발송과 다른 mailbox 발송은 번호만으로 추측하지 않고 미연결 원장·활성 관리자
+  알림으로 보존한다. ERP 대화는 고객번호만으로 합치지 않고 기존 Case_idx·상담·직접 연락처별
+  구분을 유지한다.
+- SOLAPI JPG MMS는 기존 직원 endpoint 원장과 `02-555-7455` 발신을 유지한다. 유일한
+  활성·인증 `public_number=025557455` 대표 endpoint가 있을 때만 7455를 회신 mailbox로
+  snapshot하며, 매핑 부재·중복은 기존 MMS 발송을 막지 않고 이후 회신만 안전하게 미연결 처리한다.
+- 전체 5패키지 test·typecheck·lint·production build, core 92개·gateway 183개 테스트,
+  DB schema check·재생성 no-op과 `git diff --check`를 통과했다. `PROJECT_PLAN.md`는 v1.62다.
+  이 브랜치에서는 main 병합·운영 migration·secret 갱신·배포·추가 외부 문자 발송을 수행하지
+  않았다.
+
 ### 2026-08-19 — 센트릭스 0588 공용 문자 회선 운영 canary
 - 사용자의 명시적 승인으로 활성 대표 endpoint `070-4607-0588`을 발신 계정으로 고정해
   통제 SMS 1건을 운영 발송했다. 김충환 직원 원장과 수동 연락처·outbox·감사 원장을 보존했고,

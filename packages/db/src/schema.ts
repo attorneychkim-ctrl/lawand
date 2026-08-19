@@ -2951,6 +2951,11 @@ export const telephonyMessages = pgTable(
     endpointId: uuid("endpoint_id")
       .notNull()
       .references(() => telephonyEndpoints.id, { onDelete: "restrict" }),
+    senderNumberSnapshot: varchar("sender_number_snapshot", { length: 20 }),
+    replyMailboxEndpointId: uuid("reply_mailbox_endpoint_id").references(
+      () => telephonyEndpoints.id,
+      { onDelete: "restrict" },
+    ),
     staffUserId: uuid("staff_user_id")
       .notNull()
       .references(() => staffUsers.id, { onDelete: "restrict" }),
@@ -3022,6 +3027,15 @@ export const telephonyMessages = pgTable(
     index("telephony_messages_manual_contact_requested_idx").on(
       table.manualContactId,
       table.requestedAt,
+    ),
+    index("telephony_messages_reply_mailbox_remote_requested_idx").on(
+      table.replyMailboxEndpointId,
+      table.remotePhoneFingerprint,
+      table.requestedAt,
+    ),
+    check(
+      "telephony_messages_sender_number_snapshot_format",
+      sql`${table.senderNumberSnapshot} IS NULL OR ${table.senderNumberSnapshot} ~ '^0[0-9]{8,10}$'`,
     ),
     check(
       "telephony_messages_remote_phone_fingerprint_length",
@@ -3433,7 +3447,7 @@ export const telephonyInboundMessages = pgTable(
         AND ${table.directoryCaseIdx} IS NULL
         AND ${table.manualContactId} IS NULL
       ) OR (
-        ${table.matchStrategy} = 'latest_outbound'
+        ${table.matchStrategy} IN ('latest_outbound', 'reply_mailbox_latest_outbound')
         AND ${table.matchedOutboundMessageId} IS NOT NULL
         AND ${table.targetSource} = 'consultation'
         AND ${table.consultationId} IS NOT NULL
@@ -3441,7 +3455,7 @@ export const telephonyInboundMessages = pgTable(
         AND ${table.directoryCaseIdx} IS NULL
         AND ${table.manualContactId} IS NULL
       ) OR (
-        ${table.matchStrategy} = 'latest_outbound'
+        ${table.matchStrategy} IN ('latest_outbound', 'reply_mailbox_latest_outbound')
         AND ${table.matchedOutboundMessageId} IS NOT NULL
         AND ${table.targetSource} = 'legal_friends_directory'
         AND ${table.consultationId} IS NULL
@@ -3449,7 +3463,7 @@ export const telephonyInboundMessages = pgTable(
         AND ${table.directoryCaseIdx} > 0
         AND ${table.manualContactId} IS NULL
       ) OR (
-        ${table.matchStrategy} = 'latest_outbound'
+        ${table.matchStrategy} IN ('latest_outbound', 'reply_mailbox_latest_outbound')
         AND ${table.matchedOutboundMessageId} IS NOT NULL
         AND ${table.targetSource} = 'manual'
         AND ${table.consultationId} IS NULL

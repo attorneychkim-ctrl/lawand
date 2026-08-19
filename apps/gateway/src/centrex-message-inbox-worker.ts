@@ -31,6 +31,7 @@ import type { CentrexClient, CentrexReceivedMessageRecord } from "./centrex.js";
 import { CentrexDeliveryError } from "./centrex.js";
 import type { CentrexCredentialVault } from "./centrex-credential-vault.js";
 import type { DataProtection } from "./crypto.js";
+import { outboundReplyMatchStrategy } from "./telephony-message-routing.js";
 
 type Database = ReturnType<typeof createDatabaseClient>["db"];
 type DatabaseTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -197,6 +198,7 @@ export function createCentrexMessageInboxWorker(options: {
   }
 
   async function matchOutbound(
+    endpointId: string,
     remotePhoneFingerprint: Buffer,
     receivedAt: Date,
     executor: Database | DatabaseTransaction = db,
@@ -210,6 +212,7 @@ export function createCentrexMessageInboxWorker(options: {
         directoryClientIdx: telephonyMessageDirectoryTargets.clientIdx,
         directoryCaseIdx: telephonyMessageDirectoryTargets.caseIdx,
         manualContactId: telephonyMessages.manualContactId,
+        replyMailboxEndpointId: telephonyMessages.replyMailboxEndpointId,
       })
       .from(telephonyMessages)
       .leftJoin(
@@ -224,6 +227,7 @@ export function createCentrexMessageInboxWorker(options: {
           eq(telephonyMessages.remotePhoneFingerprint, remotePhoneFingerprint),
           inArray(telephonyMessages.commandStatus, ["succeeded", "unknown"]),
           lte(telephonyMessages.requestedAt, receivedAt),
+          eq(telephonyMessages.replyMailboxEndpointId, endpointId),
         ),
       )
       .orderBy(desc(telephonyMessages.requestedAt))
@@ -241,7 +245,11 @@ export function createCentrexMessageInboxWorker(options: {
     if (match.targetSource === "manual" && !match.manualContactId) {
       return null;
     }
-    return match;
+    const matchStrategy = outboundReplyMatchStrategy(
+      match.replyMailboxEndpointId,
+      endpointId,
+    );
+    return matchStrategy ? { ...match, matchStrategy } : null;
   }
 
   async function importRecord(
@@ -294,7 +302,7 @@ export function createCentrexMessageInboxWorker(options: {
     );
     return db.transaction(async (tx) => {
     const match = sourceIdentity.matchOutbound
-      ? await matchOutbound(remotePhoneFingerprint, receivedAt, tx)
+      ? await matchOutbound(endpointId, remotePhoneFingerprint, receivedAt, tx)
       : null;
     const [inserted] = await tx
       .insert(telephonyInboundMessages)
@@ -332,7 +340,7 @@ export function createCentrexMessageInboxWorker(options: {
           match?.targetSource === "manual"
             ? match.manualContactId
             : null,
-        matchStrategy: match ? "latest_outbound" : "unmatched",
+        matchStrategy: match?.matchStrategy ?? "unmatched",
         receivedAt,
         fetchedAt,
         createdAt: fetchedAt,

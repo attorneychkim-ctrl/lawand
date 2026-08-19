@@ -1,5 +1,29 @@
 # 센트릭스 문자 수·발신함·개인 템플릿
 
+## vNext 후보 — 0588 공용 SMS/LMS 발신·회신 경로
+
+- 센트릭스 텍스트 전용 SMS/LMS는 직원 개인 회선을 선택하지 않고
+  `LAWAND_CENTREX_MESSAGE_SENDER_LINE`의 활성·인증 대표 endpoint로 보낸다. 기본값과 운영
+  secret 생성 기준은 RID 제거와 실제 왕복 canary를 마친 `070-4607-0588`이다. 해당 endpoint를
+  찾지 못하면 개인 회선으로 fallback하지 않고 503으로 중단해 다른 RID 번호의 오발신을 막는다.
+- `telephony_messages.staff_user_id`는 실제 발송 직원을 그대로 보존하고 `endpoint_id`만 0588
+  공용 endpoint를 가리킨다. migration `0069_talented_meltdown.sql`은 발신 당시 표시번호
+  snapshot과 고객이 회신할 mailbox endpoint snapshot을 추가한다.
+- 수신문자는 `회신 mailbox endpoint + 고객 전화번호 HMAC 지문 + 수신시각 이전`이 모두
+  일치하는 성공 또는 결과불명 발송 중 가장 최근 건에만 연결하며 전략은
+  `reply_mailbox_latest_outbound`로 남긴다. snapshot이 없는 기존 발송이나 다른 mailbox 발송은
+  고객번호만으로 추정하지 않고 `연결 확인 필요` 원장과 활성 관리자 알림으로 보존한다.
+- SOLAPI JPG MMS는 기존 직원 endpoint 원장과 등록 발신번호 `02-555-7455`를 그대로 사용한다.
+  활성·인증 대표 endpoint 중 `public_number=025557455`가 유일하면 그 7455 수신함만 회신
+  mailbox snapshot으로 기록한다. 매핑이 없거나 중복이어도 기존 MMS 발송은 막지 않으며,
+  이후 회신은 잘못 연결하는 대신 `연결 확인 필요`로 남는다.
+- ERP `/messages`는 현재와 같이 리걸프렌즈 Case_idx·ERP 상담 ID·직접 연락처 ID별 대화를
+  유지한다. 고객번호만으로 대화를 합치지 않으므로 동일 번호 공유 고객과 복수 사건의 문자가
+  한 방으로 섞이지 않는다. SMS 프로토콜에 원 발송 ID가 없기 때문에 같은 수신함·고객번호로
+  서로 다른 사건에 연속 발송한 경우에는 가장 최근 선행 발송을 고르는 한계가 남는다.
+- 이 후보는 소스와 migration만 구현했다. main 병합, 운영 migration·secret 반영, gateway 배포,
+  추가 외부 발송은 메인 통합 세션의 별도 승인·릴리스 범위다.
+
 ## v2 운영 배포 — 대표번호 수신함과 통합 문자 화면
 
 - 2026-08-11 migration `0044_sturdy_preak.sql` 출시 후보는 직원 개인 회선과 별개인

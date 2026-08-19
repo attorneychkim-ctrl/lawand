@@ -3752,6 +3752,7 @@ export function createGatewayServer(options?: {
                 ? 400
               : error.code === "feature_disabled" ||
                   error.code === "mms_feature_disabled" ||
+                  error.code === "centrex_message_sender_not_configured" ||
                   error.code === "message_image_upload_failed"
                 ? 503
                 : 409;

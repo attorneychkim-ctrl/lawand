@@ -101,6 +101,12 @@ import {
   type SolapiClient,
 } from "./solapi.js";
 import { classifyTelephonyCallRegion } from "./telephony-call-region.js";
+import {
+  centrexMessageDeliveryRoute,
+  DEFAULT_CENTREX_MESSAGE_SENDER_LINE,
+  solapiMessageDeliveryRoute,
+  type TelephonyMessageDeliveryRoute,
+} from "./telephony-message-routing.js";
 
 type Database = ReturnType<typeof createDatabaseClient>["db"];
 type DatabaseTransaction = Parameters<
@@ -786,6 +792,7 @@ export class TelephonyCallError extends Error {
       | "mms_feature_disabled"
       | "message_idempotency_conflict"
       | "message_body_invalid"
+      | "centrex_message_sender_not_configured"
       | "manual_message_contact_not_found"
       | "inbound_call_not_found"
       | "inbound_call_not_ringing"
@@ -959,6 +966,7 @@ export function createTelephonyService(options: {
   dispatchEnabled: boolean;
   solapiClient?: SolapiClient | null;
   solapiMmsSender?: string | null;
+  centrexMessageSenderLine?: string;
   answerableBridgeIds?: ReadonlySet<string>;
   idleCommandPollIntervalMs?: number;
   now?: () => Date;
@@ -969,6 +977,7 @@ export function createTelephonyService(options: {
     dispatchEnabled,
     solapiClient = null,
     solapiMmsSender = null,
+    centrexMessageSenderLine = DEFAULT_CENTREX_MESSAGE_SENDER_LINE,
     answerableBridgeIds = new Set<string>(),
     idleCommandPollIntervalMs,
     now = () => new Date(),
@@ -983,6 +992,99 @@ export function createTelephonyService(options: {
     string,
     { expiresAt: number; value: Promise<PhoneCustomerMatch> }
   >();
+
+  async function resolveMessageDeliveryRoute(
+    tx: DatabaseTransaction,
+    provider: "centrex" | "solapi",
+    actorUserId: string,
+  ): Promise<TelephonyMessageDeliveryRoute> {
+    if (provider === "centrex") {
+      const [senderEndpoint] = await tx
+        .select({
+          id: telephonyEndpoints.id,
+          lineNumber: telephonyEndpoints.lineNumber,
+        })
+        .from(telephonyEndpoints)
+        .innerJoin(
+          telephonyEndpointCredentials,
+          eq(
+            telephonyEndpointCredentials.endpointId,
+            telephonyEndpoints.id,
+          ),
+        )
+        .where(
+          and(
+            eq(telephonyEndpoints.provider, "centrex"),
+            eq(telephonyEndpoints.endpointType, "representative"),
+            eq(telephonyEndpoints.lineNumber, centrexMessageSenderLine),
+            eq(telephonyEndpoints.isActive, true),
+          ),
+        )
+        .limit(1);
+      if (!senderEndpoint) {
+        throw new TelephonyCallError(
+          "centrex_message_sender_not_configured",
+          "공용 센트릭스 문자 발신 회선이 활성화되지 않았습니다.",
+        );
+      }
+      return centrexMessageDeliveryRoute(senderEndpoint);
+    }
+
+    const [actorEndpoint] = await tx
+      .select({ id: telephonyEndpoints.id })
+      .from(staffTelephonyBindings)
+      .innerJoin(
+        telephonyEndpoints,
+        eq(telephonyEndpoints.id, staffTelephonyBindings.endpointId),
+      )
+      .where(
+        and(
+          eq(staffTelephonyBindings.staffUserId, actorUserId),
+          eq(staffTelephonyBindings.isActive, true),
+          eq(staffTelephonyBindings.isPrimary, true),
+          eq(telephonyEndpoints.provider, "centrex"),
+          eq(telephonyEndpoints.isActive, true),
+        ),
+      )
+      .limit(1);
+    if (!actorEndpoint) {
+      throw new TelephonyCallError(
+        "centrex_endpoint_not_linked",
+        "직원 계정에 활성 센트릭스 회선이 연결되지 않았습니다.",
+      );
+    }
+    if (!solapiMmsSender) {
+      throw new TelephonyCallError(
+        "mms_feature_disabled",
+        "이미지 문자를 보내려면 솔라피 MMS 발신번호 설정이 필요합니다.",
+      );
+    }
+    const replyMailboxes = await tx
+      .select({ id: telephonyEndpoints.id })
+      .from(telephonyEndpoints)
+      .innerJoin(
+        telephonyEndpointCredentials,
+        eq(
+          telephonyEndpointCredentials.endpointId,
+          telephonyEndpoints.id,
+        ),
+      )
+      .where(
+        and(
+          eq(telephonyEndpoints.provider, "centrex"),
+          eq(telephonyEndpoints.endpointType, "representative"),
+          eq(telephonyEndpoints.publicNumber, solapiMmsSender),
+          eq(telephonyEndpoints.isActive, true),
+        ),
+      )
+      .limit(2);
+    return solapiMessageDeliveryRoute({
+      actorEndpointId: actorEndpoint.id,
+      senderNumber: solapiMmsSender,
+      replyMailboxEndpointId:
+        replyMailboxes.length === 1 ? replyMailboxes[0]!.id : null,
+    });
+  }
 
   function phonebookContactResponse(
     contact: typeof telephonyPhonebookContacts.$inferSelect,
@@ -7931,30 +8033,6 @@ export function createTelephonyService(options: {
           "전화번호가 수집된 상담 고객에게만 문자를 보낼 수 있습니다.",
         );
       }
-      const [endpoint] = await tx
-        .select({ id: telephonyEndpoints.id })
-        .from(staffTelephonyBindings)
-        .innerJoin(
-          telephonyEndpoints,
-          eq(telephonyEndpoints.id, staffTelephonyBindings.endpointId),
-        )
-        .where(
-          and(
-            eq(staffTelephonyBindings.staffUserId, actor.id),
-            eq(staffTelephonyBindings.isActive, true),
-            eq(staffTelephonyBindings.isPrimary, true),
-            eq(telephonyEndpoints.provider, "centrex"),
-            eq(telephonyEndpoints.isActive, true),
-          ),
-        )
-        .limit(1);
-      if (!endpoint) {
-        throw new TelephonyCallError(
-          "centrex_endpoint_not_linked",
-          "직원 계정에 활성 센트릭스 회선이 연결되지 않았습니다.",
-        );
-      }
-
       let templateName: string | null = null;
       let imageFileId: string | null = null;
       let imageUrl: string | null = null;
@@ -8004,6 +8082,7 @@ export function createTelephonyService(options: {
           "이미지 문자를 보내려면 솔라피 MMS 발신번호 설정이 필요합니다.",
         );
       }
+      const route = await resolveMessageDeliveryRoute(tx, provider, actor.id);
 
       const messageId = createTelephonyMessageId();
       const eventId = createEventId();
@@ -8026,7 +8105,7 @@ export function createTelephonyService(options: {
                 targetSource: "consultation",
                 consultationId,
                 requestId: request.id,
-                endpointId: endpoint.id,
+                endpointId: route.endpointId,
                 staffUserId: actor.id,
                 provider: "solapi",
                 channel: "mms",
@@ -8038,7 +8117,7 @@ export function createTelephonyService(options: {
                 targetSource: "consultation",
                 consultationId,
                 requestId: request.id,
-                endpointId: endpoint.id,
+                endpointId: route.endpointId,
                 staffUserId: actor.id,
                 provider: "centrex",
                 channel: "sms",
@@ -8055,7 +8134,9 @@ export function createTelephonyService(options: {
         .values({
           id: messageId,
           provider,
-          endpointId: endpoint.id,
+          endpointId: route.endpointId,
+          senderNumberSnapshot: route.senderNumberSnapshot,
+          replyMailboxEndpointId: route.replyMailboxEndpointId,
           staffUserId: actor.id,
           targetSource: "consultation",
           consultationId,
@@ -8089,7 +8170,9 @@ export function createTelephonyService(options: {
         targetId: messageId,
         metadata: {
           consultationId,
-          endpointId: endpoint.id,
+          endpointId: route.endpointId,
+          replyMailboxEndpointId: route.replyMailboxEndpointId,
+          senderNumberSnapshot: route.senderNumberSnapshot,
           templateId: input.templateId,
           messageKind,
           bodyByteLength,
@@ -8174,30 +8257,6 @@ export function createTelephonyService(options: {
         );
       }
 
-      const [endpoint] = await tx
-        .select({ id: telephonyEndpoints.id })
-        .from(staffTelephonyBindings)
-        .innerJoin(
-          telephonyEndpoints,
-          eq(telephonyEndpoints.id, staffTelephonyBindings.endpointId),
-        )
-        .where(
-          and(
-            eq(staffTelephonyBindings.staffUserId, actor.id),
-            eq(staffTelephonyBindings.isActive, true),
-            eq(staffTelephonyBindings.isPrimary, true),
-            eq(telephonyEndpoints.provider, "centrex"),
-            eq(telephonyEndpoints.isActive, true),
-          ),
-        )
-        .limit(1);
-      if (!endpoint) {
-        throw new TelephonyCallError(
-          "centrex_endpoint_not_linked",
-          "직원 계정에 활성 센트릭스 회선이 연결되지 않았습니다.",
-        );
-      }
-
       let templateName: string | null = null;
       let imageFileId: string | null = null;
       let imageUrl: string | null = null;
@@ -8247,6 +8306,7 @@ export function createTelephonyService(options: {
           "이미지 문자를 보내려면 솔라피 MMS 발신번호 설정이 필요합니다.",
         );
       }
+      const route = await resolveMessageDeliveryRoute(tx, provider, actor.id);
 
       const messageId = createTelephonyMessageId();
       const eventId = createEventId();
@@ -8278,7 +8338,7 @@ export function createTelephonyService(options: {
                 targetSource: "legal_friends_directory",
                 directoryClientIdx: targetInput.clientIdx,
                 directoryCaseIdx: targetInput.caseIdx,
-                endpointId: endpoint.id,
+                endpointId: route.endpointId,
                 staffUserId: actor.id,
                 provider: "solapi",
                 channel: "mms",
@@ -8290,7 +8350,7 @@ export function createTelephonyService(options: {
                 targetSource: "legal_friends_directory",
                 directoryClientIdx: targetInput.clientIdx,
                 directoryCaseIdx: targetInput.caseIdx,
-                endpointId: endpoint.id,
+                endpointId: route.endpointId,
                 staffUserId: actor.id,
                 provider: "centrex",
                 channel: "sms",
@@ -8307,7 +8367,9 @@ export function createTelephonyService(options: {
         .values({
           id: messageId,
           provider,
-          endpointId: endpoint.id,
+          endpointId: route.endpointId,
+          senderNumberSnapshot: route.senderNumberSnapshot,
+          replyMailboxEndpointId: route.replyMailboxEndpointId,
           staffUserId: actor.id,
           targetSource: "legal_friends_directory",
           consultationId: null,
@@ -8354,7 +8416,9 @@ export function createTelephonyService(options: {
         metadata: {
           messageId,
           caseIdx: targetInput.caseIdx,
-          endpointId: endpoint.id,
+          endpointId: route.endpointId,
+          replyMailboxEndpointId: route.replyMailboxEndpointId,
+          senderNumberSnapshot: route.senderNumberSnapshot,
           templateId: input.templateId,
           messageKind,
           bodyByteLength,
@@ -8489,30 +8553,6 @@ export function createTelephonyService(options: {
         );
       }
 
-      const [endpoint] = await tx
-        .select({ id: telephonyEndpoints.id })
-        .from(staffTelephonyBindings)
-        .innerJoin(
-          telephonyEndpoints,
-          eq(telephonyEndpoints.id, staffTelephonyBindings.endpointId),
-        )
-        .where(
-          and(
-            eq(staffTelephonyBindings.staffUserId, actor.id),
-            eq(staffTelephonyBindings.isActive, true),
-            eq(staffTelephonyBindings.isPrimary, true),
-            eq(telephonyEndpoints.provider, "centrex"),
-            eq(telephonyEndpoints.isActive, true),
-          ),
-        )
-        .limit(1);
-      if (!endpoint) {
-        throw new TelephonyCallError(
-          "centrex_endpoint_not_linked",
-          "직원 계정에 활성 센트릭스 회선이 연결되지 않았습니다.",
-        );
-      }
-
       let templateName: string | null = null;
       let imageFileId: string | null = null;
       let imageUrl: string | null = null;
@@ -8561,6 +8601,7 @@ export function createTelephonyService(options: {
           "이미지 문자를 보내려면 솔라피 MMS 발신번호 설정이 필요합니다.",
         );
       }
+      const route = await resolveMessageDeliveryRoute(tx, provider, actor.id);
 
       const messageId = createTelephonyMessageId();
       const eventId = createEventId();
@@ -8582,7 +8623,7 @@ export function createTelephonyService(options: {
                 messageId,
                 targetSource: "manual",
                 manualContactId: contact.id,
-                endpointId: endpoint.id,
+                endpointId: route.endpointId,
                 staffUserId: actor.id,
                 provider: "solapi",
                 channel: "mms",
@@ -8593,7 +8634,7 @@ export function createTelephonyService(options: {
                 messageId,
                 targetSource: "manual",
                 manualContactId: contact.id,
-                endpointId: endpoint.id,
+                endpointId: route.endpointId,
                 staffUserId: actor.id,
                 provider: "centrex",
                 channel: "sms",
@@ -8610,7 +8651,9 @@ export function createTelephonyService(options: {
         .values({
           id: messageId,
           provider,
-          endpointId: endpoint.id,
+          endpointId: route.endpointId,
+          senderNumberSnapshot: route.senderNumberSnapshot,
+          replyMailboxEndpointId: route.replyMailboxEndpointId,
           staffUserId: actor.id,
           targetSource: "manual",
           consultationId: null,
@@ -8645,7 +8688,9 @@ export function createTelephonyService(options: {
         targetId: contact.id,
         metadata: {
           messageId,
-          endpointId: endpoint.id,
+          endpointId: route.endpointId,
+          replyMailboxEndpointId: route.replyMailboxEndpointId,
+          senderNumberSnapshot: route.senderNumberSnapshot,
           templateId: input.templateId,
           messageKind,
           bodyByteLength,

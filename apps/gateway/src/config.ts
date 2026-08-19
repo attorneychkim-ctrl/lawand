@@ -1,3 +1,5 @@
+import { DEFAULT_CENTREX_MESSAGE_SENDER_LINE } from "./telephony-message-routing.js";
+
 export type GatewayConfig = {
   databaseUrl: string;
   databaseRequestPoolMax: number;
@@ -43,6 +45,7 @@ export type GatewayConfig = {
     appPassword: string;
     mailbox: string;
   } | null;
+  centrexMessageSenderLine: string;
   centrexWorkerEnabled: boolean;
   centrexCredentials: Readonly<Record<string, string>> | null;
   centrexBridgeKeys: Readonly<
@@ -395,6 +398,14 @@ export function readGatewayConfig(): GatewayConfig {
     "LAWAND_CENTREX_WORKER_ENABLED",
     false,
   );
+  const centrexMessageSenderLine =
+    process.env.LAWAND_CENTREX_MESSAGE_SENDER_LINE?.replace(/\D/g, "") ||
+    DEFAULT_CENTREX_MESSAGE_SENDER_LINE;
+  if (!/^070[0-9]{8}$/.test(centrexMessageSenderLine)) {
+    throw new Error(
+      "LAWAND_CENTREX_MESSAGE_SENDER_LINE은 센트릭스 070 회선번호여야 합니다.",
+    );
+  }
   const centrexCredentials = centrexCredentialsValue();
   const centrexBridgeKeys = centrexBridgeKeysValue();
   const centrexRingCallback = centrexRingCallbackValue();
@@ -437,6 +448,7 @@ export function readGatewayConfig(): GatewayConfig {
     kakaoSkill,
     naverBookingImapEnabled,
     naverBookingImap,
+    centrexMessageSenderLine,
     centrexWorkerEnabled,
     centrexCredentials,
     centrexBridgeKeys,
