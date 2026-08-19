@@ -102,6 +102,23 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-19 — 완료 작업 4개 통합 병합 후보
+- 원격과 일치하고 깨끗한 `GA4_insert`·`erp_legal_synch`·`region_error`·`sms_number_problem`
+  워크트리를 `main`에 통합했다. 다른 `origin/LegalFlow/*`·`origin/worktree/*` HEAD는 모두 통합 전
+  `main`의 ancestor였으며, 네 브랜치만 미반영 상태였다. GA4 운영 활성화·국외이전 동의,
+  리걸프렌즈 연결 고객명 우선 표시, ERP intake 내부 메타데이터 호환, 센트릭스 SMS/LMS 0588
+  공용 mailbox 발송·회신 연결을 한 릴리스 후보로 묶었다.
+- 독립 브랜치의 migration `0069` 충돌은 리걸프렌즈 연결 고객명 함수를
+  `0069_legalfriends_linked_case_client_name.sql`, 문자 mailbox snapshot을
+  `0070_good_earthquake.sql`로 재번호화하고 Drizzle journal/snapshot을 단일 연속 체인으로
+  생성했다. 영향 앱은 홈페이지·gateway이며 DB migration 2개가 있다.
+- 전체 5패키지 test·typecheck·lint·production build, DB schema check와 `git diff --check`를
+  통과했다. core 93개·gateway 190개·홈페이지 GA4 10개 테스트가 성공했다. 병렬 검증의 최초
+  홈페이지 typecheck는 동시 Next build가 `.next/types`를 재생성하는 순간과 겹쳐 중단됐고,
+  build 완료 뒤 전체 typecheck를 단독 재실행해 통과했다. 아직 원격 `main` 푸시·운영 snapshot·
+  migration·digest 전환·운영 secret 변경·외부 발송은 수행하지 않았다. `PROJECT_PLAN.md`는
+  v1.63이다.
+
 ### 2026-08-19 — ERP 리걸 연결 고객명·수신전화 조회 우선순위 후보
 - `legalfriends_case_links.case_idx`가 있는 상담은 최초 접수 고객명 암호문과 요청 이력을
   수정하지 않고, 목록·상세·수신전화의 표시 경계에서 정확히 연결된 리걸프렌즈 사건의 현재
