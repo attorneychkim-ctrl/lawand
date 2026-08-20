@@ -8,7 +8,7 @@ import { subscribeReviewRealtime } from "./review-realtime";
 import { subscribeMessageRealtime } from "./message-realtime";
 import { subscribePhoneDeskRealtime } from "./phone-desk-realtime";
 
-function NavIcon({ kind }: { kind: "consultations" | "clients" | "reviews" | "phone" | "phonebook" | "messages" | "staff" | "more" | "manage" }) {
+function NavIcon({ kind }: { kind: "consultations" | "clients" | "reviews" | "phone" | "phonebook" | "messages" | "staff" | "webhook" | "more" | "manage" }) {
   return kind === "consultations" ? (
     <svg aria-hidden="true" viewBox="0 0 24 24">
       <path d="M7.5 6.5h9M7.5 10.5h9M7.5 14.5h5" />
@@ -42,6 +42,12 @@ function NavIcon({ kind }: { kind: "consultations" | "clients" | "reviews" | "ph
     <svg aria-hidden="true" viewBox="0 0 24 24">
       <circle cx="9" cy="8" r="3" />
       <path d="M3.5 19.5v-2a4.5 4.5 0 0 1 4.5-4.5h2a4.5 4.5 0 0 1 4.5 4.5v2M16 6.5h4M18 4.5v4M16.5 13.5a4.5 4.5 0 0 1 4 4.5v1.5" />
+    </svg>
+  ) : kind === "webhook" ? (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <circle cx="6.5" cy="7" r="2.5" />
+      <circle cx="17.5" cy="17" r="2.5" />
+      <path d="m8.3 8.8 7.4 6.4M11.5 5.5h4A2.5 2.5 0 0 1 18 8v4M12.5 18.5h-4A2.5 2.5 0 0 1 6 16v-4" />
     </svg>
   ) : kind === "manage" ? (
     <svg aria-hidden="true" viewBox="0 0 24 24">
@@ -117,6 +123,8 @@ export function ErpNav({ showStaff }: { showStaff: boolean }) {
   const consultationActive = pathname === "/" || pathname.startsWith("/consultations/");
   const phonebookActive = pathname.startsWith("/phonebook");
   const staffActive = pathname.startsWith("/staff");
+  const webhookNotificationsActive = pathname.startsWith("/webhook-notifications");
+  const manageActive = staffActive || webhookNotificationsActive;
 
   const refreshReviewDutyCount = useCallback(async () => {
     try {
@@ -259,7 +267,15 @@ export function ErpNav({ showStaff }: { showStaff: boolean }) {
         </Link>
       </NavDisclosure>
       {showStaff ? (
-        <NavDisclosure active={staffActive} icon="manage" label="관리" pathname={pathname}>
+        <NavDisclosure active={manageActive} icon="manage" label="관리" pathname={pathname}>
+          <Link
+            aria-current={webhookNotificationsActive ? "page" : undefined}
+            className={webhookNotificationsActive ? "is-active" : undefined}
+            href="/webhook-notifications"
+          >
+            <NavIcon kind="webhook" />
+            <span>웹훅 알림 설정</span>
+          </Link>
           <Link aria-current={staffActive ? "page" : undefined} className={staffActive ? "is-active" : undefined} href="/staff">
             <NavIcon kind="staff" />
             <span>직원 관리</span>

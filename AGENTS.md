@@ -18,9 +18,12 @@
 - 이 WSL 환경: node **v22.22.2**, pnpm **11.17.0**(Corepack + 로컬 shim).
 
 ## 작업 규칙
-- 이 저장소의 워크트리·터미널 관리자는 **HERDR**다. Orca 관리로 가정하거나 Orca 상태를
-  인수인계 원장으로 사용하지 않는다. HERDR 세션에서는 `HERDR_ENV=1`을 확인하고
-  `herdr worktree list`로 관리 워크트리를 확인한다.
+- 이 저장소의 워크트리·터미널 관리자는 세션에 따라 **HERDR 또는 Orca**다. 현재 경로와
+  관리 도구의 실제 상태를 먼저 확인하고, 확인된 관리자 하나만 그 세션의 작업 원장으로
+  사용한다. `HERDR_ENV=1`인 HERDR 세션에서는 `herdr worktree list`를 확인한다. Orca
+  워크트리(`.orca/worktrees/` 경로)에서는 Linux용 `orca-ide status --json`과
+  `orca-ide worktree current --json`을 확인하고 Orca 상태를 사용한다. 한 관리자의 환경이나
+  서버가 없다는 이유로 다른 관리자의 세션이라고 추정하지 않는다.
 - `main`이 아닌 워크트리 브랜치에서는 구현·검증 뒤 해당 브랜치 커밋과 원격 브랜치
   푸시까지만 수행한다. `main` 머지·`main` 푸시와 실서비스 배포·운영 데이터 변경은
   메인 세션에서만 수행하며, 사용자가 해당 브랜치 세션에 별도로 명시하지 않는 한
@@ -48,9 +51,10 @@
   cap을 검증한다. 정리 전후 cache·가용 바이트·회수 바이트·현재/rollback 이미지 ID를
   `/var/log/lawand/deployments.log`와
   인수인계 로그에 기록한다. health 실패 전에는 이 정리를 실행하지 않는다.
-- 메인 통합 배포 직전에는 HERDR 워크트리 목록과 `origin/worktree/*` 원격 브랜치를 모두
-  열거하고, 각 HEAD가 `main`의 ancestor인지 확인한다. 미반영 브랜치는 `병합/명시적 제외/
-  진행 중` 중 하나로 기록하기 전에는 아티팩트 생성과 운영 배포를 시작하지 않는다.
+- 메인 통합 배포 직전에는 현재 세션 관리자가 제공하는 전체 워크트리 목록(HERDR는
+  `herdr worktree list`, Orca는 `orca-ide worktree list --json`)과 관련 원격 작업 브랜치를
+  모두 열거하고, 각 HEAD가 `main`의 ancestor인지 확인한다. 미반영 브랜치는 `병합/명시적
+  제외/진행 중` 중 하나로 기록하기 전에는 아티팩트 생성과 운영 배포를 시작하지 않는다.
 - 의미 있는 작업(스캐폴딩, 신규 패키지/앱, DB 스키마, 외부 연동, 배포 등)을 마치면
   아래 **인수인계 로그에 형식 맞춰 새 항목을 append**할 것 — 다음 세션/다른 에이전트가
   이어받는 유일한 경로다.
@@ -101,6 +105,31 @@
 ---
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
+
+### 2026-08-20 — ERP 개인 웹훅 알림 설정 화면 후보
+- `origin/main` 최신 변경을 `LegalFlow/web_hook`에 병합한 뒤 ERP 관리 메뉴 첫 항목으로
+  `/webhook-notifications`를 추가했다. 관리 메뉴와 페이지는 아직 `showStaff`·`requireAdmin()`으로
+  관리자에게만 보이며, 웹훅 저장·전송까지 끝난 뒤 일반 직원에게 공개한다. 최종 설정 단위는
+  로그인 직원 개인이고 화면에도 현재 계정·소속을 명확히 표시한다.
+- 연결 이름·URL·일반 JSON 형식, 개인정보 최소화 payload 예시, 상담·전화·문자·후기의
+  담당 범위별 권장 기본값을 한 화면에 구성했다. 재통화 일정, 외부 연동·문자 실패, 기프티콘
+  결과, 센트릭스·대표 수신함 장애는 2차 후보로 구분했다. 현재 입력·테스트·저장·스위치는
+  모두 비활성 미리보기이며 DB·API·migration·실제 웹훅 발송은 추가하지 않았다.
+- Orca 내장 브라우저와 로컬 가짜 관리자 세션만 사용해 데스크톱·390px 모바일, 밝은·어두운
+  테마를 확인했다. 모바일 가로 overflow 0, 입력 글자 16px, 모든 기능 컨트롤 비활성,
+  console·hydration 오류 0이다. 긴 관리 메뉴가 390px에서 화면 밖으로 나가던 문제도 마지막
+  펼침 메뉴를 오른쪽 정렬해 교정했다. 운영 계정·데이터·외부 서비스는 사용하지 않았다.
+- 전체 5패키지 test·typecheck·lint·production build와 `git diff --check`를 통과했다. 최초
+  ERP 단독 build는 새 워크트리의 `@lawand/core` dist가 없어 실행 전 중단됐고 core를 먼저
+  build한 뒤 ERP와 전체 build가 성공했다. main 병합·운영 배포는 수행하지 않았다.
+  `PROJECT_PLAN.md`는 v1.68이다.
+
+### 2026-08-20 — 워크트리 관리자 HERDR·Orca 세션별 판별 규칙
+- 사용자가 이 저장소를 HERDR와 Orca 양쪽에서 사용하며 현재 `LegalFlow/web_hook` 세션은
+  Orca라고 명시했다. 전역 작업 규칙을 단일 HERDR 전제에서 세션별 관리자 판별로 바꿨다.
+  현재 `.orca/worktrees/` 경로에서 `orca-ide status --json`과
+  `orca-ide worktree current --json`이 정상 응답했고, 반대로 `HERDR_ENV`는 비어 있으며
+  HERDR 서버는 실행 중이 아니었다. 이후 이 세션의 워크트리·터미널 원장은 Orca를 사용한다.
 
 ### 2026-08-20 — GA4 24시간 후속 운영 수신 검증 완료
 - 2026-08-20 11:20~11:24 KST에 운영 analytics config가 유효한 Measurement ID를
