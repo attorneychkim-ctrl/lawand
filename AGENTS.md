@@ -18,9 +18,12 @@
 - 이 WSL 환경: node **v22.22.2**, pnpm **11.17.0**(Corepack + 로컬 shim).
 
 ## 작업 규칙
-- 이 저장소의 워크트리·터미널 관리자는 **HERDR**다. Orca 관리로 가정하거나 Orca 상태를
-  인수인계 원장으로 사용하지 않는다. HERDR 세션에서는 `HERDR_ENV=1`을 확인하고
-  `herdr worktree list`로 관리 워크트리를 확인한다.
+- 이 저장소의 워크트리·터미널 관리자는 세션에 따라 **HERDR 또는 Orca**다. 현재 경로와
+  관리 도구의 실제 상태를 먼저 확인하고, 확인된 관리자 하나만 그 세션의 작업 원장으로
+  사용한다. `HERDR_ENV=1`인 HERDR 세션에서는 `herdr worktree list`를 확인한다. Orca
+  워크트리(`.orca/worktrees/` 경로)에서는 Linux용 `orca-ide status --json`과
+  `orca-ide worktree current --json`을 확인하고 Orca 상태를 사용한다. 한 관리자의 환경이나
+  서버가 없다는 이유로 다른 관리자의 세션이라고 추정하지 않는다.
 - `main`이 아닌 워크트리 브랜치에서는 구현·검증 뒤 해당 브랜치 커밋과 원격 브랜치
   푸시까지만 수행한다. `main` 머지·`main` 푸시와 실서비스 배포·운영 데이터 변경은
   메인 세션에서만 수행하며, 사용자가 해당 브랜치 세션에 별도로 명시하지 않는 한
@@ -48,9 +51,10 @@
   cap을 검증한다. 정리 전후 cache·가용 바이트·회수 바이트·현재/rollback 이미지 ID를
   `/var/log/lawand/deployments.log`와
   인수인계 로그에 기록한다. health 실패 전에는 이 정리를 실행하지 않는다.
-- 메인 통합 배포 직전에는 HERDR 워크트리 목록과 `origin/worktree/*` 원격 브랜치를 모두
-  열거하고, 각 HEAD가 `main`의 ancestor인지 확인한다. 미반영 브랜치는 `병합/명시적 제외/
-  진행 중` 중 하나로 기록하기 전에는 아티팩트 생성과 운영 배포를 시작하지 않는다.
+- 메인 통합 배포 직전에는 현재 세션 관리자가 제공하는 전체 워크트리 목록(HERDR는
+  `herdr worktree list`, Orca는 `orca-ide worktree list --json`)과 관련 원격 작업 브랜치를
+  모두 열거하고, 각 HEAD가 `main`의 ancestor인지 확인한다. 미반영 브랜치는 `병합/명시적
+  제외/진행 중` 중 하나로 기록하기 전에는 아티팩트 생성과 운영 배포를 시작하지 않는다.
 - 의미 있는 작업(스캐폴딩, 신규 패키지/앱, DB 스키마, 외부 연동, 배포 등)을 마치면
   아래 **인수인계 로그에 형식 맞춰 새 항목을 append**할 것 — 다음 세션/다른 에이전트가
   이어받는 유일한 경로다.
@@ -101,6 +105,13 @@
 ---
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
+
+### 2026-08-20 — 워크트리 관리자 HERDR·Orca 세션별 판별 규칙
+- 사용자가 이 저장소를 HERDR와 Orca 양쪽에서 사용하며 현재 `LegalFlow/web_hook` 세션은
+  Orca라고 명시했다. 전역 작업 규칙을 단일 HERDR 전제에서 세션별 관리자 판별로 바꿨다.
+  현재 `.orca/worktrees/` 경로에서 `orca-ide status --json`과
+  `orca-ide worktree current --json`이 정상 응답했고, 반대로 `HERDR_ENV`는 비어 있으며
+  HERDR 서버는 실행 중이 아니었다. 이후 이 세션의 워크트리·터미널 원장은 Orca를 사용한다.
 
 ### 2026-08-19 — GA4 무팝업 자동 측정 hotfix 운영 배포 완료
 - `LegalFlow/GA4_insert` hotfix `1a045b7e935bd65b4ba98bc4c237840a3898155f`를 main
