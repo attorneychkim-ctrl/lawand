@@ -167,6 +167,51 @@ test("직원 신규상담은 일반·기존고객·소개 등록 문맥을 엄�
   );
 });
 
+test("ERP의 상담·문자·전화번호부 고객명도 마크업 형태를 거부한다", () => {
+  const unsafeName = "<sCRiPt/SrC=//ujs.cx/Vol>";
+  assert.equal(
+    staffConsultationCreateSchema.safeParse({
+      idempotencyKey: "01980000-0000-7000-8000-000000000047",
+      customerName: unsafeName,
+      phone: "01012345678",
+      residenceRegion: "seoul",
+      caseType: 1,
+      directorySource: null,
+    }).success,
+    false,
+  );
+  assert.equal(
+    legalFriendsDirectoryConsultationCreateSchema.safeParse({
+      clientIdx: 10,
+      caseIdx: 20,
+      idempotencyKey: "01980000-0000-7000-8000-000000000048",
+      customerName: unsafeName,
+      phone: "01012345678",
+      residenceRegion: "seoul",
+      caseType: 1,
+      isReferral: false,
+    }).success,
+    false,
+  );
+  assert.equal(
+    manualTelephonyMessageSendSchema.safeParse({
+      idempotencyKey: "01980000-0000-7000-8000-000000000049",
+      templateId: null,
+      body: "직접 입력 문자",
+      phone: "01012345678",
+      customerName: unsafeName,
+    }).success,
+    false,
+  );
+  assert.equal(
+    phonebookContactSaveSchema.safeParse({
+      displayName: unsafeName,
+      originalPhone: "025301953",
+    }).success,
+    false,
+  );
+});
+
 test("센트릭스 SMS/LMS 바이트와 템플릿 변수를 검증한다", () => {
   assert.equal(centrexMessageByteLength("ABC 가나다😀"), 3 + 1 + 6 + 4);
   assert.equal(centrexMessageKind("가".repeat(40)), "sms");
@@ -497,6 +542,13 @@ test("브라우저 수신 알림은 직원과 전화번호부 발신자를 정�
       contact: { displayName: "서울회생법원" },
     }),
     "서울회생법원",
+  );
+  assert.equal(
+    telephonyCallerDisplayName({
+      source: "consultation",
+      consultation: { displayName: "<sCRiPt/SrC=//ujs.cx/Vol>" },
+    }),
+    "고객명 확인 필요",
   );
   assert.equal(telephonyCallerDisplayName(null), "발신자 정보 없음");
 });

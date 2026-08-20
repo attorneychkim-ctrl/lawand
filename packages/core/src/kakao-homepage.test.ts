@@ -109,6 +109,12 @@ test("카카오 채팅 표시명은 빈 값과 제어 문자를 거부한다", (
     }).success,
     false,
   );
+  assert.equal(
+    kakaoHomepageEntryConfirmationSchema.safeParse({
+      displayName: "<sCRiPt/SrC=//ujs.cx/Vol>",
+    }).success,
+    false,
+  );
 });
 
 test("홈페이지 카카오 진입 응답은 대기·확정·무효 상태만 허용한다", () => {

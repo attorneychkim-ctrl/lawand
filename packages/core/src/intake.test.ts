@@ -31,6 +31,16 @@ test("빠른 상담 입력은 전화번호를 정규화한다", () => {
   assert.equal(parsed.phone, "01012345678");
 });
 
+test("홈페이지 상담은 마크업 형태의 고객명을 거부한다", () => {
+  assert.equal(
+    consultationSubmissionSchema.safeParse({
+      ...quickSubmission,
+      name: "<sCRiPt/SrC=//ujs.cx/Vol>",
+    }).success,
+    false,
+  );
+});
+
 test("귀속 분석 정보는 모든 상담 요청에 필요하다", () => {
   assert.throws(() =>
     consultationSubmissionSchema.parse({

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { consultationAttributionInputSchema } from "./attribution.js";
+import { consultationCustomerNameTextSchema } from "./consultation.js";
 import {
   consultationPhoneSchema,
   residenceRegionSchema,
@@ -9,19 +10,8 @@ import {
 export const CURRENT_KAKAO_HOMEPAGE_ENTRY_NOTICE_VERSION =
   "2026-08-13.kakao-homepage-entry.4";
 
-const kakaoHomepageDisplayNameSchema = z
-  .string()
-  .trim()
-  .min(1, "이름 또는 카카오톡 표시명을 입력해 주세요.")
-  .max(40, "이름 또는 카카오톡 표시명은 40자 이하로 입력해 주세요.")
-  .refine(
-    (value) =>
-      [...value].every((character) => {
-        const codePoint = character.codePointAt(0);
-        return codePoint !== undefined && codePoint > 31 && codePoint !== 127;
-      }),
-    "이름 또는 카카오톡 표시명에는 제어 문자를 사용할 수 없습니다.",
-  );
+const kakaoHomepageDisplayNameSchema =
+  consultationCustomerNameTextSchema(40);
 
 export const kakaoHomepageEntryStatusSchema = z.enum([
   "pending",

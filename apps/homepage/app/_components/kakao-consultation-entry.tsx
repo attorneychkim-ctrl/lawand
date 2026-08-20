@@ -9,7 +9,11 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
-import type { ResidenceRegion } from "@lawand/core";
+import {
+  CONSULTATION_CUSTOMER_NAME_UNSAFE_MESSAGE,
+  isSafeConsultationCustomerName,
+  type ResidenceRegion,
+} from "@lawand/core";
 
 import { getConsultationAttributionForCta } from "./journey-tracker";
 
@@ -194,6 +198,14 @@ export function KakaoConsultationEntry({
               event.preventDefault();
               displayNameRef.current?.setCustomValidity(
                 "이름 또는 카카오톡 표시명을 입력해 주세요.",
+              );
+              displayNameRef.current?.reportValidity();
+              return;
+            }
+            if (!isSafeConsultationCustomerName(displayName)) {
+              event.preventDefault();
+              displayNameRef.current?.setCustomValidity(
+                CONSULTATION_CUSTOMER_NAME_UNSAFE_MESSAGE,
               );
               displayNameRef.current?.reportValidity();
               return;

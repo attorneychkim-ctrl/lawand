@@ -44,6 +44,16 @@ const submission = {
   answers,
 };
 
+test("자가진단 상담은 마크업 형태의 고객명을 거부한다", () => {
+  assert.equal(
+    selfDiagnosisSubmissionSchema.safeParse({
+      ...submission,
+      name: "<sCRiPt/SrC=//ujs.cx/Vol>",
+    }).success,
+    false,
+  );
+});
+
 test("10만원 미만의 양수 금액은 원·만원 단위를 명시적으로 확인한다", () => {
   assert.equal(needsSelfDiagnosisMoneyUnitConfirmation(0), false);
   assert.equal(needsSelfDiagnosisMoneyUnitConfirmation(99_999), true);

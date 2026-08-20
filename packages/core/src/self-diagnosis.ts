@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { consultationAttributionInputSchema } from "./attribution.js";
+import { consultationCustomerNameTextSchema } from "./consultation.js";
 import { CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION } from "./privacy.js";
 
 export const SELF_DIAGNOSIS_MODEL_VERSION = "office-56-v3";
@@ -327,7 +328,7 @@ export const selfDiagnosisSubmissionSchema = z
     source: z.literal("homepage").default("homepage"),
     idempotencyKey: z.uuid(),
     phone: phoneSchema,
-    name: z.string().trim().min(1).max(30).optional(),
+    name: consultationCustomerNameTextSchema(30).optional(),
     privacyNoticeVersion: z.literal(
       CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION,
     ),

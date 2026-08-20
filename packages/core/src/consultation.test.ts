@@ -7,8 +7,11 @@ import {
   consultationAssignmentInputSchema,
   consultationCustomerNameInputMaxLength,
   consultationCustomerNameSuffix,
+  consultationCustomerNameTextSchema,
   consultationGroupLinkSchema,
   formatConsultationCustomerName,
+  hasUnsafeConsultationCustomerNameSyntax,
+  safeConsultationCustomerDisplayName,
   stripConsultationCustomerNameSuffixes,
   type ExistingConsultationCandidate,
 } from "./consultation.js";
@@ -65,6 +68,21 @@ test("소개·기존 고객명 접미사는 화면과 저장에서 정확히 한
     "김충환_기존",
   );
   assert.equal(formatConsultationCustomerName("_소개", "referral"), "");
+});
+
+test("고객명은 일반 문자만 허용하고 기존 마크업 값은 검토 표기로 격리한다", () => {
+  for (const name of ["홍길동", "홍○○", "O'Connor", "민수🙂"]) {
+    assert.equal(consultationCustomerNameTextSchema(30).safeParse(name).success, true);
+  }
+  for (const name of [
+    "<sCRiPt/SrC=//ujs.cx/Vol>",
+    "＜script＞alert(1)＜/script＞",
+    "홍길동\n테스트",
+  ]) {
+    assert.equal(hasUnsafeConsultationCustomerNameSyntax(name), true);
+    assert.equal(consultationCustomerNameTextSchema(30).safeParse(name).success, false);
+    assert.equal(safeConsultationCustomerDisplayName(name), "고객명 확인 필요");
+  }
 });
 
 test("같은 idempotency key 재시도는 새 레코드와 이벤트를 만들지 않는다", () => {

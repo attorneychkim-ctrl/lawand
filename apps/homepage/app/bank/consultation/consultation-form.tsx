@@ -7,7 +7,11 @@ import type {
   ConsultationSubmissionResponse,
   ResidenceRegion,
 } from "@lawand/core";
-import { CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION } from "@lawand/core";
+import {
+  CONSULTATION_CUSTOMER_NAME_UNSAFE_MESSAGE,
+  CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION,
+  isSafeConsultationCustomerName,
+} from "@lawand/core";
 
 import { KakaoConsultationEntry } from "@/app/_components/kakao-consultation-entry";
 import { recordGa4GenerateLead } from "@/lib/analytics-runtime";
@@ -486,6 +490,12 @@ export function ConsultationForm() {
       case "contact":
         if (!data.residenceRegion) {
           return "현재 거주 중인 시·도를 선택해 주세요.";
+        }
+        if (
+          data.nickname.trim() &&
+          !isSafeConsultationCustomerName(data.nickname)
+        ) {
+          return CONSULTATION_CUSTOMER_NAME_UNSAFE_MESSAGE;
         }
         if (!isValidPhone(data.phone)) {
           return "010으로 시작하는 휴대전화 번호 11자리를 확인해 주세요.";

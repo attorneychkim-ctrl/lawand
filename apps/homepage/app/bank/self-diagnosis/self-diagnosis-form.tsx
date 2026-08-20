@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  CONSULTATION_CUSTOMER_NAME_UNSAFE_MESSAGE,
   CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION,
   SELF_DIAGNOSIS_INCOME_TYPES,
   SELF_DIAGNOSIS_LIVING_COST_TYPES,
@@ -11,6 +12,7 @@ import {
   SELF_DIAGNOSIS_RESIDENCE_REGIONS,
   SELF_DIAGNOSIS_RESIDENCE_TYPES,
   getSelfDiagnosisCourtOptions,
+  isSafeConsultationCustomerName,
   needsSelfDiagnosisMoneyUnitConfirmation,
   type SelfDiagnosisResidenceRegion,
   type SelfDiagnosisMoneyUnitField,
@@ -417,6 +419,9 @@ export function SelfDiagnosisForm() {
     }
     if (candidateStep === 3) {
       if (!candidateData.name.trim()) return "이름을 입력해 주세요.";
+      if (!isSafeConsultationCustomerName(candidateData.name)) {
+        return CONSULTATION_CUSTOMER_NAME_UNSAFE_MESSAGE;
+      }
       if (!/^010\d{8}$/u.test(digits(candidateData.phone))) {
         return "010으로 시작하는 휴대전화 번호를 입력해 주세요.";
       }

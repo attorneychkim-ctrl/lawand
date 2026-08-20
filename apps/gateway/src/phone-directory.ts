@@ -1,4 +1,8 @@
 import { sql, type SQL } from "drizzle-orm";
+import {
+  CONSULTATION_CUSTOMER_NAME_REVIEW_LABEL,
+  safeConsultationCustomerName,
+} from "@lawand/core";
 
 function candidateValues(phones: readonly string[]): SQL {
   if (phones.length === 0) {
@@ -148,7 +152,7 @@ export function summarizeLinkedLegalFriendsCaseNames(
   const names = new Map<string, string>();
   for (const row of rows) {
     const caseIdx = row.case_idx.trim();
-    const clientName = row.client_name?.trim();
+    const clientName = safeConsultationCustomerName(row.client_name);
     if (!caseIdx || !clientName || names.has(caseIdx)) continue;
     names.set(caseIdx, clientName);
   }
@@ -161,7 +165,13 @@ export function linkedLegalFriendsDisplayName(
   linkedCaseNames: ReadonlyMap<string, string>,
 ) {
   const caseIdx = linkedCaseIdx?.trim();
-  return (caseIdx ? linkedCaseNames.get(caseIdx) : null) ?? erpDisplayName;
+  return (
+    safeConsultationCustomerName(
+      caseIdx ? linkedCaseNames.get(caseIdx) : null,
+    ) ??
+    safeConsultationCustomerName(erpDisplayName) ??
+    CONSULTATION_CUSTOMER_NAME_REVIEW_LABEL
+  );
 }
 
 export function phoneDirectoryCustomersQuery(phones: readonly string[]) {

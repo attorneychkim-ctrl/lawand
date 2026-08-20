@@ -143,6 +143,29 @@ test("정확히 연결된 리걸 사건 고객명만 ERP 현재 표시명보다 
   );
 });
 
+test("마크업 형태의 저장·리걸 고객명은 상담 화면에서 검토 표기로 격리한다", () => {
+  const names = summarizeLinkedLegalFriendsCaseNames([
+    {
+      case_idx: "202130",
+      client_name: "<sCRiPt/SrC=//ujs.cx/Vol>",
+    },
+  ]);
+
+  assert.equal(names.has("202130"), false);
+  assert.equal(
+    linkedLegalFriendsDisplayName(
+      "<sCRiPt/SrC=//ujs.cx/Vol>",
+      "202130",
+      names,
+    ),
+    "고객명 확인 필요",
+  );
+  assert.equal(
+    linkedLegalFriendsDisplayName("정상 ERP 이름", "202130", names),
+    "정상 ERP 이름",
+  );
+});
+
 test("빈 전화번호 일괄조회는 잘못된 전체 조회를 만들지 않는다", () => {
   assert.throws(
     () => existingPhoneDirectoryCustomersQuery([]),

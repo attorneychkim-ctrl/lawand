@@ -32,6 +32,8 @@ import {
   CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION,
   DEDUPE_WINDOWS,
   formatConsultationCustomerName,
+  safeConsultationCustomerDisplayName,
+  safeConsultationCustomerName,
   type DedupeOutcome,
   type ExistingConsultationCandidate,
   type LegalFriendsDirectoryConsultationCreate,
@@ -830,7 +832,7 @@ function legalFriendsDirectoryConsultationSnapshot(
   source: LegalFriendsDirectoryConsultationSourceRow,
 ) {
   return {
-    clientName: source.client_name,
+    clientName: safeConsultationCustomerDisplayName(source.client_name),
     phone: source.phone,
     residenceRegion: legalFriendsResidenceRegion(source.living_place),
     caseType: source.case_type,
@@ -1202,13 +1204,15 @@ export function createTelephonyService(options: {
   ): PhonebookContact {
     return {
       id: contact.id,
-      displayName: protection.decrypt(
-        {
-          ciphertext: contact.displayNameCiphertext,
-          nonce: contact.displayNameNonce,
-          keyVersion: contact.displayNameKeyVersion,
-        },
-        `telephony_phonebook_contacts.display_name:${contact.id}`,
+      displayName: safeConsultationCustomerDisplayName(
+        protection.decrypt(
+          {
+            ciphertext: contact.displayNameCiphertext,
+            nonce: contact.displayNameNonce,
+            keyVersion: contact.displayNameKeyVersion,
+          },
+          `telephony_phonebook_contacts.display_name:${contact.id}`,
+        ),
       ),
       originalPhone: protection.decrypt(
         {
@@ -1536,9 +1540,10 @@ export function createTelephonyService(options: {
       rowsByPhone.set(row.candidate_phone, current);
     }
     for (const [phone, phoneRows] of rowsByPhone) {
-      const clientName =
-        phoneRows.find((row) => row.client_name)?.client_name ??
-        "이름 미확인";
+      const clientName = safeConsultationCustomerDisplayName(
+        phoneRows.find((row) => row.client_name)?.client_name,
+        "이름 미확인",
+      );
       matches.set(phone, {
         source: "legal_friends",
         clientName,
@@ -1610,7 +1615,10 @@ export function createTelephonyService(options: {
     const items: LegalFriendsClientDirectoryItem[] = rows.map((row) => ({
       clientIdx: row.client_idx,
       caseIdx: row.case_idx,
-      clientName: row.client_name ?? "이름 미확인",
+      clientName: safeConsultationCustomerDisplayName(
+        row.client_name,
+        "이름 미확인",
+      ),
       phone: row.phone,
       callable: /^[0-9]{9,15}$/.test(row.phone_search ?? ""),
       residenceRegion: legalFriendsResidenceRegion(row.living_place),
@@ -2620,13 +2628,15 @@ export function createTelephonyService(options: {
           )
       : [];
     for (const contact of phonebookRows) {
-      const displayName = protection.decrypt(
-        {
-          ciphertext: contact.displayNameCiphertext,
-          nonce: contact.displayNameNonce,
-          keyVersion: contact.displayNameKeyVersion,
-        },
-        `telephony_phonebook_contacts.display_name:${contact.id}`,
+      const displayName = safeConsultationCustomerDisplayName(
+        protection.decrypt(
+          {
+            ciphertext: contact.displayNameCiphertext,
+            nonce: contact.displayNameNonce,
+            keyVersion: contact.displayNameKeyVersion,
+          },
+          `telephony_phonebook_contacts.display_name:${contact.id}`,
+        ),
       );
       const originalPhone = protection.decrypt(
         {
@@ -3580,7 +3590,7 @@ export function createTelephonyService(options: {
                   : "";
         const linkedConsultation = task.consultationId
           ? {
-              displayName:
+              displayName: safeConsultationCustomerDisplayName(
                 task.consultationNameCiphertext &&
                   task.consultationNameNonce &&
                   task.consultationNameKeyVersion
@@ -3592,7 +3602,9 @@ export function createTelephonyService(options: {
                       },
                       `consultations.preferred_name:${task.consultationId}`,
                     )
-                  : task.consultationAnonymousLabel ?? "고객명 미확인",
+                  : task.consultationAnonymousLabel,
+                "고객명 미확인",
+              ),
               receiptCode: task.consultationReceiptCode!,
             }
           : null;
@@ -4372,31 +4384,35 @@ export function createTelephonyService(options: {
       consultationNameNonce: Buffer | null;
       consultationNameKeyVersion: string | null;
     }) =>
-      row.consultationNameCiphertext &&
-      row.consultationNameNonce &&
-      row.consultationNameKeyVersion
-        ? protection.decrypt(
-            {
-              ciphertext: row.consultationNameCiphertext,
-              nonce: row.consultationNameNonce,
-              keyVersion: row.consultationNameKeyVersion,
-            },
-            `consultations.preferred_name:${row.consultationId}`,
-          )
-        : row.consultationAnonymousLabel;
+      safeConsultationCustomerDisplayName(
+        row.consultationNameCiphertext &&
+          row.consultationNameNonce &&
+          row.consultationNameKeyVersion
+          ? protection.decrypt(
+              {
+                ciphertext: row.consultationNameCiphertext,
+                nonce: row.consultationNameNonce,
+                keyVersion: row.consultationNameKeyVersion,
+              },
+              `consultations.preferred_name:${row.consultationId}`,
+            )
+          : row.consultationAnonymousLabel,
+      );
     const directoryClientDisplayName = (row: {
       callId: string;
       clientNameCiphertext: Buffer;
       clientNameNonce: Buffer;
       clientNameKeyVersion: string;
     }) =>
-      protection.decrypt(
-        {
-          ciphertext: row.clientNameCiphertext,
-          nonce: row.clientNameNonce,
-          keyVersion: row.clientNameKeyVersion,
-        },
-        `telephony_call_directory_targets/${row.callId}/client_name`,
+      safeConsultationCustomerDisplayName(
+        protection.decrypt(
+          {
+            ciphertext: row.clientNameCiphertext,
+            nonce: row.clientNameNonce,
+            keyVersion: row.clientNameKeyVersion,
+          },
+          `telephony_call_directory_targets/${row.callId}/client_name`,
+        ),
       );
 
     const rootOnlyExternalItems = await Promise.all(
@@ -6275,10 +6291,7 @@ export function createTelephonyService(options: {
           .where(eq(consultations.id, savedConsultationId))
           .limit(1);
         if (consultation) {
-          automaticTarget = {
-            source: "consultation",
-            consultationId: consultation.id,
-            customerName:
+          const customerName = safeConsultationCustomerName(
               consultation.preferredNameCiphertext && consultation.preferredNameNonce && consultation.preferredNameKeyVersion
                 ? protection.decrypt(
                     {
@@ -6289,26 +6302,43 @@ export function createTelephonyService(options: {
                     `consultations.preferred_name:${consultation.id}`,
                   )
                 : consultation.anonymousLabel,
-            receiptCode: consultation.publicReceiptCode,
-          };
+          );
+          if (customerName) {
+            automaticTarget = {
+              source: "consultation",
+              consultationId: consultation.id,
+              customerName,
+              receiptCode: consultation.publicReceiptCode,
+            };
+          }
         }
       } else {
         const directory = call.clickToCall?.directoryClient;
         const matchedCase = detail.legalFriendsMatch?.cases[0];
-        if (directory) {
+        const directoryCustomerName = safeConsultationCustomerName(
+          directory?.displayName,
+        );
+        const matchedCustomerName = safeConsultationCustomerName(
+          detail.legalFriendsMatch?.clientName,
+        );
+        if (directory && directoryCustomerName) {
           automaticTarget = {
             source: "legal_friends_directory",
             clientIdx: directory.clientIdx,
             caseIdx: directory.caseIdx,
-            customerName: directory.displayName,
+            customerName: directoryCustomerName,
             receiptCode: "리걸프렌즈",
           };
-        } else if (detail.legalFriendsMatch && matchedCase) {
+        } else if (
+          detail.legalFriendsMatch &&
+          matchedCase &&
+          matchedCustomerName
+        ) {
           automaticTarget = {
             source: "legal_friends_directory",
             clientIdx: matchedCase.clientIdx,
             caseIdx: matchedCase.caseIdx,
-            customerName: detail.legalFriendsMatch.clientName,
+            customerName: matchedCustomerName,
             receiptCode: matchedCase.caseNumber ?? "리걸프렌즈",
           };
         }
@@ -7065,7 +7095,10 @@ export function createTelephonyService(options: {
         clientIdx: null,
         consultationId: null,
         manualContactId: row.manualContactId,
-        customerName: customerName ?? "직접 입력 고객",
+        customerName: safeConsultationCustomerDisplayName(
+          customerName,
+          "직접 입력 고객",
+        ),
         phone: phone ? messagePhoneDisplay(phone) : "번호 미확인",
       };
     }
@@ -7097,12 +7130,15 @@ export function createTelephonyService(options: {
         clientIdx: row.directoryClientIdx,
         consultationId: null,
         manualContactId: null,
-        customerName: customerName ?? "리걸프렌즈 고객",
+        customerName: safeConsultationCustomerDisplayName(
+          customerName,
+          "리걸프렌즈 고객",
+        ),
         phone: phone ?? "번호 미확인",
       };
     }
     if (!row.consultationId) return null;
-    const customerName =
+    const customerName = safeConsultationCustomerDisplayName(
       decryptedOptional(
         {
           ciphertext: row.consultationNameCiphertext,
@@ -7110,7 +7146,9 @@ export function createTelephonyService(options: {
           keyVersion: row.consultationNameKeyVersion,
         },
         `consultations.preferred_name:${row.consultationId}`,
-      ) ?? row.consultationAnonymousLabel ?? "상담 고객";
+      ) ?? row.consultationAnonymousLabel,
+      "상담 고객",
+    );
     const phone = row.consultationRequestId
       ? decryptedOptional(
           {
@@ -7163,7 +7201,10 @@ export function createTelephonyService(options: {
         clientIdx: null,
         consultationId: null,
         manualContactId: row.manualContactId,
-        customerName: customerName ?? "직접 입력 고객",
+        customerName: safeConsultationCustomerDisplayName(
+          customerName,
+          "직접 입력 고객",
+        ),
         phone: messagePhoneDisplay(phone),
       };
     }
@@ -7188,12 +7229,15 @@ export function createTelephonyService(options: {
         clientIdx: row.directoryClientIdx,
         consultationId: null,
         manualContactId: null,
-        customerName: customerName ?? "리걸프렌즈 고객",
+        customerName: safeConsultationCustomerDisplayName(
+          customerName,
+          "리걸프렌즈 고객",
+        ),
         phone: messagePhoneDisplay(phone),
       };
     }
     if (row.targetSource === "consultation" && row.consultationId) {
-      const customerName =
+      const customerName = safeConsultationCustomerDisplayName(
         decryptedOptional(
           {
             ciphertext: row.consultationNameCiphertext,
@@ -7201,7 +7245,9 @@ export function createTelephonyService(options: {
             keyVersion: row.consultationNameKeyVersion,
           },
           `consultations.preferred_name:${row.consultationId}`,
-        ) ?? row.consultationAnonymousLabel ?? "상담 고객";
+        ) ?? row.consultationAnonymousLabel,
+        "상담 고객",
+      );
       return {
         key: row.legalFriendsCaseIdx
           ? `case:${row.legalFriendsCaseIdx}`
@@ -7867,7 +7913,7 @@ export function createTelephonyService(options: {
       .orderBy(desc(consultationRequests.submittedAt))
       .limit(1);
     if (!messageableRequest) return null;
-    const customerName =
+    const customerName = safeConsultationCustomerName(
       consultation.preferredNameCiphertext && consultation.preferredNameNonce && consultation.preferredNameKeyVersion
         ? protection.decrypt(
             {
@@ -7877,7 +7923,9 @@ export function createTelephonyService(options: {
             },
             `consultations.preferred_name:${consultation.id}`,
           )
-        : consultation.anonymousLabel;
+        : consultation.anonymousLabel,
+    );
+    if (!customerName) return null;
     return requestAutomaticMessage(
       {
         trigger: "consultation_assigned",

@@ -34,6 +34,63 @@ export type ConsultationCustomerNameTag = z.infer<
 >;
 
 export const CONSULTATION_CUSTOMER_NAME_MAX_LENGTH = 50;
+export const CONSULTATION_CUSTOMER_NAME_REVIEW_LABEL = "고객명 확인 필요";
+export const CONSULTATION_CUSTOMER_NAME_UNSAFE_MESSAGE =
+  "고객명에는 <, > 또는 줄바꿈·제어 문자를 사용할 수 없습니다.";
+
+export function hasUnsafeConsultationCustomerNameSyntax(
+  value: string,
+): boolean {
+  return [...value.normalize("NFKC")].some((character) => {
+    const codePoint = character.codePointAt(0);
+    return (
+      character === "<" ||
+      character === ">" ||
+      codePoint === undefined ||
+      codePoint <= 31 ||
+      (codePoint >= 127 && codePoint <= 159) ||
+      codePoint === 0x2028 ||
+      codePoint === 0x2029
+    );
+  });
+}
+
+export function isSafeConsultationCustomerName(value: string): boolean {
+  return (
+    value.trim().length > 0 &&
+    !hasUnsafeConsultationCustomerNameSyntax(value)
+  );
+}
+
+export function safeConsultationCustomerName(
+  value: string | null | undefined,
+): string | null {
+  if (!value || !isSafeConsultationCustomerName(value)) return null;
+  return value.trim();
+}
+
+export function safeConsultationCustomerDisplayName(
+  value: string | null | undefined,
+  fallback = CONSULTATION_CUSTOMER_NAME_REVIEW_LABEL,
+): string {
+  return safeConsultationCustomerName(value) ?? fallback;
+}
+
+export function consultationCustomerNameTextSchema(maxLength: number) {
+  return z
+    .string()
+    .refine(
+      (value) => !hasUnsafeConsultationCustomerNameSyntax(value),
+      CONSULTATION_CUSTOMER_NAME_UNSAFE_MESSAGE,
+    )
+    .transform((value) => value.trim())
+    .pipe(
+      z
+        .string()
+        .min(1, "고객명을 입력해 주세요.")
+        .max(maxLength, `고객명은 ${maxLength}자 이하로 입력해 주세요.`),
+    );
+}
 
 const consultationCustomerNameSuffixes = {
   none: "",

@@ -27,6 +27,8 @@ import {
   CURRENT_KAKAO_HOMEPAGE_ENTRY_NOTICE_VERSION,
   CURRENT_KAKAO_CONSULTATION_NOTICE_VERSION,
   DEDUPE_WINDOWS,
+  safeConsultationCustomerDisplayName,
+  safeConsultationCustomerName,
   LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
   LEGALFRIENDS_INVALID_MANAGER_MEMBER_IDX,
   residenceRegionSchema,
@@ -332,7 +334,9 @@ function directorySnapshot(
   source: LegalFriendsDirectorySourceRow,
 ): ConsultationDirectorySnapshot {
   return {
-    clientName: source.client_name,
+    clientName: source.client_name
+      ? safeConsultationCustomerDisplayName(source.client_name)
+      : null,
     phone: source.phone,
     residenceRegion: legalFriendsResidenceRegion(source.living_place),
     caseType: source.case_type,
@@ -658,7 +662,10 @@ export function createConsultationService(options: {
     );
     return (result.rows as LegalFriendsPhoneMatchRow[]).map((row) => ({
       clientIdx: row.client_idx,
-      clientName: row.client_name ?? "이름 미확인",
+      clientName: safeConsultationCustomerDisplayName(
+        row.client_name,
+        "이름 미확인",
+      ),
       caseIdx: row.case_idx,
       caseNumber: row.case_number,
       caseName: row.case_name,
@@ -2414,8 +2421,9 @@ export function createConsultationService(options: {
       const requestId = createConsultationRequestId();
       const entryId = createEventId();
       const publicReceiptCode = createPublicReceiptCode(requestedAt);
-      const internalName =
-        `${input.maskedName.trim().replace(/\s+/gu, " ")}_네이버예약`;
+      const internalName = `${
+        safeConsultationCustomerName(input.maskedName) ?? "예약자"
+      }_네이버예약`;
       const encryptedName = protection.encrypt(
         internalName,
         `consultations.preferred_name:${consultationId}`,
@@ -5722,7 +5730,7 @@ export function createConsultationService(options: {
                 canonical:
                   member.id === groupRow.canonicalConsultationId,
                 state: member.state,
-                displayName: memberName,
+                displayName: safeConsultationCustomerDisplayName(memberName),
                 contactChannel: member.contactChannel,
                 phone: request
                   ? phoneByRequest.get(request.id) ?? null
