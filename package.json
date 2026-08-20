@@ -9,6 +9,7 @@
     "db:local:setup": "node scripts/setup-local-db.mjs",
     "dev": "turbo run dev",
     "diagnosis:sync": "node scripts/sync-self-diagnosis-profiles.mjs",
+    "docs:context:check": "node scripts/check-context-docs.mjs",
     "legalfriends:case-memo": "node scripts/import-legalfriends-casememo.mjs",
     "legalfriends:client-statement": "node scripts/import-legalfriends-client-statement.mjs",
     "legalfriends:phone-directory": "node scripts/import-legalfriends-phone-directory.mjs",
