@@ -1,4 +1,4 @@
-# 로앤 통합 플랫폼 — 현재 설계·운영 기준선 (v2.0)
+# 로앤 통합 플랫폼 — 현재 설계·운영 기준선 (v2.1)
 
 > 갱신일: 2026-08-20
 >
@@ -29,24 +29,21 @@
 
 | 항목 | 현재 기준 |
 | --- | --- |
-| Git `main` | 최근 컨텍스트 통합 `38fc1dc6476ea7108ee5846e45d23618741a47fa`; 실제 HEAD는 `git rev-parse origin/main`으로 확인 |
-| 최신 통합 코드 | `f8bd74d04ac240fe6c9ed02759b795b069140559` |
-| 최신 운영 릴리스 | `20260820T034100Z-three-worktrees-v1` |
-| 운영 DB | PostgreSQL, migration 72개 (`0000..0071`) |
-| 최신 migration | `0071_consultation_schedule_follow_up.sql` |
+| Git `main` | 운영 애플리케이션 소스 `34fc13d1e1a42126613749cfc295baea4b9885c3`; 기록 커밋 뒤 실제 HEAD는 `git rev-parse origin/main`으로 확인 |
+| 최신 통합 코드 | `34fc13d1e1a42126613749cfc295baea4b9885c3` |
+| 최신 운영 릴리스 | `20260820T094820Z-six-worktrees-v1` |
+| 운영 DB | PostgreSQL, migration 74개 (`0000..0073`) |
+| 최신 migration | `0073_desktop_notifications.sql` |
 | 공개 홈페이지 | `lawandfirm.com`, AWS 홈페이지 앱 운영 |
 | 내부 제품명 | `LAW& OS` |
 | Linux 배포 | GitHub Actions → private ECR ARM64 → EC2 immutable digest pull |
 
-최신 릴리스는 gateway·ERP에 내선 발신 직원 상세와 홈페이지 예약 상담의 담당자 재통화
-업무·정시 브라우저 알림을 반영했다. 홈페이지는 직전 GA4 무팝업 측정 digest를 유지했다.
-ERP의 개인 웹훅 설정은 관리자 전용 비활성 미리보기이며 DB·API·실제 전송은 없다. 최신
-health·digest·snapshot·migration 해시와 검증 결과는
+최신 릴리스는 홈페이지·ERP·gateway를 함께 전환해 공개 intake의 의심 고객명 격리, 전화
+업무 통합 배지, 후기 비활성 상태 피드백, 상담완료 문자·후기 요청 독립 발송과 개인 Windows
+PC 알림 원장을 반영했다. 개인 PC 알림 화면은 관리자 전용이며 unsigned client artifact는
+운영에 제공하지 않는다. 외부 URL 웹훅 후보는 폐기됐다. 최신 health·digest·snapshot·
+migration 해시와 검증 결과는
 [`docs/handoffs/CURRENT.md`](docs/handoffs/CURRENT.md)를 따른다.
-
-컨텍스트 문서 구조 개편은 `38fc1dc6476ea7108ee5846e45d23618741a47fa`로 `main`과 CI에
-반영됐다. 애플리케이션 코드·DB·운영 설정은 바뀌지 않아 ECR에 게시된 같은 SHA의 이미지를
-EC2에 전환하지 않았고 위 운영 릴리스와 런타임 기준선은 그대로다.
 
 ## 2. 저장소와 런타임 경계
 

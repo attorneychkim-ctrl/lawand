@@ -4,20 +4,65 @@
 CloudFormation 스택: `lawand-prod`
 리전: 서울(`ap-northeast-2`)
 최초 배포 릴리스: `20260804T085006Z-84e8708`
-현재 홈페이지 릴리스: `20260819T084041Z-ga4-no-prompt-hotfix-v1`
-현재 ERP 릴리스: `20260820T034100Z-three-worktrees-v1`
-현재 gateway 릴리스: `20260820T034100Z-three-worktrees-v1`
+현재 홈페이지 릴리스: `20260820T094820Z-six-worktrees-v1`
+현재 ERP 릴리스: `20260820T094820Z-six-worktrees-v1`
+현재 gateway 릴리스: `20260820T094820Z-six-worktrees-v1`
 현재 Windows bridge: `v0.8.3.0`
 
-완료된 모든 worktree를 main에 통합한 기준선 위에 공개 후기 작성자 자동 마스킹과 ERP 후기
-요청 템플릿 선택·문자 미리보기·편집 UX를 홈페이지·ERP·gateway의 같은 릴리스로 운영
-반영했다. 2026-08-18 통합 릴리스는 알림 복구·신규 상담 전달사항·화면 전환 어텐션,
-개인 템플릿 자동문자와 기프티쇼 비즈 통제 발송을 더하고 migration `0064`·`0065`를
-적용했다. Windows bridge는 코드 영향이 없어 `v0.8.3.0`을 유지했다.
+완료된 모든 worktree를 main에 통합한 기준선 위에 공개 intake 고객명 격리, 전화 업무 통합
+배지, 후기 UI 피드백, 상담완료 문자와 개인 Windows PC 알림을 홈페이지·ERP·gateway의 같은
+릴리스로 운영 반영했다. Windows bridge는 코드 영향이 없어 `v0.8.3.0`을 유지했다.
 
 이 문서는 정식 도메인 전환 이후를 포함한 실제 AWS 구성, 접속점, 데이터 이관 범위와
 운영 체크리스트를 기록한다. 비밀번호·API 키·AWS 계정 ID·RDS 마스터 시크릿 ARN은
 기록하지 않는다.
+
+## 2026-08-20 완료 작업 6개 통합 운영 배포
+
+- `clientname_sCRiPt`·`phone_alarm`·`change_manager`·`review_save_error`·
+  `sms_consult_complete`·`web_hook`을 애플리케이션 소스
+  `34fc13d1e1a42126613749cfc295baea4b9885c3`에 통합했다. 모든 Orca·원격 작업 HEAD는 최종
+  main ancestor다. 전체 5패키지 test·typecheck·lint·production build, DB schema/diff와
+  Actions `32354715262`·`32354715274`가 성공했다. core 102개·gateway 217개·홈페이지 9개
+  테스트가 통과했다.
+- 새 gateway digest를 먼저 pull해 `arm64`·app·revision을 확인하고 암호화 RDS snapshot
+  `lawand-prod-pre-six-worktrees-20260820t094820z`을 available·100%로 확보했다. migration
+  `0072_consultation_completed_message.sql`·`0073_desktop_notifications.sql`을 적용하고 두 번째
+  실행 no-op을 확인했다. 운영 migration은 74개이며 최신 해시는
+  `dca900abf3b0298920774d2548e82059663c411c1a99490838fc34a647982f0d`·
+  `0448f39922e61c360cd0417a867c194be0812d6c60254da04b06ee47675b3c36`로 소스와 일치한다.
+  PC 알림 테이블 5·FK 6·index 10, PUBLIC/viewer grant 0, 앱 최소 권한 15, cleanup 함수의
+  `SECURITY DEFINER`·고정 search path와 자동 생성 행 0을 확인했다.
+- 릴리스 `20260820T094820Z-six-worktrees-v1`의 parent digest/image ID는 홈페이지
+  `sha256:26c2969026cd618d44bbfb0d97462e0da8d98092155b10fb87c4f6993d1e7a16`·
+  `sha256:a93a38cfbc437f77f59920561c83b8b5d2fe4f75defd02b10d7f9de967eec362`, ERP
+  `sha256:527c57b3007e4e381a746961bd1fbd721e633e02bf4ae69d998a0d0f0ed70c74`·
+  `sha256:b0343f7ed1accb411d78dbb23f0869f00b445a2c80ace4232a3d7ec1d67b94af`, gateway
+  `sha256:c2ca002dca9462459323a0030418ff13552abbe66087bff779748fa5f1e8a99d`·
+  `sha256:60bf3cccd010444ad68f7318512415943094fa15a5d35b9f426a991897dc072c`다. 세 ARM64 child
+  scan은 CRITICAL 3·HIGH 11·MEDIUM 11·LOW 1이다.
+- rollback image ID는 홈페이지
+  `sha256:a56d1c3a921000df1d9acecfdb04f695399cc12ee74277f2bf199a1dc26c428d`·
+  `sha256:c422c640286252f4df42958f9f2ea1917f82306dbd8d7acbd81cc06ee08b4fa9`, ERP
+  `sha256:9d5ef697dcf8146b06a579e85967b41e49f10243047ad3b5980eb50f1fc668cc`·
+  `sha256:944686691a7080ddd6730e759d2bd223de8a7691abadf811322d027cc31c5666`, gateway
+  `sha256:006d43231caf810b4ab619b066a3934348db1d95593034f164bc242a9ff79f21`·
+  `sha256:b79063876c62833360f065ec799a5320b0210b4348b45515ff21e4216012fdcf`다. BuildKit cache는
+  홈페이지 1,421,000,000, ERP 1,429,000,000, gateway 1,381,000,000 bytes다. 가용량은 각각
+  19,107,753,984→19,990,347,776, 93,380,214,784→94,275,960,832,
+  92,974,284,800→93,828,960,256 bytes이고 회수량은 882,593,792·895,746,048·854,675,456
+  bytes다. 앱별 현재+rollback 2개와 source release 2개를 보존했다.
+- 정식·EIP 홈페이지·ERP 로그인·gateway health는 각각 3회 연속 200, 앱·Caddy active,
+  restart 0, 환경파일 600, 배포 뒤 error journal·failed unit 0이다. 네 health 표본의
+  request/LISTEN waiting은 `0/20`·`0/5`이고 CloudWatch는 OK 14·ALARM 0·
+  INSUFFICIENT_DATA 0이다. 세 EC2 status/system ok·SSM Online, RDS available·암호화·삭제
+  방지다. outbox는 published 1,282·dead 29·pending 618·locked 0이며 전화·문자·받기 명령과
+  최근 5분 통화는 0이다.
+- Orca 운영 canary에서 상담 시작 단계 전환·제목 포커스·스크롤 이동을 확인했고 console·
+  hydration 신호·가로 overflow·제출 network 요청은 0이다. GA config는 값 비출력 검증에서
+  유효한 형식과 `private`·`no-store`를 유지했다. PC 알림 페이지는 비로그인 시 로그인으로
+  이동하고 unsigned client artifact 키는 0이라 다운로드를 열지 않았다. 상담 backfill·실제
+  전화/문자/PC 알림·외부 웹훅 발송은 만들지 않았다.
 
 ## 2026-08-20 완료 작업 3개 통합 운영 배포
 

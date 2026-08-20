@@ -5,29 +5,31 @@
 
 ## 운영 기준선
 
-- 최근 컨텍스트 통합: `main` merge `38fc1dc6476ea7108ee5846e45d23618741a47fa`.
-  실제 원격 HEAD는 기록 커밋이 뒤따를 수 있으므로 `git rev-parse origin/main`으로 확인한다.
-- 최신 통합 코드 기준: `f8bd74d04ac240fe6c9ed02759b795b069140559`.
-- 최신 운영 릴리스: `20260820T034100Z-three-worktrees-v1`.
-  - gateway·ERP를 같은 릴리스 ID로 전환했다.
-  - 홈페이지는 직전 GA4 무팝업 운영 digest를 유지한다.
-- 운영 DB migration: 72개, 최신 `0071_consultation_schedule_follow_up.sql`.
-  - 최신 해시: `a660aff7b7a39d5b9fde99a9fe3cb8b62d5459bc37fde1c89d78296e5bf080e9`.
-  - 운영 적용 및 재실행 no-op을 확인했다.
-- 최신 릴리스 검증 시 정식·EIP gateway health와 ERP 로그인은 3회 연속 200, 앱·Caddy
-  active, restart 0, error journal 0이었다. 최종 request/LISTEN waiting은 `0/20`·`0/5`,
-  CloudWatch는 OK 14·ALARM 0이었다.
-- 최신 런타임 릴리스 검증 run은 `32328367486`이다. 컨텍스트 통합에서는 Actions
-  `32337680968`(문서 검사)·`32337680942`(전체 소스 검증과 ARM64 게시)가 성공했다.
-  새 SHA 이미지는 ECR에 게시만 했고 EC2 digest는 전환하지 않았다.
+- 최신 통합·운영 애플리케이션 소스는
+  `34fc13d1e1a42126613749cfc295baea4b9885c3`이다. 배포 기록 커밋이 뒤따를 수 있으므로 실제
+  원격 HEAD는 `git rev-parse origin/main`으로 확인한다.
+- 최신 운영 릴리스는 `20260820T094820Z-six-worktrees-v1`이며 홈페이지·ERP·gateway를 같은
+  릴리스 ID와 immutable digest로 전환했다.
+  - homepage `sha256:26c2969026cd618d44bbfb0d97462e0da8d98092155b10fb87c4f6993d1e7a16`
+  - ERP `sha256:527c57b3007e4e381a746961bd1fbd721e633e02bf4ae69d998a0d0f0ed70c74`
+  - gateway `sha256:c2ca002dca9462459323a0030418ff13552abbe66087bff779748fa5f1e8a99d`
+- 운영 DB migration은 74개(`0000..0073`)다. 최신 두 해시는
+  `dca900abf3b0298920774d2548e82059663c411c1a99490838fc34a647982f0d`·
+  `0448f39922e61c360cd0417a867c194be0812d6c60254da04b06ee47675b3c36`이며 암호화 snapshot
+  `lawand-prod-pre-six-worktrees-20260820t094820z` 뒤 적용·재실행 no-op을 확인했다.
+- 정식·EIP 세 앱 endpoint는 각각 3회 연속 200, 앱·Caddy active, restart·error journal 0,
+  env 600이다. request/LISTEN waiting은 네 표본 모두 `0/20`·`0/5`, CloudWatch는
+  OK 14·ALARM 0·INSUFFICIENT_DATA 0이다.
+- Actions `32354715262`(전체 소스 검증·세 ARM64 이미지 게시)와 `32354715274`(컨텍스트 문서
+  검사)가 성공했다. ECR ARM64 child scan은 세 앱 모두 CRITICAL 3·HIGH 11·MEDIUM 11·LOW 1이다.
 
 ## 현재 제품 상태
 
 - 홈페이지·ERP·gateway와 Route 53 정식 도메인은 운영 중이다.
 - 내선 발신 직원 상세, 홈페이지 예약 상담의 담당자 재통화 업무·정시 브라우저 알림은
   운영 반영됐다.
-- 현재 통합 후보는 기존 개인 웹훅 미리보기를 관리자 전용 개인 Windows PC 알림으로
-  교체한다. 5분 pairing·개인별 설정·실제 내부 이벤트 생산자는 구현됐지만, unsigned client는
+- 기존 개인 웹훅 미리보기는 관리자 전용 개인 Windows PC 알림으로 교체해 운영 반영했다.
+  5분 pairing·개인별 9개 설정·실제 내부 이벤트 생산자는 활성 코드지만, unsigned client는
   운영 artifact로 제공하지 않으며 일반 직원에게 아직 공개하지 않는다.
 - GA4 운영 Measurement ID·무팝업 측정과 `generate_lead` 주요 이벤트 표시는 활성화됐다.
   Google Ads·네이버 광고 연결, 광고 개인화, 자동 입찰은 시작하지 않았다.
@@ -60,9 +62,7 @@
 
 - 현재 작업 관리 기준은 **Orca이며 HERDR가 아니다**. 이번 통합 세션에서 Orca 앱
   `1.4.185`와 runtime ready/reachable, `main` 및 기능 워크트리 6개를 확인했다.
-- `LegalFlow/project_md_compact`는 `main` merge `38fc1dc6476ea7108ee5846e45d23618741a47fa`로
-  반영됐다. 런타임 코드·migration이 없어 현재 EC2 릴리스는 유지했다.
 - 사용자가 모든 기능 작업 완료와 통합 배포를 승인해 clean·원격 일치 상태의 기능 브랜치
-  6개를 `main`에 통합했다. migration은 기존 `0071` 뒤에서 `0072`·`0073`으로 정렬했고 전체
-  검증과 임시 DB 재실행 no-op까지 통과했다. 원격 `main` 푸시와 운영 배포를 이어서 수행한다.
+  6개를 `main`에 통합했다. 기존 `0071` 뒤에서 `0072`·`0073`으로 정렬하고 전체 검증·운영
+  snapshot·migration·세 앱 배포·후속 health까지 완료했다.
 - 다음 작업 전에 `PROJECT_PLAN.md`, 이 문서, 해당 분야의 상세 문서만 읽는다.
