@@ -1,8 +1,17 @@
-# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.69)
+# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.70)
 
 > 이 문서는 새 로앤 홈페이지 + 새 ERP + 리걸플로/리걸프렌즈 연동을 하나의 플랫폼으로
 > 묶기 위한 **저장소 구조·아키텍처 설계 초안**이다. 코덱스/클로드코드 세션이 번갈아
 > 작업하는 것을 전제로 하며, 첫 커밋 시점에 이 문서를 기준선으로 삼는다.
+>
+> 2026-08-20 운영 반영: 세 완료 작업을 main
+> `f8bd74d04ac240fe6c9ed02759b795b069140559`, 릴리스
+> `20260820T034100Z-three-worktrees-v1`로 gateway·ERP에 배포했다. 암호화 RDS snapshot 뒤
+> migration `0071`을 적용해 운영 원장 72개와 해시·FK·check·unique index·PUBLIC grant 0을
+> 확인했다. 정식·EIP health 200, restart·error journal 0이고 최종 request/LISTEN waiting은
+> 0/20·0/5, CloudWatch OK 14다. 내선 발신 직원 상세와 예약 상담 재통화 업무를 활성화했고
+> 개인 웹훅 설정은 관리자 전용 비활성 미리보기로 유지한다. 홈페이지·GA4 digest, 기존 업무
+> 데이터와 실제 전화·문자·웹훅 외부 발송은 변경하지 않았다.
 >
 > 2026-08-20 통합 후보: `extension_number`·`request_consultation_time`·`web_hook` 완료 작업을
 > main에 합쳤다. gateway·ERP는 일반 내선 발신 직원 상세, 홈페이지 예약 상담의 담당자 재통화

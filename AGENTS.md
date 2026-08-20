@@ -102,6 +102,37 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-20 — 완료 작업 3개 통합 운영 배포 완료
+- 세 완료 브랜치를 최종 main `f8bd74d04ac240fe6c9ed02759b795b069140559`에 통합했고 모든
+  로컬·원격 작업 HEAD가 ancestor임을 확인했다. `HERDR_ENV`와 HERDR 서버가 없어 Git
+  worktree·원격 브랜치를 전수 대조했다. 전체 5패키지 test·typecheck·lint·production build,
+  DB schema check·`git diff --check`, core 95개·gateway 193개·홈페이지 9개 테스트와 Actions
+  `32328367486`이 성공했다.
+- 암호화 snapshot `lawand-prod-pre-three-worktrees-20260820t034100z`을 available·100%로 확보한
+  뒤 새 gateway digest로 migration `0071`을 적용하고 재실행 no-op을 확인했다. 운영 migration은
+  72개이고 최신 해시 `a660aff7b7a39d5b9fde99a9fe3cb8b62d5459bc37fde1c89d78296e5bf080e9`가
+  소스와 일치한다. nullable 출처 컬럼 2개, 상담요청 FK, 단일 출처 check, 열린 업무 unique
+  index 2개와 PUBLIC grant 0을 확인했다. 기존 재통화 업무는 총 66·open 27로 보존됐다.
+- 릴리스 `20260820T034100Z-three-worktrees-v1`로 gateway→ERP를 digest 전환했다. parent
+  digest/image ID는 gateway
+  `sha256:ab9955a94eab6d3ca77c151e9407f68c6c2ef2187d206d5aa30bab17c816d076`·
+  `sha256:006d43231caf810b4ab619b066a3934348db1d95593034f164bc242a9ff79f21`, ERP
+  `sha256:aba5e003495a93a3bf59da5e7e90519c0518b2ed0f5aeac7144aa99d9930f84b`·
+  `sha256:9d5ef697dcf8146b06a579e85967b41e49f10243047ad3b5980eb50f1fc668cc`다.
+  두 ARM64 child scan은 CRITICAL 3·HIGH 11·MEDIUM 11·LOW 1이다.
+- health 뒤 gateway cache 1,381,000,000 bytes·가용량 93,003,325,440→93,854,560,256·회수
+  851,234,816 bytes, ERP cache 1,429,000,000 bytes·가용량
+  93,410,037,760→94,302,461,952·회수 892,424,192 bytes다. 현재+rollback 2개와 source release
+  2개를 보존하고 서버 배포 로그에 기록했다.
+- 정식·EIP gateway health와 ERP 로그인은 3회 연속 200이고 앱·Caddy active, restart 0,
+  환경파일 600, error journal 0이다. gateway request/LISTEN waiting은 네 후속 표본에서
+  0/20·0/5였다. 배포 전후 request pool wait 지표가 간헐적으로 3~10까지 올라 알람이 반복
+  전환됐으나 최종 실시간 표본은 모두 0이고 CloudWatch는 OK 14·ALARM 0·INSUFFICIENT_DATA
+  0으로 복귀했다. 세 EC2 status ok·SSM Online, RDS available·암호화·삭제 방지다.
+- outbox는 dead 29·pending 551·published 1,093, locked 0이다. 홈페이지는 기존 GA4 운영
+  digest를 유지했고 DB backfill·실제 전화/문자·웹훅 발송·외부 연결은 만들지 않았다. 웹훅
+  화면은 관리자 전용 비활성 미리보기다. `PROJECT_PLAN.md`는 v1.70이다.
+
 ### 2026-08-20 — 완료 작업 3개 통합 병합 후보
 - 원격과 일치하고 깨끗한 `extension_number`·`request_consultation_time`·`web_hook` 워크트리를
   main에 병합했다. 다른 모든 `origin/LegalFlow/*`·`origin/worktree/*` HEAD는 병합 전 main의

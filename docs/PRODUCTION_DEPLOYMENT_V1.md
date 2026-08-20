@@ -5,8 +5,8 @@ CloudFormation 스택: `lawand-prod`
 리전: 서울(`ap-northeast-2`)
 최초 배포 릴리스: `20260804T085006Z-84e8708`
 현재 홈페이지 릴리스: `20260819T084041Z-ga4-no-prompt-hotfix-v1`
-현재 ERP 릴리스: `20260819T035353Z-orca-integrated-ops-v3`
-현재 gateway 릴리스: `20260819T071714Z-four-worktrees-v1`
+현재 ERP 릴리스: `20260820T034100Z-three-worktrees-v1`
+현재 gateway 릴리스: `20260820T034100Z-three-worktrees-v1`
 현재 Windows bridge: `v0.8.3.0`
 
 완료된 모든 worktree를 main에 통합한 기준선 위에 공개 후기 작성자 자동 마스킹과 ERP 후기
@@ -18,6 +18,41 @@ CloudFormation 스택: `lawand-prod`
 이 문서는 정식 도메인 전환 이후를 포함한 실제 AWS 구성, 접속점, 데이터 이관 범위와
 운영 체크리스트를 기록한다. 비밀번호·API 키·AWS 계정 ID·RDS 마스터 시크릿 ARN은
 기록하지 않는다.
+
+## 2026-08-20 완료 작업 3개 통합 운영 배포
+
+- `extension_number`·`request_consultation_time`·`web_hook`을 main
+  `f8bd74d04ac240fe6c9ed02759b795b069140559`에 통합했다. 전체 test·typecheck·lint·production
+  build, DB schema/diff check와 Actions `32328367486`이 성공했다. core 95개·gateway 193개·
+  홈페이지 9개 테스트가 통과했고 모든 작업 브랜치 HEAD는 최종 main의 ancestor다.
+- 암호화 RDS snapshot `lawand-prod-pre-three-worktrees-20260820t034100z`을 available·100%로
+  확보한 뒤 새 gateway digest로 migration `0071_consultation_schedule_follow_up.sql`을 적용하고
+  재실행 no-op을 확인했다. 운영 migration 72개와 최신 해시
+  `a660aff7b7a39d5b9fde99a9fe3cb8b62d5459bc37fde1c89d78296e5bf080e9`가 소스와 일치한다.
+  nullable 출처 컬럼 2개, 상담요청 FK, 단일 출처 check, 열린 업무 unique index 2개,
+  PUBLIC grant 0을 확인했다. 기존 재통화 업무는 총 66·open 27로 보존했다.
+- 릴리스 `20260820T034100Z-three-worktrees-v1`의 parent digest/image ID는 gateway
+  `sha256:ab9955a94eab6d3ca77c151e9407f68c6c2ef2187d206d5aa30bab17c816d076`·
+  `sha256:006d43231caf810b4ab619b066a3934348db1d95593034f164bc242a9ff79f21`, ERP
+  `sha256:aba5e003495a93a3bf59da5e7e90519c0518b2ed0f5aeac7144aa99d9930f84b`·
+  `sha256:9d5ef697dcf8146b06a579e85967b41e49f10243047ad3b5980eb50f1fc668cc`다.
+  두 ARM64 child scan은 CRITICAL 3·HIGH 11·MEDIUM 11·LOW 1이다.
+- gateway rollback은
+  `sha256:b79063876c62833360f065ec799a5320b0210b4348b45515ff21e4216012fdcf`·
+  `sha256:dce53948efe1518c90a60ef62b194057663e51d6e66921f03b34cd817fb7c465`, ERP rollback은
+  `sha256:944686691a7080ddd6730e759d2bd223de8a7691abadf811322d027cc31c5666`·
+  `sha256:3259c97aced4999a11d67bb0434c2cabe6bc21d717699d0d5dcbf3d3775e851a`다. gateway cache는
+  1,381,000,000 bytes, 가용량 93,003,325,440→93,854,560,256, 회수 851,234,816 bytes이고
+  ERP cache는 1,429,000,000 bytes, 가용량 93,410,037,760→94,302,461,952, 회수
+  892,424,192 bytes다. 현재+rollback 2개와 source release 2개만 보존했다.
+- 정식·EIP gateway health와 ERP 로그인은 3회 연속 200, 앱·Caddy active, restart 0,
+  환경파일 600, error journal 0이다. request/LISTEN waiting은 네 후속 표본에서 0/20·0/5다.
+  배포 전후 request pool wait가 간헐적으로 3~10을 기록해 알람이 반복 전환됐지만 최종 표본은
+  모두 0이고 CloudWatch OK 14·ALARM 0·INSUFFICIENT_DATA 0으로 복귀했다. 세 EC2 status ok·
+  SSM Online, RDS available·암호화·삭제 방지다. outbox는 dead 29·pending 551·published
+  1,093, locked 0이다.
+- 홈페이지는 기존 GA4 운영 digest를 유지했다. 기존 업무 backfill, 실제 전화·문자·웹훅 발송,
+  웹훅 외부 연결은 수행하지 않았으며 웹훅 설정 화면은 관리자 전용 비활성 미리보기다.
 
 ## 2026-08-20 GA4 24시간 후속 운영 수신 검증
 
