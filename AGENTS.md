@@ -113,6 +113,27 @@
   `orca-ide worktree current --json`이 정상 응답했고, 반대로 `HERDR_ENV`는 비어 있으며
   HERDR 서버는 실행 중이 아니었다. 이후 이 세션의 워크트리·터미널 원장은 Orca를 사용한다.
 
+### 2026-08-20 — GA4 24시간 후속 운영 수신 검증 완료
+- 2026-08-20 11:20~11:24 KST에 운영 analytics config가 유효한 Measurement ID를
+  `private`·`no-store`로 제공하고 홈페이지 분석 동의 배너 문구는 계속 0임을 확인했다.
+  GA4 실시간 보고서에는 로앤 페이지 제목이 정상 표시됐고, 확인 시점 최근 30분 활성 사용자
+  87·최근 5분 12, `page_view` 136·`session_start` 93·`first_visit` 81·`user_engagement` 62로
+  전날의 실시간 0·처리 지연이 해소됐다. 8월 19일까지 처리된 일반 보고서도 세션 391·활성
+  사용자 377·신규 사용자 367을 표시했다.
+- 방문 페이지 15개를 보고서 두 페이지에서 모두 대조했다. query·fragment·연락처·검색어 없이
+  허용된 pathname만 보였고 사례 상세는 `/bank/cases/_detail`로 일반화됐다. 공란 1행은
+  있었으나 민감 문자열은 없었다. 최근 활동에는 운영 `generate_lead`가 이미 감지되어 실제
+  상담 추가 생성이나 합성 이벤트 전송은 하지 않았다.
+- `generate_lead`만 GA4 주요 이벤트로 표시하고 주요 이벤트 탭 재조회에서 등록을 확인했다.
+  이는 `GA4 관측 리드` 보조 지표이며 primary 자동 최적화 승격이 아니다. 과거 이벤트는
+  소급 집계되지 않으므로 기존 일반 보고서의 주요 이벤트 0은 정상이다. Google Ads 링크·승인
+  필요·요청 전송은 모두 0이며 연결, 맞춤형 광고, 광고 개인화, 자동 입찰을 시작하지 않았다.
+- AdPilot 읽기 전용 GA4 OAuth·Admin·Data API 연결은 별도
+  `ga4_advertisement_with_lawand_session` 워크트리 세션에 독립 인계했고 네이버 광고 연결은
+  다음 승인 게이트로 남겼다. 이번 후속에서는 홈페이지 코드·이미지·운영 배포·DB·상담 데이터를
+  변경하지 않았으며 외부 설정 변경은 GA4 속성의 `generate_lead` 주요 이벤트 표시뿐이다.
+  `PROJECT_PLAN.md`는 v1.67이다.
+
 ### 2026-08-19 — GA4 무팝업 자동 측정 hotfix 운영 배포 완료
 - `LegalFlow/GA4_insert` hotfix `1a045b7e935bd65b4ba98bc4c237840a3898155f`를 main
   `22ebd761e0502ae3ac1ca07bac8e625ed4a6fd7e`에 병합했다. HERDR는 이 세션에서 환경변수와
