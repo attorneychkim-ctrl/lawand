@@ -4139,8 +4139,11 @@ export const telephonyFollowUpTasks = pgTable(
   {
     id: uuid("id").primaryKey(),
     aftercareId: uuid("aftercare_id")
-      .notNull()
       .references(() => telephonyCallAftercare.id, { onDelete: "restrict" }),
+    consultationRequestId: uuid("consultation_request_id").references(
+      () => consultationRequests.id,
+      { onDelete: "restrict" },
+    ),
     assigneeUserId: uuid("assignee_user_id")
       .notNull()
       .references(() => staffUsers.id, { onDelete: "restrict" }),
@@ -4161,9 +4164,16 @@ export const telephonyFollowUpTasks = pgTable(
     uniqueIndex("telephony_follow_up_tasks_open_aftercare_uidx")
       .on(table.aftercareId)
       .where(sql`${table.state} = 'open'`),
+    uniqueIndex("telephony_follow_up_tasks_open_consultation_request_uidx")
+      .on(table.consultationRequestId)
+      .where(sql`${table.state} = 'open'`),
     index("telephony_follow_up_tasks_open_due_idx")
       .on(table.dueAt, table.assigneeUserId)
       .where(sql`${table.state} = 'open'`),
+    check(
+      "telephony_follow_up_tasks_single_source",
+      sql`num_nonnulls(${table.aftercareId}, ${table.consultationRequestId}) = 1`,
+    ),
     check(
       "telephony_follow_up_tasks_state_times",
       sql`(

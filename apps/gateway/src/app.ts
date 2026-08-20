@@ -2128,6 +2128,72 @@ export function createGatewayServer(options?: {
 
       if (
         request.method === "GET" &&
+        url.pathname === "/v1/phone-desk/follow-ups"
+      ) {
+        if (
+          !options?.telephonyService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        sendJson(
+          response,
+          200,
+          await options.telephonyService.getPhoneDeskFollowUps(),
+        );
+        return;
+      }
+
+      if (
+        request.method === "GET" &&
+        url.pathname === "/v1/phone-desk/follow-ups/duty"
+      ) {
+        if (
+          !options?.telephonyService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const actor = await options.authService.authorize(sessionToken, [
+          ...consultationAccessRoles,
+        ]);
+        sendJson(
+          response,
+          200,
+          await options.telephonyService.getPhoneDeskFollowUpDuty(actor),
+        );
+        return;
+      }
+
+      if (
+        request.method === "GET" &&
         url.pathname === "/v1/phone-desk/calls"
       ) {
         if (

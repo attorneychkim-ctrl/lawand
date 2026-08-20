@@ -32,6 +32,9 @@ export type ConsultationListItem = {
   state: string;
   displayName: string;
   contactChannel: "phone" | "kakao_channel" | "naver_booking";
+  contactPreference: "as_soon_as_possible" | "scheduled_window";
+  contactWindowStart: string | null;
+  contactWindowEnd: string | null;
   phone: string | null;
   softDeletedAt: string | null;
   softDeletedByUserId: string | null;
@@ -648,9 +651,11 @@ export type PhoneDeskAftercare = {
 
 export type PhoneDeskFollowUp = {
   id: string;
-  aftercareId: string;
-  callId: string;
-  result: PhoneDeskCallResult;
+  source: "aftercare" | "consultation_schedule";
+  aftercareId: string | null;
+  consultationRequestId: string | null;
+  callId: string | null;
+  result: PhoneDeskCallResult | null;
   consultationId: string | null;
   customerName: string;
   remotePhone: string;
@@ -668,7 +673,24 @@ export type PhoneDeskFollowUp = {
       }
     | null;
   dueAt: string;
+  dueEndAt: string | null;
   assignee: { staffUserId: string; displayName: string };
+};
+
+export type PhoneDeskFollowUpSnapshot = {
+  snapshotAt: string;
+  items: PhoneDeskFollowUp[];
+};
+
+export type PhoneDeskFollowUpDuty = {
+  snapshotAt: string;
+  count: number;
+  items: Array<{
+    id: string;
+    source: "aftercare" | "consultation_schedule";
+    dueAt: string;
+    dueEndAt: string | null;
+  }>;
 };
 
 export type PhoneDeskCallSnapshot = {
@@ -1253,6 +1275,18 @@ export async function getPhoneDeskCalls(
   return coalescedGatewayRead<PhoneDeskCallSnapshot>(
     `/v1/phone-desk/calls?${pagedDateParams(options).toString()}`,
     (status) => `전화데스크 목록 조회 실패 (${status})`,
+  );
+}
+
+export async function getPhoneDeskFollowUps(): Promise<PhoneDeskFollowUpSnapshot> {
+  return phoneDeskResponse<PhoneDeskFollowUpSnapshot>(
+    await gatewayFetch("/v1/phone-desk/follow-ups"),
+  );
+}
+
+export async function getPhoneDeskFollowUpDuty(): Promise<PhoneDeskFollowUpDuty> {
+  return phoneDeskResponse<PhoneDeskFollowUpDuty>(
+    await gatewayFetch("/v1/phone-desk/follow-ups/duty"),
   );
 }
 

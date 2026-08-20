@@ -88,6 +88,22 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
+function formatContactWindow(start: string, end: string) {
+  const date = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    month: "numeric",
+    day: "numeric",
+    weekday: "short",
+  }).format(new Date(start));
+  const timeFormatter = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+  return `${date} ${timeFormatter.format(new Date(start))}~${timeFormatter.format(new Date(end))}`;
+}
+
 function formatPhone(value: string) {
   return value.replace(/(\d{3})(\d{4})(\d{4})/, "$1-$2-$3");
 }
@@ -120,6 +136,9 @@ function searchText(item: ConsultationListItem) {
     item.legalFriendsRegistered ? "리걸프렌즈 등록 완료" : null,
     residenceRegionLabels[item.residenceRegion ?? ""],
     modeLabel(item),
+    item.contactWindowStart && item.contactWindowEnd
+      ? formatContactWindow(item.contactWindowStart, item.contactWindowEnd)
+      : null,
     item.latestTelephony?.disposition === "no_answer" ? "부재" : null,
     item.latestTelephony?.disposition === "callback_required"
       ? "재상담 필요"
@@ -614,6 +633,20 @@ export function ConsultationWorkspace({
                         <span aria-hidden="true">·</span>
                         {modeLabel(consultation)}
                       </span>
+                      {consultation.contactChannel === "phone" &&
+                      consultation.contactPreference === "scheduled_window" &&
+                      consultation.contactWindowStart &&
+                      consultation.contactWindowEnd ? (
+                        <span className="consultation-row-schedule">
+                          <span>상담 요청 시각</span>
+                          <strong>
+                            {formatContactWindow(
+                              consultation.contactWindowStart,
+                              consultation.contactWindowEnd,
+                            )}
+                          </strong>
+                        </span>
+                      ) : null}
                       <StatusBadges item={consultation} />
                     </span>
                     <span className="consultation-row-owner">

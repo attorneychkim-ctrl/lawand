@@ -4,6 +4,7 @@ import type { StaffPrincipal } from "../../lib/staff-auth";
 import { logoutAction } from "../auth-actions";
 import { BrowserNotificationToggle } from "./browser-notification-toggle";
 import { ErpNav } from "./erp-nav";
+import { FollowUpNotificationBridge } from "./follow-up-notification-bridge";
 import { InboundCallIndicator } from "./inbound-call-indicator";
 import { LawandOsBrand } from "./lawand-os-brand";
 import { ReviewNotificationBridge } from "./review-notification-bridge";
@@ -51,6 +52,7 @@ export function StaffBar({ staff }: { staff: StaffPrincipal }) {
       />
       <ReviewNotificationBridge />
       <MessageNotificationBridge />
+      <FollowUpNotificationBridge />
     </header>
   );
 }

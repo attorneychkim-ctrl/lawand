@@ -1,7 +1,7 @@
 "use client";
 
 export type BrowserNotificationDiagnostic = {
-  channel: "consultation" | "telephony" | "review" | "message" | "service_worker";
+  channel: "consultation" | "telephony" | "review" | "message" | "follow_up" | "service_worker";
   stage: "sse" | "prepare" | "display";
   outcome: "connected" | "disconnected" | "sync" | "succeeded" | "failed";
   reason?: string;

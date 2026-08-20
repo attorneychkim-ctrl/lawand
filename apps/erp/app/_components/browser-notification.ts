@@ -60,11 +60,20 @@ type MessageBrowserNotification = {
   title: string; body: string; eventId: string; messageId: string; href: string; occurredAt: string;
 };
 
+type FollowUpBrowserNotification = {
+  title: string;
+  body: string;
+  eventId: string;
+  taskId: string;
+  href: string;
+  occurredAt: string;
+};
+
 type ErpBrowserNotification = {
   title: string;
   body: string;
   notificationId: string;
-  resourceKind: "consultation" | "telephony" | "review" | "message";
+  resourceKind: "consultation" | "telephony" | "review" | "message" | "follow_up";
   resourceId: string;
   href: string;
   deskHref?: string;
@@ -382,6 +391,20 @@ export function showMessageBrowserNotification(input: MessageBrowserNotification
   return showErpBrowserNotification({
     title: input.title, body: input.body, notificationId: input.eventId,
     resourceKind: "message", resourceId: input.messageId, href: input.href,
+    occurredAt: input.occurredAt,
+  });
+}
+
+export function showFollowUpBrowserNotification(
+  input: FollowUpBrowserNotification,
+) {
+  return showErpBrowserNotification({
+    title: input.title,
+    body: input.body,
+    notificationId: input.eventId,
+    resourceKind: "follow_up",
+    resourceId: input.taskId,
+    href: input.href,
     occurredAt: input.occurredAt,
   });
 }
