@@ -18,12 +18,9 @@
 - 이 WSL 환경: node **v22.22.2**, pnpm **11.17.0**(Corepack + 로컬 shim).
 
 ## 작업 규칙
-- 이 저장소의 워크트리·터미널 관리자는 세션에 따라 **HERDR 또는 Orca**다. 현재 경로와
-  관리 도구의 실제 상태를 먼저 확인하고, 확인된 관리자 하나만 그 세션의 작업 원장으로
-  사용한다. `HERDR_ENV=1`인 HERDR 세션에서는 `herdr worktree list`를 확인한다. Orca
-  워크트리(`.orca/worktrees/` 경로)에서는 Linux용 `orca-ide status --json`과
-  `orca-ide worktree current --json`을 확인하고 Orca 상태를 사용한다. 한 관리자의 환경이나
-  서버가 없다는 이유로 다른 관리자의 세션이라고 추정하지 않는다.
+- 이 저장소의 워크트리·터미널 관리자는 **HERDR**다. Orca 관리로 가정하거나 Orca 상태를
+  인수인계 원장으로 사용하지 않는다. HERDR 세션에서는 `HERDR_ENV=1`을 확인하고
+  `herdr worktree list`로 관리 워크트리를 확인한다.
 - `main`이 아닌 워크트리 브랜치에서는 구현·검증 뒤 해당 브랜치 커밋과 원격 브랜치
   푸시까지만 수행한다. `main` 머지·`main` 푸시와 실서비스 배포·운영 데이터 변경은
   메인 세션에서만 수행하며, 사용자가 해당 브랜치 세션에 별도로 명시하지 않는 한
@@ -51,10 +48,9 @@
   cap을 검증한다. 정리 전후 cache·가용 바이트·회수 바이트·현재/rollback 이미지 ID를
   `/var/log/lawand/deployments.log`와
   인수인계 로그에 기록한다. health 실패 전에는 이 정리를 실행하지 않는다.
-- 메인 통합 배포 직전에는 현재 세션 관리자가 제공하는 전체 워크트리 목록(HERDR는
-  `herdr worktree list`, Orca는 `orca-ide worktree list --json`)과 관련 원격 작업 브랜치를
-  모두 열거하고, 각 HEAD가 `main`의 ancestor인지 확인한다. 미반영 브랜치는 `병합/명시적
-  제외/진행 중` 중 하나로 기록하기 전에는 아티팩트 생성과 운영 배포를 시작하지 않는다.
+- 메인 통합 배포 직전에는 HERDR 워크트리 목록과 `origin/worktree/*` 원격 브랜치를 모두
+  열거하고, 각 HEAD가 `main`의 ancestor인지 확인한다. 미반영 브랜치는 `병합/명시적 제외/
+  진행 중` 중 하나로 기록하기 전에는 아티팩트 생성과 운영 배포를 시작하지 않는다.
 - 의미 있는 작업(스캐폴딩, 신규 패키지/앱, DB 스키마, 외부 연동, 배포 등)을 마치면
   아래 **인수인계 로그에 형식 맞춰 새 항목을 append**할 것 — 다음 세션/다른 에이전트가
   이어받는 유일한 경로다.
@@ -105,6 +101,22 @@
 ---
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
+
+### 2026-08-20 — 완료 작업 3개 통합 병합 후보
+- 원격과 일치하고 깨끗한 `extension_number`·`request_consultation_time`·`web_hook` 워크트리를
+  main에 병합했다. 다른 모든 `origin/LegalFlow/*`·`origin/worktree/*` HEAD는 병합 전 main의
+  ancestor였고 세 브랜치만 미반영이었다. `HERDR_ENV`가 없고 HERDR 서버도 실행 중이 아니어서
+  로컬 Git worktree와 원격 작업 브랜치를 읽기 전용으로 전수 대조했다.
+- gateway·ERP에는 내선 발신 직원 상세 알림과 예약 상담 재통화 업무·정시 브라우저 알림을,
+  ERP에는 관리자 전용 개인 웹훅 설정 비활성 미리보기를 통합했다. 웹훅 저장·API·실제 발송은
+  없고 일반 직원에게 공개하지 않는다. 브랜치가 제안한 HERDR·Orca 혼용 전역 규칙은 최신
+  authoritative 지침과 충돌해 기능 코드와 과거 후보 로그만 보존하고 HERDR 단일 규칙으로
+  복원했다.
+- migration `0071_consultation_schedule_follow_up.sql` 하나가 있으며 재통화 업무 출처를 통화
+  후처리 또는 상담요청 중 정확히 하나로 강제한다. 통합 상태에서 전체 5패키지 test·typecheck·
+  lint·production build, DB schema check와 `git diff --check`를 통과했다. core 95개·gateway
+  193개·홈페이지 9개 테스트가 성공했다. 아직 main 푸시·운영 snapshot·migration·digest 전환·
+  운영 데이터 변경·외부 전화/문자/웹훅 발송은 수행하지 않았다. `PROJECT_PLAN.md`는 v1.69다.
 
 ### 2026-08-20 — ERP 개인 웹훅 알림 설정 화면 후보
 - `origin/main` 최신 변경을 `LegalFlow/web_hook`에 병합한 뒤 ERP 관리 메뉴 첫 항목으로
