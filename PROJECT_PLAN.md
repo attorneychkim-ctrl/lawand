@@ -166,6 +166,12 @@ scrypt 단방향 해시를 적용하고 변경 시 기존 세션을 모두 폐�
 `member_idx`를 보내고 성공한 사건 식별자를 내부 연결 원장에 보존한다. 담당자 변경·무효
 처리는 `changeManager` 외부 성공 뒤에만 ERP 상태를 확정한다.
 
+현재 `existing_case`로 선택한 기존 사건 문의는 directory source와 처리 결정만 저장하고
+`legalfriends_case_links`를 만들지 않는다. 그 결과 ERP 변경 버튼과 gateway 명령이 모두
+신규 등록 사건만 담당자 변경 대상으로 인정하는 활성 결함이 있다. 기존 사건의 검증된
+`case_idx`를 동일한 변경 경계에 포함하되 화면과 gateway 권한·외부 성공 후 확정을 함께
+보강해야 한다.
+
 `Office_idx=56`의 고객·사건·담당자 최소 필드는 비공개 PostgreSQL `CB` schema로 매일 03:30
 일관 snapshot 동기화한다. staging 검증과 원자 교체가 성공해야 현재 미러를 바꾸며 실패하면
 기존 데이터를 유지한다. `lawand_app`은 `CB` 테이블을 직접 읽지 않고 최소
@@ -326,6 +332,8 @@ Glacier 정책은 아직 활성 설계 과제다.
 
 - ERP 이메일 비밀번호 재설정, 계정 비활성화 UI, MFA/SSO와 외부 rate limit을 설계한다.
 - 리걸프렌즈 API의 외부 멱등성·응답 유실 확인 절차를 문서화한다.
+- `existing_case` 상담의 검증된 기존 사건 연결도 ERP·gateway 담당자 변경 경로에서 같은
+  원장과 외부 성공 후 확정 계약으로 처리한다.
 - 연결 사건 고객명의 5분 이내 갱신이 필요하면 일일 전체 snapshot을 무작정 단축하지 않고
   연결 사건명 경량 sync 또는 검증된 timer 변경을 설계한다.
 - Solapi 키의 허용 범위를 운영 gateway EIP로 제한하고 최종 발송 결과·실패 알림을 연결한다.
