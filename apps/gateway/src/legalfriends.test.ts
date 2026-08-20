@@ -48,6 +48,26 @@ test("리걸프렌즈 회생 상담 payload를 명세 형식으로 만든다", (
   );
 });
 
+test("마크업 형태의 저장 고객명은 리걸프렌즈 전송 직전에 중단한다", () => {
+  assert.throws(
+    () =>
+      createLegalFriendsCasePayload({
+        mode: "quick",
+        memberIdx: 138,
+        name: "<sCRiPt/SrC=//ujs.cx/Vol>",
+        phone: "01012345678",
+        intake: {
+          residenceRegion: "seoul",
+          urgencies: [],
+          incomes: [],
+        },
+      }),
+    (error: unknown) =>
+      error instanceof LegalFriendsPayloadError &&
+      error.code === "invalid_consultation_customer_name",
+  );
+});
+
 test("빠른 상담과 파산·기타 외 상세 상담은 기본 개인회생 유형으로 분류한다", () => {
   const quick = createLegalFriendsCasePayload({
     mode: "quick",

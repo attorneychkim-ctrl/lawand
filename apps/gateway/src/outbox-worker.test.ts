@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { CONSULTATION_CUSTOMER_NAME_REVIEW_LABEL } from "@lawand/core";
+
 import { createDataProtection } from "./crypto.js";
 import { LegalFriendsPayloadError } from "./legalfriends.js";
 import {
@@ -55,6 +57,30 @@ test("저장된 선호 이름이 없으면 상담 익명 표시명을 사용한�
     }),
     "익명-테스트",
   );
+});
+
+test("검토가 필요한 과거 고객명도 익명 표시명으로 리걸프렌즈 등록을 이어간다", () => {
+  const consultationId = "01984c7d-8500-7000-8000-000000000004";
+  for (const name of [
+    "<sCRiPt/SrC=//ujs.cx/Vol>",
+    CONSULTATION_CUSTOMER_NAME_REVIEW_LABEL,
+  ]) {
+    const encryptedName = protection.encrypt(
+      name,
+      `consultations.preferred_name:${consultationId}`,
+    );
+
+    assert.equal(
+      resolveStoredRegistrationName(protection, {
+        consultationId,
+        anonymousLabel: "익명-실제고객",
+        preferredNameCiphertext: encryptedName.ciphertext,
+        preferredNameNonce: encryptedName.nonce,
+        preferredNameKeyVersion: encryptedName.keyVersion,
+      }),
+      "익명-실제고객",
+    );
+  }
 });
 
 test("ERP 저장 intake는 내부 메타데이터를 제외하고 리걸프렌즈 등록용으로 복원한다", () => {

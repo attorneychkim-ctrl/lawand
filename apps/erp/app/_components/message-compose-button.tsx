@@ -7,6 +7,7 @@ import { createPortal } from "react-dom";
 
 import {
   centrexMessageByteLength,
+  consultationCustomerNameForMessage,
   renderMessageTemplate,
 } from "@lawand/core";
 
@@ -138,7 +139,7 @@ export function MessageComposeButton({
     setBody(
       template
         ? renderMessageTemplate(template.body, {
-            "{{고객명}}": customerName,
+            "{{고객명}}": consultationCustomerNameForMessage(customerName),
             "{{담당자명}}": staffName,
             "{{접수번호}}": receiptCode,
           })

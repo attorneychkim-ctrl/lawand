@@ -9,7 +9,11 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
-import type { ResidenceRegion } from "@lawand/core";
+import {
+  isSafeConsultationCustomerName,
+  reviewableConsultationCustomerName,
+  type ResidenceRegion,
+} from "@lawand/core";
 
 import { getConsultationAttributionForCta } from "./journey-tracker";
 
@@ -105,6 +109,12 @@ export function KakaoConsultationEntry({
   const displayNameRef = useRef<HTMLInputElement>(null);
   const idempotencyInput = useRef<HTMLInputElement>(null);
   const attributionInput = useRef<HTMLInputElement>(null);
+  const submittedDisplayName = displayName.trim()
+    ? reviewableConsultationCustomerName(displayName, 40)
+    : "";
+  const displayNameNeedsReview = Boolean(
+    displayName.trim() && !isSafeConsultationCustomerName(displayName),
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -219,6 +229,12 @@ export function KakaoConsultationEntry({
             type="hidden"
           />
           <input ref={attributionInput} name="attribution" type="hidden" />
+          <input
+            name="displayName"
+            readOnly
+            type="hidden"
+            value={submittedDisplayName}
+          />
 
           <label htmlFor={displayNameId}>
             이름 또는 카카오톡 표시명 <span>필수</span>
@@ -228,7 +244,6 @@ export function KakaoConsultationEntry({
             autoComplete="name"
             id={displayNameId}
             maxLength={40}
-            name="displayName"
             onChange={(event) => {
               event.currentTarget.setCustomValidity("");
               setDisplayName(event.target.value);
@@ -279,11 +294,15 @@ export function KakaoConsultationEntry({
             버튼을 누르면 이 이름과 거주 지역으로 상담이 접수되고 카카오톡
             채팅방이 새로 열립니다. 전화번호를 남기면 상담원이 더 빠르게 고객을
             확인할 수 있지만, 입력하지 않으셔도 카카오 상담을 이용할 수 있어요.
+            {displayNameNeedsReview
+              ? " 입력한 이름 형식은 확인이 필요해 상담원이 채팅에서 다시 여쭤보며, 상담 접수는 그대로 진행됩니다."
+              : ""}
           </p>
           <p className="kakao-entry-modal-privacy">
-            입력한 이름·거주 지역과 선택 입력한 전화번호는 상담 확인을 위해
-            암호화해 보관합니다. 카카오 사용자 ID와 메시지 원문은 홈페이지에서
-            받지 않습니다. 자세한 내용은{" "}
+            이름 형식에 문제가 없으면 이름·거주 지역과 선택 입력한 전화번호를
+            상담 확인을 위해 암호화해 보관합니다. 확인이 필요한 이름 원문은
+            저장하지 않고 검토 표기로 바꿉니다. 카카오 사용자 ID와 메시지 원문은
+            홈페이지에서 받지 않습니다. 자세한 내용은{" "}
             <a href="/privacy" rel="noopener noreferrer" target="_blank">
               개인정보처리방침
             </a>
@@ -303,14 +322,16 @@ export function KakaoConsultationEntry({
             </p>
             <p className="kakao-entry-modal-message-example">
               <strong>
-                {displayName.trim()
-                  ? `“홈페이지에 입력한 이름은 ${displayName.trim()}입니다. 상담 요청합니다.”`
+                {displayNameNeedsReview
+                  ? "“홈페이지에서 상담을 요청했습니다. 고객명 확인 부탁드립니다.”"
+                  : displayName.trim()
+                    ? `“홈페이지에 입력한 이름은 ${displayName.trim()}입니다. 상담 요청합니다.”`
                   : "이름을 입력하면 보낼 문장이 여기에 표시됩니다."}
               </strong>
             </p>
             <p>
-              입력한 이름을 함께 보내야 채팅방 이름이 달라도 상담원이 고객님의
-              상담 요청을 확인할 수 있어요.
+              이름을 함께 보내거나 고객명 확인을 요청해야 채팅방 이름이 달라도
+              상담원이 고객님의 상담 요청을 확인할 수 있어요.
             </p>
           </aside>
 

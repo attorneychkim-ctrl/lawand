@@ -2,8 +2,10 @@ import { z } from "zod";
 
 import {
   CONSULTATION_CUSTOMER_NAME_MAX_LENGTH,
+  consultationCustomerNameTextSchema,
   consultationCustomerNameTagSchema,
   formatConsultationCustomerName,
+  safeConsultationCustomerDisplayName,
 } from "./consultation.js";
 import { residenceRegionSchema } from "./intake.js";
 
@@ -24,15 +26,21 @@ export function telephonyCallerDisplayName(
   identity: TelephonyCallerIdentity,
 ): string {
   if (identity?.source === "consultation") {
-    return identity.consultation.displayName;
+    return safeConsultationCustomerDisplayName(
+      identity.consultation.displayName,
+    );
   }
-  if (identity?.source === "legal_friends") return identity.clientName;
+  if (identity?.source === "legal_friends") {
+    return safeConsultationCustomerDisplayName(identity.clientName);
+  }
   if (identity?.source === "staff") {
     return identity.staffMembers
       .map((member) => member.displayName)
       .join(" · ");
   }
-  if (identity?.source === "phonebook") return identity.contact.displayName;
+  if (identity?.source === "phonebook") {
+    return safeConsultationCustomerDisplayName(identity.contact.displayName);
+  }
   return "발신자 정보 없음";
 }
 
@@ -286,7 +294,7 @@ export const manualTelephonyMessageSendSchema = z
     ...messageSendFields,
     contactId: z.uuid().nullable().optional(),
     phone: manualMessagePhoneSchema.nullable().optional(),
-    customerName: z.string().trim().min(1).max(50).nullable().optional(),
+    customerName: consultationCustomerNameTextSchema(50).nullable().optional(),
   })
   .strict()
   .superRefine((value, context) => {
@@ -318,7 +326,7 @@ export const legalFriendsDirectoryConsultationCreateSchema = z
     clientIdx: z.number().int().positive(),
     caseIdx: z.number().int().positive(),
     idempotencyKey: z.uuid(),
-    customerName: z.string().trim().min(1).max(50),
+    customerName: consultationCustomerNameTextSchema(50),
     phone: z
       .string()
       .trim()
@@ -360,7 +368,7 @@ export type LegalFriendsDirectoryConsultationCreate = z.infer<
 export const staffConsultationCreateSchema = z
   .object({
     idempotencyKey: z.uuid(),
-    customerName: z.string().trim().min(1).max(50),
+    customerName: consultationCustomerNameTextSchema(50),
     phone: z
       .string()
       .trim()
@@ -452,7 +460,7 @@ const phoneDeskConsultationActionSchema = z.discriminatedUnion("mode", [
   z
     .object({
       mode: z.literal("create"),
-      customerName: z.string().trim().min(1).max(50),
+      customerName: consultationCustomerNameTextSchema(50),
       customerNameTag: consultationCustomerNameTagSchema.optional(),
       directorySource: z
         .object({
@@ -492,7 +500,7 @@ const phonebookPhoneSchema = z
 
 export const phonebookContactSaveSchema = z
   .object({
-    displayName: z.string().trim().min(1).max(100),
+    displayName: consultationCustomerNameTextSchema(100),
     originalPhone: phonebookPhoneSchema,
     connectedPhone: phonebookPhoneSchema.nullable().optional(),
   })
@@ -512,7 +520,7 @@ const phoneDeskPhonebookActionSchema = z.discriminatedUnion("mode", [
   z
     .object({
       mode: z.literal("save"),
-      displayName: z.string().trim().min(1).max(100),
+      displayName: consultationCustomerNameTextSchema(100),
       originalPhone: phonebookPhoneSchema,
       connectedPhone: phonebookPhoneSchema.nullable().optional(),
     })

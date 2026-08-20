@@ -1,6 +1,7 @@
-import type {
-  ConsultationIntakeAnswers,
-  ResidenceRegion,
+import {
+  isSafeConsultationCustomerName,
+  type ConsultationIntakeAnswers,
+  type ResidenceRegion,
 } from "@lawand/core";
 
 export const LEGALFRIENDS_CREATE_CASE_URL =
@@ -66,7 +67,8 @@ export class LegalFriendsPayloadError extends Error {
       | "unsupported_residence_region"
       | "assignee_mapping_missing"
       | "consultation_phone_not_collected"
-      | "invalid_consultation_intake",
+      | "invalid_consultation_intake"
+      | "invalid_consultation_customer_name",
   ) {
     super(
       code === "unsupported_residence_region"
@@ -75,7 +77,9 @@ export class LegalFriendsPayloadError extends Error {
           ? "담당 직원의 리걸프렌즈 계정 매핑이 없습니다."
           : code === "consultation_phone_not_collected"
             ? "전화번호가 수집되지 않은 상담은 리걸프렌즈에 등록할 수 없습니다."
-            : "저장된 상담정보의 거주지역 또는 상담 항목을 확인해 주세요.",
+            : code === "invalid_consultation_customer_name"
+              ? "저장된 고객명을 확인한 뒤 리걸프렌즈에 등록해 주세요."
+              : "저장된 상담정보의 거주지역 또는 상담 항목을 확인해 주세요.",
     );
   }
 }
@@ -155,6 +159,9 @@ export function createLegalFriendsCasePayload(input: {
   intake: ConsultationIntakeAnswers;
   livingPlaceOverride?: string;
 }): LegalFriendsCasePayload {
+  if (!isSafeConsultationCustomerName(input.name)) {
+    throw new LegalFriendsPayloadError("invalid_consultation_customer_name");
+  }
   if (
     !input.livingPlaceOverride &&
     input.intake.residenceRegion === "overseas_or_other"

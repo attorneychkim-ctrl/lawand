@@ -27,6 +27,10 @@ import {
   CURRENT_KAKAO_HOMEPAGE_ENTRY_NOTICE_VERSION,
   CURRENT_KAKAO_CONSULTATION_NOTICE_VERSION,
   DEDUPE_WINDOWS,
+  CONSULTATION_CUSTOMER_NAME_REVIEW_LABEL,
+  safeConsultationCustomerDisplayName,
+  safeConsultationCustomerName,
+  usableConsultationCustomerName,
   LEGALFRIENDS_INVALID_MANAGER_EXTERNAL_ACCOUNT_ID,
   LEGALFRIENDS_INVALID_MANAGER_MEMBER_IDX,
   residenceRegionSchema,
@@ -332,7 +336,9 @@ function directorySnapshot(
   source: LegalFriendsDirectorySourceRow,
 ): ConsultationDirectorySnapshot {
   return {
-    clientName: source.client_name,
+    clientName: source.client_name
+      ? safeConsultationCustomerDisplayName(source.client_name)
+      : null,
     phone: source.phone,
     residenceRegion: legalFriendsResidenceRegion(source.living_place),
     caseType: source.case_type,
@@ -361,6 +367,9 @@ function encryptedOrNull(
 }
 
 function kakaoDisplayName(displayName: string, publicReceiptCode: string) {
+  if (displayName === CONSULTATION_CUSTOMER_NAME_REVIEW_LABEL) {
+    return displayName;
+  }
   const suffix = publicReceiptCode.split("-").at(-1);
   if (!suffix) {
     throw new Error("카카오 상담 접수번호 형식이 올바르지 않습니다.");
@@ -658,7 +667,10 @@ export function createConsultationService(options: {
     );
     return (result.rows as LegalFriendsPhoneMatchRow[]).map((row) => ({
       clientIdx: row.client_idx,
-      clientName: row.client_name ?? "이름 미확인",
+      clientName: safeConsultationCustomerDisplayName(
+        row.client_name,
+        "이름 미확인",
+      ),
       caseIdx: row.case_idx,
       caseNumber: row.case_number,
       caseName: row.case_name,
@@ -794,6 +806,9 @@ export function createConsultationService(options: {
     rawSubmission: ConsultationSubmission,
   ): Promise<ConsultationSubmissionResponse> {
     const submission = consultationSubmissionSchema.parse(rawSubmission);
+    const usableSubmissionName = usableConsultationCustomerName(
+      submission.name,
+    );
     const submittedAt = new Date();
     const consentAgreedAt = new Date(submission.consentAgreedAt);
     if (
@@ -823,10 +838,10 @@ export function createConsultationService(options: {
       contact: submission.contact,
       intake: submission.intake,
     });
-    const nameFingerprint = submission.name
+    const nameFingerprint = usableSubmissionName
       ? protection.fingerprint({
           kind: "consultation_name",
-          value: normalizeConsultationName(submission.name),
+          value: normalizeConsultationName(usableSubmissionName),
         })
       : null;
 
@@ -871,7 +886,6 @@ export function createConsultationService(options: {
           requestId: consultationRequests.id,
           payloadFingerprint: consultationRequests.payloadFingerprint,
           journeySessionId: consultationRequests.journeySessionId,
-          hasProvidedName: consultationRequests.hasProvidedName,
           preferredNameCiphertext: consultations.preferredNameCiphertext,
           preferredNameNonce: consultations.preferredNameNonce,
           preferredNameKeyVersion: consultations.preferredNameKeyVersion,
@@ -971,6 +985,9 @@ export function createConsultationService(options: {
                 `consultations.preferred_name:${canonicalConsultationId}`,
               )
             : null;
+        const usableCandidateName = usableConsultationCustomerName(
+          candidateName,
+        );
         candidates.push({
           consultationId: canonicalConsultationId,
           latestRequestId: row.requestId,
@@ -978,12 +995,12 @@ export function createConsultationService(options: {
           phoneFingerprint: phoneFingerprint.toString("hex"),
           latestPayloadFingerprint: row.payloadFingerprint.toString("hex"),
           latestJourneySessionId: row.journeySessionId,
-          hasProvidedName: row.hasProvidedName,
-          nameFingerprint: candidateName
+          hasProvidedName: Boolean(usableCandidateName),
+          nameFingerprint: usableCandidateName
             ? protection
                 .fingerprint({
                   kind: "consultation_name",
-                  value: normalizeConsultationName(candidateName),
+                  value: normalizeConsultationName(usableCandidateName),
                 })
                 .toString("hex")
             : null,
@@ -996,7 +1013,7 @@ export function createConsultationService(options: {
           phoneFingerprint: phoneFingerprint.toString("hex"),
           payloadFingerprint: payloadFingerprint.toString("hex"),
           journeySessionId: submission.attribution?.journeySessionId ?? null,
-          hasProvidedName: Boolean(submission.name),
+          hasProvidedName: Boolean(usableSubmissionName),
           nameFingerprint: nameFingerprint?.toString("hex") ?? null,
           submittedAt,
         },
@@ -1007,8 +1024,8 @@ export function createConsultationService(options: {
         throw new Error("트랜잭션 내 멱등성 판정 경로가 올바르지 않습니다.");
       }
 
-      const incomingNormalizedName = submission.name
-        ? normalizeConsultationName(submission.name)
+      const incomingNormalizedName = usableSubmissionName
+        ? normalizeConsultationName(usableSubmissionName)
         : null;
       const repeatGroupHasSameName =
         decision.action === "attach_repeat_request" &&
@@ -1032,9 +1049,12 @@ export function createConsultationService(options: {
                   `consultations.preferred_name:${row.consultationId}`,
                 )
               : null;
+          const usableCandidateName = usableConsultationCustomerName(
+            candidateName,
+          );
           return (
-            (candidateName
-              ? normalizeConsultationName(candidateName)
+            (usableCandidateName
+              ? normalizeConsultationName(usableCandidateName)
               : null) === incomingNormalizedName
           );
         });
@@ -1251,7 +1271,7 @@ export function createConsultationService(options: {
         phoneCiphertext: phoneEncrypted.ciphertext,
         phoneNonce: phoneEncrypted.nonce,
         phoneKeyVersion: phoneEncrypted.keyVersion,
-        hasProvidedName: Boolean(submission.name),
+        hasProvidedName: Boolean(usableSubmissionName),
         nameCiphertext: nameEncrypted?.ciphertext ?? null,
         nameNonce: nameEncrypted?.nonce ?? null,
         nameKeyVersion: nameEncrypted?.keyVersion ?? null,
@@ -1743,8 +1763,9 @@ export function createConsultationService(options: {
         throw new Error("카카오 홈페이지 진입 별칭을 만들지 못했습니다.");
       }
       const internalAlias = `카카오_${receiptSuffix}_플친`;
-      const submittedDisplayName = normalizeKakaoDisplayName(
-        input.displayName,
+      const submittedDisplayName = normalizeKakaoDisplayName(input.displayName);
+      const usableSubmittedDisplayName = usableConsultationCustomerName(
+        submittedDisplayName,
       );
       const preferredDisplayName = kakaoDisplayName(
         submittedDisplayName,
@@ -1927,7 +1948,7 @@ export function createConsultationService(options: {
         phoneCiphertext: requestPhoneEncrypted?.ciphertext ?? null,
         phoneNonce: requestPhoneEncrypted?.nonce ?? null,
         phoneKeyVersion: requestPhoneEncrypted?.keyVersion ?? null,
-        hasProvidedName: true,
+        hasProvidedName: Boolean(usableSubmittedDisplayName),
         nameCiphertext: requestNameEncrypted.ciphertext,
         nameNonce: requestNameEncrypted.nonce,
         nameKeyVersion: requestNameEncrypted.keyVersion,
@@ -2414,8 +2435,9 @@ export function createConsultationService(options: {
       const requestId = createConsultationRequestId();
       const entryId = createEventId();
       const publicReceiptCode = createPublicReceiptCode(requestedAt);
-      const internalName =
-        `${input.maskedName.trim().replace(/\s+/gu, " ")}_네이버예약`;
+      const internalName = `${
+        safeConsultationCustomerName(input.maskedName) ?? "예약자"
+      }_네이버예약`;
       const encryptedName = protection.encrypt(
         internalName,
         `consultations.preferred_name:${consultationId}`,
@@ -5722,7 +5744,7 @@ export function createConsultationService(options: {
                 canonical:
                   member.id === groupRow.canonicalConsultationId,
                 state: member.state,
-                displayName: memberName,
+                displayName: safeConsultationCustomerDisplayName(memberName),
                 contactChannel: member.contactChannel,
                 phone: request
                   ? phoneByRequest.get(request.id) ?? null

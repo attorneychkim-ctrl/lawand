@@ -7,7 +7,11 @@ import type {
   ConsultationSubmissionResponse,
   ResidenceRegion,
 } from "@lawand/core";
-import { CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION } from "@lawand/core";
+import {
+  CONSULTATION_CUSTOMER_NAME_REVIEW_LABEL,
+  CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION,
+  reviewableConsultationCustomerName,
+} from "@lawand/core";
 
 import { KakaoConsultationEntry } from "@/app/_components/kakao-consultation-entry";
 import { recordGa4GenerateLead } from "@/lib/analytics-runtime";
@@ -555,7 +559,14 @@ export function ConsultationForm() {
       idempotencyKey,
       mode,
       phone: data.phone,
-      ...(data.nickname.trim() ? { name: data.nickname.trim() } : {}),
+      ...(data.nickname.trim()
+        ? {
+            name: reviewableConsultationCustomerName(
+              data.nickname,
+              30,
+            ),
+          }
+        : {}),
       contact:
         data.callbackMode === "scheduled" && scheduledStart
           ? {
@@ -741,7 +752,8 @@ export function ConsultationForm() {
           ref={entryRef}
         >
           <div className="intake-notice" role="status">
-            상담 요청을 완료하면 입력 내용이 암호화되어 안전하게 접수됩니다.
+            상담 요청은 암호화해 접수하며, 확인이 필요한 고객명 원문은 저장하지
+            않고 안전한 검토 표기로 바꿉니다.
           </div>
           <div className="consultation-entry-heading">
             <p className="eyebrow">시작 방법</p>
@@ -805,8 +817,8 @@ export function ConsultationForm() {
   return (
     <section className="consultation-flow shell">
       <div className="intake-notice" role="status">
-        입력 내용은 제출 전까지 이 화면에만 남으며, 완료 버튼을 누르면 암호화해
-        접수합니다.
+        입력 내용은 제출 전까지 이 화면에만 남습니다. 완료하면 암호화해
+        접수하고, 확인이 필요한 고객명 원문은 저장하지 않습니다.
       </div>
 
       <div className="consultation-progress" aria-label={`전체 ${steps.length}단계 중 ${stepIndex + 1}단계`}>
@@ -1305,7 +1317,18 @@ export function ConsultationForm() {
               </div>
               <div>
                 <dt>이름 또는 호칭</dt>
-                <dd>{data.nickname.trim() || "입력하지 않음 · 익명으로 접수"}</dd>
+                <dd>
+                  {data.nickname.trim()
+                    ? reviewableConsultationCustomerName(data.nickname, 30)
+                    : "입력하지 않음 · 익명으로 접수"}
+                  {data.nickname.trim() &&
+                  reviewableConsultationCustomerName(data.nickname, 30) ===
+                    CONSULTATION_CUSTOMER_NAME_REVIEW_LABEL ? (
+                    <small className="customer-name-review-note">
+                      이름은 통화 중 다시 확인하며 상담 요청은 정상 접수됩니다.
+                    </small>
+                  ) : null}
+                </dd>
               </div>
               <div>
                 <dt>거주 지역</dt>

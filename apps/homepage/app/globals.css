@@ -222,6 +222,15 @@
   box-shadow: 0 0 0 3px rgba(39, 106, 87, 0.11);
 }
 
+.customer-name-review-note {
+  display: block;
+  margin-top: 6px;
+  color: var(--slate-600);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.55;
+}
+
 .diagnosis-field-grid {
   display: grid;
   gap: 18px;

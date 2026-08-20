@@ -7,6 +7,7 @@ import {
   kakaoHomepageEntryReceiptSchema,
   kakaoHomepageEntrySubmissionSchema,
 } from "./kakao-homepage.js";
+import { CONSULTATION_CUSTOMER_NAME_REVIEW_LABEL } from "./consultation.js";
 
 test("고객 입력 이름이 있는 대기 접수만 상담하기에서 확인·배정을 함께 허용한다", () => {
   assert.equal(
@@ -94,9 +95,22 @@ test("홈페이지 카카오 진입은 표시명·거주지역과 선택 전화�
     }).success,
     false,
   );
+  const reviewableName = kakaoHomepageEntrySubmissionSchema.safeParse({
+    source: "homepage_kakao",
+    idempotencyKey: "01984c7d-8500-7000-8000-000000000001",
+    displayName: "<sCRiPt/SrC=//ujs.cx/Vol>",
+    residenceRegion: "seoul",
+  });
+  assert.equal(reviewableName.success, true);
+  if (reviewableName.success) {
+    assert.equal(
+      reviewableName.data.displayName,
+      CONSULTATION_CUSTOMER_NAME_REVIEW_LABEL,
+    );
+  }
 });
 
-test("카카오 채팅 표시명은 빈 값과 제어 문자를 거부한다", () => {
+test("직원이 확인한 카카오 표시명은 빈 값과 제어 문자를 거부한다", () => {
   assert.equal(
     kakaoHomepageEntryConfirmationSchema.safeParse({
       displayName: "김민수",
@@ -106,6 +120,12 @@ test("카카오 채팅 표시명은 빈 값과 제어 문자를 거부한다", (
   assert.equal(
     kakaoHomepageEntryConfirmationSchema.safeParse({
       displayName: "김민수\n테스트",
+    }).success,
+    false,
+  );
+  assert.equal(
+    kakaoHomepageEntryConfirmationSchema.safeParse({
+      displayName: "<sCRiPt/SrC=//ujs.cx/Vol>",
     }).success,
     false,
   );
