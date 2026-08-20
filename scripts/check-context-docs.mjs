@@ -39,10 +39,13 @@ const archiveDocuments = [
 const requiredReferences = [
   ["AGENTS.md", "docs/handoffs/CURRENT.md"],
   ["AGENTS.md", "pnpm docs:context:check"],
+  ["AGENTS.md", "현재 워크트리·터미널 관리 기준은 **Orca이며 HERDR가 아니다**"],
+  ["AGENTS.md", "orca-ide worktree current --json"],
   ["PROJECT_PLAN.md", "docs/handoffs/CURRENT.md"],
   ["PROJECT_PLAN.md", "docs/archive/context-pre-compact/README.md"],
   ["CLAUDE.md", "docs/handoffs/CURRENT.md"],
   ["CLAUDE.md", "docs/handoffs/YYYY-MM.md"],
+  ["docs/handoffs/CURRENT.md", "현재 작업 관리 기준은 **Orca이며 HERDR가 아니다**"],
 ];
 
 const forbiddenPatterns = [
@@ -56,6 +59,16 @@ const forbiddenPatterns = [
     "PROJECT_PLAN.md",
     /^## .*스캐폴딩 전/m,
     "현재 기준선에 과거 스캐폴딩 체크리스트를 되살릴 수 없습니다.",
+  ],
+  [
+    "AGENTS.md",
+    /(?:워크트리·터미널 )?관리자는 \*\*HERDR\*\*|HERDR 워크트리 목록/m,
+    "AGENTS.md의 현재 작업 관리 기준을 HERDR로 되돌릴 수 없습니다.",
+  ],
+  [
+    "docs/handoffs/CURRENT.md",
+    /관리자는 HERDR|HERDR 워크트리 목록/m,
+    "CURRENT.md의 현재 작업 관리 기준을 HERDR로 되돌릴 수 없습니다.",
   ],
 ];
 

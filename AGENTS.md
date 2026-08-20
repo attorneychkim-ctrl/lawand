@@ -28,10 +28,13 @@
 
 ## 작업 규칙
 
-- 이 저장소의 워크트리·터미널 관리자는 **HERDR**다. Orca 관리로 가정하거나 Orca 상태를
-  인수인계 원장으로 사용하지 않는다. HERDR 세션에서는 `HERDR_ENV=1`을 확인하고
-  `herdr worktree list`로 관리 워크트리를 확인한다. HERDR가 없거나 서버가 중단돼 있으면
-  그 사실을 기록하고 Git worktree·원격 브랜치를 읽기 전용으로 대조한다.
+- 이 저장소의 현재 워크트리·터미널 관리 기준은 **Orca이며 HERDR가 아니다**. Linux/WSL
+  셸에서는 bare `orca` 대신 `orca-ide status --json`과
+  `orca-ide worktree current --json`으로 런타임·현재 워크트리를 확인하고, 저장소 전체는
+  `orca-ide worktree list --repo "$(git rev-parse --show-toplevel)" --json`으로 대조한다.
+  Orca 상태를 작업·인수인계의 단일 기준으로 사용하며 HERDR 상태를 현재 기준으로 사용하지
+  않는다. Orca가 없거나 런타임이 중단돼 있으면 그 사실을 기록하고 Git worktree·원격
+  브랜치를 읽기 전용으로 대조한다.
 - `main`이 아닌 워크트리 브랜치에서는 구현·검증 뒤 해당 브랜치 커밋과 원격 브랜치
   푸시까지만 수행한다. `main` 머지·`main` 푸시와 실서비스 배포·운영 데이터 변경은
   메인 세션에서만 수행하며, 사용자가 해당 브랜치 세션에 별도로 명시하지 않는 한
@@ -56,9 +59,10 @@
   넘으면 남은 cache를 비워 hard cap을 검증한다. 정리 전후 cache·가용/회수 바이트·현재/
   rollback 이미지 ID를 `/var/log/lawand/deployments.log`와 월별 인수인계에 기록한다.
   health 실패 전에는 정리하지 않는다.
-- 메인 통합 배포 직전에는 HERDR 워크트리 목록과 `origin/worktree/*`·작업용 원격 브랜치를
-  모두 열거하고 각 HEAD가 `main`의 ancestor인지 확인한다. 미반영 브랜치는 `병합/명시적
-  제외/진행 중` 중 하나로 기록하기 전에는 아티팩트 생성과 운영 배포를 시작하지 않는다.
+- 메인 통합 배포 직전에는 Orca의 저장소 워크트리 목록과 `origin/worktree/*`·작업용 원격
+  브랜치를 모두 열거하고 각 HEAD가 `main`의 ancestor인지 확인한다. 미반영 브랜치는
+  `병합/명시적 제외/진행 중` 중 하나로 기록하기 전에는 아티팩트 생성과 운영 배포를
+  시작하지 않는다.
 
 ## 문서·인수인계 규칙
 
