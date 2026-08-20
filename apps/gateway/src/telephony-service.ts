@@ -138,6 +138,12 @@ const PHONE_CUSTOMER_CACHE_TTL_MS = 15_000;
 const PHONE_CUSTOMER_CACHE_MAX_ENTRIES = 500;
 const MESSAGE_PAGE_DEFAULT_LIMIT = 50;
 const MESSAGE_PAGE_MAX_LIMIT = 50;
+const PHONE_DESK_TRANSFER_RELATION_TYPES = [
+  "transfer_attempted",
+  "transfer_completed",
+  "transfer_returned",
+  "transfer_unresolved",
+] as const;
 const callRootCurrentEndpoint = alias(
   telephonyEndpoints,
   "call_root_current_endpoint",
@@ -635,6 +641,45 @@ export type PhoneCustomerMatch =
       }>;
     }
   | null;
+
+export function phoneDeskTransferConfirmationDutyTargetUserIds(input: {
+  participantUserIds: readonly (string | null)[];
+  endpointOwnerUserIds: readonly string[];
+  customerMatch: PhoneCustomerMatch;
+  activeStaffUserIds: ReadonlySet<string>;
+  fallbackAdminUserIds: readonly string[];
+}) {
+  const targetUserIds = new Set<string>();
+  const addActive = (staffUserId: string | null | undefined) => {
+    if (staffUserId && input.activeStaffUserIds.has(staffUserId)) {
+      targetUserIds.add(staffUserId);
+    }
+  };
+
+  for (const staffUserId of input.participantUserIds) addActive(staffUserId);
+  for (const staffUserId of input.endpointOwnerUserIds) addActive(staffUserId);
+
+  if (input.customerMatch?.source === "consultation") {
+    addActive(input.customerMatch.consultation.assigneeUserId);
+  } else if (input.customerMatch?.source === "legal_friends") {
+    for (const legalFriendsCase of input.customerMatch.cases) {
+      for (const staffUserId of legalFriendsCase.staffUserIds) {
+        addActive(staffUserId);
+      }
+    }
+  } else if (input.customerMatch?.source === "staff") {
+    for (const staff of input.customerMatch.staffMembers) {
+      addActive(staff.staffUserId);
+    }
+  }
+
+  if (targetUserIds.size === 0) {
+    for (const staffUserId of input.fallbackAdminUserIds) {
+      addActive(staffUserId);
+    }
+  }
+  return [...targetUserIds];
+}
 
 export function retainHigherPriorityPhoneCustomerMatch(
   matches: Map<string, PhoneCustomerMatch>,
@@ -5192,13 +5237,198 @@ export function createTelephonyService(options: {
     };
   }
 
+  async function countPhoneDeskTransferConfirmationDuties(
+    actor: StaffPrincipal,
+  ) {
+    const [rows, activeStaff] = await Promise.all([
+      db
+        .select({
+          id: telephonyCallRoots.id,
+          originalEndpointId: telephonyCallRoots.originalEndpointId,
+          currentEndpointId: telephonyCallRoots.currentEndpointId,
+          remotePhoneCiphertext: telephonyCallRoots.remotePhoneCiphertext,
+          remotePhoneNonce: telephonyCallRoots.remotePhoneNonce,
+          remotePhoneKeyVersion: telephonyCallRoots.remotePhoneKeyVersion,
+          legEndpointId: telephonyCallLegs.endpointId,
+          legStaffUserId: telephonyCallLegs.staffUserId,
+        })
+        .from(telephonyCallRoots)
+        .leftJoin(
+          telephonyCallLegs,
+          eq(telephonyCallLegs.rootId, telephonyCallRoots.id),
+        )
+        .where(
+          and(
+            eq(telephonyCallRoots.scope, "external"),
+            eq(telephonyCallRoots.correlationStatus, "needs_confirmation"),
+            inArray(telephonyCallRoots.state, ["needs_confirmation", "ended"]),
+          ),
+        )
+        .orderBy(
+          desc(telephonyCallRoots.lastEventAt),
+          asc(telephonyCallLegs.startedAt),
+        ),
+      activePhoneDeskStaff(),
+    ]);
+    if (rows.length === 0) return 0;
+
+    const candidates = new Map<
+      string,
+      {
+        id: string;
+        remotePhoneCiphertext: Buffer | null;
+        remotePhoneNonce: Buffer | null;
+        remotePhoneKeyVersion: string | null;
+        endpointIds: Set<string>;
+        participantUserIds: Set<string>;
+      }
+    >();
+    for (const row of rows) {
+      let candidate = candidates.get(row.id);
+      if (!candidate) {
+        candidate = {
+          id: row.id,
+          remotePhoneCiphertext: row.remotePhoneCiphertext,
+          remotePhoneNonce: row.remotePhoneNonce,
+          remotePhoneKeyVersion: row.remotePhoneKeyVersion,
+          endpointIds: new Set([
+            row.originalEndpointId,
+            ...(row.currentEndpointId ? [row.currentEndpointId] : []),
+          ]),
+          participantUserIds: new Set(),
+        };
+        candidates.set(row.id, candidate);
+      }
+      if (row.legEndpointId) candidate.endpointIds.add(row.legEndpointId);
+      if (row.legStaffUserId) {
+        candidate.participantUserIds.add(row.legStaffUserId);
+      }
+    }
+
+    const rootIds = [...candidates.keys()];
+    const endpointIds = [
+      ...new Set(
+        [...candidates.values()].flatMap((candidate) => [
+          ...candidate.endpointIds,
+        ]),
+      ),
+    ];
+    const [relationRows, endpointOwnerRows] = await Promise.all([
+      db
+        .select({ rootId: telephonyCallRelations.rootId })
+        .from(telephonyCallRelations)
+        .where(
+          and(
+            inArray(telephonyCallRelations.rootId, rootIds),
+            inArray(telephonyCallRelations.relationType, [
+              ...PHONE_DESK_TRANSFER_RELATION_TYPES,
+            ]),
+          ),
+        ),
+      endpointIds.length
+        ? db
+            .select({
+              endpointId: staffTelephonyBindings.endpointId,
+              staffUserId: staffTelephonyBindings.staffUserId,
+            })
+            .from(staffTelephonyBindings)
+            .innerJoin(
+              telephonyEndpoints,
+              and(
+                eq(telephonyEndpoints.id, staffTelephonyBindings.endpointId),
+                eq(telephonyEndpoints.isActive, true),
+              ),
+            )
+            .innerJoin(
+              staffUsers,
+              and(
+                eq(staffUsers.id, staffTelephonyBindings.staffUserId),
+                eq(staffUsers.status, "active"),
+              ),
+            )
+            .innerJoin(
+              staffMemberships,
+              and(
+                eq(staffMemberships.userId, staffUsers.id),
+                eq(staffMemberships.isPrimary, true),
+                eq(staffMemberships.isActive, true),
+              ),
+            )
+            .where(
+              and(
+                inArray(staffTelephonyBindings.endpointId, endpointIds),
+                eq(staffTelephonyBindings.isActive, true),
+              ),
+            )
+        : [],
+    ]);
+    const transferRootIds = new Set(relationRows.map((row) => row.rootId));
+    const endpointOwnerUserIds = new Map<string, string[]>();
+    for (const row of endpointOwnerRows) {
+      const owners = endpointOwnerUserIds.get(row.endpointId) ?? [];
+      owners.push(row.staffUserId);
+      endpointOwnerUserIds.set(row.endpointId, owners);
+    }
+    const transferCandidates = [...candidates.values()].filter((candidate) =>
+      transferRootIds.has(candidate.id),
+    );
+    if (transferCandidates.length === 0) return 0;
+
+    const remotePhoneByRoot = new Map<string, string>();
+    for (const candidate of transferCandidates) {
+      if (
+        !candidate.remotePhoneCiphertext ||
+        !candidate.remotePhoneNonce ||
+        !candidate.remotePhoneKeyVersion
+      ) {
+        continue;
+      }
+      remotePhoneByRoot.set(
+        candidate.id,
+        protection.decrypt(
+          {
+            ciphertext: candidate.remotePhoneCiphertext,
+            nonce: candidate.remotePhoneNonce,
+            keyVersion: candidate.remotePhoneKeyVersion,
+          },
+          `telephony_inbound_calls/${candidate.id}/remote_phone`,
+        ),
+      );
+    }
+    const customerMatches = await resolvePhoneCustomers([
+      ...remotePhoneByRoot.values(),
+    ]);
+    const activeStaffUserIds = new Set(
+      activeStaff.map((staff) => staff.staffUserId),
+    );
+    const fallbackAdminUserIds = actor.roles.includes("admin")
+      ? [actor.id]
+      : [];
+
+    return transferCandidates.reduce((total, candidate) => {
+      const remotePhone = remotePhoneByRoot.get(candidate.id);
+      const targetUserIds = phoneDeskTransferConfirmationDutyTargetUserIds({
+        participantUserIds: [...candidate.participantUserIds],
+        endpointOwnerUserIds: [...candidate.endpointIds].flatMap(
+          (endpointId) => endpointOwnerUserIds.get(endpointId) ?? [],
+        ),
+        customerMatch: remotePhone
+          ? customerMatches.get(remotePhone) ?? null
+          : null,
+        activeStaffUserIds,
+        fallbackAdminUserIds,
+      });
+      return total + Number(targetUserIds.includes(actor.id));
+    }, 0);
+  }
+
   async function getPhoneDeskFollowUpDuty(actor: StaffPrincipal) {
     const snapshotAt = now();
     const notificationFloor = new Date(snapshotAt.getTime() - 60 * 60_000);
     const notificationHorizon = new Date(
       snapshotAt.getTime() + 24 * 60 * 60_000,
     );
-    const [[summary], candidates] = await Promise.all([
+    const [[summary], candidates, transferConfirmationCount] = await Promise.all([
       db
         .select({ count: count() })
         .from(telephonyFollowUpTasks)
@@ -5234,10 +5464,14 @@ export function createTelephonyService(options: {
         )
         .orderBy(asc(telephonyFollowUpTasks.dueAt))
         .limit(PHONE_DESK_MAX_LIMIT),
+      countPhoneDeskTransferConfirmationDuties(actor),
     ]);
+    const followUpCount = summary?.count ?? 0;
     return {
       snapshotAt: snapshotAt.toISOString(),
-      count: summary?.count ?? 0,
+      count: followUpCount + transferConfirmationCount,
+      followUpCount,
+      transferConfirmationCount,
       items: candidates.map((task) => ({
         id: task.id,
         source: task.consultationRequestId

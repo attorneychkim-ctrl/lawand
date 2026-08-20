@@ -15,6 +15,7 @@ import {
   phoneDeskItemAssignees,
   phoneDeskItemMatchesAssignee,
   phoneDeskItemMatchesFilter,
+  phoneDeskTransferConfirmationDutyTargetUserIds,
   retainHigherPriorityPhoneCustomerMatch,
   shouldAutoOpenConnectedAftercare,
   staffPhoneCustomerMatches,
@@ -65,6 +66,50 @@ test("종료 고객 leg만 남은 확인 필요 통화는 2분 뒤 직원이 수
       lastEventAt: resolutionAt,
     }),
     true,
+  );
+});
+
+test("호전환 확인 배지는 통화 참여자·회선 소유자·고객 담당자에게만 표시한다", () => {
+  const activeStaffUserIds = new Set([
+    "staff-participant",
+    "staff-line-owner",
+    "staff-customer-owner",
+    "staff-admin",
+  ]);
+  assert.deepEqual(
+    phoneDeskTransferConfirmationDutyTargetUserIds({
+      participantUserIds: ["staff-participant", "staff-inactive"],
+      endpointOwnerUserIds: ["staff-line-owner", "staff-participant"],
+      customerMatch: {
+        source: "consultation",
+        consultation: {
+          id: "consultation-1",
+          publicReceiptCode: "TEST-1",
+          displayName: "확인 고객",
+          state: "assigned",
+          firstRequestedAt: "2026-08-20T01:00:00.000Z",
+          lastRequestedAt: "2026-08-20T01:00:00.000Z",
+          assigneeUserId: "staff-customer-owner",
+          assigneeDisplayName: "고객 담당자",
+        },
+      },
+      activeStaffUserIds,
+      fallbackAdminUserIds: ["staff-admin"],
+    }),
+    ["staff-participant", "staff-line-owner", "staff-customer-owner"],
+  );
+});
+
+test("호전환 관련자를 해석할 수 없는 건만 활성 관리자에게 안전망 배지를 표시한다", () => {
+  assert.deepEqual(
+    phoneDeskTransferConfirmationDutyTargetUserIds({
+      participantUserIds: [null, "staff-inactive"],
+      endpointOwnerUserIds: [],
+      customerMatch: null,
+      activeStaffUserIds: new Set(["staff-admin"]),
+      fallbackAdminUserIds: ["staff-admin"],
+    }),
+    ["staff-admin"],
   );
 });
 
