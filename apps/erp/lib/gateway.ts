@@ -493,6 +493,7 @@ export type TelephonyCallActivity = {
   participants: Array<{
     legId: string;
     endpointId: string;
+    extension: string;
     staffUserId: string | null;
     displayName: string | null;
     kind: "customer" | "consultation" | "internal";
@@ -500,6 +501,15 @@ export type TelephonyCallActivity = {
     state: "ringing" | "connected" | "ended";
     remoteExtension: string | null;
     startedAt: string;
+  }>;
+  internalCallers: Array<{
+    staffUserId: string | null;
+    displayName: string | null;
+    extension: string;
+    organization: { key: string; name: string } | null;
+    region: { key: string; name: string } | null;
+    department: string | null;
+    jobTitle: string | null;
   }>;
   transfer: {
     state:

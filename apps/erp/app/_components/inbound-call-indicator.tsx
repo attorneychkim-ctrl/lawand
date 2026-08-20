@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { telephonyCallerDisplayName } from "@lawand/core";
+import {
+  telephonyCallerDisplayName,
+  telephonyInternalCallerNotificationCopy,
+} from "@lawand/core";
 
 import type {
   PhoneDeskCallSnapshot,
@@ -498,14 +501,39 @@ function notificationCopy(
       }`,
     };
   }
+  if (activity.notificationKind === "internal_inbound") {
+    const internalCopy = telephonyInternalCallerNotificationCopy(
+      activity.internalCallers ?? [],
+    );
+    const recipients = [
+      ...new Set(
+        activity.participants.flatMap((participant) =>
+          participant.direction === "inbound"
+            ? [
+                participant.displayName
+                  ? `${participant.displayName} · 내선 ${participant.extension}`
+                  : `내선 ${participant.extension}`,
+              ]
+            : [],
+        ),
+      ),
+    ];
+    return {
+      title: internalCopy.title,
+      body: [
+        ...internalCopy.bodyLines,
+        recipients.length
+          ? `수신 ${recipients.join(" / ")}`
+          : `수신 ${activity.currentEndpoint.label} · 내선 ${activity.currentEndpoint.extension}`,
+      ].join("\n"),
+    };
+  }
   const kindLabel =
     activity.notificationKind === "transferred_customer"
       ? "전달된 고객 전화"
       : activity.notificationKind === "transfer_returned"
         ? "고객 전화 복귀"
-        : activity.notificationKind === "internal_inbound"
-          ? "내선 전화"
-          : "고객 전화 수신";
+        : "고객 전화 수신";
   const customer = activity.customerMatch;
   const customerName = telephonyCallerDisplayName(customer);
   const details: string[] = [];
