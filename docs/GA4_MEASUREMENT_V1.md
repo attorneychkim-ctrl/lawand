@@ -2,7 +2,7 @@
 
 > 계약 ID: `lawand-ga4-measurement-v1`
 > 확정일: 2026-08-19
-> 상태: GA4 운영 속성·웹 스트림·운영 ID 1차 활성화 완료, 무팝업 hotfix 배포 전
+> 상태: GA4 운영 속성·웹 스트림·운영 ID와 무팝업 hotfix 배포·24시간 수신 검증 완료
 > 현재 외부 상태: 로앤 GA4 운영 웹 스트림은 활성화했고 네이버 광고 계정은 아직 연결하지 않음
 > AdPilot 상대 기준: `docs/integrations/lawand-ga4-measurement-v1.md` v1.1.0,
 > 커밋 `b2ef82111b5f63e9d279f716c77e3a58154d9e5f`
@@ -257,15 +257,13 @@ AdPilot v1.1.0은 **최적화 역할**과 **현재 열어 보는 보고 목표**
 - AdPilot에서 운영 스트림·목표·키워드 기여 검증
 - 개인정보처리방침 초안의 책임 변호사·개인정보 담당자 검토
 
-현재 구현 후보는 로컬에서 정제·중복 런타임 단위 테스트, Measurement ID 없음/있음의
-동일 빌드 런타임 설정 API, ID 확인 뒤 자동 정제 페이지뷰, 홈페이지 typecheck·lint·
-production build를 확인했다.
-전체 5패키지 typecheck·lint·test·production build도 통과했다.
-실제 운영 ID가 없으므로 Google 수신 성공, 실제 `_ga` 생성·삭제, DebugView·일반 보고서,
-AdPilot 운영 스트림·목표·키워드 귀속은 아직 성공으로 선언하지 않는다. 공식 약관과
-처리위치는 대조해 개인정보처리방침 후보에 반영했지만, 책임 변호사·개인정보
-보호책임자의 최종 승인과 Google 관리 화면의 실제 설정 증거는 운영 활성화 전 게이트로
-남긴다.
+현재 구현은 로컬 정제·중복 테스트와 전체 5패키지 typecheck·lint·test·production build를
+통과했고 운영 Measurement ID와 같은 이미지의 runtime 설정 API로 활성화됐다. 무팝업
+hotfix 뒤 최초·내부 이동·모바일 `page_view`가 각각 한 번 전송되고 민감 query·fragment·
+연락처·검색어가 제거되는 것을 확인했다. 2026-08-20 실시간·일반 보고서 수신과 기존 운영
+`generate_lead` 감지, 주요 이벤트 표시도 확인했다. AdPilot 운영 OAuth·목표·키워드 귀속과
+네이버 광고 연결은 아직 성공으로 선언하지 않으며, 책임 변호사·개인정보 보호책임자의 고지·
+설정 정기 대조는 운영 게이트로 계속 유지한다.
 
 운영 상담 폼 canary는 실제 상담 원장을 변경하므로 메인 통합·배포 세션의 별도 승인을
 받아야 한다. 구현 worktree는 main 병합, 운영 GA 설정, 운영 배포, 실제 광고 클릭·상담 생성,

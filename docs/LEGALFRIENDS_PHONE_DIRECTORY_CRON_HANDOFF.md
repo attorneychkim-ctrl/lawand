@@ -16,7 +16,7 @@
 
 ## 기준 소스와 실행 명령
 
-- 먼저 저장소의 `PROJECT_PLAN.md`, `AGENTS.md`를 읽는다.
+- 먼저 저장소의 `PROJECT_PLAN.md`, `docs/handoffs/CURRENT.md`, `AGENTS.md`를 읽는다.
 - 구현 기준은 `scripts/import-legalfriends-phone-directory.mjs`와
   `scripts/verify-legalfriends-phone-directory.sql`이다.
 - 수동 검증 명령의 형태는 다음과 같다.
@@ -76,8 +76,9 @@ corepack pnpm legalfriends:phone-directory -- --replace
   연결한다. 로그 보존기간을 명시한다.
 - 실패 canary에서 기존 `CB` 세 테이블의 논리 요약이 바뀌지 않는지 확인한다.
 - 성공 canary 뒤 gateway health와 인증된 전화데스크 고객 조회가 정상인지 확인한다.
-- 작업을 마치면 `PROJECT_PLAN.md`의 일일 자동 동기화 상태와 `AGENTS.md` 최상단
-  인수인계 로그를 갱신한다.
+- 작업을 마치면 설계·운영 기준이 바뀐 경우에만 `PROJECT_PLAN.md`의 일일 자동 동기화
+  상태를 갱신한다. 실행 결과는 해당 월의 `docs/handoffs/YYYY-MM.md` 맨 아래에 append하고,
+  다음 세션 상태가 바뀌었으면 `docs/handoffs/CURRENT.md`도 갱신한다.
 
 ## 보고 형식
 

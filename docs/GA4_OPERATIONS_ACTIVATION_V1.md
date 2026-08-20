@@ -1,7 +1,7 @@
 # 로앤 GA4 운영 활성화 실행서 v1
 
 > 기준일: 2026-08-19
-> 상태: Analytics 계정·속성·웹 스트림·운영 ID 1차 활성화 완료, 무팝업 hotfix 배포 전
+> 상태: Analytics 계정·속성·웹 스트림·운영 ID·무팝업 hotfix 배포와 24시간 수신 검증 완료
 > 측정 계약: [`GA4_MEASUREMENT_V1.md`](GA4_MEASUREMENT_V1.md)
 > 원칙: 맞춤형 광고를 사용하지 않고, 별도 동의 UI 없이 최소화·정제한 분석만 측정
 
@@ -174,9 +174,9 @@ Secrets Manager의 홈페이지 환경에만 설정한다. property ID와 OAuth 
 
 - [x] 이 브랜치의 homepage test·typecheck·lint·production build 성공
 - [ ] 개인정보 보호책임자 승인과 GA 관리 설정 증거 완료
-- [ ] 메인 세션에서 무팝업 hotfix와 현재 `main`, 모든 완료 worktree 포함 여부 대조
+- [x] 메인 세션에서 무팝업 hotfix와 현재 `main`, 모든 완료 worktree 포함 여부 대조
 - [x] 운영 Measurement ID를 secret에 설정하되 로그·커밋에 전체 값을 출력하지 않음
-- [ ] 무팝업 hotfix가 포함된 `main` commit의 홈페이지 ARM64 이미지를 digest로 배포
+- [x] 무팝업 hotfix가 포함된 `main` commit의 홈페이지 ARM64 이미지를 digest로 배포
 
 ### 6-2. 브라우저 canary
 
@@ -196,11 +196,11 @@ Secrets Manager의 홈페이지 환경에만 설정한다. property ID와 OAuth 
 
 ### 6-3. GA 수신 검증
 
-- [ ] DebugView/실시간에서 정제된 `page_view` 수신
+- [x] 실시간에서 정제된 `page_view` 수신
 - [ ] 승인된 상담 canary에서 `generate_lead` 한 번만 수신
-- [ ] 이름·전화번호·접수번호·실제 검색어·상담값·원본 URL이 이벤트에 없음
-- [ ] `generate_lead`를 GA key event로 표시하되 Google 광고 계정에는 연결하지 않음
-- [ ] 24~48시간 뒤 일반 보고서와 Data API 결과 확인
+- [x] 이름·전화번호·접수번호·실제 검색어·상담값·원본 URL이 이벤트에 없음
+- [x] `generate_lead`를 GA key event로 표시하되 Google 광고 계정에는 연결하지 않음
+- [x] 24시간 뒤 실시간·일반 보고서 결과 확인
 - [ ] AdPilot에서는 목표 역할을 `supporting`으로 유지하고 `GA4 관측 리드`로 표시
 
 ## 7. AdPilot·네이버 광고 후속 순서
@@ -239,19 +239,21 @@ GA 속성 자체 삭제는 복구가 어려운 외부 변경이므로 원인 조
 - 계정 공유 전체 끔과 최소수집·기기 기반 보고 ID·14개월 보유 설정: 완료
 - 이메일·민감 쿼리 18개 가림 및 UTM/`n_keyword_id` 보존 테스트: 완료
 - AdPilot 읽기 전용 연결·0건 상태·`generate_lead` 보조 목표 로컬 준비 검증: 완료
-- 운영 Measurement ID 설정·1차 배포: 완료, 무팝업 hotfix 재배포 대기
+- 운영 Measurement ID 설정·무팝업 hotfix 배포·실시간/일반 보고서 수신: 완료
 - AdPilot 운영 GA4·네이버 광고 연결: 미실행
 
 2026-08-19 지원되는 Chrome에서 사용자가 `legalflow.co.kr` 조직 계정 선택과 약관 수락을
 직접 수행했고, 홈페이지 세션이 3~5절의 생성·토글·가림 테스트를 완료했다. 표준
 `page_view` 외 향상된 측정은 끈 상태다. 정확한 account/property/stream/Measurement ID는
 Git에 남기지 않고 AdPilot 전용 Orca 세션에 전달했다. 운영 Measurement ID는 홈페이지
-secret에 반영됐고 무팝업 hotfix의 `main` 병합·재배포와 실제 수신 canary가 남았다.
+secret에 반영됐고 무팝업 hotfix의 `main` 병합·재배포와 실제 수신 검증을 완료했다.
 
 로컬 후보는 전체 5패키지 typecheck·lint·test·production build를 통과했다. 가짜 형식의
 Measurement ID를 쓴 로컬 프로덕션의 정제 페이지뷰와 console 오류 0을 확인했다. 기존
-동의 UI 검증 결과는 자동 로딩 전환으로 폐기한다. 실제 Google 수신과 운영 쿠키는 운영
-배포 뒤 새 canary로 확인한다.
+동의 UI 검증 결과는 자동 로딩 전환으로 폐기한다. 운영 canary에서 스크립트·쿠키·정제
+페이지뷰와 민감 데이터 부재를 확인했고, 2026-08-20 실시간·일반 보고서 수신과 기존 운영
+`generate_lead` 주요 이벤트 표시까지 확인했다. 실제 상담을 새로 만드는 canary는 수행하지
+않았으며 AdPilot 운영 연결과 네이버 광고 연결은 별도 승인 게이트로 남긴다.
 
 ## 10. 공식 기준 자료
 

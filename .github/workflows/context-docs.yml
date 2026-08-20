@@ -1,0 +1,40 @@
+name: Check context documents
+
+on:
+  pull_request:
+    paths:
+      - "AGENTS.md"
+      - "CLAUDE.md"
+      - "PROJECT_PLAN.md"
+      - "docs/archive/context-pre-compact/**"
+      - "docs/handoffs/**"
+      - "package.json"
+      - "scripts/check-context-docs.mjs"
+      - ".github/workflows/context-docs.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "AGENTS.md"
+      - "CLAUDE.md"
+      - "PROJECT_PLAN.md"
+      - "docs/archive/context-pre-compact/**"
+      - "docs/handoffs/**"
+      - "package.json"
+      - "scripts/check-context-docs.mjs"
+      - ".github/workflows/context-docs.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  context-docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.2
+      - name: Verify context document budgets and archive integrity
+        run: node scripts/check-context-docs.mjs
