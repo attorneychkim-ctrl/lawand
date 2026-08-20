@@ -102,6 +102,30 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-20 — 홈페이지 예약 상담시각·담당자 재통화 업무·정시 알림 후보
+- 홈페이지 전화상담의 최신 `scheduled_window`를 ERP 상담데스크 목록에 한국시간
+  날짜·요일·`HH:mm~HH:mm`으로 표시한다. 해당 건에서 `상담하기`를 누르면 같은 배정
+  트랜잭션이 정확한 상담요청 원장을 출처로 한 열린 재통화 업무를 만들고, 클릭한 직원을
+  담당자로 지정한다. 빠른 연락·카카오·네이버 예약과 과거 배정 건은 임의로 업무화하거나
+  소급 생성하지 않는다.
+- 전화데스크는 과거 통화 검색과 분리된 열린 업무 전용 경로를 최초 진입과
+  `follow_up.changed`에 동기화한다. 예약 업무는 고객·전화번호·상담 상세·문자·센트릭스 발신과
+  정확한 30분 구간을 제공하고, 구간 종료 뒤 `기한 지남`으로 남는다. 전역 전화 메뉴에는 현재
+  직원의 모든 미완료·기한 지난 업무 수가 `99+` 상한 배지로 표시된다.
+- ERP가 열려 있고 기존 브라우저 알림 권한이 허용된 경우, 담당자의 앞으로 24시간 업무를
+  시작 시각에 탭 간 한 번만 알린다. 브라우저 절전·종료를 넘는 Web Push는 추가하지 않았고,
+  오래된 업무 알림 폭주를 막아 최근 1시간을 넘긴 건은 배지·큐에만 유지한다. 개인정보 없는
+  기존 SSE 신호와 20초 자동 닫힘 알림 경계를 재사용한다.
+- migration `0071_consultation_schedule_follow_up.sql`은 `aftercare_id`를 nullable로 바꾸고
+  `consultation_request_id` FK·출처 정확히 하나 check·출처별 열린 업무 unique index를 추가한다.
+  SHA-256은 `a660aff7b7a39d5b9fde99a9fe3cb8b62d5459bc37fde1c89d78296e5bf080e9`다.
+  Drizzle schema check와 재생성 no-op을 통과했다. 이 워크트리에는 DB 접속 변수가 없어 실제
+  migration 적용·재실행 no-op은 수행하지 않았다.
+- 전체 모노레포 test·typecheck·lint·production build와 `git diff --check`를 통과했다.
+  core 93개·gateway 191개·홈페이지 9개 테스트가 성공했다. `PROJECT_PLAN.md`는 v1.67이다.
+  `LegalFlow/request_consultation_time` 브랜치 후보이며 main 병합·운영 migration·배포·운영
+  데이터·외부 전화/문자 발송은 수행하지 않았다.
+
 ### 2026-08-19 — GA4 무팝업 자동 측정 hotfix 운영 배포 완료
 - `LegalFlow/GA4_insert` hotfix `1a045b7e935bd65b4ba98bc4c237840a3898155f`를 main
   `22ebd761e0502ae3ac1ca07bac8e625ed4a6fd7e`에 병합했다. HERDR는 이 세션에서 환경변수와

@@ -83,12 +83,14 @@ import {
   telephonyCallAftercare,
   telephonyCalls,
   telephonyEndpoints,
+  telephonyFollowUpTasks,
   telephonyMessages,
 } from "@lawand/db";
 import type { createDatabaseClient } from "@lawand/db";
 
 import type { DataProtection } from "./crypto.js";
 import type { StaffPrincipal } from "./auth.js";
+import { consultationScheduleFollowUp } from "./consultation-follow-up.js";
 import {
   excludeOwnLegalFriendsCase,
   existingConsultationPhoneDirectoryCustomersQuery,
@@ -2685,6 +2687,24 @@ export function createConsultationService(options: {
           "상담 요청 원장을 찾을 수 없어 담당자를 지정하지 못했습니다.",
         );
       }
+      const [latestVisibleRequest] = await tx
+        .select({
+          id: consultationRequests.id,
+          source: consultationRequests.source,
+          contactChannel: consultationRequests.contactChannel,
+          contactPreference: consultationRequests.contactPreference,
+          contactWindowStart: consultationRequests.contactWindowStart,
+          contactWindowEnd: consultationRequests.contactWindowEnd,
+        })
+        .from(consultationRequests)
+        .where(
+          inArray(
+            consultationRequests.consultationId,
+            assignmentScope.memberIds,
+          ),
+        )
+        .orderBy(desc(consultationRequests.submittedAt))
+        .limit(1);
 
       const [directorySource] = await tx
         .select({ consultationId: consultationDirectorySources.consultationId })
@@ -2904,6 +2924,39 @@ export function createConsultationService(options: {
         occurredAt: now,
         createdAt: now,
       });
+
+      const scheduledFollowUp = consultationScheduleFollowUp(
+        latestVisibleRequest,
+      );
+      if (scheduledFollowUp) {
+        const followUpTaskId = createEventId();
+        await tx.insert(telephonyFollowUpTasks).values({
+          id: followUpTaskId,
+          aftercareId: null,
+          consultationRequestId: scheduledFollowUp.consultationRequestId,
+          assigneeUserId: actor.id,
+          state: "open",
+          dueAt: scheduledFollowUp.dueAt,
+          createdByUserId: actor.id,
+          createdAt: now,
+          updatedAt: now,
+        });
+        await tx.insert(staffAuditLogs).values({
+          id: createEventId(),
+          actorUserId: actor.id,
+          action: "telephony.follow_up.created_from_consultation_schedule",
+          targetType: "telephony_follow_up_task",
+          targetId: followUpTaskId,
+          metadata: {
+            consultationId,
+            consultationRequestId: scheduledFollowUp.consultationRequestId,
+            dueAt: scheduledFollowUp.dueAt.toISOString(),
+            windowEndAt: scheduledFollowUp.windowEndAt.toISOString(),
+          },
+          occurredAt: now,
+          createdAt: now,
+        });
+      }
 
       const assignedEventId = createEventId();
       const referenceData = {
@@ -4915,6 +4968,12 @@ export function createConsultationService(options: {
             firstByConsultation.get(consultation.id)?.source ?? "",
           ),
           latestSource: request?.source ?? "homepage",
+          contactPreference:
+            request?.contactPreference ?? "as_soon_as_possible",
+          contactWindowStart:
+            request?.contactWindowStart?.toISOString() ?? null,
+          contactWindowEnd:
+            request?.contactWindowEnd?.toISOString() ?? null,
           residenceRegion: residenceRegion.success
             ? residenceRegion.data
             : null,

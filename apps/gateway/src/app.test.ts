@@ -1729,7 +1729,7 @@ test("통합 통화 활동 조회는 인증된 직원 문맥으로만 개인정�
   assert.doesNotMatch(body, /remotePhoneCiphertext|remotePhoneFingerprint/);
 });
 
-test("전화데스크 통화자 확정·후처리·재통화 완료 API는 통합 계약과 현재 직원을 전달한다", async (context) => {
+test("전화데스크 통화자 확정·후처리·재통화 조회·완료 API는 통합 계약과 현재 직원을 전달한다", async (context) => {
   const callId = "019fa6a4-6834-7782-aa0b-4e71ffb8a301";
   const taskId = "019fa6a4-6834-7782-aa0b-4e71ffb8a302";
   const finalStaffUserId = "019fa6a4-6834-7782-aa0b-4e71ffb8a304";
@@ -1741,6 +1741,7 @@ test("전화데스크 통화자 확정·후처리·재통화 완료 API는 통�
     relationship: "referrer";
   } | null = null;
   let completedBy = "";
+  let dutyRequestedBy = "";
   let resolvedBy = "";
   const telephonyService = {
     getPhoneDeskCall: async () => ({
@@ -1788,6 +1789,25 @@ test("전화데스크 통화자 확정·후처리·재통화 완료 API는 통�
         completedAt: "2026-08-07T05:30:00.000Z",
       };
     },
+    getPhoneDeskFollowUps: async () => ({
+      snapshotAt: "2026-08-07T05:00:00.000Z",
+      items: [{ id: taskId, source: "consultation_schedule" as const }],
+    }),
+    getPhoneDeskFollowUpDuty: async (actor: StaffPrincipal) => {
+      dutyRequestedBy = actor.id;
+      return {
+        snapshotAt: "2026-08-07T05:00:00.000Z",
+        count: 1,
+        items: [
+          {
+            id: taskId,
+            source: "consultation_schedule" as const,
+            dueAt: "2026-08-08T01:00:00.000Z",
+            dueEndAt: "2026-08-08T01:30:00.000Z",
+          },
+        ],
+      };
+    },
   } as unknown as TelephonyService;
   const authService = {
     authorize: async () => realtimeActor,
@@ -1813,6 +1833,20 @@ test("전화데스크 통화자 확정·후처리·재통화 완료 API는 통�
     { headers },
   );
   assert.equal(detail.status, 200);
+
+  const followUps = await fetch(
+    `http://127.0.0.1:${address.port}/v1/phone-desk/follow-ups`,
+    { headers },
+  );
+  assert.equal(followUps.status, 200);
+  assert.match(await followUps.text(), /consultation_schedule/);
+
+  const duty = await fetch(
+    `http://127.0.0.1:${address.port}/v1/phone-desk/follow-ups/duty`,
+    { headers },
+  );
+  assert.equal(duty.status, 200);
+  assert.equal(dutyRequestedBy, realtimeActor.id);
 
   const resolved = await fetch(
     `http://127.0.0.1:${address.port}/v1/phone-desk/calls/${callId}/resolve`,

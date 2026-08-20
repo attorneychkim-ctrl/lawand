@@ -3275,6 +3275,245 @@ export function createTelephonyService(options: {
     };
   }
 
+  async function listOpenPhoneDeskFollowUps() {
+    const directRequest = alias(
+      consultationRequests,
+      "follow_up_consultation_request",
+    );
+    const callRequest = alias(
+      consultationRequests,
+      "follow_up_call_consultation_request",
+    );
+    const rows = await db
+      .select({
+        id: telephonyFollowUpTasks.id,
+        aftercareId: telephonyFollowUpTasks.aftercareId,
+        consultationRequestId: telephonyFollowUpTasks.consultationRequestId,
+        dueAt: telephonyFollowUpTasks.dueAt,
+        assigneeUserId: telephonyFollowUpTasks.assigneeUserId,
+        assigneeDisplayName: staffProfiles.displayName,
+        result: telephonyCallAftercare.result,
+        observedCallId: telephonyCallAftercare.observedCallId,
+        telephonyCallId: telephonyCallAftercare.telephonyCallId,
+        callRootId: telephonyCallAftercare.callRootId,
+        directWindowEnd: directRequest.contactWindowEnd,
+        directPhoneCiphertext: directRequest.phoneCiphertext,
+        directPhoneNonce: directRequest.phoneNonce,
+        directPhoneKeyVersion: directRequest.phoneKeyVersion,
+        rootPhoneCiphertext: telephonyCallRoots.remotePhoneCiphertext,
+        rootPhoneNonce: telephonyCallRoots.remotePhoneNonce,
+        rootPhoneKeyVersion: telephonyCallRoots.remotePhoneKeyVersion,
+        observedPhoneCiphertext: telephonyInboundCalls.remotePhoneCiphertext,
+        observedPhoneNonce: telephonyInboundCalls.remotePhoneNonce,
+        observedPhoneKeyVersion: telephonyInboundCalls.remotePhoneKeyVersion,
+        callTargetSource: telephonyCalls.targetSource,
+        callRequestId: telephonyCalls.consultationRequestId,
+        callPhoneCiphertext: callRequest.phoneCiphertext,
+        callPhoneNonce: callRequest.phoneNonce,
+        callPhoneKeyVersion: callRequest.phoneKeyVersion,
+        directoryPhoneCiphertext:
+          telephonyCallDirectoryTargets.phoneCiphertext,
+        directoryPhoneNonce: telephonyCallDirectoryTargets.phoneNonce,
+        directoryPhoneKeyVersion: telephonyCallDirectoryTargets.phoneKeyVersion,
+        consultationId: consultations.id,
+        consultationReceiptCode: consultations.publicReceiptCode,
+        consultationAnonymousLabel: consultations.anonymousLabel,
+        consultationNameCiphertext: consultations.preferredNameCiphertext,
+        consultationNameNonce: consultations.preferredNameNonce,
+        consultationNameKeyVersion: consultations.preferredNameKeyVersion,
+      })
+      .from(telephonyFollowUpTasks)
+      .leftJoin(
+        telephonyCallAftercare,
+        eq(telephonyCallAftercare.id, telephonyFollowUpTasks.aftercareId),
+      )
+      .leftJoin(
+        directRequest,
+        eq(directRequest.id, telephonyFollowUpTasks.consultationRequestId),
+      )
+      .leftJoin(
+        telephonyCallRoots,
+        eq(telephonyCallRoots.id, telephonyCallAftercare.callRootId),
+      )
+      .leftJoin(
+        telephonyInboundCalls,
+        eq(telephonyInboundCalls.id, telephonyCallAftercare.observedCallId),
+      )
+      .leftJoin(
+        telephonyCalls,
+        eq(telephonyCalls.id, telephonyCallAftercare.telephonyCallId),
+      )
+      .leftJoin(
+        callRequest,
+        eq(callRequest.id, telephonyCalls.consultationRequestId),
+      )
+      .leftJoin(
+        telephonyCallDirectoryTargets,
+        eq(
+          telephonyCallDirectoryTargets.telephonyCallId,
+          telephonyCalls.id,
+        ),
+      )
+      .leftJoin(
+        consultations,
+        or(
+          eq(consultations.id, telephonyCallAftercare.consultationId),
+          eq(consultations.id, directRequest.consultationId),
+        ),
+      )
+      .innerJoin(
+        staffProfiles,
+        eq(staffProfiles.userId, telephonyFollowUpTasks.assigneeUserId),
+      )
+      .where(eq(telephonyFollowUpTasks.state, "open"))
+      .orderBy(asc(telephonyFollowUpTasks.dueAt))
+      .limit(PHONE_DESK_MAX_LIMIT);
+    const customerMatch = createPhoneCustomerLoader();
+
+    return Promise.all(
+      rows.map(async (task) => {
+        const remotePhone = task.callRootId &&
+            task.rootPhoneCiphertext &&
+            task.rootPhoneNonce &&
+            task.rootPhoneKeyVersion
+          ? protection.decrypt(
+              {
+                ciphertext: task.rootPhoneCiphertext,
+                nonce: task.rootPhoneNonce,
+                keyVersion: task.rootPhoneKeyVersion,
+              },
+              `telephony_inbound_calls/${task.callRootId}/remote_phone`,
+            )
+          : task.observedCallId &&
+              task.observedPhoneCiphertext &&
+              task.observedPhoneNonce &&
+              task.observedPhoneKeyVersion
+            ? protection.decrypt(
+                {
+                  ciphertext: task.observedPhoneCiphertext,
+                  nonce: task.observedPhoneNonce,
+                  keyVersion: task.observedPhoneKeyVersion,
+                },
+                `telephony_inbound_calls/${task.observedCallId}/remote_phone`,
+              )
+            : task.telephonyCallId &&
+                task.callTargetSource === "legal_friends_directory" &&
+                task.directoryPhoneCiphertext &&
+                task.directoryPhoneNonce &&
+                task.directoryPhoneKeyVersion
+              ? protection.decrypt(
+                  {
+                    ciphertext: task.directoryPhoneCiphertext,
+                    nonce: task.directoryPhoneNonce,
+                    keyVersion: task.directoryPhoneKeyVersion,
+                  },
+                  `telephony_call_directory_targets/${task.telephonyCallId}/phone`,
+                )
+              : task.callRequestId &&
+                  task.callPhoneCiphertext &&
+                  task.callPhoneNonce &&
+                  task.callPhoneKeyVersion
+                ? protection.decrypt(
+                    {
+                      ciphertext: task.callPhoneCiphertext,
+                      nonce: task.callPhoneNonce,
+                      keyVersion: task.callPhoneKeyVersion,
+                    },
+                    `consultation_requests.phone:${task.callRequestId}`,
+                  )
+                : task.consultationRequestId &&
+                    task.directPhoneCiphertext &&
+                    task.directPhoneNonce &&
+                    task.directPhoneKeyVersion
+                  ? protection.decrypt(
+                      {
+                        ciphertext: task.directPhoneCiphertext,
+                        nonce: task.directPhoneNonce,
+                        keyVersion: task.directPhoneKeyVersion,
+                      },
+                      `consultation_requests.phone:${task.consultationRequestId}`,
+                    )
+                  : "";
+        const linkedConsultation = task.consultationId
+          ? {
+              displayName:
+                task.consultationNameCiphertext &&
+                  task.consultationNameNonce &&
+                  task.consultationNameKeyVersion
+                  ? protection.decrypt(
+                      {
+                        ciphertext: task.consultationNameCiphertext,
+                        nonce: task.consultationNameNonce,
+                        keyVersion: task.consultationNameKeyVersion,
+                      },
+                      `consultations.preferred_name:${task.consultationId}`,
+                    )
+                  : task.consultationAnonymousLabel ?? "고객명 미확인",
+              receiptCode: task.consultationReceiptCode!,
+            }
+          : null;
+        const match = !linkedConsultation && remotePhone
+          ? await customerMatch(remotePhone)
+          : null;
+        const matchedConsultation =
+          match?.source === "consultation" ? match.consultation : null;
+        const matchedDirectoryCase =
+          match?.source === "legal_friends" ? match.cases[0] ?? null : null;
+        const customerName =
+          linkedConsultation?.displayName ??
+          matchedConsultation?.displayName ??
+          (match?.source === "staff"
+            ? match.staffMembers.map((staff) => staff.displayName).join(" · ")
+            : null) ??
+          (match?.source === "legal_friends" ? match.clientName : null) ??
+          (match?.source === "phonebook" ? match.contact.displayName : null) ??
+          "고객명 미확인";
+        const contactTarget = task.consultationId && linkedConsultation
+          ? {
+              source: "consultation" as const,
+              consultationId: task.consultationId,
+              receiptCode: linkedConsultation.receiptCode,
+            }
+          : matchedConsultation
+            ? {
+                source: "consultation" as const,
+                consultationId: matchedConsultation.id,
+                receiptCode: matchedConsultation.publicReceiptCode,
+              }
+            : matchedDirectoryCase
+              ? {
+                  source: "legal_friends_directory" as const,
+                  clientIdx: matchedDirectoryCase.clientIdx,
+                  caseIdx: matchedDirectoryCase.caseIdx,
+                  receiptCode:
+                    matchedDirectoryCase.caseNumber ?? "리걸프렌즈",
+                }
+              : null;
+        return {
+          id: task.id,
+          source: task.consultationRequestId
+            ? ("consultation_schedule" as const)
+            : ("aftercare" as const),
+          aftercareId: task.aftercareId,
+          consultationRequestId: task.consultationRequestId,
+          callId:
+            task.callRootId ?? task.observedCallId ?? task.telephonyCallId,
+          result: task.result,
+          consultationId: task.consultationId,
+          customerName,
+          remotePhone,
+          contactTarget,
+          dueAt: task.dueAt.toISOString(),
+          dueEndAt: task.directWindowEnd?.toISOString() ?? null,
+          assignee: {
+            staffUserId: task.assigneeUserId,
+            displayName: task.assigneeDisplayName,
+          },
+        };
+      }),
+    );
+  }
+
   async function getPhoneDeskCalls(
     queryOrLimit: PhoneDeskListQuery | number = PHONE_DESK_DEFAULT_LIMIT,
     callId?: string,
@@ -4674,7 +4913,7 @@ export function createTelephonyService(options: {
       (typeof followUpRows)[number]
     >();
     for (const task of followUpRows) {
-      if (!followUpsByAftercare.has(task.aftercareId)) {
+      if (task.aftercareId && !followUpsByAftercare.has(task.aftercareId)) {
         followUpsByAftercare.set(task.aftercareId, task);
       }
     }
@@ -4766,276 +5005,9 @@ export function createTelephonyService(options: {
         aftercare: row ? aftercareResponse(row) : null,
       };
     });
-    const openFollowUps = callId || !includeFollowUps
+    const followUps = callId || !includeFollowUps
       ? []
-      : await db
-          .select({
-            id: telephonyFollowUpTasks.id,
-            aftercareId: telephonyFollowUpTasks.aftercareId,
-            dueAt: telephonyFollowUpTasks.dueAt,
-            assigneeUserId: telephonyFollowUpTasks.assigneeUserId,
-            assigneeDisplayName: staffProfiles.displayName,
-            result: telephonyCallAftercare.result,
-            observedCallId: telephonyCallAftercare.observedCallId,
-            telephonyCallId: telephonyCallAftercare.telephonyCallId,
-            callRootId: telephonyCallAftercare.callRootId,
-            consultationId: telephonyCallAftercare.consultationId,
-          })
-          .from(telephonyFollowUpTasks)
-          .innerJoin(
-            telephonyCallAftercare,
-            eq(telephonyCallAftercare.id, telephonyFollowUpTasks.aftercareId),
-          )
-          .innerJoin(
-            staffProfiles,
-            eq(staffProfiles.userId, telephonyFollowUpTasks.assigneeUserId),
-          )
-          .where(eq(telephonyFollowUpTasks.state, "open"))
-          .orderBy(asc(telephonyFollowUpTasks.dueAt))
-          .limit(PHONE_DESK_MAX_LIMIT);
-    const followUpRootIds = openFollowUps.flatMap((task) =>
-      task.callRootId ? [task.callRootId] : [],
-    );
-    const followUpObservedIds = openFollowUps.flatMap((task) =>
-      task.observedCallId ? [task.observedCallId] : [],
-    );
-    const followUpCommandIds = openFollowUps.flatMap((task) =>
-      task.telephonyCallId ? [task.telephonyCallId] : [],
-    );
-    const followUpConsultationIds = [
-      ...new Set(
-        openFollowUps.flatMap((task) =>
-          task.consultationId ? [task.consultationId] : [],
-        ),
-      ),
-    ];
-    const [
-      followUpRootRows,
-      followUpObservedRows,
-      followUpCommandRows,
-      followUpConsultationRows,
-    ] = await Promise.all([
-      followUpRootIds.length
-        ? db
-            .select({
-              id: telephonyCallRoots.id,
-              remotePhoneCiphertext: telephonyCallRoots.remotePhoneCiphertext,
-              remotePhoneNonce: telephonyCallRoots.remotePhoneNonce,
-              remotePhoneKeyVersion: telephonyCallRoots.remotePhoneKeyVersion,
-            })
-            .from(telephonyCallRoots)
-            .where(inArray(telephonyCallRoots.id, followUpRootIds))
-        : Promise.resolve([]),
-      followUpObservedIds.length
-        ? db
-            .select({
-              id: telephonyInboundCalls.id,
-              remotePhoneCiphertext:
-                telephonyInboundCalls.remotePhoneCiphertext,
-              remotePhoneNonce: telephonyInboundCalls.remotePhoneNonce,
-              remotePhoneKeyVersion:
-                telephonyInboundCalls.remotePhoneKeyVersion,
-            })
-            .from(telephonyInboundCalls)
-            .where(inArray(telephonyInboundCalls.id, followUpObservedIds))
-        : Promise.resolve([]),
-      followUpCommandIds.length
-        ? db
-            .select({
-              id: telephonyCalls.id,
-              targetSource: telephonyCalls.targetSource,
-              consultationRequestId: telephonyCalls.consultationRequestId,
-              consultationPhoneCiphertext: consultationRequests.phoneCiphertext,
-              consultationPhoneNonce: consultationRequests.phoneNonce,
-              consultationPhoneKeyVersion: consultationRequests.phoneKeyVersion,
-              directoryPhoneCiphertext:
-                telephonyCallDirectoryTargets.phoneCiphertext,
-              directoryPhoneNonce: telephonyCallDirectoryTargets.phoneNonce,
-              directoryPhoneKeyVersion:
-                telephonyCallDirectoryTargets.phoneKeyVersion,
-            })
-            .from(telephonyCalls)
-            .leftJoin(
-              consultationRequests,
-              eq(consultationRequests.id, telephonyCalls.consultationRequestId),
-            )
-            .leftJoin(
-              telephonyCallDirectoryTargets,
-              eq(
-                telephonyCallDirectoryTargets.telephonyCallId,
-                telephonyCalls.id,
-              ),
-            )
-            .where(inArray(telephonyCalls.id, followUpCommandIds))
-        : Promise.resolve([]),
-      followUpConsultationIds.length
-        ? db
-            .select({
-              consultationId: consultations.id,
-              consultationReceiptCode: consultations.publicReceiptCode,
-              consultationAnonymousLabel: consultations.anonymousLabel,
-              consultationNameCiphertext: consultations.preferredNameCiphertext,
-              consultationNameNonce: consultations.preferredNameNonce,
-              consultationNameKeyVersion: consultations.preferredNameKeyVersion,
-            })
-            .from(consultations)
-            .where(inArray(consultations.id, followUpConsultationIds))
-        : Promise.resolve([]),
-    ]);
-    const followUpRootPhone = new Map(
-      followUpRootRows.flatMap((row) =>
-        row.remotePhoneCiphertext &&
-        row.remotePhoneNonce &&
-        row.remotePhoneKeyVersion
-          ? [
-              [
-                row.id,
-                protection.decrypt(
-                  {
-                    ciphertext: row.remotePhoneCiphertext,
-                    nonce: row.remotePhoneNonce,
-                    keyVersion: row.remotePhoneKeyVersion,
-                  },
-                  `telephony_inbound_calls/${row.id}/remote_phone`,
-                ),
-              ] as const,
-            ]
-          : [],
-      ),
-    );
-    const followUpObservedPhone = new Map(
-      followUpObservedRows.map((row) => [
-        row.id,
-        protection.decrypt(
-          {
-            ciphertext: row.remotePhoneCiphertext,
-            nonce: row.remotePhoneNonce,
-            keyVersion: row.remotePhoneKeyVersion,
-          },
-          `telephony_inbound_calls/${row.id}/remote_phone`,
-        ),
-      ] as const),
-    );
-    const followUpCommandPhone = new Map(
-      followUpCommandRows.flatMap((row) => {
-        if (
-          row.targetSource === "legal_friends_directory" &&
-          row.directoryPhoneCiphertext &&
-          row.directoryPhoneNonce &&
-          row.directoryPhoneKeyVersion
-        ) {
-          return [[
-            row.id,
-            protection.decrypt(
-              {
-                ciphertext: row.directoryPhoneCiphertext,
-                nonce: row.directoryPhoneNonce,
-                keyVersion: row.directoryPhoneKeyVersion,
-              },
-              `telephony_call_directory_targets/${row.id}/phone`,
-            ),
-          ] as const];
-        }
-        if (
-          row.consultationRequestId &&
-          row.consultationPhoneCiphertext &&
-          row.consultationPhoneNonce &&
-          row.consultationPhoneKeyVersion
-        ) {
-          return [[
-            row.id,
-            protection.decrypt(
-              {
-                ciphertext: row.consultationPhoneCiphertext,
-                nonce: row.consultationPhoneNonce,
-                keyVersion: row.consultationPhoneKeyVersion,
-              },
-              `consultation_requests.phone:${row.consultationRequestId}`,
-            ),
-          ] as const];
-        }
-        return [];
-      }),
-    );
-    const followUpConsultation = new Map(
-      followUpConsultationRows.map((row) => [
-        row.consultationId,
-        {
-          displayName: consultationDisplayName(row),
-          receiptCode: row.consultationReceiptCode,
-        },
-      ] as const),
-    );
-    const followUps = await Promise.all(
-      openFollowUps.map(async (task) => {
-        const callId =
-          task.callRootId ?? task.observedCallId ?? task.telephonyCallId!;
-        const remotePhone =
-          (task.callRootId
-            ? followUpRootPhone.get(task.callRootId)
-            : undefined) ??
-          (task.observedCallId
-            ? followUpObservedPhone.get(task.observedCallId)
-            : undefined) ??
-          (task.telephonyCallId
-            ? followUpCommandPhone.get(task.telephonyCallId)
-            : undefined) ??
-          "";
-        const linkedConsultation = task.consultationId
-          ? followUpConsultation.get(task.consultationId)
-          : undefined;
-        const match = remotePhone ? await customerMatch(remotePhone) : null;
-        const matchedConsultation =
-          match?.source === "consultation" ? match.consultation : null;
-        const matchedDirectoryCase =
-          match?.source === "legal_friends" ? match.cases[0] ?? null : null;
-        const customerName =
-          linkedConsultation?.displayName ??
-          matchedConsultation?.displayName ??
-          (match?.source === "staff"
-            ? match.staffMembers.map((staff) => staff.displayName).join(" · ")
-            : null) ??
-          (match?.source === "legal_friends" ? match.clientName : null) ??
-          (match?.source === "phonebook" ? match.contact.displayName : null) ??
-          "고객명 미확인";
-        const contactTarget = task.consultationId && linkedConsultation
-          ? {
-              source: "consultation" as const,
-              consultationId: task.consultationId,
-              receiptCode: linkedConsultation.receiptCode,
-            }
-          : matchedConsultation
-            ? {
-                source: "consultation" as const,
-                consultationId: matchedConsultation.id,
-                receiptCode: matchedConsultation.publicReceiptCode,
-              }
-            : matchedDirectoryCase
-              ? {
-                  source: "legal_friends_directory" as const,
-                  clientIdx: matchedDirectoryCase.clientIdx,
-                  caseIdx: matchedDirectoryCase.caseIdx,
-                  receiptCode:
-                    matchedDirectoryCase.caseNumber ?? "리걸프렌즈",
-                }
-              : null;
-        return {
-          id: task.id,
-          aftercareId: task.aftercareId,
-          callId,
-          result: task.result,
-          consultationId: task.consultationId,
-          customerName,
-          remotePhone,
-          contactTarget,
-          dueAt: task.dueAt.toISOString(),
-          assignee: {
-            staffUserId: task.assigneeUserId,
-            displayName: task.assigneeDisplayName,
-          },
-        };
-      }),
-    );
+      : await listOpenPhoneDeskFollowUps();
 
     return {
       snapshotAt: snapshotAt.toISOString(),
@@ -5049,6 +5021,71 @@ export function createTelephonyService(options: {
         ? { ...emptySummary, all: items.length }
         : summary,
       followUps,
+    };
+  }
+
+  async function getPhoneDeskFollowUps() {
+    const snapshotAt = now();
+    return {
+      snapshotAt: snapshotAt.toISOString(),
+      items: await listOpenPhoneDeskFollowUps(),
+    };
+  }
+
+  async function getPhoneDeskFollowUpDuty(actor: StaffPrincipal) {
+    const snapshotAt = now();
+    const notificationFloor = new Date(snapshotAt.getTime() - 60 * 60_000);
+    const notificationHorizon = new Date(
+      snapshotAt.getTime() + 24 * 60 * 60_000,
+    );
+    const [[summary], candidates] = await Promise.all([
+      db
+        .select({ count: count() })
+        .from(telephonyFollowUpTasks)
+        .where(
+          and(
+            eq(telephonyFollowUpTasks.state, "open"),
+            eq(telephonyFollowUpTasks.assigneeUserId, actor.id),
+          ),
+        ),
+      db
+        .select({
+          id: telephonyFollowUpTasks.id,
+          consultationRequestId:
+            telephonyFollowUpTasks.consultationRequestId,
+          dueAt: telephonyFollowUpTasks.dueAt,
+          dueEndAt: consultationRequests.contactWindowEnd,
+        })
+        .from(telephonyFollowUpTasks)
+        .leftJoin(
+          consultationRequests,
+          eq(
+            consultationRequests.id,
+            telephonyFollowUpTasks.consultationRequestId,
+          ),
+        )
+        .where(
+          and(
+            eq(telephonyFollowUpTasks.state, "open"),
+            eq(telephonyFollowUpTasks.assigneeUserId, actor.id),
+            gte(telephonyFollowUpTasks.dueAt, notificationFloor),
+            lt(telephonyFollowUpTasks.dueAt, notificationHorizon),
+          ),
+        )
+        .orderBy(asc(telephonyFollowUpTasks.dueAt))
+        .limit(PHONE_DESK_MAX_LIMIT),
+    ]);
+    return {
+      snapshotAt: snapshotAt.toISOString(),
+      count: summary?.count ?? 0,
+      items: candidates.map((task) => ({
+        id: task.id,
+        source: task.consultationRequestId
+          ? ("consultation_schedule" as const)
+          : ("aftercare" as const),
+        dueAt: task.dueAt.toISOString(),
+        dueEndAt: task.dueEndAt?.toISOString() ?? null,
+      })),
     };
   }
 
@@ -6170,6 +6207,8 @@ export function createTelephonyService(options: {
           id: telephonyFollowUpTasks.id,
           state: telephonyFollowUpTasks.state,
           aftercareId: telephonyFollowUpTasks.aftercareId,
+          consultationRequestId:
+            telephonyFollowUpTasks.consultationRequestId,
         })
         .from(telephonyFollowUpTasks)
         .where(eq(telephonyFollowUpTasks.id, taskId))
@@ -6202,7 +6241,12 @@ export function createTelephonyService(options: {
         action: "telephony.follow_up.completed",
         targetType: "telephony_follow_up_task",
         targetId: task.id,
-        metadata: { aftercareId: task.aftercareId },
+        metadata: {
+          ...(task.aftercareId ? { aftercareId: task.aftercareId } : {}),
+          ...(task.consultationRequestId
+            ? { consultationRequestId: task.consultationRequestId }
+            : {}),
+        },
         occurredAt: completedAt,
         createdAt: completedAt,
       });
@@ -9263,6 +9307,8 @@ export function createTelephonyService(options: {
     listUnreadMessageNotifications,
     getPhoneDeskCalls,
     getPhoneDeskCall,
+    getPhoneDeskFollowUps,
+    getPhoneDeskFollowUpDuty,
     listPhonebookContacts,
     pollInboundAnswerCommand,
     requestClickToCall,

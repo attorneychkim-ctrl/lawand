@@ -4361,6 +4361,27 @@ a.inbound-customer:hover { text-decoration: underline; }
   line-height: 1.45;
 }
 
+.consultation-row-schedule {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  color: var(--brand-strong);
+  font-size: .72rem;
+  line-height: 1.45;
+}
+
+.consultation-row-schedule > span {
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--brand-soft);
+  font-size: .62rem;
+  font-weight: 800;
+}
+
+.consultation-row-schedule > strong { font-weight: 850; }
+
 .consultation-flags {
   display: flex;
   min-height: 20px;

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { subscribeReviewRealtime } from "./review-realtime";
 import { subscribeMessageRealtime } from "./message-realtime";
+import { subscribePhoneDeskRealtime } from "./phone-desk-realtime";
 
 function NavIcon({ kind }: { kind: "consultations" | "clients" | "reviews" | "phone" | "phonebook" | "messages" | "staff" | "more" | "manage" }) {
   return kind === "consultations" ? (
@@ -112,6 +113,7 @@ export function ErpNav({ showStaff }: { showStaff: boolean }) {
   const pathname = usePathname();
   const [reviewDutyCount, setReviewDutyCount] = useState(0);
   const [messageDutyCount, setMessageDutyCount] = useState(0);
+  const [followUpDutyCount, setFollowUpDutyCount] = useState(0);
   const consultationActive = pathname === "/" || pathname.startsWith("/consultations/");
   const phonebookActive = pathname.startsWith("/phonebook");
   const staffActive = pathname.startsWith("/staff");
@@ -161,6 +163,34 @@ export function ErpNav({ showStaff }: { showStaff: boolean }) {
     return () => { unsubscribe(); window.removeEventListener("lawand:message-read", refresh); };
   }, [pathname, refreshMessageDutyCount]);
 
+  const refreshFollowUpDutyCount = useCallback(async () => {
+    try {
+      const response = await fetch("/api/phone-desk/follow-ups/duty", {
+        cache: "no-store",
+      });
+      const body = (await response.json().catch(() => null)) as {
+        count?: unknown;
+      } | null;
+      if (response.ok && typeof body?.count === "number") {
+        setFollowUpDutyCount(body.count);
+      }
+    } catch {
+      // 다음 실시간 이벤트나 화면 이동 때 다시 동기화한다.
+    }
+  }, []);
+
+  useEffect(() => {
+    queueMicrotask(() => void refreshFollowUpDutyCount());
+    return subscribePhoneDeskRealtime((message) => {
+      if (
+        message.kind === "sync" ||
+        message.payload.eventType === "follow_up.changed"
+      ) {
+        void refreshFollowUpDutyCount();
+      }
+    });
+  }, [pathname, refreshFollowUpDutyCount]);
+
   return (
     <nav aria-label="ERP 주요 메뉴" className="staff-primary-nav">
       <Link
@@ -202,6 +232,14 @@ export function ErpNav({ showStaff }: { showStaff: boolean }) {
       >
         <NavIcon kind="phone" />
         <span>전화</span>
+        {followUpDutyCount > 0 ? (
+          <span
+            aria-label={`내 미완료 재통화 업무 ${followUpDutyCount}건`}
+            className="nav-count-badge"
+          >
+            {followUpDutyCount > 99 ? "99+" : followUpDutyCount}
+          </span>
+        ) : null}
       </Link>
       <Link
         aria-current={pathname.startsWith("/messages") ? "page" : undefined}

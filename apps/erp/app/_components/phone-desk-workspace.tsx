@@ -15,6 +15,7 @@ import {
 } from "./list-navigation";
 import { ClickToCallButton } from "./click-to-call-button";
 import { MessageComposeButton } from "./message-compose-button";
+import { subscribePhoneDeskRealtime } from "./phone-desk-realtime";
 
 type SourceFilter = PhoneDeskListFilter;
 type FollowUpAssignee = { staffUserId: string; displayName: string };
@@ -119,6 +120,24 @@ function formatDateTime(value: string) {
     second: "2-digit",
     hour12: false,
   }).format(new Date(value));
+}
+
+function formatFollowUpWindow(start: string, end: string | null) {
+  const date = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    month: "numeric",
+    day: "numeric",
+    weekday: "short",
+  }).format(new Date(start));
+  const time = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+  return end
+    ? `${date} ${time.format(new Date(start))}~${time.format(new Date(end))}`
+    : `${date} ${time.format(new Date(start))}`;
 }
 
 function formatDuration(seconds: number) {
@@ -342,6 +361,8 @@ export function PhoneDeskWorkspace({
   const [endDate, setEndDate] = useState(todayKey);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
+  const [followUpLoading, setFollowUpLoading] = useState(true);
+  const [followUpError, setFollowUpError] = useState("");
   const [hasSearched, setHasSearched] = useState(false);
   const [followUpAssigneeFilter, setFollowUpAssigneeFilter] = useState(
     currentStaff,
@@ -358,6 +379,7 @@ export function PhoneDeskWorkspace({
     () => new Set(),
   );
   const requestSequence = useRef(0);
+  const followUpRequestSequence = useRef(0);
 
   useEffect(() => {
     const initialTimer = window.setTimeout(() => setCurrentTime(Date.now()), 0);
@@ -367,6 +389,48 @@ export function PhoneDeskWorkspace({
       window.clearInterval(timer);
     };
   }, []);
+
+  const refreshFollowUps = useCallback(async () => {
+    const sequence = ++followUpRequestSequence.current;
+    setFollowUpLoading(true);
+    setFollowUpError("");
+    try {
+      const response = await fetch("/api/phone-desk/follow-ups", {
+        cache: "no-store",
+        headers: { accept: "application/json" },
+      });
+      if (!response.ok) throw new Error("follow_up_sync_failed");
+      const value = (await response.json()) as {
+        items?: PhoneDeskCallSnapshot["followUps"];
+      };
+      if (!Array.isArray(value.items)) {
+        throw new Error("follow_up_sync_invalid");
+      }
+      if (sequence !== followUpRequestSequence.current) return;
+      const items = value.items;
+      setSnapshot((current) => ({ ...current, followUps: items }));
+    } catch {
+      if (sequence === followUpRequestSequence.current) {
+        setFollowUpError("재통화 업무를 불러오지 못했습니다.");
+      }
+    } finally {
+      if (sequence === followUpRequestSequence.current) {
+        setFollowUpLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    queueMicrotask(() => void refreshFollowUps());
+    return subscribePhoneDeskRealtime((message) => {
+      if (
+        message.kind === "sync" ||
+        message.payload.eventType === "follow_up.changed"
+      ) {
+        void refreshFollowUps();
+      }
+    });
+  }, [refreshFollowUps]);
 
   const refresh = useCallback(async (
     criteria: SearchCriteria,
@@ -382,7 +446,6 @@ export function PhoneDeskWorkspace({
         page: String(nextPage),
         pageSize: String(nextPageSize),
         filter: criteria.filter,
-        includeFollowUps: "1",
         from: `${criteria.startDate}T00:00:00+09:00`,
         to: `${criteria.endDate}T23:59:59.999+09:00`,
       });
@@ -407,7 +470,10 @@ export function PhoneDeskWorkspace({
         }
         return;
       }
-      setSnapshot(next);
+      setSnapshot((current) => ({
+        ...next,
+        followUps: current.followUps,
+      }));
       setPageSize(next.pageSize);
       setAppliedCriteria(criteria);
       setHasSearched(true);
@@ -478,9 +544,7 @@ export function PhoneDeskWorkspace({
       if (!response.ok) {
         throw new Error(body?.message ?? "재통화 업무를 완료하지 못했습니다.");
       }
-      if (appliedCriteria) {
-        await refresh(appliedCriteria, 1, pageSize);
-      }
+      await refreshFollowUps();
     } catch (error) {
       window.alert(
         error instanceof Error
@@ -494,7 +558,7 @@ export function PhoneDeskWorkspace({
         return next;
       });
     }
-  }, [appliedCriteria, pageSize, refresh]);
+  }, [refreshFollowUps]);
 
   const visibleItems = useMemo(() => {
     return snapshot.items.filter((call) => {
@@ -618,7 +682,6 @@ export function PhoneDeskWorkspace({
 
       {loadError ? <p className="error-banner" role="alert">{loadError}</p> : null}
 
-      {hasSearched ? <>
       <section className="phone-follow-up-queue" aria-label="재통화 업무 큐">
         <div className="phone-follow-up-heading">
           <div>
@@ -655,9 +718,14 @@ export function PhoneDeskWorkspace({
                 ))}
               </select>
             </label>
-            <span className="count-badge">미완료 {visibleFollowUps.length}건</span>
+            <span className="count-badge">
+              {followUpLoading ? "동기화 중" : `미완료 ${visibleFollowUps.length}건`}
+            </span>
           </div>
         </div>
+        {followUpError ? (
+          <p className="error-banner" role="alert">{followUpError}</p>
+        ) : null}
         {visibleFollowUps.length === 0 ? (
           <p className="phone-follow-up-empty">
             {snapshot.followUps.length === 0
@@ -671,7 +739,7 @@ export function PhoneDeskWorkspace({
             {visibleFollowUps.map((task) => {
               const overdue =
                 currentTime !== null &&
-                new Date(task.dueAt).getTime() < currentTime;
+                new Date(task.dueEndAt ?? task.dueAt).getTime() < currentTime;
               return (
                 <article className={overdue ? "is-overdue" : undefined} key={task.id}>
                   <div className="phone-follow-up-summary">
@@ -680,13 +748,21 @@ export function PhoneDeskWorkspace({
                       <span>{formatPhone(task.remotePhone) || "전화번호 확인 필요"}</span>
                     </div>
                     <div className="phone-follow-up-schedule">
-                      <span className="phone-follow-up-result">{resultCopy[task.result]}</span>
-                      <strong>{formatDateTime(task.dueAt)}</strong>
+                      <span className="phone-follow-up-result">
+                        {task.source === "consultation_schedule"
+                          ? "홈페이지 상담 예약"
+                          : task.result
+                            ? resultCopy[task.result]
+                            : "재통화"}
+                      </span>
+                      <strong>{formatFollowUpWindow(task.dueAt, task.dueEndAt)}</strong>
                       <span>{overdue ? "기한 지남" : "재통화 예정"} · 담당 {task.assignee.displayName}</span>
                     </div>
                   </div>
                   <div className="phone-follow-up-actions">
-                    <Link href={`/phone-desk/${task.callId}`}>통화 상세</Link>
+                    {task.callId ? (
+                      <Link href={`/phone-desk/${task.callId}`}>통화 상세</Link>
+                    ) : null}
                     {task.consultationId ? (
                       <Link href={`/consultations/${task.consultationId}`}>상담 상세</Link>
                     ) : null}
@@ -746,6 +822,7 @@ export function PhoneDeskWorkspace({
           </div>
         )}
       </section>
+      {hasSearched ? <>
       <div className="phone-desk-panel">
         <div className="phone-desk-toolbar">
           <div className="phone-desk-result-copy">
