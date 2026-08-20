@@ -338,9 +338,6 @@ Glacier 정책은 아직 활성 설계 과제다.
 
 ### 운영 acceptance
 
-- 후기 요청 템플릿 저장은 client timeout·서버 결과 재조회/동기화·명시적 오류 표시와
-  개인정보 없는 경로별 duration/status 관측을 갖춘다. request DB pool 포화의 점유 요청을
-  식별하기 전에는 pool 크기를 먼저 늘리지 않는다.
 - 센트릭스 일반 내선·무조건/통화 후 호전환·실패 복귀 canary를 다시 수행한다.
 - 통화 후 호전환 B/customer final leg는 추가 provider 증거가 없으면 `확인 필요`로 유지한다.
 - Windows bridge 조직용 Authenticode 인증서를 발급·배포한다.
