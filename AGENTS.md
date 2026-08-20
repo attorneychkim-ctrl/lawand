@@ -106,6 +106,30 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-20 — ERP 개인 PC 네이티브 알림 설정 화면 교정
+- 사용자가 처음 말한 `웹훅`은 외부 URL·Slack·Discord 연동이 아니라 ERP 브라우저를 열어두지
+  않아도 직원 컴퓨터의 Windows/macOS 알림 영역에 뜨는 OS 네이티브 알림을 뜻한 것으로
+  확정했다. 앞선 외부 웹훅 후보는 폐기하고 관리 메뉴·route를 `/desktop-notifications`의
+  `PC 알림 설정`으로 교정했다. 페이지와 관리 메뉴는 계속 관리자에게만 보인다.
+- URL·일반 JSON 형식 입력과 개인정보 최소 payload 문구를 제거했다. 대신 `LAW& OS 알림`
+  프로그램 설치, 현재 로그인 직원과 일회용 기기 연결, 실제 OS 테스트 알림의 3단계 후보와
+  연결 기기 상태 자리를 만들었다. 알림 미리보기는 사용자의 요구대로 고객명·전화번호·
+  상담/문자/후기 실제 내용과 정확한 ERP 이동을 포함하며, 화면의 값은 예시임을 명시했다.
+  PC 사용 중 전체 내용·잠금 화면 제목만 표시를 권장 기본안으로 제시한다.
+- 기존 `apps/centrex-bridge`는 중앙 Windows 서버에서 회선별 OCX를 호스팅하는 프로그램이므로
+  직원 PC 알림 프로그램으로 확장하지 않는다. 자동 시작·서명 인증·재연결 패턴만 참고할 수
+  있으며, 현재 변경에는 PC 프로그램·기기 등록·전달 대기열·DB/API/migration·실제 OS 알림이
+  없다. `PROJECT_PLAN.md`는 v1.69다.
+- 전체 5패키지 test·typecheck·lint·production build와 DB schema check, `git diff --check`를
+  통과했다. ERP production build에는 `/desktop-notifications`만 있고 폐기한
+  `/webhook-notifications` route는 없다. 가짜 관리자 세션을 쓴 로컬 production Chrome에서
+  1920px 밝은·어두운 테마와 390px 모바일을 확인해 가로 overflow·console error·hydration
+  신호가 모두 0이고, 페이지 내부의 설치·연결·저장 버튼 3개는 비활성, 입력 요소는 0개임을
+  확인했다. 최초 ERP typecheck는 삭제한 route를 가리키는 기존 `.next/types` 때문에 실패했지만
+  production build로 route type을 재생성한 뒤 ERP와 전체 typecheck가 통과했다. WSL IP의
+  비보안 HTTP origin에서는 기존 실시간 코드의 `crypto.randomUUID`가 막혀 localhost origin으로
+  다시 검증했으며 제품 코드 오류는 아니었다. main 병합·운영 배포·운영 데이터 변경은 하지 않았다.
+
 ### 2026-08-20 — ERP 개인 웹훅 알림 설정 화면 후보
 - `origin/main` 최신 변경을 `LegalFlow/web_hook`에 병합한 뒤 ERP 관리 메뉴 첫 항목으로
   `/webhook-notifications`를 추가했다. 관리 메뉴와 페이지는 아직 `showStaff`·`requireAdmin()`으로
