@@ -65,7 +65,9 @@ import {
   staffAuditLogs,
   staffExternalAccounts,
   staffMemberships,
+  staffOrganizations,
   staffProfiles,
+  staffRegions,
   staffUsers,
   staffTelephonyBindings,
   telephonyCallObservationLinks,
@@ -420,6 +422,99 @@ export function isStaleOneSidedInternalCall(input: {
     input.activeLegCount <= 1 &&
     input.lastEventAt.getTime() <
       input.snapshotAt.getTime() - INTERNAL_SINGLE_LEG_CONFIRMATION_WINDOW_MS;
+}
+
+export type InternalCallNotificationCaller = {
+  staffUserId: string | null;
+  displayName: string | null;
+  extension: string;
+  organization: { key: string; name: string } | null;
+  region: { key: string; name: string } | null;
+  department: string | null;
+  jobTitle: string | null;
+};
+
+type InternalCallNotificationParticipant = {
+  direction: "inbound" | "outbound";
+  extension: string;
+  remoteExtension: string | null;
+};
+
+type InternalCallNotificationDirectoryEntry = {
+  extension: string;
+  staffUserId: string;
+  displayName: string;
+  organizationKey: string;
+  organizationName: string;
+  regionKey: string;
+  regionName: string;
+  department: string;
+  jobTitle: string;
+};
+
+export function internalCallNotificationCallers(
+  participants: readonly InternalCallNotificationParticipant[],
+  directory: readonly InternalCallNotificationDirectoryEntry[],
+): InternalCallNotificationCaller[] {
+  const callerExtensions = new Set<string>();
+  for (const participant of participants) {
+    if (participant.direction === "inbound" && participant.remoteExtension) {
+      callerExtensions.add(participant.remoteExtension);
+    }
+  }
+  for (const participant of participants) {
+    if (participant.direction === "outbound") {
+      callerExtensions.add(participant.extension);
+    }
+  }
+
+  const directoryByExtension = new Map<
+    string,
+    InternalCallNotificationDirectoryEntry[]
+  >();
+  for (const staff of directory) {
+    const current = directoryByExtension.get(staff.extension) ?? [];
+    if (!current.some((item) => item.staffUserId === staff.staffUserId)) {
+      current.push(staff);
+      directoryByExtension.set(staff.extension, current);
+    }
+  }
+
+  const callers: InternalCallNotificationCaller[] = [];
+  const seen = new Set<string>();
+  for (const extension of callerExtensions) {
+    const matchedStaff = directoryByExtension.get(extension) ?? [];
+    if (matchedStaff.length === 0) {
+      callers.push({
+        staffUserId: null,
+        displayName: null,
+        extension,
+        organization: null,
+        region: null,
+        department: null,
+        jobTitle: null,
+      });
+      continue;
+    }
+    for (const staff of matchedStaff) {
+      const key = `${staff.staffUserId}:${extension}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      callers.push({
+        staffUserId: staff.staffUserId,
+        displayName: staff.displayName,
+        extension,
+        organization: {
+          key: staff.organizationKey,
+          name: staff.organizationName,
+        },
+        region: { key: staff.regionKey, name: staff.regionName },
+        department: staff.department,
+        jobTitle: staff.jobTitle,
+      });
+    }
+  }
+  return callers;
 }
 
 type InboundAnswerCommandStatus =
@@ -2699,6 +2794,7 @@ export function createTelephonyService(options: {
         endpointRegionKey: telephonyEndpoints.regionKey,
         legId: telephonyCallLegs.id,
         legEndpointId: telephonyCallLegs.endpointId,
+        legExtension: callLegEndpoint.extension,
         legStaffUserId: telephonyCallLegs.staffUserId,
         legKind: telephonyCallLegs.kind,
         legDirection: telephonyCallLegs.direction,
@@ -2715,6 +2811,10 @@ export function createTelephonyService(options: {
       .leftJoin(
         telephonyCallLegs,
         eq(telephonyCallLegs.rootId, telephonyCallRoots.id),
+      )
+      .leftJoin(
+        callLegEndpoint,
+        eq(callLegEndpoint.id, telephonyCallLegs.endpointId),
       )
       .leftJoin(
         staffProfiles,
@@ -2800,13 +2900,39 @@ export function createTelephonyService(options: {
           .filter((endpointId): endpointId is string => Boolean(endpointId)),
       ),
     ];
+    const internalRemoteExtensions = [
+      ...new Set(
+        rows.flatMap((row) =>
+          row.scope === "internal" && row.legRemoteExtension
+            ? [row.legRemoteExtension]
+            : []
+        ),
+      ),
+    ];
+    const activityOwnerScope = internalRemoteExtensions.length
+      ? or(
+          inArray(staffTelephonyBindings.endpointId, activityEndpointIds),
+          inArray(telephonyEndpoints.extension, internalRemoteExtensions),
+        )
+      : inArray(staffTelephonyBindings.endpointId, activityEndpointIds);
     const activityOwnerRows = await db
       .select({
         endpointId: staffTelephonyBindings.endpointId,
+        extension: telephonyEndpoints.extension,
         staffUserId: staffTelephonyBindings.staffUserId,
+        displayName: staffProfiles.displayName,
+        organizationKey: staffMemberships.organizationKey,
+        organizationName: staffOrganizations.name,
         regionKey: staffMemberships.regionKey,
+        regionName: staffRegions.name,
+        department: staffMemberships.department,
+        jobTitle: staffMemberships.jobTitle,
       })
       .from(staffTelephonyBindings)
+      .innerJoin(
+        telephonyEndpoints,
+        eq(telephonyEndpoints.id, staffTelephonyBindings.endpointId),
+      )
       .innerJoin(
         staffUsers,
         and(
@@ -2814,6 +2940,7 @@ export function createTelephonyService(options: {
           eq(staffUsers.status, "active"),
         ),
       )
+      .innerJoin(staffProfiles, eq(staffProfiles.userId, staffUsers.id))
       .innerJoin(
         staffMemberships,
         and(
@@ -2822,10 +2949,19 @@ export function createTelephonyService(options: {
           eq(staffMemberships.isActive, true),
         ),
       )
+      .innerJoin(
+        staffOrganizations,
+        eq(staffOrganizations.key, staffMemberships.organizationKey),
+      )
+      .innerJoin(
+        staffRegions,
+        eq(staffRegions.key, staffMemberships.regionKey),
+      )
       .where(
         and(
-          inArray(staffTelephonyBindings.endpointId, activityEndpointIds),
+          activityOwnerScope,
           eq(staffTelephonyBindings.isActive, true),
+          eq(telephonyEndpoints.isActive, true),
         ),
       );
     const ownersByActivityEndpoint = new Map<string, string[]>();
@@ -2873,6 +3009,7 @@ export function createTelephonyService(options: {
               {
                 legId: row.legId,
                 endpointId: row.legEndpointId!,
+                extension: row.legExtension!,
                 staffUserId: row.legStaffUserId,
                 displayName: row.legDisplayName,
                 kind: row.legKind!,
@@ -2967,13 +3104,16 @@ export function createTelephonyService(options: {
           );
         }
       } else if (root.scope === "internal") {
-        notificationKind = "internal_inbound";
-        notificationTargetUserIds = participants.flatMap((participant) =>
+        const internalInboundTargetUserIds = participants.flatMap((participant) =>
           participant.direction === "inbound"
             ? ownersByActivityEndpoint.get(participant.endpointId) ??
               (participant.staffUserId ? [participant.staffUserId] : [])
             : [],
         );
+        if (internalInboundTargetUserIds.length > 0) {
+          notificationKind = "internal_inbound";
+          notificationTargetUserIds = internalInboundTargetUserIds;
+        }
       } else if (root.direction === "inbound") {
         notificationKind = "external_inbound";
         notificationTargetUserIds = externalInboundNotificationTargetUserIds(
@@ -2991,6 +3131,9 @@ export function createTelephonyService(options: {
           root.correlationStatus === "confirmed"
           ? null
           : latestTransferRelation;
+      const internalCallers = root.scope === "internal"
+        ? internalCallNotificationCallers(participants, activityOwnerRows)
+        : [];
       items.push({
         id: root.id,
         observedCallId: observedCall?.observedCallId ?? null,
@@ -3027,6 +3170,7 @@ export function createTelephonyService(options: {
           extension: root.endpointExtension,
         },
         participants,
+        internalCallers,
         transfer: displayedTransferRelation
           ? {
               state: displayedTransferRelation.relationType,

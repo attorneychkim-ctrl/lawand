@@ -21,6 +21,7 @@ import {
   staffConsultationCreateSchema,
   telephonyCallerDisplayName,
   telephonyCallDispositionConfirmationSchema,
+  telephonyInternalCallerNotificationCopy,
   telephonyMessageSendSchema,
 } from "./telephony.js";
 
@@ -498,6 +499,51 @@ test("브라우저 수신 알림은 직원과 전화번호부 발신자를 정�
     "서울회생법원",
   );
   assert.equal(telephonyCallerDisplayName(null), "발신자 정보 없음");
+});
+
+test("내선 브라우저 알림은 발신 직원의 이름·소속·부서·직책·지역을 표시한다", () => {
+  assert.deepEqual(
+    telephonyInternalCallerNotificationCopy([
+      {
+        displayName: "김로앤",
+        extension: "4591",
+        organization: { name: "법무법인 로앤" },
+        region: { name: "서울" },
+        department: "상담팀",
+        jobTitle: "대리",
+      },
+    ]),
+    {
+      title: "📞 내선 전화 · 김로앤",
+      bodyLines: [
+        "발신 김로앤 · 내선 4591",
+        "소속 법무법인 로앤 · 부서 상담팀",
+        "직책 대리 · 지역 서울",
+      ],
+    },
+  );
+});
+
+test("미등록 내선은 직원을 추정하지 않고 내선번호만 알린다", () => {
+  assert.deepEqual(
+    telephonyInternalCallerNotificationCopy([
+      {
+        displayName: null,
+        extension: "9971",
+        organization: null,
+        region: null,
+        department: null,
+        jobTitle: null,
+      },
+    ]),
+    {
+      title: "📞 내선 전화 · 미등록 내선 9971",
+      bodyLines: [
+        "발신 미등록 내선 9971",
+        "소속·부서·직책·지역 확인 불가",
+      ],
+    },
+  );
 });
 
 test("센트릭스 받기 명령과 결과는 전화번호 없는 최소 계약만 허용한다", () => {

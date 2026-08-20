@@ -102,6 +102,21 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-20 — 내선 브라우저 알림 발신 직원 상세 후보
+- 일반 내선 전화가 울리면 gateway가 수신 leg의 상대 내선과 발신 leg endpoint를
+  활성·검증된 직원 통화 binding에 대조해 발신 직원을 해석한다. 상대 leg가
+  늦게 도착해도 수신 관측의 상대 내선으로 이름·소속·부서·직책·지역을 즉시
+  구성한다. 동일 내선에 후보가 여럿이면 모두 보여주고, 미등록 내선은 직원을
+  임의로 추정하지 않는다.
+- ERP Notification은 `📞 내선 전화 · 발신 직원명`을 제목으로, 발신 내선·소속·부서·
+  직책·지역과 수신 직원·내선을 본문으로 표시한다. 발신 leg만 먼저 보이는 순간에
+  발신자 자신에게 수신 알림을 잘못 보내지 않고, 실제 inbound 참여자에게만 알린다.
+- 전체 5패키지 test·typecheck·lint·production build, core 95개·gateway 192개 테스트,
+  DB schema check와 `git diff --check`를 통과했다. 첫 gateway test는 새 워크트리에 core·DB
+  dist가 없어 테스트 실행 전 중단됐고, 두 패키지를 build한 뒤 전체를 재실행해 통과했다.
+  `HERDR_ENV`는 이 세션에 없었다. migration·운영 데이터·외부 전화·main 병합·운영 배포는
+  수행하지 않았고 `PROJECT_PLAN.md`는 v1.67이다.
+
 ### 2026-08-19 — GA4 무팝업 자동 측정 hotfix 운영 배포 완료
 - `LegalFlow/GA4_insert` hotfix `1a045b7e935bd65b4ba98bc4c237840a3898155f`를 main
   `22ebd761e0502ae3ac1ca07bac8e625ed4a6fd7e`에 병합했다. HERDR는 이 세션에서 환경변수와

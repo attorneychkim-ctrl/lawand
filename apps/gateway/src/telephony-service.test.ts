@@ -7,6 +7,7 @@ import {
   canResolvePhoneDeskFinalParticipant,
   canonicalizePhoneDeskObservedCalls,
   externalInboundNotificationTargetUserIds,
+  internalCallNotificationCallers,
   isCentrexInboundAnswerDeliveryDelayed,
   isPhoneDeskAftercareWritableState,
   isStaleOneSidedInternalCall,
@@ -98,6 +99,91 @@ test("상대 leg 없는 내선만 3분 뒤 확인 필요 대상으로 낮춘다"
       snapshotAt,
     }),
     false,
+  );
+});
+
+test("내선 수신 알림은 수신 leg의 상대 내선으로 발신 직원 프로필을 즉시 해석한다", () => {
+  const directory = [
+    {
+      extension: "4591",
+      staffUserId: "staff-caller",
+      displayName: "김로앤",
+      organizationKey: "lawand",
+      organizationName: "법무법인 로앤",
+      regionKey: "seoul",
+      regionName: "서울",
+      department: "상담팀",
+      jobTitle: "대리",
+    },
+  ];
+
+  assert.deepEqual(
+    internalCallNotificationCallers(
+      [
+        {
+          direction: "inbound",
+          extension: "1208",
+          remoteExtension: "4591",
+        },
+      ],
+      directory,
+    ),
+    [
+      {
+        staffUserId: "staff-caller",
+        displayName: "김로앤",
+        extension: "4591",
+        organization: { key: "lawand", name: "법무법인 로앤" },
+        region: { key: "seoul", name: "서울" },
+        department: "상담팀",
+        jobTitle: "대리",
+      },
+    ],
+  );
+
+  assert.equal(
+    internalCallNotificationCallers(
+      [
+        {
+          direction: "inbound",
+          extension: "1208",
+          remoteExtension: "4591",
+        },
+        {
+          direction: "outbound",
+          extension: "4591",
+          remoteExtension: "1208",
+        },
+      ],
+      directory,
+    ).length,
+    1,
+  );
+});
+
+test("등록되지 않은 발신 내선은 직원을 추정하지 않는다", () => {
+  assert.deepEqual(
+    internalCallNotificationCallers(
+      [
+        {
+          direction: "inbound",
+          extension: "1208",
+          remoteExtension: "9971",
+        },
+      ],
+      [],
+    ),
+    [
+      {
+        staffUserId: null,
+        displayName: null,
+        extension: "9971",
+        organization: null,
+        region: null,
+        department: null,
+        jobTitle: null,
+      },
+    ],
   );
 });
 

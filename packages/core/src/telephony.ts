@@ -36,6 +36,48 @@ export function telephonyCallerDisplayName(
   return "발신자 정보 없음";
 }
 
+export type TelephonyInternalCallerIdentity = {
+  displayName: string | null;
+  extension: string;
+  organization: { name: string } | null;
+  region: { name: string } | null;
+  department: string | null;
+  jobTitle: string | null;
+};
+
+export function telephonyInternalCallerNotificationCopy(
+  callers: readonly TelephonyInternalCallerIdentity[],
+): { title: string; bodyLines: string[] } {
+  if (callers.length === 0) {
+    return {
+      title: "📞 내선 전화 · 발신 직원 확인 중",
+      bodyLines: ["발신 직원과 내선번호를 확인하고 있어요"],
+    };
+  }
+
+  const callerLabels = callers.map((caller) =>
+    caller.displayName ?? `미등록 내선 ${caller.extension}`
+  );
+  const bodyLines = callers.flatMap((caller) => {
+    if (!caller.displayName) {
+      return [
+        `발신 미등록 내선 ${caller.extension}`,
+        "소속·부서·직책·지역 확인 불가",
+      ];
+    }
+    return [
+      `발신 ${caller.displayName} · 내선 ${caller.extension}`,
+      `소속 ${caller.organization?.name ?? "미확인"} · 부서 ${caller.department ?? "미확인"}`,
+      `직책 ${caller.jobTitle ?? "미확인"} · 지역 ${caller.region?.name ?? "미확인"}`,
+    ];
+  });
+
+  return {
+    title: `📞 내선 전화 · ${callerLabels.join(" · ")}`,
+    bodyLines,
+  };
+}
+
 export const MESSAGE_TEMPLATE_VARIABLES = [
   "{{고객명}}",
   "{{담당자명}}",
