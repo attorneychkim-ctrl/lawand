@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parseTelephonyInboundEventNotification } from "./telephony-inbound-events.js";
+import {
+  parseTelephonyInboundEventNotification,
+  telephonyInboundEventNotificationFromSnapshot,
+} from "./telephony-inbound-events.js";
 
 test("수신전화 원장 알림 payload에서 실시간 이벤트를 복원한다", () => {
   assert.deepEqual(
@@ -67,4 +70,15 @@ test("허용하지 않은 이벤트와 잘못된 식별자는 수신전화 paylo
     ),
     null,
   );
+});
+
+test("수신전화 원장 snapshot은 원래 ringing 이벤트 ID와 시각을 복원한다", () => {
+  const notification = telephonyInboundEventNotificationFromSnapshot({
+    event_id: "019fa6a4-6834-7782-aa0b-4e71ffb8a2a1",
+    event_type: "inbound.ringing",
+    inbound_call_id: "019fa6a4-6834-7782-aa0b-4e71ffb8a2a2",
+    occurred_at: new Date("2026-08-20T01:00:00.000Z"),
+  });
+  assert.equal(notification?.eventId, "019fa6a4-6834-7782-aa0b-4e71ffb8a2a1");
+  assert.equal(notification?.occurredAt, "2026-08-20T01:00:00.000Z");
 });

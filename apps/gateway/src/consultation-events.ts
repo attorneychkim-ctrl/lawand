@@ -259,7 +259,7 @@ export function createPostgresConsultationEventSource(options: {
         FROM public.outbox_events
         WHERE aggregate_type = 'consultation'
           AND event_type LIKE 'consultation.%'
-          AND occurred_at >= now() - interval '2 minutes'
+          AND occurred_at >= now() - interval '5 minutes'
         ORDER BY occurred_at ASC, id ASC
         LIMIT 200
       `);

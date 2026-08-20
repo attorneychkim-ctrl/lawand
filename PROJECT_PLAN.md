@@ -58,7 +58,8 @@ lawand/
 │   ├── homepage/         # 공개 홈페이지, SEO, 상담·후기 접점
 │   ├── erp/              # LAW& OS, 직원 인증·업무 화면
 │   ├── gateway/          # Node 장수명 서버, API·SSE·worker·외부 연동
-│   └── centrex-bridge/   # Windows x86/.NET Framework 센트릭스 ActiveX bridge
+│   ├── centrex-bridge/   # Windows x86/.NET Framework 센트릭스 ActiveX bridge
+│   └── desktop-notifier/ # 직원 Windows PC의 개인 업무 알림 client
 ├── packages/
 │   ├── core/             # 공유 도메인 계약·검증·이벤트 타입
 │   └── db/               # Drizzle schema·migration·DB client
@@ -143,6 +144,9 @@ SSR되는 첫 렌더는 결정적이어야 하며 WebKit 자동 링크 변환 �
 - 같은 정규화 전화번호의 마지막 요청이 7일 이내이고 상담이 미종결이면 채널·입력 이름과
   관계없이 같은 상담으로 묶는다. 이름 차이는 차단이 아니라 가족·공용 번호 확인 신호다.
 - 전화 없는 카카오·네이버 접수는 자동으로 묶지 않고 접수번호와 사람의 확인을 사용한다.
+- 공개 경계의 고객명이 markup·제어문자를 포함하면 상담 자체를 버리지 않고 원문을 저장하지
+  않은 채 `고객명 확인 필요`로 격리한다. 전화번호·상담 내용·접수 원장은 계속 처리하고,
+  리걸프렌즈와 문자에는 익명 표시명·중립 호칭을 사용한다.
 - 요청별 암호화 intake와 광고 귀속은 합치지 않고 그대로 보존한다.
 - 최초 배정은 ERP의 `상담하기`에서 실행 직원을 담당자로 정하며, 같은 트랜잭션에서 업무
   이벤트와 리걸프렌즈·알림톡 실행 요청을 만든다.
@@ -198,6 +202,8 @@ DPAPI 내구 큐와 HTTPS/HMAC 인증으로 gateway에 보낸다. bridge는 inte
 provider 근거를 보존하고 마지막 고객 leg가 끝날 때 root를 종료한다. 통화 후 호전환의
 B/customer final leg처럼 결정적 증거가 없는 경우 최종 통화자를 추측하지 않는다. 전화데스크는
 검색형 과거 원장과 열린 재통화 업무 큐를 분리해 누적 조회가 실시간 알림 경로를 막지 않게 한다.
+전역 전화 배지는 현재 직원의 열린 재통화 업무와 실제 관련자로 해석된 호전환 `확인 필요`를
+합산하며, 관련자를 전혀 찾지 못한 건만 활성 관리자에게 안전망으로 표시한다.
 
 전화·브라우저 Notification·후처리의 상세 기준은 다음 문서를 따른다.
 
@@ -216,7 +222,9 @@ B/customer final leg처럼 결정적 증거가 없는 경우 최종 통화자를
 
 SOLAPI JPG MMS는 등록 대표번호 `02-555-7455` 경계를 유지한다. 상담 접수·담당 배정 알림톡은
 승인 템플릿만 사용하고 문자 대체 발송을 끈다. 개인정보는 발송 직전에만 복호화하고 outbox와
-로그에는 넣지 않는다. 상세 계약은 다음 문서를 따른다.
+로그에는 넣지 않는다. 상담완료 후처리는 템플릿 문자와 후기 요청 문자를 독립적으로 선택해
+같은 저장 요청에서 실행할 수 있고, 공통 `{{고객명}}` 치환은 유니코드 앞 세 글자만 사용한다.
+상세 계약은 다음 문서를 따른다.
 
 - [`docs/CENTREX_MESSAGING_V1.md`](docs/CENTREX_MESSAGING_V1.md)
 - [`docs/SOLAPI_ALIMTALK_V1.md`](docs/SOLAPI_ALIMTALK_V1.md)
@@ -272,12 +280,19 @@ GA4의 `generate_lead` 주요 이벤트는 `GA4 관측 리드` 보조 지표다.
 - [`docs/GA4_MEASUREMENT_V1.md`](docs/GA4_MEASUREMENT_V1.md)
 - [`docs/GA4_OPERATIONS_ACTIVATION_V1.md`](docs/GA4_OPERATIONS_ACTIVATION_V1.md)
 
-### 4-10. 개인 웹훅
+### 4-10. 개인 PC 알림
 
-ERP `/webhook-notifications`는 관리자 전용 비활성 미리보기다. 최종 제품 경계는 직원 개인별
-연결·개인 담당 범위 이벤트지만 현재 입력·테스트·저장·스위치는 모두 비활성이다. 비밀값 보호,
-HTTPS/SSRF 검증, 서명, 멱등성, 재시도·dead-letter, 감사, payload 개인정보 최소화와 관리자가
-아닌 직원 권한 모델이 완성되기 전에는 저장 API나 실제 전송을 추가하지 않는다.
+ERP `/desktop-notifications`는 로그인 직원 본인의 Windows 기기를 5분짜리 일회용 코드로
+연결하고 상담·전화·문자·후기 알림 9종의 개인 설정을 관리한다. gateway는 기존 업무 원장의
+안정적인 이벤트 ID와 대상 판정을 재사용해 직원별 알림을 만들고 payload 전체를 AES-256-GCM으로
+암호화한다. 기기 bearer token은 hash만 서버에 저장하고 Windows Credential Manager에만 원문을
+보관한다. 재연결 시 최근 원장을 짧게 재생하되 직원·원본 이벤트 unique 경계로 중복을 막고,
+만료 pairing·알림은 최소 권한 SECURITY DEFINER 함수로 정리한다.
+
+Windows client는 outbound HTTPS polling만 사용하고 잠금 화면에서는 고객 내용을 숨기며,
+deep link는 설정된 ERP same-origin만 연다. 관리 메뉴와 설정 화면은 아직 관리자 전용이다.
+조직 Authenticode 서명 전의 ZIP은 운영 다운로드로 제공하지 않고, macOS client와 일반 직원
+공개는 서명·배포 채널과 acceptance가 끝난 뒤 별도 승인한다. 외부 URL 웹훅 후보는 폐기됐다.
 
 ## 5. 인프라·배포·데이터 보관
 
@@ -342,13 +357,16 @@ Glacier 정책은 아직 활성 설계 과제다.
   연결 사건명 경량 sync 또는 검증된 timer 변경을 설계한다.
 - Solapi 키의 허용 범위를 운영 gateway EIP로 제한하고 최종 발송 결과·실패 알림을 연결한다.
 - 상담 담당자 변경 고객 알림톡은 승인 템플릿·대상·시점이 정해진 뒤 별도 이벤트로 추가한다.
-- 개인 웹훅은 보안·전달 원장이 완성될 때까지 관리자 전용 미리보기로 둔다.
+- 개인 PC 알림은 조직 Authenticode 서명·정식 artifact 배포와 일반 직원 권한 공개 전까지
+  관리자 전용으로 둔다.
 
 ### 운영 acceptance
 
 - 센트릭스 일반 내선·무조건/통화 후 호전환·실패 복귀 canary를 다시 수행한다.
 - 통화 후 호전환 B/customer final leg는 추가 provider 증거가 없으면 `확인 필요`로 유지한다.
 - Windows bridge 조직용 Authenticode 인증서를 발급·배포한다.
+- Windows 개인 PC 알림 client도 조직 Authenticode 서명·timestamp와 정식 다운로드 채널을
+  마련한 뒤 통제 PC에서 설치·업데이트·제거 acceptance를 수행한다.
 - 실제 배정 수가 50개에 가까워지기 전에 Windows 서버 메모리 여유와 인스턴스 상향을 검토한다.
 - 통제 JPG MMS 단말 수신, mailbox별 문자 회신, 50건 cursor 경계를 검증한다.
 - 네이버 예약 신규 확정 메일과 카카오 홈페이지 접수→직원 확인 흐름을 승인된 canary로 확인한다.

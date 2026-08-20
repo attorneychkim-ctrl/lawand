@@ -1,5 +1,6 @@
 export * from "./attribution.js";
 export * from "./consultation.js";
+export * from "./desktop-notification.js";
 export * from "./events.js";
 export * from "./identifiers.js";
 export * from "./intake.js";

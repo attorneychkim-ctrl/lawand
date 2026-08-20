@@ -539,7 +539,7 @@ export function createReviewManagementService(options: {
   async function getDetail(
     recordType: ReviewRecordType,
     id: string,
-    actor: StaffPrincipal,
+    actor: StaffPrincipal | null,
     audit = true,
   ): Promise<ReviewManagementDetail | null> {
     const subject = await resolveSubject(recordType, id);
@@ -658,6 +658,7 @@ export function createReviewManagementService(options: {
         : "restricted";
 
     if (audit) {
+      if (!actor) throw new Error("review_detail_audit_actor_required");
       const occurredAt = now();
       await db.insert(staffAuditLogs).values({
         id: createEventId(),
@@ -1621,6 +1622,34 @@ export function createReviewManagementService(options: {
     };
   }
 
+  async function desktopNotification(
+    recordType: ReviewRecordType,
+    id: string,
+  ) {
+    const detail = await getDetail(recordType, id, null, false);
+    if (
+      !detail ||
+      !detail.linkedCustomer ||
+      detail.status === "restricted" ||
+      (detail.recordType === "review" && detail.reply)
+    ) {
+      return null;
+    }
+    return {
+      id,
+      recordType,
+      href: recordPath(recordType, id),
+      customerName: detail.linkedCustomer.clientName,
+      submittedPhone: detail.submittedPhone,
+      content: detail.content,
+      receiptCode: detail.receiptCode,
+      caseNumber: detail.linkedCustomer.caseNumber,
+      caseName: detail.linkedCustomer.caseName,
+      targetUserIds: detail.linkedCustomer.dutyManagerUserIds,
+      occurredAt: detail.occurredAt,
+    };
+  }
+
   return {
     list,
     getDetail,
@@ -1631,6 +1660,7 @@ export function createReviewManagementService(options: {
     createRequestTemplate,
     updateRequestTemplate,
     deleteRequestTemplate,
+    desktopNotification,
     sendRequests,
     aftercareRequestOption,
     sendAftercareRequest,

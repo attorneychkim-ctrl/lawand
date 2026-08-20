@@ -11,6 +11,7 @@ export type GatewayConfig = {
   keyVersion: string;
   internalApiKey: string;
   publicIntakeApiKey: string;
+  erpBaseUrl: string;
   reviewWriteUrl: string;
   giftishow: {
     authCode: string;
@@ -250,6 +251,34 @@ function reviewWriteUrlValue(): string {
   return url.toString().replace(/\/$/, "");
 }
 
+function erpBaseUrlValue(): string {
+  const raw =
+    process.env.LAWAND_ERP_BASE_URL?.trim() ||
+    (process.env.NODE_ENV === "production"
+      ? "https://erp.lawandfirm.com"
+      : "http://127.0.0.1:3021");
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("LAWAND_ERP_BASE_URL은 유효한 절대 URL이어야 합니다.");
+  }
+  if (
+    !["https:", "http:"].includes(url.protocol) ||
+    (process.env.NODE_ENV === "production" && url.protocol !== "https:") ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    (url.pathname !== "/" && url.pathname !== "")
+  ) {
+    throw new Error(
+      "LAWAND_ERP_BASE_URL은 운영에서 HTTPS origin 형식이어야 합니다.",
+    );
+  }
+  return url.origin;
+}
+
 function giftishowValue(): GatewayConfig["giftishow"] {
   const values = {
     authCode: process.env.LAWAND_GIFTISHOW_AUTH_CODE?.trim() || "",
@@ -437,6 +466,7 @@ export function readGatewayConfig(): GatewayConfig {
     keyVersion: required("LAWAND_DATA_KEY_VERSION"),
     internalApiKey: required("LAWAND_INTERNAL_API_KEY"),
     publicIntakeApiKey: required("LAWAND_PUBLIC_INTAKE_API_KEY"),
+    erpBaseUrl: erpBaseUrlValue(),
     reviewWriteUrl: reviewWriteUrlValue(),
     giftishow: giftishowValue(),
     outboxWorkerEnabled,

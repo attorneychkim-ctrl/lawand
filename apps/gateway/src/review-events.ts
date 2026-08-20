@@ -21,6 +21,14 @@ export type ReviewEventMessage =
 
 export type ReviewEventSource = {
   subscribe(listener: (message: ReviewEventMessage) => void): () => void;
+  getRecentNotifications?(): Promise<ReviewEventNotification[]>;
+};
+
+export type ReviewEventSnapshotRow = {
+  event_id: string;
+  review_id: string | null;
+  submission_id: string | null;
+  occurred_at: Date;
 };
 
 const uuidPattern =
@@ -57,8 +65,23 @@ export function parseReviewEventNotification(
   }
 }
 
+export function reviewEventNotificationFromSnapshot(
+  row: ReviewEventSnapshotRow,
+): ReviewEventNotification | null {
+  const recordId = row.review_id ?? row.submission_id;
+  if (!recordId) return null;
+  return parseReviewEventNotification(JSON.stringify({
+    eventId: row.event_id,
+    eventType: "review.linked",
+    recordId,
+    recordType: row.review_id ? "review" : "submission",
+    occurredAt: row.occurred_at.toISOString(),
+  }));
+}
+
 export function createPostgresReviewEventSource(options: {
   pool: DatabasePool;
+  snapshotPool?: DatabasePool;
   reconnectDelayMs?: number;
   onError?: (error: unknown) => void;
 }) {
@@ -194,6 +217,24 @@ export function createPostgresReviewEventSource(options: {
     subscribe(listener: (message: ReviewEventMessage) => void) {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+    async getRecentNotifications() {
+      const result = await (options.snapshotPool ?? options.pool)
+        .query<ReviewEventSnapshotRow>(`
+          SELECT
+            id::text AS event_id,
+            review_id::text AS review_id,
+            submission_id::text AS submission_id,
+            linked_at AS occurred_at
+          FROM public.customer_review_links
+          WHERE linked_at >= now() - interval '5 minutes'
+          ORDER BY linked_at ASC, id ASC
+          LIMIT 200
+        `);
+      return result.rows.flatMap((row) => {
+        const notification = reviewEventNotificationFromSnapshot(row);
+        return notification ? [notification] : [];
+      });
     },
   } satisfies ReviewEventSource & {
     start(): Promise<void>;

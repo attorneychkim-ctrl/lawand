@@ -18,6 +18,10 @@ import { createPostgresConsultationEventSource } from "./consultation-events.js"
 import { createPostgresReviewEventSource } from "./review-events.js";
 import { createPostgresMessageEventSource } from "./message-events.js";
 import { createDataProtection } from "./crypto.js";
+import { createDesktopNotificationService } from "./desktop-notification-service.js";
+import { createDesktopNotificationProducer } from "./desktop-notification-producer.js";
+import { createDesktopNotificationMaintenance } from "./desktop-notification-maintenance.js";
+import { createDesktopPairingProtection } from "./desktop-pairing-protection.js";
 import { createDatabasePoolMonitor } from "./database-pool-monitor.js";
 import { createPublicIntakeProtection } from "./intake-protection.js";
 import { createLegalFriendsClient } from "./legalfriends.js";
@@ -81,6 +85,30 @@ const telephonyRealtimeMonitor = createTelephonyRealtimeMonitor({
   region: config.awsRegion,
 });
 const protection = createDataProtection(config);
+const desktopNotificationService = createDesktopNotificationService({
+  db: database.db,
+  protection,
+  erpBaseUrl: config.erpBaseUrl,
+});
+const desktopNotificationMaintenance = createDesktopNotificationMaintenance({
+  desktopNotifications: desktopNotificationService,
+  onError: (error) => {
+    console.error("lawand desktop notification maintenance error", error);
+  },
+});
+const desktopPairingProtection = createDesktopPairingProtection({
+  hmacKey: config.hmacKey,
+  onLimited: ({ dimension, retryAfterSeconds }) => {
+    console.warn(
+      JSON.stringify({
+        event: "desktop_pairing_rate_limited",
+        dimension,
+        retryAfterSeconds,
+        occurredAt: new Date().toISOString(),
+      }),
+    );
+  },
+});
 const centrexClient = createCentrexClient();
 const solapiClient = config.solapiApiCredentials
   ? createSolapiClient(config.solapiApiCredentials)
@@ -164,16 +192,19 @@ const consultationEvents = createPostgresConsultationEventSource({
 });
 const reviewEvents = createPostgresReviewEventSource({
   pool: listenerPool,
+  snapshotPool: database.pool,
   onError: (error) => {
     console.error("lawand review realtime source error", error);
   },
 });
 const messageEvents = createPostgresMessageEventSource({
   pool: listenerPool,
+  snapshotPool: database.pool,
   onError: (error) => console.error("lawand message realtime source error", error),
 });
 const telephonyInboundEvents = createPostgresTelephonyInboundEventSource({
   pool: listenerPool,
+  snapshotPool: database.pool,
   onError: (error) => {
     console.error("lawand telephony inbound realtime source error", error);
   },
@@ -182,6 +213,20 @@ const telephonyDeskEvents = createPostgresTelephonyDeskEventSource({
   pool: listenerPool,
   onError: (error) => {
     console.error("lawand telephony desk realtime source error", error);
+  },
+});
+const desktopNotificationProducer = createDesktopNotificationProducer({
+  desktopNotifications: desktopNotificationService,
+  consultationEvents,
+  reviewEvents,
+  messageEvents,
+  telephonyInboundEvents,
+  telephonyDeskEvents,
+  consultationService: service,
+  reviewManagementService,
+  telephonyService,
+  onError: (error) => {
+    console.error("lawand desktop notification producer error", error);
   },
 });
 const intakeProtection = createPublicIntakeProtection({
@@ -222,6 +267,8 @@ const server = createGatewayServer({
   reviewService,
   reviewManagementService,
   giftCouponService,
+  desktopNotificationService,
+  desktopPairingProtection,
   internalApiKey: config.internalApiKey,
   publicIntakeApiKey: config.publicIntakeApiKey,
   intakeProtection,
@@ -279,6 +326,8 @@ const centrexMessageInboxWorker = config.centrexWorkerEnabled
     })
   : null;
 
+desktopNotificationProducer.start();
+desktopNotificationMaintenance.start();
 await Promise.all([
   centrexBridgeProvisioning?.start(),
   consultationEvents.start(),
@@ -349,6 +398,8 @@ function shutdown(signal: string) {
         messageEvents.stop(),
         telephonyInboundEvents.stop(),
         telephonyDeskEvents.stop(),
+        desktopNotificationProducer.stop(),
+        desktopNotificationMaintenance.stop(),
         legalFriendsOutboxWorker?.stop(),
         alimtalkOutboxWorker?.stop(),
         naverBookingImapWorker?.stop(),

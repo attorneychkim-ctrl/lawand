@@ -57,11 +57,10 @@
 
 ## 세션 운영 메모
 
-- 이 저장소의 관리자는 HERDR다. 이 문서 압축 세션에서는 `HERDR_ENV`가 비어 있고 HERDR
-  서버가 실행 중이 아니어서 Git worktree와 원격 브랜치만 읽기 전용으로 대조했다.
+- 현재 작업 관리 기준은 **Orca이며 HERDR가 아니다**. 이번 통합 세션에서 Orca 앱
+  `1.4.185`와 runtime ready/reachable, `main` 및 기능 워크트리 6개를 확인했다.
 - `LegalFlow/project_md_compact`는 `main` merge `38fc1dc6476ea7108ee5846e45d23618741a47fa`로
   반영됐다. 런타임 코드·migration이 없어 현재 EC2 릴리스는 유지했다.
-- 전수 대조 시 `LegalFlow/clientname_sCRiPt`와 `LegalFlow/phone_alarm`은 사용자의 “이것만”
-  지시에 따라 명시적 제외했다. 두 브랜치는 깨끗하고 원격과 일치한다. `LegalFlow/web_hook`의
-  원격 HEAD는 `main` ancestor지만 로컬 추적 변경 4건은 진행 중으로 보존했다.
+- 사용자가 모든 기능 작업 완료와 통합 배포를 승인해 clean·원격 일치 상태의 기능 브랜치
+  6개를 `main`에 통합 중이다. PC 알림 migration 후보는 현재 `0071`·`0072` 뒤에서 재생성한다.
 - 다음 작업 전에 `PROJECT_PLAN.md`, 이 문서, 해당 분야의 상세 문서만 읽는다.
