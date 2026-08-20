@@ -18,6 +18,7 @@ type ImageDraft = { originalName: string; fileBase64: string; previewUrl: string
 const autoSendOptions = [
   { value: null, label: "선택없음" },
   { value: "consultation_assigned", label: "담당자배정" },
+  { value: "consultation_completed", label: "상담완료" },
   { value: "no_answer", label: "부재 및 무응답" },
   { value: "busy", label: "통화중" },
   { value: "manager_callback_requested", label: "담당자 연결 요청" },

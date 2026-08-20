@@ -95,6 +95,10 @@ export const MESSAGE_TEMPLATE_VARIABLES = [
 export type MessageTemplateVariable =
   (typeof MESSAGE_TEMPLATE_VARIABLES)[number];
 
+export function messageTemplateCustomerName(value: string): string {
+  return Array.from(value.trim()).slice(0, 3).join("");
+}
+
 /**
  * 센트릭스 규격의 국내 문자 바이트 기준을 보수적으로 계산한다.
  * ASCII는 1바이트, BMP 한글·문자는 2바이트, 보조평면 문자는 4바이트다.
@@ -163,6 +167,7 @@ const messageTemplateImageSchema = z
 
 export const messageTemplateAutoSendTriggerSchema = z.enum([
   "consultation_assigned",
+  "consultation_completed",
   "no_answer",
   "busy",
   "manager_callback_requested",
@@ -228,8 +233,13 @@ export function renderMessageTemplate(
   body: string,
   values: Record<MessageTemplateVariable, string>,
 ): string {
+  const renderedValues = {
+    ...values,
+    "{{고객명}}": messageTemplateCustomerName(values["{{고객명}}"]),
+  } satisfies Record<MessageTemplateVariable, string>;
   return MESSAGE_TEMPLATE_VARIABLES.reduce(
-    (rendered, variable) => rendered.replaceAll(variable, values[variable]),
+    (rendered, variable) =>
+      rendered.replaceAll(variable, renderedValues[variable]),
     body,
   );
 }
@@ -545,7 +555,10 @@ export const phoneDeskAftercareSaveSchema = z
     followUp: phoneDeskFollowUpSchema,
     phonebook: phoneDeskPhonebookActionSchema.optional(),
     automaticMessage: z
-      .object({ enabled: z.boolean() })
+      .object({
+        enabled: z.boolean(),
+        reviewRequestEnabled: z.boolean().optional(),
+      })
       .strict()
       .optional(),
   })

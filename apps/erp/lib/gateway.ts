@@ -130,7 +130,7 @@ export type MessageTemplate = {
   name: string;
   body: string;
   bodyByteLength: number;
-  autoSendTrigger: "consultation_assigned" | "no_answer" | "busy" | "manager_callback_requested" | "rejected" | null;
+  autoSendTrigger: "consultation_assigned" | "consultation_completed" | "no_answer" | "busy" | "manager_callback_requested" | "rejected" | null;
   image: {
     url: string;
     originalName: string;
@@ -812,7 +812,10 @@ export type PhoneDeskAftercareInput = {
         originalPhone: string;
         connectedPhone?: string | null;
       };
-  automaticMessage: { enabled: boolean };
+  automaticMessage: {
+    enabled: boolean;
+    reviewRequestEnabled?: boolean;
+  };
 };
 
 export type PhonebookContact = {

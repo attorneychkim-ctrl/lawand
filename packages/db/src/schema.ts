@@ -2729,7 +2729,7 @@ export const messageTemplates = pgTable(
     ),
     check(
       "message_templates_auto_send_trigger_valid",
-      sql`${table.autoSendTrigger} IS NULL OR ${table.autoSendTrigger} IN ('consultation_assigned', 'no_answer', 'busy', 'manager_callback_requested', 'rejected')`,
+      sql`${table.autoSendTrigger} IS NULL OR ${table.autoSendTrigger} IN ('consultation_assigned', 'consultation_completed', 'no_answer', 'busy', 'manager_callback_requested', 'rejected')`,
     ),
     check(
       "message_templates_owner_audit_consistent",

@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   CENTREX_LMS_MAX_BYTES,
   centrexMessageByteLength,
+  messageTemplateCustomerName,
 } from "./telephony.js";
 
 export const CURRENT_REVIEW_PRIVACY_NOTICE_VERSION = "2026-07-29.1";
@@ -349,8 +350,13 @@ export function renderReviewRequestTemplate(
   body: string,
   values: Record<ReviewRequestTemplateVariable, string>,
 ): string {
+  const renderedValues = {
+    ...values,
+    "{{고객명}}": messageTemplateCustomerName(values["{{고객명}}"]),
+  } satisfies Record<ReviewRequestTemplateVariable, string>;
   return REVIEW_REQUEST_TEMPLATE_VARIABLES.reduce(
-    (rendered, variable) => rendered.replaceAll(variable, values[variable]),
+    (rendered, variable) =>
+      rendered.replaceAll(variable, renderedValues[variable]),
     body,
   );
 }

@@ -505,6 +505,13 @@
       "when": 1787192928659,
       "tag": "0071_consultation_schedule_follow_up",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1787213441903,
+      "tag": "0072_consultation_completed_message",
+      "breakpoints": true
     }
   ]
 }

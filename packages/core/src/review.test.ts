@@ -139,7 +139,7 @@ test("개인 후기 요청 템플릿은 전용 링크를 요구하고 허용 변
   );
   assert.equal(
     renderReviewRequestTemplate(body, {
-      "{{고객명}}": "홍길동",
+      "{{고객명}}": "홍길동_소개",
       "{{담당자명}}": "김담당",
       "{{사건번호}}": "2026개회1234",
       "{{후기작성링크}}": "https://example.test/review",

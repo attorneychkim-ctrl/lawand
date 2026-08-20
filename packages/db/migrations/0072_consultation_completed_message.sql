@@ -1,0 +1,2 @@
+ALTER TABLE "message_templates" DROP CONSTRAINT "message_templates_auto_send_trigger_valid";--> statement-breakpoint
+ALTER TABLE "message_templates" ADD CONSTRAINT "message_templates_auto_send_trigger_valid" CHECK ("message_templates"."auto_send_trigger" IS NULL OR "message_templates"."auto_send_trigger" IN ('consultation_assigned', 'consultation_completed', 'no_answer', 'busy', 'manager_callback_requested', 'rejected'));
