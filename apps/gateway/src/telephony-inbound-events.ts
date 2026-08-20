@@ -30,6 +30,14 @@ export type TelephonyInboundEventSource = {
   subscribe(
     listener: (message: TelephonyInboundEventMessage) => void,
   ): () => void;
+  getRecentNotifications?(): Promise<TelephonyInboundEventNotification[]>;
+};
+
+export type TelephonyInboundEventSnapshotRow = {
+  event_id: string;
+  event_type: TelephonyInboundEventNotification["eventType"];
+  inbound_call_id: string;
+  occurred_at: Date;
 };
 
 const uuidPattern =
@@ -73,8 +81,20 @@ export function parseTelephonyInboundEventNotification(
   }
 }
 
+export function telephonyInboundEventNotificationFromSnapshot(
+  row: TelephonyInboundEventSnapshotRow,
+): TelephonyInboundEventNotification | null {
+  return parseTelephonyInboundEventNotification(JSON.stringify({
+    eventId: row.event_id,
+    eventType: row.event_type,
+    inboundCallId: row.inbound_call_id,
+    occurredAt: row.occurred_at.toISOString(),
+  }));
+}
+
 export function createPostgresTelephonyInboundEventSource(options: {
   pool: DatabasePool;
+  snapshotPool?: DatabasePool;
   reconnectDelayMs?: number;
   onError?: (error: unknown) => void;
 }) {
@@ -221,6 +241,25 @@ export function createPostgresTelephonyInboundEventSource(options: {
     subscribe(listener: (message: TelephonyInboundEventMessage) => void) {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+    async getRecentNotifications() {
+      const result = await (options.snapshotPool ?? options.pool)
+        .query<TelephonyInboundEventSnapshotRow>(`
+          SELECT
+            id::text AS event_id,
+            event_type::text AS event_type,
+            inbound_call_id::text AS inbound_call_id,
+            occurred_at
+          FROM public.telephony_inbound_events
+          WHERE event_type = 'inbound.ringing'
+            AND occurred_at >= now() - interval '5 minutes'
+          ORDER BY occurred_at ASC, id ASC
+          LIMIT 200
+        `);
+      return result.rows.flatMap((row) => {
+        const notification = telephonyInboundEventNotificationFromSnapshot(row);
+        return notification ? [notification] : [];
+      });
     },
   } satisfies TelephonyInboundEventSource & {
     start(): Promise<void>;

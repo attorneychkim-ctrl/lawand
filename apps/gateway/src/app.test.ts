@@ -297,6 +297,59 @@ test("Windows 앱은 일회용 연결 뒤 기기 토큰으로 알림을 가져�
   ]);
 });
 
+test("Windows 연결 반복 제한은 DB 조회 전에 429와 재시도 시간을 반환한다", async (context) => {
+  let pairCalls = 0;
+  const desktopNotificationService = {
+    async pairDevice() {
+      pairCalls += 1;
+      throw new Error("rate limit must run first");
+    },
+  } as unknown as DesktopNotificationService;
+  const server = createGatewayServer({
+    desktopNotificationService,
+    desktopPairingProtection: {
+      check(input) {
+        assert.equal(input.pairingCode, "p".repeat(43));
+        assert.equal(input.networkAddress, "203.0.113.20");
+        return {
+          allowed: false as const,
+          dimension: "network" as const,
+          retryAfterSeconds: 37,
+        };
+      },
+    },
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+
+  const response = await fetch(
+    `http://127.0.0.1:${address.port}/v1/desktop-notifications/pair`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-forwarded-for": "198.51.100.1, 203.0.113.20",
+      },
+      body: JSON.stringify({
+        pairingCode: "p".repeat(43),
+        deviceName: "LAWAND-DESK-01",
+        platform: "windows",
+        appVersion: "0.1.0",
+      }),
+    },
+  );
+  assert.equal(response.status, 429);
+  assert.equal(response.headers.get("retry-after"), "37");
+  assert.equal(
+    (await response.json() as { error: string }).error,
+    "pairing_rate_limited",
+  );
+  assert.equal(pairCalls, 0);
+});
+
 test("PC 알림 polling은 기기 토큰이 없거나 대기 건이 없으면 안전하게 끝난다", async (context) => {
   const desktopNotificationService = {
     pollNext: async () => null,

@@ -869,8 +869,28 @@ export function createDesktopNotificationService(options: {
     return { id: device.id, disconnected: true as const };
   }
 
+  async function cleanupExpired() {
+    const result = await db.execute(
+      sql`SELECT expired_pairing_count, expired_notification_count
+          FROM public.cleanup_expired_desktop_notification_records()`,
+    );
+    const row = (
+      result.rows as Array<{
+        expired_pairing_count: string | number;
+        expired_notification_count: string | number;
+      }>
+    )[0];
+    return {
+      expiredPairingCount: Number(row?.expired_pairing_count ?? 0),
+      expiredNotificationCount: Number(
+        row?.expired_notification_count ?? 0,
+      ),
+    };
+  }
+
   return {
     acknowledge,
+    cleanupExpired,
     createPairing,
     createTestNotification,
     disconnectCurrentDevice,

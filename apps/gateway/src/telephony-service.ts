@@ -70,6 +70,7 @@ import {
   staffUsers,
   staffTelephonyBindings,
   telephonyCallObservationLinks,
+  telephonyCallObservations,
   telephonyCallAftercare,
   telephonyCallDirectoryTargets,
   telephonyCallLegs,
@@ -124,6 +125,7 @@ const DUPLICATE_COMMAND_WINDOW_MS = 30_000;
 const INBOUND_RINGING_SNAPSHOT_WINDOW_MS = 3 * 60_000;
 const INBOUND_CONNECTED_SNAPSHOT_WINDOW_MS = 12 * 60 * 60_000;
 const INBOUND_ENDED_SNAPSHOT_WINDOW_MS = 20_000;
+const DESKTOP_CALL_NOTIFICATION_REPLAY_WINDOW_MS = 5 * 60_000;
 const INTERNAL_SINGLE_LEG_CONFIRMATION_WINDOW_MS = 3 * 60_000;
 const MANUAL_FINAL_PARTICIPANT_DELAY_MS = 2 * 60_000;
 const INBOUND_ANSWER_COMMAND_TTL_MS = 20_000;
@@ -975,6 +977,58 @@ function messageResponse(message: {
     lastErrorCode: message.lastErrorCode,
     lastErrorMessage: message.lastErrorMessage,
   };
+}
+
+export type DesktopCallNotificationKind =
+  | "internal_inbound"
+  | "transferred_customer"
+  | "transfer_returned";
+
+export type DesktopCallObservationCandidate = {
+  id: string;
+  legId: string | null;
+  observationType: "ringing" | "channels" | "ended";
+  direction: "inbound" | "outbound" | null;
+  occurredAt: Date;
+};
+
+export function desktopCallNotificationObservation(input: {
+  kind: DesktopCallNotificationKind | "external_inbound" | null;
+  relationToLegId: string | null;
+  observations: readonly DesktopCallObservationCandidate[];
+}): DesktopCallObservationCandidate | null {
+  return [...input.observations].reverse().find((observation) => {
+    if (input.kind === "internal_inbound") {
+      return (
+        observation.observationType === "ringing" &&
+        observation.direction === "inbound"
+      );
+    }
+    if (input.kind === "transferred_customer") {
+      return (
+        observation.observationType === "ringing" &&
+        observation.direction === "inbound" &&
+        observation.legId === input.relationToLegId
+      );
+    }
+    if (input.kind === "transfer_returned") {
+      return (
+        observation.observationType === "ended" &&
+        observation.legId === input.relationToLegId
+      );
+    }
+    return false;
+  }) ?? null;
+}
+
+export function desktopCallNotificationTargetLegId(input: {
+  kind: DesktopCallNotificationKind;
+  observationLegId: string | null;
+  relationFromLegId: string | null;
+}): string | null {
+  return input.kind === "transfer_returned"
+    ? input.relationFromLegId
+    : input.observationLegId;
 }
 
 export function createTelephonyService(options: {
@@ -2672,8 +2726,20 @@ export function createTelephonyService(options: {
     };
   }
 
-  async function getCallActivitySnapshot(actor: Pick<StaffPrincipal, "id">) {
+  async function getCallActivitySnapshot(
+    actor: Pick<StaffPrincipal, "id">,
+    snapshotOptions?: {
+      rootIds?: readonly string[];
+      includeAllInternal?: boolean;
+      endedWindowMs?: number;
+    },
+  ) {
     const snapshotAt = now();
+    if (snapshotOptions?.rootIds?.length === 0) {
+      return { snapshotAt: snapshotAt.toISOString(), items: [] };
+    }
+    const endedWindowMs =
+      snapshotOptions?.endedWindowMs ?? INBOUND_ENDED_SNAPSHOT_WINDOW_MS;
     const rows = await db
       .select({
         id: telephonyCallRoots.id,
@@ -2722,28 +2788,37 @@ export function createTelephonyService(options: {
         eq(staffProfiles.userId, telephonyCallLegs.staffUserId),
       )
       .where(
-        or(
-          and(
-            ne(telephonyCallRoots.state, "ended"),
-            gte(
-              telephonyCallRoots.lastEventAt,
-              new Date(snapshotAt.getTime() - INBOUND_CONNECTED_SNAPSHOT_WINDOW_MS),
-            ),
-            or(
-              ne(telephonyCallRoots.state, "ringing"),
+        and(
+          snapshotOptions?.rootIds
+            ? inArray(telephonyCallRoots.id, [...snapshotOptions.rootIds])
+            : undefined,
+          or(
+            and(
+              ne(telephonyCallRoots.state, "ended"),
               gte(
                 telephonyCallRoots.lastEventAt,
                 new Date(
-                  snapshotAt.getTime() - INBOUND_RINGING_SNAPSHOT_WINDOW_MS,
+                  snapshotAt.getTime() - INBOUND_CONNECTED_SNAPSHOT_WINDOW_MS,
+                ),
+              ),
+              or(
+                ne(telephonyCallRoots.state, "ringing"),
+                gte(
+                  telephonyCallRoots.lastEventAt,
+                  new Date(
+                    snapshotAt.getTime() - INBOUND_RINGING_SNAPSHOT_WINDOW_MS,
+                  ),
                 ),
               ),
             ),
-          ),
-          and(
-            eq(telephonyCallRoots.state, "ended"),
-            gte(
-              telephonyCallRoots.endedAt,
-              new Date(snapshotAt.getTime() - INBOUND_ENDED_SNAPSHOT_WINDOW_MS),
+            and(
+              eq(telephonyCallRoots.state, "ended"),
+              gte(
+                telephonyCallRoots.endedAt,
+                new Date(
+                  snapshotAt.getTime() - endedWindowMs,
+                ),
+              ),
             ),
           ),
         ),
@@ -2900,6 +2975,7 @@ export function createTelephonyService(options: {
       }
       if (
         root.scope === "internal" &&
+        !snapshotOptions?.includeAllInternal &&
         !participants.some(
           (participant) =>
             participant.staffUserId === actor.id ||
@@ -7505,6 +7581,217 @@ export function createTelephonyService(options: {
     };
   }
 
+  async function getDesktopCallActivityNotifications(input?: {
+    callRootId?: string;
+  }) {
+    const replaySince = new Date(
+      now().getTime() - DESKTOP_CALL_NOTIFICATION_REPLAY_WINDOW_MS,
+    );
+    const observations = await db
+      .select({
+        id: telephonyCallObservations.id,
+        rootId: telephonyCallObservations.rootId,
+        legId: telephonyCallObservations.legId,
+        endpointId: telephonyCallObservations.endpointId,
+        observationType: telephonyCallObservations.observationType,
+        direction: telephonyCallObservations.direction,
+        occurredAt: telephonyCallObservations.occurredAt,
+      })
+      .from(telephonyCallObservations)
+      .where(
+        and(
+          input?.callRootId
+            ? eq(telephonyCallObservations.rootId, input.callRootId)
+            : undefined,
+          isNotNull(telephonyCallObservations.rootId),
+          isNotNull(telephonyCallObservations.legId),
+          inArray(telephonyCallObservations.observationType, [
+            "ringing",
+            "ended",
+          ]),
+          gte(telephonyCallObservations.occurredAt, replaySince),
+        ),
+      )
+      .orderBy(asc(telephonyCallObservations.occurredAt))
+      .limit(200);
+    const rootIds = [
+      ...new Set(
+        observations.flatMap((observation) =>
+          observation.rootId ? [observation.rootId] : [],
+        ),
+      ),
+    ];
+    if (rootIds.length === 0) return [];
+
+    const activeStaff = await activePhoneDeskStaff();
+    const firstStaff = activeStaff[0];
+    if (!firstStaff) return [];
+    const snapshot = await getCallActivitySnapshot(
+      { id: firstStaff.staffUserId },
+      {
+        rootIds,
+        includeAllInternal: true,
+        endedWindowMs: DESKTOP_CALL_NOTIFICATION_REPLAY_WINDOW_MS,
+      },
+    );
+    const relationRows = await db
+      .select({
+        rootId: telephonyCallRelations.rootId,
+        fromLegId: telephonyCallRelations.fromLegId,
+        toLegId: telephonyCallRelations.toLegId,
+        relationType: telephonyCallRelations.relationType,
+        occurredAt: telephonyCallRelations.occurredAt,
+      })
+      .from(telephonyCallRelations)
+      .where(
+        and(
+          inArray(telephonyCallRelations.rootId, rootIds),
+          inArray(telephonyCallRelations.relationType, [
+            "transfer_attempted",
+            "transfer_completed",
+            "transfer_returned",
+            "transfer_unresolved",
+          ]),
+        ),
+      )
+      .orderBy(desc(telephonyCallRelations.occurredAt));
+    const latestRelationByRoot = new Map<string, (typeof relationRows)[number]>();
+    for (const relation of relationRows) {
+      if (!latestRelationByRoot.has(relation.rootId)) {
+        latestRelationByRoot.set(relation.rootId, relation);
+      }
+    }
+
+    const chosen = [];
+    for (const activity of snapshot.items) {
+      // 재연결 시 이미 끝난 벨·호전환을 다시 띄우지 않는다. 복귀 알림도
+      // 기존 고객 leg가 살아 있어 root가 활성인 동안에만 의미가 있다.
+      if (activity.state === "ended") continue;
+      const rootObservations = observations.filter(
+        (observation) => observation.rootId === activity.id,
+      );
+      const relation = latestRelationByRoot.get(activity.id) ?? null;
+      const participantsByLeg = new Map(
+        activity.participants.map((participant) => [
+          participant.legId,
+          participant,
+        ]),
+      );
+      const latestMatching = desktopCallNotificationObservation({
+        kind: activity.notificationKind,
+        relationToLegId: relation?.toLegId ?? null,
+        observations: rootObservations,
+      });
+      if (!latestMatching) continue;
+      const kind = activity.notificationKind as DesktopCallNotificationKind;
+      const targetLegId = desktopCallNotificationTargetLegId({
+        kind,
+        observationLegId: latestMatching.legId,
+        relationFromLegId: relation?.fromLegId ?? null,
+      });
+      const targetParticipant = targetLegId
+        ? participantsByLeg.get(targetLegId)
+        : null;
+      if (!targetParticipant) continue;
+      chosen.push({
+        activity,
+        observation: latestMatching,
+        targetEndpointId: targetParticipant.endpointId,
+      });
+    }
+    if (chosen.length === 0) return [];
+
+    const targetEndpointIds = [
+      ...new Set(chosen.map((item) => item.targetEndpointId)),
+    ];
+    const [ownerRows, endpointRows] = await Promise.all([
+      db
+        .select({
+          endpointId: staffTelephonyBindings.endpointId,
+          staffUserId: staffTelephonyBindings.staffUserId,
+        })
+        .from(staffTelephonyBindings)
+        .innerJoin(
+          staffUsers,
+          and(
+            eq(staffUsers.id, staffTelephonyBindings.staffUserId),
+            eq(staffUsers.status, "active"),
+          ),
+        )
+        .innerJoin(
+          staffMemberships,
+          and(
+            eq(staffMemberships.userId, staffTelephonyBindings.staffUserId),
+            eq(staffMemberships.isPrimary, true),
+            eq(staffMemberships.isActive, true),
+          ),
+        )
+        .where(
+          and(
+            inArray(staffTelephonyBindings.endpointId, targetEndpointIds),
+            eq(staffTelephonyBindings.isActive, true),
+          ),
+        ),
+      db
+        .select({
+          id: telephonyEndpoints.id,
+          label: telephonyEndpoints.label,
+          extension: telephonyEndpoints.extension,
+        })
+        .from(telephonyEndpoints)
+        .where(inArray(telephonyEndpoints.id, targetEndpointIds)),
+    ]);
+    const ownersByEndpoint = new Map<string, string[]>();
+    for (const owner of ownerRows) {
+      const owners = ownersByEndpoint.get(owner.endpointId) ?? [];
+      owners.push(owner.staffUserId);
+      ownersByEndpoint.set(owner.endpointId, owners);
+    }
+    const endpointById = new Map(endpointRows.map((row) => [row.id, row]));
+    const activeStaffIds = new Set(activeStaff.map((staff) => staff.staffUserId));
+
+    return chosen.flatMap(({ activity, observation, targetEndpointId }) => {
+      const targetParticipant = activity.participants.find(
+        (participant) => participant.endpointId === targetEndpointId,
+      );
+      const targetUserIds = [
+        ...new Set([
+          ...(ownersByEndpoint.get(targetEndpointId) ?? []),
+          ...(targetParticipant?.staffUserId &&
+          activeStaffIds.has(targetParticipant.staffUserId)
+            ? [targetParticipant.staffUserId]
+            : []),
+        ]),
+      ];
+      if (targetUserIds.length === 0) return [];
+      const targetEndpoint = endpointById.get(targetEndpointId);
+      const callerParticipant = activity.participants.find(
+        (participant) => participant.direction === "outbound",
+      );
+      return [{
+        sourceEventId: observation.id,
+        callRootId: activity.id,
+        kind: activity.notificationKind as
+          | "internal_inbound"
+          | "transferred_customer"
+          | "transfer_returned",
+        targetUserIds,
+        occurredAt: observation.occurredAt.toISOString(),
+        customerName: telephonyCallerDisplayName(activity.customerMatch),
+        remotePhone: activity.remotePhone,
+        callRegion: activity.callRegion,
+        lineLabel: targetEndpoint?.label ?? activity.currentEndpoint.label,
+        targetExtension:
+          targetEndpoint?.extension ?? activity.currentEndpoint.extension,
+        callerName: callerParticipant?.displayName ?? null,
+        callerExtension:
+          targetParticipant?.remoteExtension ??
+          callerParticipant?.remoteExtension ??
+          null,
+      }];
+    });
+  }
+
   async function listUnreadMessageNotifications(actor: StaffPrincipal) {
     const rows = await db
       .select({ messageId: telephonyInboundMessageNotifications.inboundMessageId })
@@ -9349,6 +9636,7 @@ export function createTelephonyService(options: {
     getMessageNotification,
     getDesktopMessageNotification,
     getDesktopInboundCallNotification,
+    getDesktopCallActivityNotifications,
     getMessageThread,
     listMessageTemplates,
     listUnreadMessageNotifications,

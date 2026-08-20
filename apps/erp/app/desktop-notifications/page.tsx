@@ -66,7 +66,7 @@ const notificationGroups: DesktopNotificationPreferenceGroup[] = [
         title: "내선 · 호전환 · 복귀",
         description: "내선 전화가 오거나 고객 전화가 나에게 전달·복귀하면 알립니다.",
         scope: "실제 수신 직원",
-        available: false,
+        available: true,
       },
       {
         key: "phone.all_external",
@@ -115,7 +115,6 @@ const notificationGroups: DesktopNotificationPreferenceGroup[] = [
 ];
 
 const laterNotificationItems = [
-  "내선 · 호전환 · 복귀의 정확한 수신 직원 알림",
   "재통화 일정 임박 · 기한 초과",
   "리걸프렌즈 · 알림톡 · 문자 발송 실패",
   "기프티콘 발송 결과 확인 필요",
@@ -192,12 +191,12 @@ export default async function DesktopNotificationsPage() {
             </svg>
           </span>
           <div>
-            <strong>실제 업무 알림 연결 중</strong>
+            <strong>개인별 PC 알림 3차 연결</strong>
             <p>
-              상담·외부 수신전화·고객 문자·담당 후기는 실제 내용으로 자동 전달됩니다. 내선·호전환은 다음 연결 단계입니다.
+              상담·외부 수신전화·고객 문자·담당 후기와 내선·호전환·복귀가 실제 수신 직원에게 자동 전달됩니다.
             </p>
           </div>
-          <span className="desktop-alert-stage-badge">개발자 2차</span>
+          <span className="desktop-alert-stage-badge">개발자 3차</span>
         </section>
 
         <div className="desktop-alert-overview-grid">
@@ -277,7 +276,7 @@ export default async function DesktopNotificationsPage() {
           </div>
           <ul>
             {laterNotificationItems.map((item) => (
-              <li key={item}><span>2차</span>{item}</li>
+              <li key={item}><span>후속</span>{item}</li>
             ))}
           </ul>
         </section>

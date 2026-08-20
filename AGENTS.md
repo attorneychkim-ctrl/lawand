@@ -106,6 +106,37 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-20 — Windows 개인 PC 알림 전화·재생·운영 방어 3차 후보
+- 기존 `lawand_telephony_desk_events`를 재사용해 내선 수신·고객 호전환·미연결 복귀를
+  `phone.internal_transfer` 개인 설정에 연결했다. 최근 5분의 안정적인 call observation UUID를
+  원본 ID로 쓰며, 내선·호전환은 실제 inbound leg 회선 소유자, 복귀는 원래 고객 leg 소유자만
+  대상으로 삼는다. 활성 직원·주 소속·회선 binding을 확인하고 대상이 없을 때 전 직원으로
+  넓히지 않으며, 이미 종료된 통화 root는 재연결 뒤 다시 띄우지 않는다. ERP의 해당 스위치는
+  실제 저장 가능하게 열었지만 관리 메뉴와 페이지는 계속 관리자 전용이다.
+- 상담·수신문자·후기 연결·외부 수신전화는 LISTEN 연결 직후 request pool에서 최근 5분 원장을
+  재생한다. 실시간·재생은 기존 직원·원본 이벤트 unique index로 합쳐지고, 만료는 재생 시각이
+  아닌 원래 발생 시각부터 업무 알림 24시간·전화 2분이다. migration
+  `0073_desktop_notification_reliability.sql`은 후기 NOTIFY event ID를 link UUID로 안정화하고,
+  만료 pairing·암호화 알림과 cascade delivery만 지우는 SECURITY DEFINER 함수를 추가했다.
+  PUBLIC·viewer 실행은 차단하고 `lawand_app`에 함수 실행만 허용했으며, 15분 maintenance가 시작
+  즉시와 이후 주기적으로 호출한다. 기기·개인 설정·감사 원장은 보존한다.
+- 공개 pairing은 코드 원문과 IP를 저장·로그하지 않는 HMAC 지문 기반 메모리 sliding window로
+  같은 코드 5회/5분, 같은 네트워크 12회/10분·60회/일을 제한한다. 로컬 gateway에서 격리한 가짜
+  코드·문서용 IP로 1~5회 410, 6회 429와 `Retry-After: 300`을 확인했고 DB pairing 조회 전에
+  차단되는 회귀 테스트도 추가했다. 알림에는 사용자가 요청한 고객명·전화번호·상담·문자·후기
+  실제 내용을 유지하되 기존 직원별 AES-GCM 저장과 잠금 화면 본문 숨김 경계를 바꾸지 않았다.
+- 로컬 `lawand_dev`에 `0073`을 적용해 재실행 no-op, stable 후기 ID, 앱 역할 실행 권한과 rollback
+  fixture의 만료 pairing·알림 삭제를 확인했다. 세 재생 snapshot SQL과 최근 통화 조회도 앱 역할로
+  실제 실행했다. 전체 5패키지 test·typecheck·lint·production build, DB schema check와
+  `git diff --check`를 통과했고 core 96개·gateway 207개 테스트가 성공했다. Windows Debug·Release
+  x64 컴파일과 self-test도 통과했으며 Release ZIP SHA-256은
+  `29678B85B1A8C24E480684F797CE324975F3A8F824FDB83E8CC7CF058FAE5646`이고 아직 무서명이다.
+- 이번 요청에 사용자가 제공한 세션 지침에 따라 HERDR만 관리자로 취급했으나 `HERDR_ENV`와
+  HERDR 서버가 없어 Git 상태만 확인했고 Orca 상태·터미널은 사용하지 않았다. 로컬 ERP 3021·
+  gateway 3022는 계속 실행하고 worker는 꺼 둔 상태다. main 병합·운영 migration·운영 배포·외부
+  발송은 수행하지 않았다. 조직 Authenticode 서명·정식 배포 채널, 실제 내선·호전환·복귀 운영
+  acceptance와 macOS 클라이언트가 후속이며 `PROJECT_PLAN.md`는 v1.72다.
+
 ### 2026-08-20 — Windows 개인 PC 알림 실제 이벤트·개인 설정 2차 후보
 - migration `0072_faulty_tyger_tiger.sql`은 직원별 9개 고정 이벤트 설정과
   `desktop_notifications.source_event_id`를 추가했다. `(staff_user_id, source_event_id)` partial

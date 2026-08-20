@@ -4,6 +4,7 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
+import { isIP } from "node:net";
 
 import {
   consultationSubmissionSchema,
@@ -120,6 +121,7 @@ import {
   DesktopNotificationError,
   type DesktopNotificationService,
 } from "./desktop-notification-service.js";
+import type { DesktopPairingProtection } from "./desktop-pairing-protection.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_MESSAGE_TEMPLATE_BODY_BYTES = 320 * 1024;
@@ -208,6 +210,38 @@ function desktopDeviceToken(request: IncomingMessage): string | null {
   if (typeof provided !== "string") return null;
   const parsed = desktopNotificationDeviceTokenSchema.safeParse(provided);
   return parsed.success ? parsed.data : null;
+}
+
+function normalizedNetworkAddress(value: string): string | null {
+  const trimmed = value.trim().toLowerCase();
+  if (isIP(trimmed)) return trimmed;
+  const bracketed = trimmed.match(/^\[([^\]]+)\](?::\d+)?$/);
+  if (bracketed?.[1] && isIP(bracketed[1])) return bracketed[1];
+  const ipv4WithPort = trimmed.match(/^([^:]+):\d+$/);
+  if (ipv4WithPort?.[1] && isIP(ipv4WithPort[1]) === 4) {
+    return ipv4WithPort[1];
+  }
+  return null;
+}
+
+function desktopPairingNetworkAddress(
+  request: IncomingMessage,
+): string | null {
+  const forwarded = request.headers["x-forwarded-for"];
+  const forwardedValues = Array.isArray(forwarded)
+    ? forwarded
+    : typeof forwarded === "string"
+      ? [forwarded]
+      : [];
+  for (const value of forwardedValues
+    .flatMap((item) => item.split(","))
+    .reverse()) {
+    const normalized = normalizedNetworkAddress(value);
+    if (normalized) return normalized;
+  }
+  return request.socket.remoteAddress
+    ? normalizedNetworkAddress(request.socket.remoteAddress)
+    : null;
 }
 
 function invalidRequestIssues(
@@ -306,6 +340,7 @@ export function createGatewayServer(options?: {
   reviewManagementService?: ReviewManagementService;
   giftCouponService?: GiftCouponService;
   desktopNotificationService?: DesktopNotificationService;
+  desktopPairingProtection?: DesktopPairingProtection;
   reviewEvents?: ReviewEventSource;
   messageEvents?: MessageEventSource;
   telephonyService?: TelephonyService;
@@ -383,6 +418,22 @@ export function createGatewayServer(options?: {
         );
         if (!parsed.success) {
           sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+          return;
+        }
+        const pairingDecision = options.desktopPairingProtection?.check({
+          pairingCode: parsed.data.pairingCode,
+          networkAddress: desktopPairingNetworkAddress(request),
+        });
+        if (pairingDecision && !pairingDecision.allowed) {
+          sendJson(
+            response,
+            429,
+            {
+              error: "pairing_rate_limited",
+              message: "PC 연결 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.",
+            },
+            { "retry-after": String(pairingDecision.retryAfterSeconds) },
+          );
           return;
         }
         const result = await options.desktopNotificationService.pairDevice(

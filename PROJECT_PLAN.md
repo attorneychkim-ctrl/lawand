@@ -1,8 +1,34 @@
-# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.71)
+# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.72)
 
 > 이 문서는 새 로앤 홈페이지 + 새 ERP + 리걸플로/리걸프렌즈 연동을 하나의 플랫폼으로
 > 묶기 위한 **저장소 구조·아키텍처 설계 초안**이다. 코덱스/클로드코드 세션이 번갈아
 > 작업하는 것을 전제로 하며, 첫 커밋 시점에 이 문서를 기준선으로 삼는다.
+>
+> 2026-08-20 Windows 개인 PC 네이티브 알림 3차 후보: 전화 대상·재생·운영 방어
+> 기존 `lawand_telephony_desk_events`를 재사용해 별도 LISTEN 연결을 늘리지 않고, 최근
+> `telephony_call_observations`의 안정적인 UUID를 원본 이벤트로 삼아 내선 수신·고객 호전환·
+> 미연결 복귀를 `phone.internal_transfer`로 연결했다. 내선과 호전환은 실제 inbound leg의 활성
+> endpoint 소유자, 복귀는 관계 원장의 원래 고객 leg 소유자에게만 보낸다. 활성 주 소속과 회선
+> binding을 모두 확인하며 정확한 대상이 없을 때 전 직원으로 넓히지 않는다. 이미 종료된 root는
+> 재연결 때 다시 울리지 않는다. ERP의 비활성 스위치를 실제 개인 설정으로 열되 관리 메뉴와
+> 페이지 자체는 전체 기능 출시 전까지 계속 관리자 전용이다.
+>
+> 상담·수신문자·후기 연결·외부 수신전화 소스는 LISTEN 연결 직후 최근 5분의 durable 원장을
+> request pool로 재생한다. 알림 만료는 재생 시각이 아니라 원래 `occurredAt`부터 상담·문자·후기
+> 24시간, 전화 2분으로 계산하고 지난 전화는 큐에 넣지 않는다. 기존 직원·원본 이벤트 unique
+> index가 실시간 신호와 재생의 중복을 제거한다. migration `0073`은 후기 연결 NOTIFY의 event ID를
+> 안정적인 link UUID로 바꾸고, 만료 pairing과 암호화 알림을 삭제하는 입력 없는 SECURITY DEFINER
+> 함수를 추가한다. 15분 maintenance는 시작 즉시와 이후 주기적으로 이를 호출하며 delivery는
+> cascade 삭제하되 기기·개인 설정·감사 원장은 보존한다. PUBLIC·viewer 실행은 차단하고
+> `lawand_app`에 함수 실행만 허용한다.
+>
+> 공개 pairing은 원문을 보관하거나 로그에 남기지 않는 HMAC 지문 기반 메모리 sliding window로
+> 같은 코드 5회/5분, 같은 네트워크 12회/10분·60회/일을 제한하고 429 `Retry-After`를 반환한다.
+> 로컬 `lawand_dev`에 `0073`을 적용하고 재실행 no-op, 함수 권한·stable 후기 ID, rollback fixture의
+> 만료 pairing/알림 삭제를 확인했다. 전체 5패키지 test·typecheck·lint·production build와 DB
+> schema check, Windows Debug·Release 컴파일 및 self-test를 통과했다. 조직 Authenticode 서명·
+> 정식 배포 채널, macOS 클라이언트와
+> 실제 내선·호전환·복귀 운영 acceptance는 후속이며 main 병합·운영 migration·배포는 하지 않았다.
 >
 > 2026-08-20 Windows 개인 PC 네이티브 알림 2차 후보: 실제 업무 이벤트와 개인 설정
 > migration `0072`는 직원별 9개 고정 이벤트 선호와 원본 이벤트 UUID를 저장하며, 직원·원본

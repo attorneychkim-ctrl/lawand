@@ -10,6 +10,7 @@ import type { ReviewEventSource } from "./review-events.js";
 import type { ReviewManagementService } from "./review-management-service.js";
 import type { ConsultationService } from "./service.js";
 import type { TelephonyInboundEventSource } from "./telephony-inbound-events.js";
+import type { TelephonyDeskEventSource } from "./telephony-desk-events.js";
 import type { TelephonyService } from "./telephony-service.js";
 
 const BUSINESS_NOTIFICATION_DURATION_MS = 24 * 60 * 60 * 1_000;
@@ -104,14 +105,18 @@ function consultationIntakeLines(intake: unknown): string[] {
 function queueInput(
   input: Omit<DesktopNotificationEventQueueInput, "expiresAt"> & {
     durationMs: number;
+    occurredAt: string;
   },
   now: () => Date,
-): DesktopNotificationEventQueueInput {
-  const current = now();
-  const { durationMs, ...notification } = input;
+): DesktopNotificationEventQueueInput | null {
+  const occurredAt = new Date(input.occurredAt);
+  const expiresAt = new Date(occurredAt.getTime() + input.durationMs);
+  if (!Number.isFinite(expiresAt.getTime()) || expiresAt <= now()) return null;
+  const { durationMs: _durationMs, occurredAt: _occurredAt, ...notification } =
+    input;
   return {
     ...notification,
-    expiresAt: new Date(current.getTime() + durationMs),
+    expiresAt,
   };
 }
 
@@ -121,17 +126,21 @@ export function createDesktopNotificationProducer(options: {
   reviewEvents: ReviewEventSource;
   messageEvents: MessageEventSource;
   telephonyInboundEvents: TelephonyInboundEventSource;
+  telephonyDeskEvents: TelephonyDeskEventSource;
   consultationService: Pick<ConsultationService, "detail">;
   reviewManagementService: Pick<ReviewManagementService, "desktopNotification">;
   telephonyService: Pick<
     TelephonyService,
-    "getDesktopMessageNotification" | "getDesktopInboundCallNotification"
+    | "getDesktopMessageNotification"
+    | "getDesktopInboundCallNotification"
+    | "getDesktopCallActivityNotifications"
   >;
   now?: () => Date;
   onError?: (error: unknown) => void;
 }) {
   const now = options.now ?? (() => new Date());
   const pending = new Set<Promise<void>>();
+  const replaying = new Set<string>();
   let unsubscribers: Array<() => void> = [];
 
   function track(task: Promise<unknown>) {
@@ -140,6 +149,37 @@ export function createDesktopNotificationProducer(options: {
       .catch((error) => options.onError?.(error))
       .finally(() => pending.delete(pendingTask));
     pending.add(pendingTask);
+  }
+
+  async function queueNotification(
+    input: Omit<DesktopNotificationEventQueueInput, "expiresAt"> & {
+      durationMs: number;
+      occurredAt: string;
+    },
+  ) {
+    const queued = queueInput(input, now);
+    if (!queued) return;
+    await options.desktopNotifications.queueEvent(queued);
+  }
+
+  function replay<T>(
+    key: string,
+    load: (() => Promise<T[]>) | undefined,
+    handle: (notification: T) => Promise<void>,
+  ) {
+    if (!load || replaying.has(key)) return;
+    replaying.add(key);
+    track(
+      (async () => {
+        try {
+          for (const notification of await load()) {
+            await handle(notification);
+          }
+        } finally {
+          replaying.delete(key);
+        }
+      })(),
+    );
   }
 
   async function handleConsultation(
@@ -188,26 +228,22 @@ export function createDesktopNotificationProducer(options: {
       }`,
       ...consultationIntakeLines(latestRequest?.intake),
     ];
-    await options.desktopNotifications.queueEvent(
-      queueInput(
-        {
-          sourceEventId: event.eventId,
-          eventType: `desktop.consultation.${
-            preferenceKey.split(".").slice(1).join("_")
-          }`,
-          preferenceKey,
-          ...(targetUserIds ? { targetUserIds } : {}),
-          payload: {
-            title: `${kindLabel} · ${customerName}`,
-            body: truncateDesktopNotificationBody(summary.join("\n")),
-            category: "consultation",
-            deepLinkPath: `/consultations/${event.consultationId}`,
-          },
-          durationMs: BUSINESS_NOTIFICATION_DURATION_MS,
-        },
-        now,
-      ),
-    );
+    await queueNotification({
+      sourceEventId: event.eventId,
+      eventType: `desktop.consultation.${
+        preferenceKey.split(".").slice(1).join("_")
+      }`,
+      preferenceKey,
+      ...(targetUserIds ? { targetUserIds } : {}),
+      payload: {
+        title: `${kindLabel} · ${customerName}`,
+        body: truncateDesktopNotificationBody(summary.join("\n")),
+        category: "consultation",
+        deepLinkPath: `/consultations/${event.consultationId}`,
+      },
+      durationMs: BUSINESS_NOTIFICATION_DURATION_MS,
+      occurredAt: event.occurredAt,
+    });
   }
 
   async function handleMessage(
@@ -224,26 +260,22 @@ export function createDesktopNotificationProducer(options: {
       message.targetSource === null
         ? "message.unmatched"
         : "message.assigned_reply";
-    await options.desktopNotifications.queueEvent(
-      queueInput(
-        {
-          sourceEventId: event.eventId,
-          eventType: `desktop.${preferenceKey.replaceAll(".", "_")}`,
-          preferenceKey,
-          targetUserIds: event.targetUserIds,
-          payload: {
-            title: `새 문자 · ${message.customerName}`,
-            body: truncateDesktopNotificationBody(
-              `${formatPhone(message.phone)}\n${message.body}`,
-            ),
-            category: "message",
-            deepLinkPath: message.href,
-          },
-          durationMs: BUSINESS_NOTIFICATION_DURATION_MS,
-        },
-        now,
-      ),
-    );
+    await queueNotification({
+      sourceEventId: event.eventId,
+      eventType: `desktop.${preferenceKey.replaceAll(".", "_")}`,
+      preferenceKey,
+      targetUserIds: event.targetUserIds,
+      payload: {
+        title: `새 문자 · ${message.customerName}`,
+        body: truncateDesktopNotificationBody(
+          `${formatPhone(message.phone)}\n${message.body}`,
+        ),
+        category: "message",
+        deepLinkPath: message.href,
+      },
+      durationMs: BUSINESS_NOTIFICATION_DURATION_MS,
+      occurredAt: event.occurredAt,
+    });
   }
 
   async function handleReview(
@@ -261,32 +293,28 @@ export function createDesktopNotificationProducer(options: {
     const caseLabel = [review.caseNumber, review.caseName]
       .filter(Boolean)
       .join(" · ");
-    await options.desktopNotifications.queueEvent(
-      queueInput(
-        {
-          sourceEventId: event.eventId,
-          eventType: "desktop.review.assigned_new",
-          preferenceKey: "review.assigned_new",
-          targetUserIds: review.targetUserIds,
-          payload: {
-            title: `담당 고객 후기 · ${review.customerName}`,
-            body: truncateDesktopNotificationBody(
-              [
-                review.submittedPhone
-                  ? formatPhone(review.submittedPhone)
-                  : review.receiptCode ?? "홈페이지 고객후기",
-                caseLabel || "연결 사건을 확인해 주세요.",
-                review.content,
-              ].join("\n"),
-            ),
-            category: "review",
-            deepLinkPath: review.href,
-          },
-          durationMs: BUSINESS_NOTIFICATION_DURATION_MS,
-        },
-        now,
-      ),
-    );
+    await queueNotification({
+      sourceEventId: event.eventId,
+      eventType: "desktop.review.assigned_new",
+      preferenceKey: "review.assigned_new",
+      targetUserIds: review.targetUserIds,
+      payload: {
+        title: `담당 고객 후기 · ${review.customerName}`,
+        body: truncateDesktopNotificationBody(
+          [
+            review.submittedPhone
+              ? formatPhone(review.submittedPhone)
+              : review.receiptCode ?? "홈페이지 고객후기",
+            caseLabel || "연결 사건을 확인해 주세요.",
+            review.content,
+          ].join("\n"),
+        ),
+        category: "review",
+        deepLinkPath: review.href,
+      },
+      durationMs: BUSINESS_NOTIFICATION_DURATION_MS,
+      occurredAt: event.occurredAt,
+    });
   }
 
   async function handlePhone(
@@ -307,45 +335,75 @@ export function createDesktopNotificationProducer(options: {
     await Promise.all([
       ...(directTargets.length > 0
         ? [
-            options.desktopNotifications.queueEvent(
-              queueInput(
-                {
-                  sourceEventId: event.eventId,
-                  eventType: "desktop.phone.targeted_inbound",
-                  preferenceKey: "phone.targeted_inbound",
-                  targetUserIds: directTargets,
-                  payload: {
-                    title: `[${region}] 내 담당·내 회선 전화 · ${call.customerName}`,
-                    body: `${phone}\n수신 회선 ${call.lineLabel}`,
-                    category: "phone",
-                    deepLinkPath: `/phone-desk/${call.id}`,
-                  },
-                  durationMs: PHONE_NOTIFICATION_DURATION_MS,
-                },
-                now,
-              ),
-            ),
+            queueNotification({
+              sourceEventId: event.eventId,
+              eventType: "desktop.phone.targeted_inbound",
+              preferenceKey: "phone.targeted_inbound",
+              targetUserIds: directTargets,
+              payload: {
+                title: `[${region}] 내 담당·내 회선 전화 · ${call.customerName}`,
+                body: `${phone}\n수신 회선 ${call.lineLabel}`,
+                category: "phone",
+                deepLinkPath: `/phone-desk/${call.id}`,
+              },
+              durationMs: PHONE_NOTIFICATION_DURATION_MS,
+              occurredAt: event.occurredAt,
+            }),
           ]
         : []),
-      options.desktopNotifications.queueEvent(
-        queueInput(
-          {
-            sourceEventId: event.eventId,
-            eventType: "desktop.phone.all_external",
-            preferenceKey: "phone.all_external",
-            excludedUserIds: directTargets,
-            payload: {
-              title: `[${region}] 대표번호 수신 · ${call.customerName}`,
-              body: `${phone}\n수신 회선 ${call.lineLabel}`,
-              category: "phone",
-              deepLinkPath: `/phone-desk/${call.id}`,
-            },
-            durationMs: PHONE_NOTIFICATION_DURATION_MS,
-          },
-          now,
-        ),
-      ),
+      queueNotification({
+        sourceEventId: event.eventId,
+        eventType: "desktop.phone.all_external",
+        preferenceKey: "phone.all_external",
+        excludedUserIds: directTargets,
+        payload: {
+          title: `[${region}] 대표번호 수신 · ${call.customerName}`,
+          body: `${phone}\n수신 회선 ${call.lineLabel}`,
+          category: "phone",
+          deepLinkPath: `/phone-desk/${call.id}`,
+        },
+        durationMs: PHONE_NOTIFICATION_DURATION_MS,
+        occurredAt: event.occurredAt,
+      }),
     ]);
+  }
+
+  async function handleCallActivity(callRootId?: string) {
+    const calls =
+      await options.telephonyService.getDesktopCallActivityNotifications(
+        callRootId ? { callRootId } : undefined,
+      );
+    await Promise.all(
+      calls.map((call) => {
+        const internal = call.kind === "internal_inbound";
+        const region = regionLabels[call.callRegion] ?? call.callRegion;
+        const caller = call.callerName
+          ? `${call.callerName}${call.callerExtension ? ` · 내선 ${call.callerExtension}` : ""}`
+          : `내선 ${call.callerExtension ?? "확인 중"}`;
+        const title = internal
+          ? `내선 전화 · ${caller}`
+          : call.kind === "transfer_returned"
+            ? `[${region}] 고객 전화 복귀 · ${call.customerName}`
+            : `[${region}] 호전환 전화 · ${call.customerName}`;
+        const body = internal
+          ? `수신 ${call.lineLabel} · 내선 ${call.targetExtension}`
+          : `${formatPhone(call.remotePhone)}\n수신 회선 ${call.lineLabel}`;
+        return queueNotification({
+          sourceEventId: call.sourceEventId,
+          eventType: `desktop.phone.${call.kind}`,
+          preferenceKey: "phone.internal_transfer",
+          targetUserIds: call.targetUserIds,
+          payload: {
+            title,
+            body: truncateDesktopNotificationBody(body),
+            category: "phone",
+            deepLinkPath: `/phone-desk/${call.callRootId}`,
+          },
+          durationMs: PHONE_NOTIFICATION_DURATION_MS,
+          occurredAt: call.occurredAt,
+        });
+      }),
+    );
   }
 
   return {
@@ -353,16 +411,75 @@ export function createDesktopNotificationProducer(options: {
       if (unsubscribers.length > 0) return;
       unsubscribers = [
         options.consultationEvents.subscribe((message) => {
-          if (message.kind === "changed") track(handleConsultation(message));
+          if (message.kind === "changed") {
+            track(handleConsultation(message));
+          } else {
+            replay(
+              "consultation",
+              options.consultationEvents.getRecentNotifications
+                ? () => options.consultationEvents.getRecentNotifications!()
+                : undefined,
+              (notification) =>
+                handleConsultation({ kind: "changed", notification }),
+            );
+          }
         }),
         options.messageEvents.subscribe((message) => {
-          if (message.kind === "changed") track(handleMessage(message));
+          if (message.kind === "changed") {
+            track(handleMessage(message));
+          } else {
+            replay(
+              "message",
+              options.messageEvents.getRecentNotifications
+                ? () => options.messageEvents.getRecentNotifications!()
+                : undefined,
+              (notification) =>
+                handleMessage({ kind: "changed", notification }),
+            );
+          }
         }),
         options.reviewEvents.subscribe((message) => {
-          if (message.kind === "changed") track(handleReview(message));
+          if (message.kind === "changed") {
+            track(handleReview(message));
+          } else {
+            replay(
+              "review",
+              options.reviewEvents.getRecentNotifications
+                ? () => options.reviewEvents.getRecentNotifications!()
+                : undefined,
+              (notification) =>
+                handleReview({ kind: "changed", notification }),
+            );
+          }
         }),
         options.telephonyInboundEvents.subscribe((message) => {
-          if (message.kind === "changed") track(handlePhone(message));
+          if (message.kind === "changed") {
+            track(handlePhone(message));
+          } else {
+            replay(
+              "telephony-inbound",
+              options.telephonyInboundEvents.getRecentNotifications
+                ? () =>
+                    options.telephonyInboundEvents.getRecentNotifications!()
+                : undefined,
+              (notification) =>
+                handlePhone({ kind: "changed", notification }),
+            );
+          }
+        }),
+        options.telephonyDeskEvents.subscribe((message) => {
+          if (
+            message.kind === "changed" &&
+            message.notification.eventType === "call_activity.changed"
+          ) {
+            track(handleCallActivity(message.notification.entityId));
+          } else if (message.kind === "sync") {
+            replay(
+              "telephony-call-activity",
+              async () => [undefined],
+              () => handleCallActivity(),
+            );
+          }
         }),
       ];
     },

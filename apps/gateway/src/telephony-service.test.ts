@@ -6,6 +6,8 @@ import {
   answerableInboundCallForActor,
   canResolvePhoneDeskFinalParticipant,
   canonicalizePhoneDeskObservedCalls,
+  desktopCallNotificationObservation,
+  desktopCallNotificationTargetLegId,
   externalInboundNotificationTargetUserIds,
   isCentrexInboundAnswerDeliveryDelayed,
   isPhoneDeskAftercareWritableState,
@@ -19,6 +21,73 @@ import {
   staffPhoneCustomerMatches,
   type PhoneCustomerMatch,
 } from "./telephony-service.js";
+
+test("내선·호전환·복귀는 해당 leg의 안정적인 관측 ID만 알림 근거로 쓴다", () => {
+  const observations = [
+    {
+      id: "outbound-ring",
+      legId: "caller-leg",
+      observationType: "ringing" as const,
+      direction: "outbound" as const,
+      occurredAt: new Date("2026-08-20T01:00:00.000Z"),
+    },
+    {
+      id: "inbound-ring",
+      legId: "target-leg",
+      observationType: "ringing" as const,
+      direction: "inbound" as const,
+      occurredAt: new Date("2026-08-20T01:00:01.000Z"),
+    },
+    {
+      id: "target-ended",
+      legId: "target-leg",
+      observationType: "ended" as const,
+      direction: null,
+      occurredAt: new Date("2026-08-20T01:00:02.000Z"),
+    },
+  ];
+
+  assert.equal(
+    desktopCallNotificationObservation({
+      kind: "internal_inbound",
+      relationToLegId: null,
+      observations,
+    })?.id,
+    "inbound-ring",
+  );
+  assert.equal(
+    desktopCallNotificationObservation({
+      kind: "transferred_customer",
+      relationToLegId: "target-leg",
+      observations,
+    })?.id,
+    "inbound-ring",
+  );
+  assert.equal(
+    desktopCallNotificationObservation({
+      kind: "transferred_customer",
+      relationToLegId: "other-leg",
+      observations,
+    }),
+    null,
+  );
+  assert.equal(
+    desktopCallNotificationObservation({
+      kind: "transfer_returned",
+      relationToLegId: "target-leg",
+      observations,
+    })?.id,
+    "target-ended",
+  );
+  assert.equal(
+    desktopCallNotificationTargetLegId({
+      kind: "transfer_returned",
+      observationLegId: "target-leg",
+      relationFromLegId: "original-customer-leg",
+    }),
+    "original-customer-leg",
+  );
+});
 
 test("담당자 연결 요청 자동문자는 한국 시간의 30분 일정과 담당자를 고정 형식으로 붙인다", () => {
   assert.equal(
