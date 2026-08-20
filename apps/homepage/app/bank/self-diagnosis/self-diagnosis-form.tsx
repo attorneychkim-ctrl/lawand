@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
-  CONSULTATION_CUSTOMER_NAME_UNSAFE_MESSAGE,
+  CONSULTATION_CUSTOMER_NAME_REVIEW_LABEL,
   CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION,
   SELF_DIAGNOSIS_INCOME_TYPES,
   SELF_DIAGNOSIS_LIVING_COST_TYPES,
@@ -12,8 +12,8 @@ import {
   SELF_DIAGNOSIS_RESIDENCE_REGIONS,
   SELF_DIAGNOSIS_RESIDENCE_TYPES,
   getSelfDiagnosisCourtOptions,
-  isSafeConsultationCustomerName,
   needsSelfDiagnosisMoneyUnitConfirmation,
+  reviewableConsultationCustomerName,
   type SelfDiagnosisResidenceRegion,
   type SelfDiagnosisMoneyUnitField,
   type SelfDiagnosisSubmissionResponse,
@@ -419,9 +419,6 @@ export function SelfDiagnosisForm() {
     }
     if (candidateStep === 3) {
       if (!candidateData.name.trim()) return "이름을 입력해 주세요.";
-      if (!isSafeConsultationCustomerName(candidateData.name)) {
-        return CONSULTATION_CUSTOMER_NAME_UNSAFE_MESSAGE;
-      }
       if (!/^010\d{8}$/u.test(digits(candidateData.phone))) {
         return "010으로 시작하는 휴대전화 번호를 입력해 주세요.";
       }
@@ -479,7 +476,10 @@ export function SelfDiagnosisForm() {
           source: "homepage",
           idempotencyKey,
           phone: candidateData.phone,
-          name: candidateData.name.trim(),
+          name: reviewableConsultationCustomerName(
+            candidateData.name,
+            30,
+          ),
           privacyNoticeVersion: CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION,
           consentAgreedAt: new Date().toISOString(),
           attribution: getConsultationAttribution(),
@@ -983,6 +983,13 @@ export function SelfDiagnosisForm() {
               <label>
                 <span>이름</span>
                 <input autoComplete="name" value={data.name} onChange={(event) => setField("name", event.target.value.slice(0, 30))} placeholder="성함을 입력해 주세요" />
+                {data.name.trim() &&
+                reviewableConsultationCustomerName(data.name, 30) ===
+                  CONSULTATION_CUSTOMER_NAME_REVIEW_LABEL ? (
+                  <small className="customer-name-review-note">
+                    이름은 상담 중 다시 확인하며 자가진단 접수는 계속 진행됩니다.
+                  </small>
+                ) : null}
               </label>
               <label>
                 <span>휴대전화</span>

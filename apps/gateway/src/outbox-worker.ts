@@ -21,6 +21,7 @@ import {
   legalfriendsManagerChangeRequestedEventSchema,
   legalfriendsRestorationRequestedEventSchema,
   legalfriendsRegistrationRequestedEventSchema,
+  usableConsultationCustomerName,
   type PlatformEvent,
   residenceRegionSchema,
 } from "@lawand/core";
@@ -148,7 +149,7 @@ export function resolveStoredRegistrationName(
   protection: Pick<DataProtection, "decrypt">,
   request: StoredRegistrationName,
 ): string {
-  return request.preferredNameCiphertext &&
+  const preferredName = request.preferredNameCiphertext &&
     request.preferredNameNonce &&
     request.preferredNameKeyVersion
     ? protection.decrypt(
@@ -159,7 +160,10 @@ export function resolveStoredRegistrationName(
         },
         `consultations.preferred_name:${request.consultationId}`,
       )
-    : request.anonymousLabel;
+    : null;
+  return (
+    usableConsultationCustomerName(preferredName) ?? request.anonymousLabel
+  );
 }
 
 export function resolveStoredRegistrationIntake(

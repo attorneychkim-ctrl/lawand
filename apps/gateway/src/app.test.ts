@@ -3,7 +3,10 @@ import { createHmac } from "node:crypto";
 import { once } from "node:events";
 import test from "node:test";
 
-import type { PhoneDeskAftercareSave } from "@lawand/core";
+import {
+  CONSULTATION_CUSTOMER_NAME_REVIEW_LABEL,
+  type PhoneDeskAftercareSave,
+} from "@lawand/core";
 
 import { createGatewayServer } from "./app.js";
 import type { StaffAuthService, StaffPrincipal } from "./auth.js";
@@ -2037,6 +2040,71 @@ test("공개 상담 쓰기 경계는 홈페이지 서버의 접수 전용 키 �
     },
   );
   assert.equal(response.status, 401);
+});
+
+test("공개 상담은 비정상 고객명만 검토 표기로 바꾸고 실제 접수를 유지한다", async (context) => {
+  let receivedName: string | undefined;
+  const service = {
+    submit: async (input: { name?: string }) => {
+      receivedName = input.name;
+      return {
+        publicReceiptCode: "LA-260820-23456789",
+        acceptedAt: "2026-08-20T03:28:25.000Z",
+        dedupeOutcome: "new" as const,
+        replayed: false,
+      };
+    },
+  } as unknown as ConsultationService;
+  const server = createGatewayServer({
+    service,
+    publicIntakeApiKey: "test-public-intake-key",
+    intakeProtection: {
+      check: () => ({ allowed: true }),
+      checkKakaoEntry: () => ({ allowed: true }),
+    },
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const response = await fetch(
+    `http://127.0.0.1:${address.port}/v1/consultations`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-lawand-public-intake-key": "test-public-intake-key",
+      },
+      body: JSON.stringify({
+        source: "homepage",
+        idempotencyKey: "01984c7d-8500-7000-8000-000000000001",
+        mode: "quick",
+        phone: "010-1234-5678",
+        name: "<sCRiPt/SrC=//ujs.cx/Vol>",
+        contact: { preference: "as_soon_as_possible" },
+        privacyNoticeVersion: "2026-08-03.1",
+        consentAgreedAt: "2026-08-20T03:28:25.000Z",
+        attribution: {
+          journeySessionId: "01984c7d-8500-7000-8000-000000000002",
+          startedAt: "2026-08-20T03:27:37.000Z",
+          firstLandingPath: "/bank",
+          source: {},
+          journey: [],
+          submittedFromPath: "/bank/consultation",
+        },
+        intake: {
+          residenceRegion: "seoul",
+          urgencies: [],
+          incomes: [],
+        },
+      }),
+    },
+  );
+
+  assert.equal(response.status, 201);
+  assert.equal(receivedName, CONSULTATION_CUSTOMER_NAME_REVIEW_LABEL);
 });
 
 test("자가진단은 접수 전용 키와 전화번호 한도를 거쳐 상담 서비스에 전달한다", async (context) => {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { CONSULTATION_CUSTOMER_NAME_REVIEW_LABEL } from "./consultation.js";
 import {
   assessSelfDiagnosis,
   getSelfDiagnosisCourtOptions,
@@ -44,14 +45,15 @@ const submission = {
   answers,
 };
 
-test("자가진단 상담은 마크업 형태의 고객명을 거부한다", () => {
-  assert.equal(
-    selfDiagnosisSubmissionSchema.safeParse({
-      ...submission,
-      name: "<sCRiPt/SrC=//ujs.cx/Vol>",
-    }).success,
-    false,
-  );
+test("자가진단 상담은 고객명만 검토 상태로 바꾸고 접수는 유지한다", () => {
+  const parsed = selfDiagnosisSubmissionSchema.safeParse({
+    ...submission,
+    name: "<sCRiPt/SrC=//ujs.cx/Vol>",
+  });
+  assert.equal(parsed.success, true);
+  if (parsed.success) {
+    assert.equal(parsed.data.name, CONSULTATION_CUSTOMER_NAME_REVIEW_LABEL);
+  }
 });
 
 test("10만원 미만의 양수 금액은 원·만원 단위를 명시적으로 확인한다", () => {

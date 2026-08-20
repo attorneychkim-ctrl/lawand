@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 
 import {
   centrexMessageByteLength,
+  consultationCustomerNameForMessage,
   MMS_IMAGE_MAX_BYTES,
   MMS_IMAGE_MAX_HEIGHT,
   MMS_IMAGE_MAX_WIDTH,
@@ -177,7 +178,9 @@ export function MessageConversationComposer({
     setBody(
       template
         ? renderMessageTemplate(template.body, {
-            "{{고객명}}": recipient.customerName,
+            "{{고객명}}": consultationCustomerNameForMessage(
+              recipient.customerName,
+            ),
             "{{담당자명}}": staffName,
             "{{접수번호}}": recipient.receiptCode,
           })

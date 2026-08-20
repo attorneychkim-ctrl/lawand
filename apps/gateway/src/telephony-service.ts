@@ -31,9 +31,9 @@ import {
   createTelephonyMessageId,
   CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION,
   DEDUPE_WINDOWS,
+  consultationCustomerNameForMessage,
   formatConsultationCustomerName,
   safeConsultationCustomerDisplayName,
-  safeConsultationCustomerName,
   type DedupeOutcome,
   type ExistingConsultationCandidate,
   type LegalFriendsDirectoryConsultationCreate,
@@ -6291,37 +6291,37 @@ export function createTelephonyService(options: {
           .where(eq(consultations.id, savedConsultationId))
           .limit(1);
         if (consultation) {
-          const customerName = safeConsultationCustomerName(
-              consultation.preferredNameCiphertext && consultation.preferredNameNonce && consultation.preferredNameKeyVersion
-                ? protection.decrypt(
-                    {
-                      ciphertext: consultation.preferredNameCiphertext,
-                      nonce: consultation.preferredNameNonce,
-                      keyVersion: consultation.preferredNameKeyVersion,
-                    },
-                    `consultations.preferred_name:${consultation.id}`,
-                  )
-                : consultation.anonymousLabel,
+          const customerName = consultationCustomerNameForMessage(
+            consultation.preferredNameCiphertext &&
+              consultation.preferredNameNonce &&
+              consultation.preferredNameKeyVersion
+              ? protection.decrypt(
+                  {
+                    ciphertext: consultation.preferredNameCiphertext,
+                    nonce: consultation.preferredNameNonce,
+                    keyVersion: consultation.preferredNameKeyVersion,
+                  },
+                  `consultations.preferred_name:${consultation.id}`,
+                )
+              : consultation.anonymousLabel,
           );
-          if (customerName) {
-            automaticTarget = {
-              source: "consultation",
-              consultationId: consultation.id,
-              customerName,
-              receiptCode: consultation.publicReceiptCode,
-            };
-          }
+          automaticTarget = {
+            source: "consultation",
+            consultationId: consultation.id,
+            customerName,
+            receiptCode: consultation.publicReceiptCode,
+          };
         }
       } else {
         const directory = call.clickToCall?.directoryClient;
         const matchedCase = detail.legalFriendsMatch?.cases[0];
-        const directoryCustomerName = safeConsultationCustomerName(
+        const directoryCustomerName = consultationCustomerNameForMessage(
           directory?.displayName,
         );
-        const matchedCustomerName = safeConsultationCustomerName(
+        const matchedCustomerName = consultationCustomerNameForMessage(
           detail.legalFriendsMatch?.clientName,
         );
-        if (directory && directoryCustomerName) {
+        if (directory) {
           automaticTarget = {
             source: "legal_friends_directory",
             clientIdx: directory.clientIdx,
@@ -6331,8 +6331,7 @@ export function createTelephonyService(options: {
           };
         } else if (
           detail.legalFriendsMatch &&
-          matchedCase &&
-          matchedCustomerName
+          matchedCase
         ) {
           automaticTarget = {
             source: "legal_friends_directory",
@@ -7913,8 +7912,10 @@ export function createTelephonyService(options: {
       .orderBy(desc(consultationRequests.submittedAt))
       .limit(1);
     if (!messageableRequest) return null;
-    const customerName = safeConsultationCustomerName(
-      consultation.preferredNameCiphertext && consultation.preferredNameNonce && consultation.preferredNameKeyVersion
+    const customerName = consultationCustomerNameForMessage(
+      consultation.preferredNameCiphertext &&
+        consultation.preferredNameNonce &&
+        consultation.preferredNameKeyVersion
         ? protection.decrypt(
             {
               ciphertext: consultation.preferredNameCiphertext,
@@ -7925,7 +7926,6 @@ export function createTelephonyService(options: {
           )
         : consultation.anonymousLabel,
     );
-    if (!customerName) return null;
     return requestAutomaticMessage(
       {
         trigger: "consultation_assigned",

@@ -69,6 +69,33 @@ export function safeConsultationCustomerName(
   return value.trim();
 }
 
+export function usableConsultationCustomerName(
+  value: string | null | undefined,
+): string | null {
+  const safeName = safeConsultationCustomerName(value);
+  return safeName === CONSULTATION_CUSTOMER_NAME_REVIEW_LABEL
+    ? null
+    : safeName;
+}
+
+export function consultationCustomerNameForMessage(
+  value: string | null | undefined,
+): string {
+  return usableConsultationCustomerName(value) ?? "고객";
+}
+
+export function reviewableConsultationCustomerName(
+  value: string,
+  maxLength: number,
+): string {
+  const trimmed = value.trim();
+  return trimmed.length > 0 &&
+    trimmed.length <= maxLength &&
+    isSafeConsultationCustomerName(trimmed)
+    ? trimmed
+    : CONSULTATION_CUSTOMER_NAME_REVIEW_LABEL;
+}
+
 export function safeConsultationCustomerDisplayName(
   value: string | null | undefined,
   fallback = CONSULTATION_CUSTOMER_NAME_REVIEW_LABEL,
@@ -90,6 +117,16 @@ export function consultationCustomerNameTextSchema(maxLength: number) {
         .min(1, "고객명을 입력해 주세요.")
         .max(maxLength, `고객명은 ${maxLength}자 이하로 입력해 주세요.`),
     );
+}
+
+export function reviewableConsultationCustomerNameTextSchema(
+  maxLength: number,
+) {
+  return z.string().transform((value) =>
+    value.trim()
+      ? reviewableConsultationCustomerName(value, maxLength)
+      : undefined,
+  );
 }
 
 const consultationCustomerNameSuffixes = {

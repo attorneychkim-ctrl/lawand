@@ -2,9 +2,9 @@ import { z } from "zod";
 
 import { consultationAttributionInputSchema } from "./attribution.js";
 import {
-  consultationCustomerNameTextSchema,
   consultationModeSchema,
   dedupeOutcomeSchema,
+  reviewableConsultationCustomerNameTextSchema,
 } from "./consultation.js";
 import { CURRENT_CONSULTATION_PRIVACY_NOTICE_VERSION } from "./privacy.js";
 import { selfDiagnosisRecordSchema } from "./self-diagnosis.js";
@@ -77,7 +77,7 @@ export const consultationSubmissionSchema = z
     idempotencyKey: z.uuid(),
     mode: consultationModeSchema,
     phone: consultationPhoneSchema,
-    name: consultationCustomerNameTextSchema(30).optional(),
+    name: reviewableConsultationCustomerNameTextSchema(30).optional(),
     contact: z.discriminatedUnion("preference", [
       asapContactSchema,
       scheduledContactSchema,

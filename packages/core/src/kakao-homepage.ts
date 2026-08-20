@@ -1,7 +1,10 @@
 import { z } from "zod";
 
 import { consultationAttributionInputSchema } from "./attribution.js";
-import { consultationCustomerNameTextSchema } from "./consultation.js";
+import {
+  consultationCustomerNameTextSchema,
+  reviewableConsultationCustomerName,
+} from "./consultation.js";
 import {
   consultationPhoneSchema,
   residenceRegionSchema,
@@ -10,8 +13,11 @@ import {
 export const CURRENT_KAKAO_HOMEPAGE_ENTRY_NOTICE_VERSION =
   "2026-08-13.kakao-homepage-entry.4";
 
-const kakaoHomepageDisplayNameSchema =
-  consultationCustomerNameTextSchema(40);
+const kakaoHomepageDisplayNameSchema = z
+  .string()
+  .trim()
+  .min(1, "이름 또는 카카오톡 표시명을 입력해 주세요.")
+  .transform((value) => reviewableConsultationCustomerName(value, 40));
 
 export const kakaoHomepageEntryStatusSchema = z.enum([
   "pending",
@@ -41,7 +47,7 @@ export const kakaoHomepageEntryReceiptSchema = z
 
 export const kakaoHomepageEntryConfirmationSchema = z
   .object({
-    displayName: kakaoHomepageDisplayNameSchema,
+    displayName: consultationCustomerNameTextSchema(40),
   })
   .strict();
 
