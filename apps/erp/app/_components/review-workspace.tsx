@@ -774,6 +774,7 @@ export function ReviewWorkspace({
                       </button>
                     ) : null}
                     <button
+                      aria-busy={templateBusy}
                       className="primary-button"
                       disabled={templateBusy || !templateValid || (!creatingTemplate && !templateDirty)}
                       type="submit"
@@ -877,6 +878,7 @@ export function ReviewWorkspace({
               <p>수신 고객</p><strong>{selectedTargets.size}명</strong>
             </div>
             <button
+              aria-busy={sending}
               className="primary-button"
               disabled={
                 sending ||

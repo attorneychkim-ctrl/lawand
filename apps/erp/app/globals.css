@@ -813,6 +813,11 @@
   padding: 0 16px;
 }
 
+.review-template-form .primary-button:disabled:not([aria-busy="true"]),
+.review-send-dock .primary-button:disabled:not([aria-busy="true"]) {
+  cursor: not-allowed;
+}
+
 .review-customer-picker > form {
   padding: 20px 24px;
   border-bottom: 1px solid var(--line);
