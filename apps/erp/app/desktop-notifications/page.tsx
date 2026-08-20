@@ -2,54 +2,50 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { StaffBar } from "../_components/staff-bar";
-import { getDesktopNotificationDevices } from "../../lib/gateway";
+import {
+  getDesktopNotificationDevices,
+  getDesktopNotificationPreferences,
+} from "../../lib/gateway";
 import { requireAdmin } from "../../lib/session";
 import {
   DesktopNotificationConnection,
   type DesktopNotificationDevicePresentation,
 } from "./desktop-notification-connection";
+import {
+  DesktopNotificationPreferences,
+  type DesktopNotificationPreferenceGroup,
+} from "./desktop-notification-preferences";
 
 export const metadata: Metadata = {
   title: "PC 알림 설정",
 };
 
-type NotificationGroupKind = "consultation" | "phone" | "message" | "review";
-
-type NotificationPreferencePreview = {
-  title: string;
-  description: string;
-  scope: string;
-  recommended: boolean;
-};
-
-const notificationGroups: Array<{
-  kind: NotificationGroupKind;
-  title: string;
-  description: string;
-  items: NotificationPreferencePreview[];
-}> = [
+const notificationGroups: DesktopNotificationPreferenceGroup[] = [
   {
     kind: "consultation",
     title: "상담",
     description: "신규 접수와 담당 상담의 중요한 변화를 구분합니다.",
     items: [
       {
+        key: "consultation.unassigned",
         title: "새 상담 · 배정 전 재요청",
         description: "아직 담당자가 없는 새 접수와 반복 요청을 알립니다.",
         scope: "전체 직원 대상",
-        recommended: false,
+        available: true,
       },
       {
+        key: "consultation.assigned_repeat",
         title: "내 담당 상담 재요청",
         description: "이미 내가 맡은 고객이 상담을 다시 요청하면 알립니다.",
         scope: "현재 담당자",
-        recommended: true,
+        available: true,
       },
       {
+        key: "consultation.assignment",
         title: "새 담당자로 지정",
         description: "담당자 변경이 완료되어 상담이 나에게 넘어오면 알립니다.",
         scope: "새 담당자",
-        recommended: true,
+        available: true,
       },
     ],
   },
@@ -59,22 +55,25 @@ const notificationGroups: Array<{
     description: "전사 대표전화와 나에게 직접 필요한 전화를 나눕니다.",
     items: [
       {
+        key: "phone.targeted_inbound",
         title: "내 담당 고객 · 내 회선 수신",
         description: "내 고객이 전화하거나 내 센트릭스 회선이 울릴 때 알립니다.",
         scope: "담당자 · 회선 소유자",
-        recommended: true,
+        available: true,
       },
       {
+        key: "phone.internal_transfer",
         title: "내선 · 호전환 · 복귀",
         description: "내선 전화가 오거나 고객 전화가 나에게 전달·복귀하면 알립니다.",
         scope: "실제 수신 직원",
-        recommended: true,
+        available: false,
       },
       {
+        key: "phone.all_external",
         title: "모든 대표번호 외부 수신",
         description: "담당 여부와 관계없이 회사 대표번호로 오는 전화를 모두 알립니다.",
         scope: "전체 직원 대상",
-        recommended: false,
+        available: true,
       },
     ],
   },
@@ -84,16 +83,18 @@ const notificationGroups: Array<{
     description: "고객 회신의 실제 업무 담당자를 기준으로 알립니다.",
     items: [
       {
+        key: "message.assigned_reply",
         title: "고객의 새 회신",
         description: "내가 최근 문자를 보냈거나 내가 맡은 상담 고객이 회신하면 알립니다.",
         scope: "최근 발송자 · 상담 담당자",
-        recommended: true,
+        available: true,
       },
       {
+        key: "message.unmatched",
         title: "연결되지 않은 수신문자",
         description: "상담이나 최근 발송자를 찾지 못한 대표번호 문자를 알립니다.",
         scope: "관리자",
-        recommended: false,
+        available: true,
       },
     ],
   },
@@ -103,60 +104,30 @@ const notificationGroups: Array<{
     description: "연결된 사건의 답글 담당자에게 필요한 후기만 알립니다.",
     items: [
       {
+        key: "review.assigned_new",
         title: "내 담당 고객의 새 후기",
         description: "내 사건에 연결된 후기가 등록되어 검수나 공식 답글이 필요하면 알립니다.",
         scope: "연결 사건 담당자",
-        recommended: true,
+        available: true,
       },
     ],
   },
 ];
 
 const laterNotificationItems = [
+  "내선 · 호전환 · 복귀의 정확한 수신 직원 알림",
   "재통화 일정 임박 · 기한 초과",
   "리걸프렌즈 · 알림톡 · 문자 발송 실패",
   "기프티콘 발송 결과 확인 필요",
   "센트릭스 회선 · 대표 수신함 연결 장애",
 ];
 
-function NotificationGroupIcon({ kind }: { kind: NotificationGroupKind }) {
-  return kind === "consultation" ? (
-    <svg aria-hidden="true" viewBox="0 0 24 24">
-      <path d="M5 4.5h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-7l-5 3v-3H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z" />
-      <path d="M8 9h8M8 13h5" />
-    </svg>
-  ) : kind === "phone" ? (
-    <svg aria-hidden="true" viewBox="0 0 24 24">
-      <path d="M7.8 3.8 10 8.5 7.5 10a14.3 14.3 0 0 0 6.5 6.5l1.5-2.5 4.7 2.2v3a1.8 1.8 0 0 1-1.8 1.8A15.4 15.4 0 0 1 3 5.6a1.8 1.8 0 0 1 1.8-1.8h3Z" />
-    </svg>
-  ) : kind === "message" ? (
-    <svg aria-hidden="true" viewBox="0 0 24 24">
-      <path d="M5 4.5h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-8l-5 3v-3H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z" />
-      <path d="M7.5 9h9M7.5 13h6" />
-    </svg>
-  ) : (
-    <svg aria-hidden="true" viewBox="0 0 24 24">
-      <path d="M5 4.5h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-7l-5 3v-3H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z" />
-      <path d="m9 11 2 2 4-4" />
-    </svg>
-  );
-}
-
-function PreviewSwitch({ enabled }: { enabled: boolean }) {
-  return (
-    <span
-      aria-label={`권장 기본값 ${enabled ? "켜짐" : "꺼짐"}`}
-      className={`desktop-alert-preview-switch ${enabled ? "is-on" : "is-off"}`}
-      role="img"
-    >
-      <span aria-hidden="true" />
-    </span>
-  );
-}
-
 export default async function DesktopNotificationsPage() {
   const staff = await requireAdmin();
-  const devices = await getDesktopNotificationDevices();
+  const [devices, preferences] = await Promise.all([
+    getDesktopNotificationDevices(),
+    getDesktopNotificationPreferences(),
+  ]);
   const dateFormatter = new Intl.DateTimeFormat("ko-KR", {
     timeZone: "Asia/Seoul",
     month: "numeric",
@@ -221,12 +192,12 @@ export default async function DesktopNotificationsPage() {
             </svg>
           </span>
           <div>
-            <strong>Windows 1차 연결 기능</strong>
+            <strong>실제 업무 알림 연결 중</strong>
             <p>
-              일회용 기기 연결과 테스트 알림은 작동합니다. 실제 상담·전화·문자·후기 이벤트 자동 연결은 다음 단계에서 시작합니다.
+              상담·외부 수신전화·고객 문자·담당 후기는 실제 내용으로 자동 전달됩니다. 내선·호전환은 다음 연결 단계입니다.
             </p>
           </div>
-          <span className="desktop-alert-stage-badge">개발자 1차</span>
+          <span className="desktop-alert-stage-badge">개발자 2차</span>
         </section>
 
         <div className="desktop-alert-overview-grid">
@@ -293,49 +264,10 @@ export default async function DesktopNotificationsPage() {
           </section>
         </div>
 
-        <section aria-labelledby="desktop-preferences-title" className="desktop-alert-preferences-section">
-          <header className="desktop-alert-section-heading">
-            <div>
-              <p className="section-kicker">NOTIFICATION SCOPE</p>
-              <h2 id="desktop-preferences-title">받을 알림 선택</h2>
-              <p>전사 알림과 나에게 직접 배정된 알림을 구분한 권장 기본값입니다.</p>
-            </div>
-            <div className="desktop-alert-legend" aria-label="권장 기본값 범례">
-              <span><i className="is-on" /> 권장 켜짐</span>
-              <span><i className="is-off" /> 권장 꺼짐</span>
-            </div>
-          </header>
-
-          <div className="desktop-alert-group-grid">
-            {notificationGroups.map((group) => (
-              <article className={`erp-panel desktop-alert-group-card is-${group.kind}`} key={group.kind}>
-                <header>
-                  <span className="desktop-alert-group-icon">
-                    <NotificationGroupIcon kind={group.kind} />
-                  </span>
-                  <div>
-                    <h3>{group.title}</h3>
-                    <p>{group.description}</p>
-                  </div>
-                </header>
-                <div className="desktop-alert-preference-list">
-                  {group.items.map((item) => (
-                    <div className="desktop-alert-preference-row" key={item.title}>
-                      <div>
-                        <div className="desktop-alert-preference-title">
-                          <strong>{item.title}</strong>
-                          <span>{item.scope}</span>
-                        </div>
-                        <p>{item.description}</p>
-                      </div>
-                      <PreviewSwitch enabled={item.recommended} />
-                    </div>
-                  ))}
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
+        <DesktopNotificationPreferences
+          groups={notificationGroups}
+          preferences={preferences}
+        />
 
         <section aria-labelledby="desktop-later-title" className="erp-panel desktop-alert-later-panel">
           <div>
@@ -350,15 +282,6 @@ export default async function DesktopNotificationsPage() {
           </ul>
         </section>
 
-        <div className="desktop-alert-save-bar">
-          <div>
-            <strong>현재는 연결 확인용 테스트 알림만 보냅니다</strong>
-            <span>실제 업무 이벤트와 개인별 알림 선택 저장은 Windows 1차 경로 검증 뒤 연결합니다.</span>
-          </div>
-          <button className="primary-button" disabled type="button">
-            알림 설정 저장
-          </button>
-        </div>
       </main>
     </>
   );

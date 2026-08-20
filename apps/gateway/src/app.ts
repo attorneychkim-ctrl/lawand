@@ -13,6 +13,7 @@ import {
   desktopNotificationDeliveryAckSchema,
   desktopNotificationDeviceTokenSchema,
   desktopNotificationPairingExchangeSchema,
+  desktopNotificationPreferenceUpdateSchema,
   createKakaoSkillResponse,
   kakaoHomepageEntryConfirmationSchema,
   kakaoHomepageEntrySubmissionSchema,
@@ -468,6 +469,7 @@ export function createGatewayServer(options?: {
 
       if (
         url.pathname === "/v1/desktop-notifications/devices" ||
+        url.pathname === "/v1/desktop-notifications/preferences" ||
         url.pathname === "/v1/desktop-notifications/pairings" ||
         url.pathname === "/v1/desktop-notifications/test" ||
         url.pathname.startsWith("/v1/desktop-notifications/devices/")
@@ -492,6 +494,38 @@ export function createGatewayServer(options?: {
         }
         const actor = await options.authService.authenticateSession(sessionToken);
 
+        if (
+          request.method === "GET" &&
+          url.pathname === "/v1/desktop-notifications/preferences"
+        ) {
+          sendJson(
+            response,
+            200,
+            await options.desktopNotificationService.listPreferences(actor),
+          );
+          return;
+        }
+        if (
+          request.method === "PUT" &&
+          url.pathname === "/v1/desktop-notifications/preferences"
+        ) {
+          const parsed = desktopNotificationPreferenceUpdateSchema.safeParse(
+            await readJson(request),
+          );
+          if (!parsed.success) {
+            sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+            return;
+          }
+          sendJson(
+            response,
+            200,
+            await options.desktopNotificationService.updatePreferences(
+              actor,
+              parsed.data,
+            ),
+          );
+          return;
+        }
         if (
           request.method === "GET" &&
           url.pathname === "/v1/desktop-notifications/devices"

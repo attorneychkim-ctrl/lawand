@@ -10856,6 +10856,19 @@ a.inbound-customer:hover { text-decoration: underline; }
   font-weight: 760;
 }
 
+.desktop-alert-preference-title em {
+  display: inline-flex;
+  min-height: 22px;
+  align-items: center;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: .54rem;
+  font-style: normal;
+  font-weight: 800;
+}
+
 .desktop-alert-preference-row p {
   margin: 0;
   color: var(--muted);
@@ -10892,6 +10905,64 @@ a.inbound-customer:hover { text-decoration: underline; }
 
 .desktop-alert-preview-switch.is-on > span {
   transform: translateX(17px);
+}
+
+.desktop-alert-preference-control {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+
+.desktop-alert-preference-control input[type="checkbox"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.desktop-alert-preference-control > span:not(.sr-only) {
+  display: inline-flex;
+  width: 42px;
+  height: 24px;
+  align-items: center;
+  padding: 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  transition: border-color .16s ease, background .16s ease;
+}
+
+.desktop-alert-preference-control > span:not(.sr-only) > span {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgb(22 34 28 / 18%);
+  transition: transform .16s ease;
+}
+
+.desktop-alert-preference-control input:checked + span {
+  border-color: var(--brand);
+  background: var(--brand);
+}
+
+.desktop-alert-preference-control input:checked + span > span {
+  transform: translateX(17px);
+}
+
+.desktop-alert-preference-control input:focus-visible + span {
+  outline: 3px solid color-mix(in srgb, var(--brand) 30%, transparent);
+  outline-offset: 3px;
+}
+
+.desktop-alert-preference-control.is-disabled {
+  cursor: not-allowed;
+  opacity: .48;
 }
 
 .desktop-alert-later-panel {
@@ -10967,6 +11038,16 @@ a.inbound-customer:hover { text-decoration: underline; }
   color: var(--muted);
   font-size: .62rem;
   line-height: 1.45;
+}
+
+.desktop-alert-save-bar .form-success {
+  color: var(--success);
+  font-weight: 750;
+}
+
+.desktop-alert-save-bar .form-error {
+  color: var(--danger);
+  font-weight: 750;
 }
 
 @media (max-width: 900px) {

@@ -19,6 +19,7 @@ import { createPostgresReviewEventSource } from "./review-events.js";
 import { createPostgresMessageEventSource } from "./message-events.js";
 import { createDataProtection } from "./crypto.js";
 import { createDesktopNotificationService } from "./desktop-notification-service.js";
+import { createDesktopNotificationProducer } from "./desktop-notification-producer.js";
 import { createDatabasePoolMonitor } from "./database-pool-monitor.js";
 import { createPublicIntakeProtection } from "./intake-protection.js";
 import { createLegalFriendsClient } from "./legalfriends.js";
@@ -190,6 +191,19 @@ const telephonyDeskEvents = createPostgresTelephonyDeskEventSource({
     console.error("lawand telephony desk realtime source error", error);
   },
 });
+const desktopNotificationProducer = createDesktopNotificationProducer({
+  desktopNotifications: desktopNotificationService,
+  consultationEvents,
+  reviewEvents,
+  messageEvents,
+  telephonyInboundEvents,
+  consultationService: service,
+  reviewManagementService,
+  telephonyService,
+  onError: (error) => {
+    console.error("lawand desktop notification producer error", error);
+  },
+});
 const intakeProtection = createPublicIntakeProtection({
   hmacKey: config.hmacKey,
   // 개인정보 원문 없이 운영 경보로 집계할 수 있는 최소 정보만 남긴다.
@@ -286,6 +300,7 @@ const centrexMessageInboxWorker = config.centrexWorkerEnabled
     })
   : null;
 
+desktopNotificationProducer.start();
 await Promise.all([
   centrexBridgeProvisioning?.start(),
   consultationEvents.start(),
@@ -356,6 +371,7 @@ function shutdown(signal: string) {
         messageEvents.stop(),
         telephonyInboundEvents.stop(),
         telephonyDeskEvents.stop(),
+        desktopNotificationProducer.stop(),
         legalFriendsOutboxWorker?.stop(),
         alimtalkOutboxWorker?.stop(),
         naverBookingImapWorker?.stop(),

@@ -5,7 +5,40 @@ import {
   desktopNotificationDeliveryAckSchema,
   desktopNotificationDeviceTokenSchema,
   desktopNotificationPairingExchangeSchema,
+  desktopNotificationPreferenceDefaults,
+  desktopNotificationPreferenceKeys,
+  desktopNotificationPreferenceUpdateSchema,
 } from "./desktop-notification.js";
+
+test("PC 알림 개인 설정은 모든 고정 이벤트를 빠짐없이 저장한다", () => {
+  const preferences = { ...desktopNotificationPreferenceDefaults };
+  assert.equal(
+    desktopNotificationPreferenceUpdateSchema.safeParse({ preferences })
+      .success,
+    true,
+  );
+  assert.deepEqual(Object.keys(preferences), [
+    ...desktopNotificationPreferenceKeys,
+  ]);
+  assert.equal(
+    desktopNotificationPreferenceUpdateSchema.safeParse({
+      preferences: {
+        ...preferences,
+        "consultation.assignment": "yes",
+      },
+    }).success,
+    false,
+  );
+  const { [desktopNotificationPreferenceKeys[0]]: _missing, ...incomplete } =
+    preferences;
+  void _missing;
+  assert.equal(
+    desktopNotificationPreferenceUpdateSchema.safeParse({
+      preferences: incomplete,
+    }).success,
+    false,
+  );
+});
 
 test("Windows PC 연결은 일회용 코드와 제한된 기기 정보만 받는다", () => {
   assert.deepEqual(

@@ -704,6 +704,38 @@ export const desktopNotificationDevices = pgTable(
   ],
 );
 
+export const desktopNotificationPreferences = pgTable(
+  "desktop_notification_preferences",
+  {
+    staffUserId: uuid("staff_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "cascade" }),
+    eventKey: varchar("event_key", { length: 50 }).notNull(),
+    enabled: boolean("enabled").notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.staffUserId, table.eventKey],
+      name: "desktop_notification_preferences_pk",
+    }),
+    check(
+      "desktop_notification_preferences_event_key_allowed",
+      sql`${table.eventKey} IN (
+        'consultation.unassigned',
+        'consultation.assigned_repeat',
+        'consultation.assignment',
+        'phone.targeted_inbound',
+        'phone.internal_transfer',
+        'phone.all_external',
+        'message.assigned_reply',
+        'message.unmatched',
+        'review.assigned_new'
+      )`,
+    ),
+  ],
+);
+
 export const desktopNotifications = pgTable(
   "desktop_notifications",
   {
@@ -711,6 +743,7 @@ export const desktopNotifications = pgTable(
     staffUserId: uuid("staff_user_id")
       .notNull()
       .references(() => staffUsers.id, { onDelete: "cascade" }),
+    sourceEventId: uuid("source_event_id"),
     eventType: varchar("event_type", { length: 60 }).notNull(),
     payloadCiphertext: bytea("payload_ciphertext").notNull(),
     payloadNonce: bytea("payload_nonce").notNull(),
@@ -726,6 +759,9 @@ export const desktopNotifications = pgTable(
       table.createdAt,
     ),
     index("desktop_notifications_expires_idx").on(table.expiresAt),
+    uniqueIndex("desktop_notifications_staff_source_event_uidx")
+      .on(table.staffUserId, table.sourceEventId)
+      .where(sql`${table.sourceEventId} IS NOT NULL`),
     check(
       "desktop_notifications_event_type_format",
       sql`${table.eventType} ~ '^[a-z][a-z0-9_.-]{2,59}$'`,

@@ -3,7 +3,10 @@ import { createHmac } from "node:crypto";
 import { once } from "node:events";
 import test from "node:test";
 
-import type { PhoneDeskAftercareSave } from "@lawand/core";
+import {
+  desktopNotificationPreferenceDefaults,
+  type PhoneDeskAftercareSave,
+} from "@lawand/core";
 
 import { createGatewayServer } from "./app.js";
 import type { StaffAuthService, StaffPrincipal } from "./auth.js";
@@ -140,6 +143,69 @@ test("ERP 직원은 내부 인증과 세션으로 PC 연결 코드를 발급한�
     (await response.json() as { pairingCode: string }).pairingCode,
     "p".repeat(43),
   );
+});
+
+test("ERP 직원은 본인의 PC 알림 설정만 조회하고 전체 계약으로 저장한다", async (context) => {
+  let updatedActorId = "";
+  const updatedPreferences = {
+    ...desktopNotificationPreferenceDefaults,
+    "consultation.unassigned": true,
+  };
+  const authService = {
+    authenticateSession: async () => realtimeActor,
+  } as unknown as StaffAuthService;
+  const desktopNotificationService = {
+    listPreferences: async (actor: StaffPrincipal) => {
+      assert.equal(actor.id, realtimeActor.id);
+      return { preferences: desktopNotificationPreferenceDefaults };
+    },
+    updatePreferences: async (
+      actor: StaffPrincipal,
+      input: { preferences: typeof updatedPreferences },
+    ) => {
+      updatedActorId = actor.id;
+      assert.deepEqual(input.preferences, updatedPreferences);
+      return input;
+    },
+  } as unknown as DesktopNotificationService;
+  const server = createGatewayServer({
+    authService,
+    desktopNotificationService,
+    internalApiKey: "internal-key",
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const url = `http://127.0.0.1:${address.port}/v1/desktop-notifications/preferences`;
+  const headers = {
+    "content-type": "application/json",
+    "x-lawand-internal-key": "internal-key",
+    "x-lawand-staff-session": "staff-session",
+  };
+
+  const listed = await fetch(url, { headers });
+  assert.equal(listed.status, 200);
+  assert.deepEqual(
+    (await listed.json() as { preferences: unknown }).preferences,
+    desktopNotificationPreferenceDefaults,
+  );
+
+  const invalid = await fetch(url, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify({ preferences: { "consultation.unassigned": true } }),
+  });
+  assert.equal(invalid.status, 400);
+
+  const updated = await fetch(url, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify({ preferences: updatedPreferences }),
+  });
+  assert.equal(updated.status, 200);
+  assert.equal(updatedActorId, realtimeActor.id);
 });
 
 test("Windows 앱은 일회용 연결 뒤 기기 토큰으로 알림을 가져오고 확인한다", async (context) => {

@@ -6,6 +6,7 @@ import { createSingleFlight } from "@lawand/core";
 import type {
   ConsultationCustomerNameTag,
   ConsultationAssigneeTransferInput,
+  DesktopNotificationPreferenceUpdate,
   LegalFriendsConsultationHandling,
   LegalFriendsDirectoryConsultationCreate,
   ResidenceRegion,
@@ -1069,7 +1070,7 @@ export type DesktopNotificationDevice = {
 async function gatewayFetch(
   path: string,
   options: {
-    method?: "GET" | "POST" | "DELETE";
+    method?: "GET" | "POST" | "PUT" | "DELETE";
     body?: unknown;
     signal?: AbortSignal;
     streaming?: boolean;
@@ -2098,6 +2099,27 @@ export async function getDesktopNotificationDevices(): Promise<
     items: DesktopNotificationDevice[];
   }>(await gatewayFetch("/v1/desktop-notifications/devices"));
   return body.items;
+}
+
+export async function getDesktopNotificationPreferences(): Promise<
+  DesktopNotificationPreferenceUpdate["preferences"]
+> {
+  const body = await desktopNotificationResponse<DesktopNotificationPreferenceUpdate>(
+    await gatewayFetch("/v1/desktop-notifications/preferences"),
+  );
+  return body.preferences;
+}
+
+export async function updateDesktopNotificationPreferences(
+  preferences: DesktopNotificationPreferenceUpdate["preferences"],
+): Promise<DesktopNotificationPreferenceUpdate["preferences"]> {
+  const body = await desktopNotificationResponse<DesktopNotificationPreferenceUpdate>(
+    await gatewayFetch("/v1/desktop-notifications/preferences", {
+      method: "PUT",
+      body: { preferences },
+    }),
+  );
+  return body.preferences;
 }
 
 export async function createDesktopNotificationPairing(): Promise<{

@@ -3,10 +3,17 @@
 import { revalidatePath } from "next/cache";
 
 import {
+  desktopNotificationPreferenceDefaults,
+  desktopNotificationPreferenceKeys,
+} from "@lawand/core";
+import type { DesktopNotificationPreferenceUpdate } from "@lawand/core";
+
+import {
   createDesktopNotificationPairing,
   DesktopNotificationGatewayError,
   revokeDesktopNotificationDevice,
   sendDesktopNotificationTest,
+  updateDesktopNotificationPreferences,
 } from "../../lib/gateway";
 import { requireAdmin } from "../../lib/session";
 
@@ -16,6 +23,11 @@ export type DesktopNotificationActionState = {
   pairingCode: string;
   expiresAt: string;
   queuedDeviceCount: number;
+};
+
+export type DesktopNotificationPreferenceActionState = {
+  status: "idle" | "success" | "error";
+  message: string;
 };
 
 const initialDesktopNotificationActionState: DesktopNotificationActionState = {
@@ -104,5 +116,35 @@ export async function revokeDesktopNotificationDeviceAction(
     };
   } catch (error) {
     return actionError(error);
+  }
+}
+
+export async function saveDesktopNotificationPreferencesAction(
+  _previousState: DesktopNotificationPreferenceActionState,
+  formData: FormData,
+): Promise<DesktopNotificationPreferenceActionState> {
+  void _previousState;
+  await requireAdmin();
+  const preferences: DesktopNotificationPreferenceUpdate["preferences"] = {
+    ...desktopNotificationPreferenceDefaults,
+  };
+  for (const eventKey of desktopNotificationPreferenceKeys) {
+    preferences[eventKey] = formData.get(eventKey) === "on";
+  }
+  try {
+    await updateDesktopNotificationPreferences(preferences);
+    revalidatePath("/desktop-notifications");
+    return {
+      status: "success",
+      message: "개인 PC 알림 설정을 저장했습니다.",
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      message:
+        error instanceof DesktopNotificationGatewayError
+          ? error.message
+          : "PC 알림 설정을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+    };
   }
 }

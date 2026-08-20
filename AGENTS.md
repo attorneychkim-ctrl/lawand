@@ -106,6 +106,35 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-20 — Windows 개인 PC 알림 실제 이벤트·개인 설정 2차 후보
+- migration `0072_faulty_tyger_tiger.sql`은 직원별 9개 고정 이벤트 설정과
+  `desktop_notifications.source_event_id`를 추가했다. `(staff_user_id, source_event_id)` partial
+  unique index로 같은 업무 이벤트의 직원별 중복 알림을 막고, 설정 원장은 `lawand_app`에
+  `SELECT`·`INSERT`·`UPDATE`만 허용하며 PUBLIC·viewer에는 열지 않는다. 직접 담당·회선·최근
+  발송자·연결 후기 기본값은 켜짐이고, 전사 신규 상담·모든 외부 수신·미연결 문자는 꺼짐이다.
+- Gateway의 desktop producer가 기존 상담·수신문자·연결 후기·수신전화 이벤트와 기존 대상 판정을
+  재사용한다. 상담은 전사 신규/배정 전 재요청과 담당자의 배정 후 재요청/담당 변경, 문자는 최근
+  발송자·상담 담당자 또는 미연결 관리자, 후기는 연결 사건 담당자, 외부 전화는 고객 담당자·회선
+  소유자와 나머지 전사 선택자를 구분한다. 고객명·전화번호·상담 원문·문자 본문·후기 내용은 알림에
+  넣되 직원별 JSON 전체를 AES-GCM과 notification ID AAD로 암호화한다. 같은 이벤트를 직접 대상과
+  전사 대상으로 나눌 때도 제외 목록과 unique index가 중복을 막는다.
+- ERP 관리자 전용 `/desktop-notifications`는 로그인 계정 본인의 9개 설정을 실제 조회·저장하는
+  스위치로 교체했다. 설정은 그 계정의 연결 PC 전체에 공통 적용된다. 내선·호전환·복귀는 정확한
+  최종 수신 직원 연결 전이라 현재 값을 숨은 필드로 보존하면서 `다음 연결` 비활성 상태로 표시한다.
+  관리 메뉴 전체 공개는 기존 결정대로 모든 경로와 배포가 끝날 때까지 보류한다.
+- 로컬 `lawand_dev`에 migration을 적용해 원장 73개와 재실행 no-op, 새 테이블 최소 권한을 확인했다.
+  개인 설정 API·실제 ERP form으로 9개 저장·조회와 기본값 복원을 검증했다. 배정 상담 1건의 실제
+  재요청 이벤트를 같은 UUID로 두 번 발행했지만 알림·delivery가 각 1건만 생성됐고 실행 중인
+  `DESKTOP_KCH_AI`가 displayed ACK를 반환했다. payload는 514-byte 암호문·12-byte nonce로만
+  저장됐다. 검증용 임시 직원 session·격리 브라우저 profile·cookie는 모두 삭제했다.
+- 전체 5패키지 test·typecheck·lint·production build, DB schema check와 `git diff --check`를
+  통과했다. core 96개·gateway 196개 테스트가 성공했고, Orca 브라우저에서 실제 저장 성공·연결
+  PC·스위치 9개·비활성 1개, 데스크톱과 390px 가로 overflow 0, console·page error 0을 확인했다.
+  내선·호전환, gateway 재시작 사이 event replay, 만료 원장 정리, public pairing rate limit,
+  조직 Authenticode 서명·정식 배포와 macOS는 후속이다. 로컬 ERP 3021·gateway 3022와 Windows
+  알림 앱은 계속 실행 중이고 worker는 꺼져 있다. main 병합·운영 migration·운영 배포는 하지
+  않았다. `PROJECT_PLAN.md`는 v1.71이다.
+
 ### 2026-08-20 — Windows 개인 PC 네이티브 알림 1차 수직 경로 후보
 - ERP 관리자 전용 `/desktop-notifications`를 실제 개인 기기 연결 화면으로 전환했다. 로그인
   직원은 5분짜리 일회용 코드를 발급하고 본인 Windows 기기의 이름·버전·최근 접속·최근 알림을

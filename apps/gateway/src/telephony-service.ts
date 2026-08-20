@@ -49,6 +49,7 @@ import {
   renderMessageTemplate,
   type ResidenceRegion,
   type StaffConsultationCreate,
+  telephonyCallerDisplayName,
 } from "@lawand/core";
 import {
   consultationAssignments,
@@ -2671,7 +2672,7 @@ export function createTelephonyService(options: {
     };
   }
 
-  async function getCallActivitySnapshot(actor: StaffPrincipal) {
+  async function getCallActivitySnapshot(actor: Pick<StaffPrincipal, "id">) {
     const snapshotAt = now();
     const rows = await db
       .select({
@@ -7416,6 +7417,94 @@ export function createTelephonyService(options: {
     };
   }
 
+  async function getDesktopMessageNotification(messageId: string) {
+    const { incoming } = await loadMessageHubRows({
+      outgoingIds: [],
+      incomingIds: [messageId],
+      includeMailboxes: false,
+    });
+    const row = incoming[0];
+    if (!row) return null;
+    const identity = incomingThreadIdentity(row);
+    const body = protection.decrypt(
+      {
+        ciphertext: row.bodyCiphertext,
+        nonce: row.bodyNonce,
+        keyVersion: row.bodyKeyVersion,
+      },
+      `telephony_inbound_messages/${row.id}/body`,
+    );
+    return {
+      id: row.id,
+      threadKey: identity.key,
+      href: `/messages?thread=${encodeURIComponent(identity.key)}`,
+      customerName: identity.customerName,
+      phone: identity.phone,
+      body,
+      targetSource: identity.targetSource,
+      receivedAt: row.receivedAt.toISOString(),
+    };
+  }
+
+  async function getDesktopInboundCallNotification(inboundCallId: string) {
+    const [firstStaff] = await activePhoneDeskStaff();
+    if (!firstStaff) return null;
+    const snapshot = await getCallActivitySnapshot({
+      id: firstStaff.staffUserId,
+    });
+    const activity = snapshot.items.find(
+      (item) =>
+        item.id === inboundCallId || item.observedCallId === inboundCallId,
+    );
+    if (
+      !activity ||
+      activity.scope !== "external" ||
+      activity.direction !== "inbound" ||
+      activity.state !== "ringing" ||
+      activity.notificationKind !== "external_inbound"
+    ) {
+      return null;
+    }
+    const ownerRows = await db
+      .select({ staffUserId: staffTelephonyBindings.staffUserId })
+      .from(staffTelephonyBindings)
+      .innerJoin(
+        staffUsers,
+        and(
+          eq(staffUsers.id, staffTelephonyBindings.staffUserId),
+          eq(staffUsers.status, "active"),
+        ),
+      )
+      .where(
+        and(
+          eq(staffTelephonyBindings.endpointId, activity.currentEndpoint.id),
+          eq(staffTelephonyBindings.isActive, true),
+        ),
+      );
+    const customerUserIds =
+      activity.customerMatch?.source === "consultation"
+        ? activity.customerMatch.consultation.assigneeUserId
+          ? [activity.customerMatch.consultation.assigneeUserId]
+          : []
+        : activity.customerMatch?.source === "legal_friends"
+          ? activity.customerMatch.cases.flatMap((item) => item.staffUserIds)
+          : [];
+    return {
+      id: activity.id,
+      customerName: telephonyCallerDisplayName(activity.customerMatch),
+      remotePhone: activity.remotePhone,
+      callRegion: activity.callRegion,
+      lineLabel: activity.currentEndpoint.label,
+      directTargetUserIds: [
+        ...new Set([
+          ...ownerRows.map((row) => row.staffUserId),
+          ...customerUserIds,
+        ]),
+      ],
+      occurredAt: activity.lastEventAt,
+    };
+  }
+
   async function listUnreadMessageNotifications(actor: StaffPrincipal) {
     const rows = await db
       .select({ messageId: telephonyInboundMessageNotifications.inboundMessageId })
@@ -9258,6 +9347,8 @@ export function createTelephonyService(options: {
     getMessageDutyCount,
     getMessageHub,
     getMessageNotification,
+    getDesktopMessageNotification,
+    getDesktopInboundCallNotification,
     getMessageThread,
     listMessageTemplates,
     listUnreadMessageNotifications,

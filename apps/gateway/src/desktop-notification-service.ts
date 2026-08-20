@@ -3,12 +3,20 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type {
   DesktopNotificationDeliveryAck,
   DesktopNotificationPairingExchange,
+  DesktopNotificationPreferenceKey,
+  DesktopNotificationPreferenceUpdate,
+} from "@lawand/core";
+import {
+  desktopNotificationPreferenceDefaults,
+  desktopNotificationPreferenceKeySchema,
+  desktopNotificationPreferenceKeys,
 } from "@lawand/core";
 import {
   and,
   asc,
   eq,
   gt,
+  inArray,
   isNull,
   sql,
 } from "drizzle-orm";
@@ -16,6 +24,7 @@ import {
   desktopNotificationDeliveries,
   desktopNotificationDevices,
   desktopNotificationPairings,
+  desktopNotificationPreferences,
   desktopNotifications,
   staffAuditLogs,
   staffProfiles,
@@ -34,6 +43,8 @@ type DatabaseTransaction = Parameters<
 const PAIRING_DURATION_MS = 5 * 60 * 1_000;
 const TEST_NOTIFICATION_DURATION_MS = 15 * 60 * 1_000;
 const DEVICE_TOUCH_INTERVAL_MS = 60 * 1_000;
+const uuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export type DesktopNotificationPayload = {
   title: string;
@@ -52,6 +63,18 @@ export type DesktopNotificationDeviceView = {
   lastSeenAt: string | null;
   lastDeliveredAt: string | null;
   createdAt: string;
+};
+
+export type DesktopNotificationEventQueueInput = {
+  sourceEventId: string;
+  eventType: string;
+  preferenceKey: DesktopNotificationPreferenceKey;
+  targetUserIds?: readonly string[];
+  excludedUserIds?: readonly string[];
+  payload: Omit<DesktopNotificationPayload, "deepLink"> & {
+    deepLinkPath: string;
+  };
+  expiresAt: Date;
 };
 
 export class DesktopNotificationError extends Error {
@@ -95,6 +118,41 @@ function normalizedBaseUrl(value: string): string {
     throw new Error("LAWAND_ERP_BASE_URL 형식이 올바르지 않습니다.");
   }
   return url.origin;
+}
+
+function payloadForQueue(
+  input: DesktopNotificationEventQueueInput["payload"],
+  erpBaseUrl: string,
+): DesktopNotificationPayload {
+  if (
+    input.title.length < 1 ||
+    input.title.length > 120 ||
+    input.body.length < 1 ||
+    input.body.length > 2_000 ||
+    !["consultation", "phone", "message", "review"].includes(input.category) ||
+    !input.deepLinkPath.startsWith("/") ||
+    input.deepLinkPath.startsWith("//")
+  ) {
+    throw new DesktopNotificationError(
+      500,
+      "invalid_notification_payload",
+      "생성할 PC 알림 내용 형식이 올바르지 않습니다.",
+    );
+  }
+  const deepLink = new URL(input.deepLinkPath, erpBaseUrl);
+  if (deepLink.origin !== erpBaseUrl) {
+    throw new DesktopNotificationError(
+      500,
+      "invalid_notification_payload",
+      "PC 알림 이동 주소가 ERP 주소와 일치하지 않습니다.",
+    );
+  }
+  return {
+    title: input.title,
+    body: input.body,
+    category: input.category,
+    deepLink: deepLink.toString(),
+  };
 }
 
 function safePayload(raw: string, erpBaseUrl: string): DesktopNotificationPayload {
@@ -351,6 +409,181 @@ export function createDesktopNotificationService(options: {
         createdAt: row.createdAt.toISOString(),
       })),
     };
+  }
+
+  async function listPreferences(actor: StaffPrincipal) {
+    const rows = await db
+      .select({
+        eventKey: desktopNotificationPreferences.eventKey,
+        enabled: desktopNotificationPreferences.enabled,
+      })
+      .from(desktopNotificationPreferences)
+      .where(eq(desktopNotificationPreferences.staffUserId, actor.id));
+    const preferences: Record<DesktopNotificationPreferenceKey, boolean> = {
+      ...desktopNotificationPreferenceDefaults,
+    };
+    for (const row of rows) {
+      const parsed = desktopNotificationPreferenceKeySchema.safeParse(
+        row.eventKey,
+      );
+      if (parsed.success) preferences[parsed.data] = row.enabled;
+    }
+    return { preferences };
+  }
+
+  async function updatePreferences(
+    actor: StaffPrincipal,
+    input: DesktopNotificationPreferenceUpdate,
+  ) {
+    const now = new Date();
+    await db.transaction(async (tx) => {
+      for (const eventKey of desktopNotificationPreferenceKeys) {
+        await tx
+          .insert(desktopNotificationPreferences)
+          .values({
+            staffUserId: actor.id,
+            eventKey,
+            enabled: input.preferences[eventKey],
+            createdAt: now,
+            updatedAt: now,
+          })
+          .onConflictDoUpdate({
+            target: [
+              desktopNotificationPreferences.staffUserId,
+              desktopNotificationPreferences.eventKey,
+            ],
+            set: {
+              enabled: input.preferences[eventKey],
+              updatedAt: now,
+            },
+          });
+      }
+      await addAudit({
+        actorUserId: actor.id,
+        action: "desktop_notification.preferences.updated",
+        targetType: "desktop_notification_preferences",
+        targetId: actor.id,
+        metadata: {
+          enabledKeys: desktopNotificationPreferenceKeys.filter(
+            (eventKey) => input.preferences[eventKey],
+          ),
+        },
+        occurredAt: now,
+        transaction: tx,
+      });
+    });
+    return listPreferences(actor);
+  }
+
+  async function queueEvent(input: DesktopNotificationEventQueueInput) {
+    if (
+      !uuidPattern.test(input.sourceEventId) ||
+      !/^[a-z][a-z0-9_.-]{2,59}$/.test(input.eventType) ||
+      input.expiresAt.getTime() <= Date.now()
+    ) {
+      throw new DesktopNotificationError(
+        500,
+        "invalid_notification_payload",
+        "PC 알림 이벤트 형식이 올바르지 않습니다.",
+      );
+    }
+    const targetUserIds = input.targetUserIds
+      ? [...new Set(input.targetUserIds.filter((id) => uuidPattern.test(id)))]
+      : null;
+    if (targetUserIds?.length === 0) {
+      return { queuedUserCount: 0, queuedDeviceCount: 0 };
+    }
+    const excludedUserIds = new Set(input.excludedUserIds ?? []);
+    const rows = await db
+      .select({
+        deviceId: desktopNotificationDevices.id,
+        staffUserId: desktopNotificationDevices.staffUserId,
+        preferenceEnabled: desktopNotificationPreferences.enabled,
+      })
+      .from(desktopNotificationDevices)
+      .innerJoin(
+        staffUsers,
+        and(
+          eq(staffUsers.id, desktopNotificationDevices.staffUserId),
+          eq(staffUsers.status, "active"),
+        ),
+      )
+      .leftJoin(
+        desktopNotificationPreferences,
+        and(
+          eq(
+            desktopNotificationPreferences.staffUserId,
+            desktopNotificationDevices.staffUserId,
+          ),
+          eq(desktopNotificationPreferences.eventKey, input.preferenceKey),
+        ),
+      )
+      .where(
+        and(
+          eq(desktopNotificationDevices.status, "active"),
+          ...(targetUserIds
+            ? [inArray(desktopNotificationDevices.staffUserId, targetUserIds)]
+            : []),
+        ),
+      );
+    const devicesByUser = new Map<string, string[]>();
+    for (const row of rows) {
+      if (
+        excludedUserIds.has(row.staffUserId) ||
+        !(row.preferenceEnabled ??
+          desktopNotificationPreferenceDefaults[input.preferenceKey])
+      ) {
+        continue;
+      }
+      const deviceIds = devicesByUser.get(row.staffUserId) ?? [];
+      deviceIds.push(row.deviceId);
+      devicesByUser.set(row.staffUserId, deviceIds);
+    }
+    if (devicesByUser.size === 0) {
+      return { queuedUserCount: 0, queuedDeviceCount: 0 };
+    }
+    const payload = payloadForQueue(input.payload, erpBaseUrl);
+    const now = new Date();
+    let queuedUserCount = 0;
+    let queuedDeviceCount = 0;
+    await db.transaction(async (tx) => {
+      for (const [staffUserId, deviceIds] of devicesByUser) {
+        const notificationId = randomUUID();
+        const encrypted = protection.encrypt(
+          JSON.stringify(payload),
+          payloadContext(notificationId),
+        );
+        const inserted = await tx
+          .insert(desktopNotifications)
+          .values({
+            id: notificationId,
+            staffUserId,
+            sourceEventId: input.sourceEventId,
+            eventType: input.eventType,
+            payloadCiphertext: encrypted.ciphertext,
+            payloadNonce: encrypted.nonce,
+            payloadKeyVersion: encrypted.keyVersion,
+            expiresAt: input.expiresAt,
+            createdAt: now,
+          })
+          .onConflictDoNothing()
+          .returning({ id: desktopNotifications.id });
+        if (!inserted[0]) continue;
+        await tx.insert(desktopNotificationDeliveries).values(
+          deviceIds.map((deviceId) => ({
+            id: randomUUID(),
+            notificationId,
+            deviceId,
+            status: "pending",
+            createdAt: now,
+            updatedAt: now,
+          })),
+        );
+        queuedUserCount += 1;
+        queuedDeviceCount += deviceIds.length;
+      }
+    });
+    return { queuedUserCount, queuedDeviceCount };
   }
 
   async function revokeDevice(actor: StaffPrincipal, deviceId: string) {
@@ -642,9 +875,12 @@ export function createDesktopNotificationService(options: {
     createTestNotification,
     disconnectCurrentDevice,
     listDevices,
+    listPreferences,
     pairDevice,
     pollNext,
+    queueEvent,
     revokeDevice,
+    updatePreferences,
   };
 }
 

@@ -1,5 +1,59 @@
 import { z } from "zod";
 
+export const desktopNotificationPreferenceKeys = [
+  "consultation.unassigned",
+  "consultation.assigned_repeat",
+  "consultation.assignment",
+  "phone.targeted_inbound",
+  "phone.internal_transfer",
+  "phone.all_external",
+  "message.assigned_reply",
+  "message.unmatched",
+  "review.assigned_new",
+] as const;
+
+export const desktopNotificationPreferenceKeySchema = z.enum(
+  desktopNotificationPreferenceKeys,
+);
+
+export type DesktopNotificationPreferenceKey = z.infer<
+  typeof desktopNotificationPreferenceKeySchema
+>;
+
+export const desktopNotificationPreferenceDefaults = {
+  "consultation.unassigned": false,
+  "consultation.assigned_repeat": true,
+  "consultation.assignment": true,
+  "phone.targeted_inbound": true,
+  "phone.internal_transfer": true,
+  "phone.all_external": false,
+  "message.assigned_reply": true,
+  "message.unmatched": false,
+  "review.assigned_new": true,
+} as const satisfies Record<DesktopNotificationPreferenceKey, boolean>;
+
+export const desktopNotificationPreferenceUpdateSchema = z
+  .object({
+    preferences: z
+      .object({
+        "consultation.unassigned": z.boolean(),
+        "consultation.assigned_repeat": z.boolean(),
+        "consultation.assignment": z.boolean(),
+        "phone.targeted_inbound": z.boolean(),
+        "phone.internal_transfer": z.boolean(),
+        "phone.all_external": z.boolean(),
+        "message.assigned_reply": z.boolean(),
+        "message.unmatched": z.boolean(),
+        "review.assigned_new": z.boolean(),
+      })
+      .strict(),
+  })
+  .strict();
+
+export type DesktopNotificationPreferenceUpdate = z.infer<
+  typeof desktopNotificationPreferenceUpdateSchema
+>;
+
 export const desktopNotificationPairingCodeSchema = z
   .string()
   .trim()
