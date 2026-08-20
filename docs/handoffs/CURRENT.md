@@ -61,7 +61,10 @@
   반영됐다. 런타임 코드·migration이 없어 현재 EC2 릴리스는 유지했다.
 - 전수 대조 시 `LegalFlow/clientname_sCRiPt`와 `LegalFlow/phone_alarm`은 사용자의 “이것만”
   지시에 따라 명시적 제외했다. 두 브랜치는 깨끗하고 원격과 일치한다. `LegalFlow/web_hook`의
-  원격 HEAD는 `main` ancestor지만 로컬 추적 변경 4건은 진행 중으로 보존했다.
+  원격 HEAD는 `main` ancestor지만 로컬 변경은 진행 중으로 보존했다. 그 워크트리의 미커밋
+  `0071_dashing_skaar.sql`·`0072_faulty_tyger_tiger.sql`은 이전 기준선에서 생성돼 현재
+  `main`의 `0071`과 `sms_consult_complete`의 `0072`에 번호·journal이 충돌한다. 메인 통합 전에
+  최신 `main`과 승인된 migration 순서 위에서 `web_hook` migration을 재생성해야 한다.
 - 다음 작업 전에 `PROJECT_PLAN.md`, 이 문서, 해당 분야의 상세 문서만 읽는다.
 - 사용자 확인에 따라 `LegalFlow/sms_consult_complete`는 Orca 관리 워크트리에서 작업했다.
   기능 commit `abcd58bd9970f823dbb76369b356952edbb65d16`은 문자 템플릿 모달 스타일,
