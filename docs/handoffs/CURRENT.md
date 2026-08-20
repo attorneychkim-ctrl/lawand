@@ -5,7 +5,8 @@
 
 ## 운영 기준선
 
-- Git `main`: `bfe1519af7b060907b3531965e7800d85957b312`.
+- 최근 컨텍스트 통합: `main` merge `38fc1dc6476ea7108ee5846e45d23618741a47fa`.
+  실제 원격 HEAD는 기록 커밋이 뒤따를 수 있으므로 `git rev-parse origin/main`으로 확인한다.
 - 최신 통합 코드 기준: `f8bd74d04ac240fe6c9ed02759b795b069140559`.
 - 최신 운영 릴리스: `20260820T034100Z-three-worktrees-v1`.
   - gateway·ERP를 같은 릴리스 ID로 전환했다.
@@ -16,8 +17,9 @@
 - 최신 릴리스 검증 시 정식·EIP gateway health와 ERP 로그인은 3회 연속 200, 앱·Caddy
   active, restart 0, error journal 0이었다. 최종 request/LISTEN waiting은 `0/20`·`0/5`,
   CloudWatch는 OK 14·ALARM 0이었다.
-- GitHub Actions 검증 run `32328367486`과 전체 5패키지 test·typecheck·lint·production
-  build, DB schema check가 성공했다.
+- 최신 런타임 릴리스 검증 run은 `32328367486`이다. 컨텍스트 통합에서는 Actions
+  `32337680968`(문서 검사)·`32337680942`(전체 소스 검증과 ARM64 게시)가 성공했다.
+  새 SHA 이미지는 ECR에 게시만 했고 EC2 digest는 전환하지 않았다.
 
 ## 현재 제품 상태
 
@@ -57,6 +59,9 @@
 
 - 이 저장소의 관리자는 HERDR다. 이 문서 압축 세션에서는 `HERDR_ENV`가 비어 있고 HERDR
   서버가 실행 중이 아니어서 Git worktree와 원격 브랜치만 읽기 전용으로 대조했다.
-- 작업 브랜치는 `LegalFlow/project_md_compact`다. 이 브랜치에서는 문서 구조 개편·검증·
-  commit·push까지만 수행하고 main 병합이나 운영 배포를 하지 않는다.
+- `LegalFlow/project_md_compact`는 `main` merge `38fc1dc6476ea7108ee5846e45d23618741a47fa`로
+  반영됐다. 런타임 코드·migration이 없어 현재 EC2 릴리스는 유지했다.
+- 전수 대조 시 `LegalFlow/clientname_sCRiPt`와 `LegalFlow/phone_alarm`은 사용자의 “이것만”
+  지시에 따라 명시적 제외했다. 두 브랜치는 깨끗하고 원격과 일치한다. `LegalFlow/web_hook`의
+  원격 HEAD는 `main` ancestor지만 로컬 추적 변경 4건은 진행 중으로 보존했다.
 - 다음 작업 전에 `PROJECT_PLAN.md`, 이 문서, 해당 분야의 상세 문서만 읽는다.

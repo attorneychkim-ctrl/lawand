@@ -29,7 +29,7 @@
 
 | 항목 | 현재 기준 |
 | --- | --- |
-| Git `main` | `bfe1519af7b060907b3531965e7800d85957b312` |
+| Git `main` | 최근 컨텍스트 통합 `38fc1dc6476ea7108ee5846e45d23618741a47fa`; 실제 HEAD는 `git rev-parse origin/main`으로 확인 |
 | 최신 통합 코드 | `f8bd74d04ac240fe6c9ed02759b795b069140559` |
 | 최신 운영 릴리스 | `20260820T034100Z-three-worktrees-v1` |
 | 운영 DB | PostgreSQL, migration 72개 (`0000..0071`) |
@@ -43,6 +43,10 @@
 ERP의 개인 웹훅 설정은 관리자 전용 비활성 미리보기이며 DB·API·실제 전송은 없다. 최신
 health·digest·snapshot·migration 해시와 검증 결과는
 [`docs/handoffs/CURRENT.md`](docs/handoffs/CURRENT.md)를 따른다.
+
+컨텍스트 문서 구조 개편은 `38fc1dc6476ea7108ee5846e45d23618741a47fa`로 `main`과 CI에
+반영됐다. 애플리케이션 코드·DB·운영 설정은 바뀌지 않아 ECR에 게시된 같은 SHA의 이미지를
+EC2에 전환하지 않았고 위 운영 릴리스와 런타임 기준선은 그대로다.
 
 ## 2. 저장소와 런타임 경계
 
