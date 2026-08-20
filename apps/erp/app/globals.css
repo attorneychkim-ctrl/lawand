@@ -7617,6 +7617,24 @@ a.inbound-customer:hover { text-decoration: underline; }
 .phone-aftercare-message-action strong { color: var(--ink); font-size: .74rem; }
 .phone-aftercare-message-action span,
 .phone-aftercare-message-unavailable small { color: var(--muted); font-size: .64rem; line-height: 1.45; }
+.phone-aftercare-automation-options {
+  display: grid;
+  flex: 1 1 560px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.phone-aftercare-automation-options.is-single {
+  flex: 0 1 360px;
+  grid-template-columns: minmax(260px, 1fr);
+}
+.phone-aftercare-automation-choice { display: grid; align-content: start; gap: 5px; }
+.phone-aftercare-automation-choice > small {
+  color: var(--muted);
+  font-size: .6rem;
+  line-height: 1.45;
+}
+.phone-aftercare-automation-choice.is-unavailable { opacity: .68; }
+.phone-aftercare-automation-choice .phone-aftercare-choice { height: 100%; }
 .phone-aftercare-message-unavailable { display: grid; justify-items: end; gap: 5px; }
 .phone-aftercare-message-unavailable .message-button:disabled {
   cursor: not-allowed;
@@ -8049,6 +8067,7 @@ a.inbound-customer:hover { text-decoration: underline; }
 .message-compose-form select,
 .message-compose-form textarea,
 .message-template-editor input,
+.message-template-editor select,
 .message-template-editor textarea {
   width: 100%;
   border: 1px solid var(--line);
@@ -8060,12 +8079,14 @@ a.inbound-customer:hover { text-decoration: underline; }
   outline: none;
 }
 .message-compose-form select,
-.message-template-editor input { min-height: 43px; padding: 0 12px; }
+.message-template-editor input,
+.message-template-editor select { min-height: 43px; padding: 0 12px; }
 .message-compose-form textarea,
 .message-template-editor textarea { resize: vertical; padding: 12px; line-height: 1.65; }
 .message-compose-form select:focus,
 .message-compose-form textarea:focus,
 .message-template-editor input:focus,
+.message-template-editor select:focus,
 .message-template-editor textarea:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
 
 .message-compose-meta,
@@ -8134,7 +8155,28 @@ a.inbound-customer:hover { text-decoration: underline; }
   font-weight: 800;
 }
 .message-image-field small { color: var(--muted); font-weight: 650; }
-.message-image-field input { padding: 9px 10px; }
+.message-image-field input {
+  min-height: 48px;
+  padding: 5px 6px;
+  cursor: pointer;
+}
+.message-image-field input::file-selector-button {
+  min-height: 36px;
+  margin-right: 10px;
+  padding: 0 13px;
+  border: 1px solid color-mix(in srgb, var(--brand) 34%, var(--line));
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--brand-strong);
+  cursor: pointer;
+  font: inherit;
+  font-size: .68rem;
+  font-weight: 820;
+}
+.message-image-field input:hover::file-selector-button {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+}
 .message-image-selected { padding: 9px 11px; border-radius: 9px; background: var(--brand-soft); color: var(--brand-strong); font-size: .68rem; }
 .message-template-editor form > .primary-button { justify-self: end; min-width: 160px; padding-inline: 18px; }
 .message-template-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 20px; }
@@ -9016,6 +9058,8 @@ a.inbound-customer:hover { text-decoration: underline; }
   }
   .phone-aftercare-results { grid-template-columns: 1fr 1fr; }
   .phone-aftercare-message-action { align-items: stretch; flex-direction: column; }
+  .phone-aftercare-automation-options,
+  .phone-aftercare-automation-options.is-single { grid-template-columns: 1fr; }
   .phone-aftercare-message-action .message-button { width: 100%; }
   .phone-aftercare-message-unavailable { justify-items: stretch; }
   .phone-aftercare-grid { grid-template-columns: 1fr; }

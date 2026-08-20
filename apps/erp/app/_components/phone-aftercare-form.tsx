@@ -128,6 +128,86 @@ type LinkedConsultationContext = {
   assigneeDisplayName: string | null;
 };
 
+type AftercareAutomation = NonNullable<
+  PhoneDeskCallDetail["aftercareAutomations"]
+>[number];
+type AftercareAutomationKind = AftercareAutomation["kind"];
+type AutomationSelectionKey = `${PhoneDeskCallResult}:${AftercareAutomationKind}`;
+
+function automationSelectionKey(
+  result: PhoneDeskCallResult,
+  kind: AftercareAutomationKind,
+): AutomationSelectionKey {
+  return `${result}:${kind}`;
+}
+
+function automationDefaultSelected(
+  automation: AftercareAutomation | null,
+  available: boolean,
+) {
+  return Boolean(
+    available &&
+      automation?.latest?.status !== "sent" &&
+      automation?.latest?.status !== "pending" &&
+      automation?.latest?.status !== "unknown",
+  );
+}
+
+function AftercareAutomationChoice({
+  automation,
+  available,
+  checked,
+  label,
+  unavailableCopy,
+  onChange,
+}: {
+  automation: AftercareAutomation | null;
+  available: boolean;
+  checked: boolean;
+  label: string;
+  unavailableCopy: string;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <div
+      className={`phone-aftercare-automation-choice${available ? "" : " is-unavailable"}`}
+    >
+      <label className="phone-aftercare-choice">
+        <input
+          checked={available && checked}
+          disabled={!available || automation?.latest?.status === "pending"}
+          onChange={(event) => onChange(event.target.checked)}
+          type="checkbox"
+        />
+        <span>
+          <strong>{label}</strong>
+          <span>
+            {available
+              ? `사용 템플릿: ${automation?.templateName}`
+              : unavailableCopy}
+          </span>
+        </span>
+      </label>
+      {automation?.latest ? (
+        <small>
+          {new Intl.DateTimeFormat("ko-KR", {
+            timeZone: "Asia/Seoul",
+            dateStyle: "medium",
+            timeStyle: "short",
+          }).format(new Date(automation.latest.occurredAt))}
+          {automation.latest.status === "sent"
+            ? " 발송 완료 · 기본 체크가 해제되었습니다."
+            : automation.latest.status === "pending"
+              ? " 발송 처리 중"
+              : automation.latest.status === "unknown"
+                ? " 발송 결과 확인 필요 · 중복 발송 여부를 먼저 확인하세요."
+                : " 이전 발송 실패 · 다시 시도할 수 있습니다."}
+        </small>
+      ) : null}
+    </div>
+  );
+}
+
 export const phoneDeskResultLabels = Object.fromEntries(
   [...resultOptions, ...internalResultOptions].map((item) => [item.value, item.label]),
 ) as Record<PhoneDeskCallResult, string>;
@@ -394,7 +474,7 @@ export function PhoneAftercareForm({
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
   const [automaticSelections, setAutomaticSelections] = useState<
-    Partial<Record<PhoneDeskCallResult, boolean>>
+    Partial<Record<AutomationSelectionKey, boolean>>
   >({});
 
   useEffect(() => {
@@ -428,21 +508,37 @@ export function PhoneAftercareForm({
     followUpDueAt && minimumDueAt && followUpDueAt >= minimumDueAt,
   );
   const safeMessageTarget = getPhoneDeskContactTarget(detail);
-  const selectedAutomation = detail.aftercareAutomations?.find(
+  const selectedAutomations = detail.aftercareAutomations?.filter(
     (item) => item.result === result,
+  ) ?? [];
+  const messageTemplateAutomation = selectedAutomations.find(
+    (item) => item.kind === "message_template",
   ) ?? null;
-  const automaticMessageAvailable = Boolean(
-    safeMessageTarget && selectedAutomation?.available,
+  const reviewRequestAutomation = selectedAutomations.find(
+    (item) => item.kind === "review_request",
+  ) ?? null;
+  const messageTemplateAvailable = Boolean(
+    safeMessageTarget && messageTemplateAutomation?.available,
   );
-
-  const automaticMessageDefault = Boolean(
-    automaticMessageAvailable &&
-      selectedAutomation?.latest?.status !== "sent" &&
-      selectedAutomation?.latest?.status !== "pending" &&
-      selectedAutomation?.latest?.status !== "unknown",
+  const reviewRequestAvailable = Boolean(
+    safeMessageTarget && reviewRequestAutomation?.available,
   );
-  const sendAutomaticMessage = result
-    ? automaticSelections[result] ?? automaticMessageDefault
+  const messageTemplateSelectionKey = result
+    ? automationSelectionKey(result, "message_template")
+    : null;
+  const reviewRequestSelectionKey = result
+    ? automationSelectionKey(result, "review_request")
+    : null;
+  const sendMessageTemplate = messageTemplateSelectionKey
+    ? automaticSelections[messageTemplateSelectionKey] ??
+      automationDefaultSelected(
+        messageTemplateAutomation,
+        messageTemplateAvailable,
+      )
+    : false;
+  const sendReviewRequest = reviewRequestSelectionKey
+    ? automaticSelections[reviewRequestSelectionKey] ??
+      automationDefaultSelected(reviewRequestAutomation, reviewRequestAvailable)
     : false;
   const normalizedOriginalPhone = phonebookOriginalPhone.replace(/\D/g, "");
   const normalizedConnectedPhone = phonebookConnectedPhone.replace(/\D/g, "");
@@ -589,7 +685,10 @@ export function PhoneAftercareForm({
               : {}),
           }
           : { mode: "none" },
-      automaticMessage: { enabled: sendAutomaticMessage && automaticMessageAvailable },
+      automaticMessage: {
+        enabled: sendMessageTemplate && messageTemplateAvailable,
+        reviewRequestEnabled: sendReviewRequest && reviewRequestAvailable,
+      },
     };
     try {
       const response = await fetch(
@@ -606,6 +705,12 @@ export function PhoneAftercareForm({
       if (!response.ok || !body?.call) {
         throw new Error(body?.message ?? "통화 후처리를 저장하지 못했습니다.");
       }
+      setAutomaticSelections((current) => {
+        const next = { ...current };
+        if (messageTemplateSelectionKey) delete next[messageTemplateSelectionKey];
+        if (reviewRequestSelectionKey) delete next[reviewRequestSelectionKey];
+        return next;
+      });
       setSaved(true);
       onSaved?.(body);
       if (returnTo) {
@@ -657,50 +762,67 @@ export function PhoneAftercareForm({
         <section className="phone-aftercare-message-action">
           <div>
             <strong>고객에게 문자 남기기</strong>
-            <span>{automaticMessageAvailable
-              ? selectedAutomation?.kind === "review_request"
-                ? "후기관리 → 후기 요청 → 기본 템플릿의 ‘상담을 받은 뒤’ 내용과 개인 후기 작성 링크가 발송됩니다."
-                : result === "manager_callback_requested"
+            <span>{result === "consultation_completed"
+              ? messageTemplateAvailable && reviewRequestAvailable
+                ? "후처리를 저장하면 선택한 상담완료 안내와 후기 요청 문자가 각각 발송됩니다."
+                : reviewRequestAvailable
+                  ? "후기 요청 문자와 개인 후기 작성 링크를 발송할 수 있습니다."
+                  : messageTemplateAvailable
+                    ? "후처리를 저장하면 상담완료 자동발송 템플릿이 고객에게 발송됩니다."
+                    : "상담완료 템플릿 또는 후기 요청 대상을 확인한 뒤 발송할 수 있습니다."
+              : messageTemplateAvailable
+                ? result === "manager_callback_requested"
                   ? "후처리를 저장하면 등록된 내 템플릿과 재연락 일정·담당자가 고객에게 발송됩니다."
                   : "후처리를 저장하면 이 결과에 등록된 내 문자 템플릿이 고객에게 발송됩니다."
               : "통화 결과와 관계없이 안내나 부재 메시지를 바로 보낼 수 있습니다."}</span>
           </div>
-          {automaticMessageAvailable ? (
-            <div className="phone-aftercare-message-unavailable">
-              <label className="phone-aftercare-choice">
-                <input
-                  checked={sendAutomaticMessage}
-                  disabled={selectedAutomation?.latest?.status === "pending"}
-                  onChange={(event) => {
-                    if (!result) return;
-                    setAutomaticSelections((current) => ({
-                      ...current,
-                      [result]: event.target.checked,
-                    }));
-                  }}
-                  type="checkbox"
-                />
-                <span>
-                  <strong>{selectedAutomation?.kind === "review_request" ? "후기 요청 문자 발송" : "자동문자 발송 예정"}</strong>
-                  <span>사용 템플릿: {selectedAutomation?.templateName}</span>
-                </span>
-              </label>
-              {selectedAutomation?.latest ? (
-                <small>
-                  {new Intl.DateTimeFormat("ko-KR", {
-                    timeZone: "Asia/Seoul",
-                    dateStyle: "medium",
-                    timeStyle: "short",
-                  }).format(new Date(selectedAutomation.latest.occurredAt))}
-                  {selectedAutomation.latest.status === "sent"
-                    ? " 발송 완료 · 다시 보내려면 체크하세요."
-                    : selectedAutomation.latest.status === "pending"
-                      ? " 발송 처리 중"
-                      : selectedAutomation.latest.status === "unknown"
-                        ? " 발송 결과 확인 필요 · 중복 발송 여부를 먼저 확인하세요."
-                        : " 이전 발송 실패 · 다시 시도할 수 있습니다."}
-                </small>
-              ) : null}
+          {result === "consultation_completed" ? (
+            <div className="phone-aftercare-automation-options">
+              <AftercareAutomationChoice
+                automation={messageTemplateAutomation}
+                available={messageTemplateAvailable}
+                checked={sendMessageTemplate}
+                label="상담완료 문자발송"
+                onChange={(checked) => {
+                  if (!messageTemplateSelectionKey) return;
+                  setAutomaticSelections((current) => ({
+                    ...current,
+                    [messageTemplateSelectionKey]: checked,
+                  }));
+                }}
+                unavailableCopy="템플릿 관리에서 자동발송 ‘상담완료’를 지정해 주세요."
+              />
+              <AftercareAutomationChoice
+                automation={reviewRequestAutomation}
+                available={reviewRequestAvailable}
+                checked={sendReviewRequest}
+                label="후기 요청 문자발송"
+                onChange={(checked) => {
+                  if (!reviewRequestSelectionKey) return;
+                  setAutomaticSelections((current) => ({
+                    ...current,
+                    [reviewRequestSelectionKey]: checked,
+                  }));
+                }}
+                unavailableCopy="후기 요청에 연결할 리걸프렌즈 고객 사건이 필요합니다."
+              />
+            </div>
+          ) : messageTemplateAvailable ? (
+            <div className="phone-aftercare-automation-options is-single">
+              <AftercareAutomationChoice
+                automation={messageTemplateAutomation}
+                available={messageTemplateAvailable}
+                checked={sendMessageTemplate}
+                label="자동문자 발송 예정"
+                onChange={(checked) => {
+                  if (!messageTemplateSelectionKey) return;
+                  setAutomaticSelections((current) => ({
+                    ...current,
+                    [messageTemplateSelectionKey]: checked,
+                  }));
+                }}
+                unavailableCopy="이 통화 결과에 연결된 자동발송 템플릿이 없습니다."
+              />
             </div>
           ) : safeMessageTarget?.source === "consultation" ? (
             <MessageComposeButton

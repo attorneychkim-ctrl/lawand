@@ -2630,7 +2630,7 @@ export function createGatewayServer(options?: {
         const reviewTarget = detail.call.clickToCall?.directoryClient ?? detail.legalFriendsMatch?.cases[0];
         if (
           parsed.data.result === "consultation_completed" &&
-          parsed.data.automaticMessage?.enabled &&
+          parsed.data.automaticMessage?.reviewRequestEnabled &&
           reviewTarget &&
           detail.call.aftercare?.id &&
           options.reviewManagementService

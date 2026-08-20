@@ -182,6 +182,14 @@ test("센트릭스 SMS/LMS 바이트와 템플릿 변수를 검증한다", () =>
   );
   assert.equal(
     messageTemplateCreateSchema.safeParse({
+      name: "상담완료 안내",
+      body: "{{고객명}}님, 상담이 완료되었습니다.",
+      autoSendTrigger: "consultation_completed",
+    }).success,
+    true,
+  );
+  assert.equal(
+    messageTemplateCreateSchema.safeParse({
       name: "잘못된 자동발송",
       body: "안내입니다.",
       autoSendTrigger: "unknown",
@@ -224,7 +232,7 @@ test("센트릭스 SMS/LMS 바이트와 템플릿 변수를 검증한다", () =>
   );
   assert.equal(
     renderMessageTemplate("{{고객명}}님, {{담당자명}}입니다.", {
-      "{{고객명}}": "홍길동",
+      "{{고객명}}": "홍길동_기존",
       "{{담당자명}}": "김상담",
       "{{접수번호}}": "LA-260810-ABCDEFGH",
     }),
@@ -322,7 +330,7 @@ test("전화데스크 후처리는 기타 설명과 재통화 담당·일시를 
   assert.equal(
     phoneDeskAftercareSaveSchema.safeParse({
       ...base,
-      automaticMessage: { enabled: true },
+      automaticMessage: { enabled: true, reviewRequestEnabled: true },
     }).success,
     true,
   );

@@ -5367,7 +5367,7 @@ export function createTelephonyService(options: {
     }
     const aftercareAutomations = actor && call.scope !== "internal"
       ? await Promise.all(
-          (["no_answer", "busy", "manager_callback_requested", "rejected"] as const).map(
+          (["consultation_completed", "no_answer", "busy", "manager_callback_requested", "rejected"] as const).map(
             async (result) => {
               const [template] = await db
                 .select()
@@ -5793,7 +5793,7 @@ export function createTelephonyService(options: {
     const remotePhoneFingerprint = call.remotePhone
       ? protection.fingerprint(call.remotePhone)
       : null;
-    const automaticTrigger = (["no_answer", "busy", "manager_callback_requested", "rejected"] as const)
+    const automaticTrigger = (["consultation_completed", "no_answer", "busy", "manager_callback_requested", "rejected"] as const)
       .find((value) => value === input.result) ?? null;
     if (automaticTrigger === "manager_callback_requested" && !input.followUp.enabled) {
       const [automaticTemplate] = await db

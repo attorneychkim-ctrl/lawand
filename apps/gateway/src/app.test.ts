@@ -12,6 +12,7 @@ import type { CentrexBridgeIngressService } from "./centrex-bridge-service.js";
 import type { CentrexBridgeProvisioningService } from "./centrex-bridge-provisioning.js";
 import type { CentrexInboundObserver } from "./centrex-inbound-observer.js";
 import type { ConsultationService } from "./service.js";
+import type { ReviewManagementService } from "./review-management-service.js";
 import type { ReviewSubmissionService } from "./review-service.js";
 import type { TelephonyService } from "./telephony-service.js";
 
@@ -1905,6 +1906,130 @@ test("전화데스크 통화자 확정·후처리·재통화 조회·완료 API�
   );
   assert.equal(completed.status, 200);
   assert.equal(completedBy, realtimeActor.id);
+});
+
+test("상담완료 후처리는 템플릿 문자와 후기 요청 발송을 독립적으로 전달한다", async (context) => {
+  const callId = "019fa6a4-6834-7782-aa0b-4e71ffb8a311";
+  const aftercareId = "019fa6a4-6834-7782-aa0b-4e71ffb8a312";
+  const clientIdx = 123;
+  const caseIdx = 456;
+  let templateMessageEnabled = false;
+  let reviewRequestEnabled = false;
+  let reviewRequestTarget: {
+    clientIdx: number;
+    caseIdx: number;
+    sourceId: string;
+  } | null = null;
+
+  const callDetail = () => ({
+    snapshotAt: "2026-08-20T05:00:00.000Z",
+    call: {
+      id: callId,
+      aftercare: {
+        id: aftercareId,
+        result: "consultation_completed" as const,
+      },
+      clickToCall: {
+        directoryClient: {
+          clientIdx,
+          caseIdx,
+          displayName: "홍길동_기존",
+        },
+      },
+    },
+    staffOptions: [],
+    recommendedAssigneeUserIds: [],
+    aftercareAutomations: [
+      {
+        result: "consultation_completed" as const,
+        kind: "message_template" as const,
+        available: true,
+        templateName: "상담완료 안내",
+        templateBody: "{{고객명}}님, 상담이 완료되었습니다.",
+        latest: null,
+      },
+    ],
+  });
+  const telephonyService = {
+    getPhoneDeskCall: async () => callDetail(),
+    savePhoneDeskAftercare: async (
+      receivedCallId: string,
+      input: PhoneDeskAftercareSave,
+      actor: StaffPrincipal,
+    ) => {
+      assert.equal(receivedCallId, callId);
+      assert.equal(actor.id, realtimeActor.id);
+      templateMessageEnabled = input.automaticMessage?.enabled ?? false;
+      reviewRequestEnabled =
+        input.automaticMessage?.reviewRequestEnabled ?? false;
+      return callDetail();
+    },
+  } as unknown as TelephonyService;
+  const reviewManagementService = {
+    sendAftercareRequest: async (
+      target: { clientIdx: number; caseIdx: number; sourceId: string },
+    ) => {
+      reviewRequestTarget = target;
+      return { items: [], sentCount: 0, failedCount: 0 };
+    },
+    aftercareRequestOption: async () => ({
+      result: "consultation_completed" as const,
+      kind: "review_request" as const,
+      available: true,
+      templateName: "상담을 받은 뒤",
+      templateBody: "{{고객명}}님, 후기를 남겨 주세요.",
+      latest: {
+        status: "sent" as const,
+        occurredAt: "2026-08-20T05:00:00.000Z",
+      },
+    }),
+  } as unknown as ReviewManagementService;
+  const authService = {
+    authorize: async () => realtimeActor,
+  } as unknown as StaffAuthService;
+  const server = createGatewayServer({
+    authService,
+    internalApiKey: "test-internal-key",
+    reviewManagementService,
+    telephonyService,
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+
+  const response = await fetch(
+    `http://127.0.0.1:${address.port}/v1/phone-desk/calls/${callId}/aftercare`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-lawand-internal-key": "test-internal-key",
+        "x-lawand-staff-session": "test-session",
+      },
+      body: JSON.stringify({
+        result: "consultation_completed",
+        consultation: { mode: "none" },
+        followUp: { enabled: false },
+        automaticMessage: {
+          enabled: true,
+          reviewRequestEnabled: true,
+        },
+      }),
+    },
+  );
+  assert.equal(response.status, 200);
+  assert.equal(templateMessageEnabled, true);
+  assert.equal(reviewRequestEnabled, true);
+  assert.deepEqual(reviewRequestTarget, { clientIdx, caseIdx, sourceId: aftercareId });
+  const body = await response.json() as {
+    aftercareAutomations: Array<{ kind: string }>;
+  };
+  assert.deepEqual(
+    body.aftercareAutomations.map((item) => item.kind),
+    ["message_template", "review_request"],
+  );
 });
 
 test("직원 전화데스크 SSE는 전화번호 없이 수신·발신 변경을 전달한다", async (context) => {
