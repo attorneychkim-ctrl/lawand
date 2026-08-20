@@ -106,6 +106,24 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-20 — ERP 개인 웹훅 알림 설정 화면 후보
+- `origin/main` 최신 변경을 `LegalFlow/web_hook`에 병합한 뒤 ERP 관리 메뉴 첫 항목으로
+  `/webhook-notifications`를 추가했다. 관리 메뉴와 페이지는 아직 `showStaff`·`requireAdmin()`으로
+  관리자에게만 보이며, 웹훅 저장·전송까지 끝난 뒤 일반 직원에게 공개한다. 최종 설정 단위는
+  로그인 직원 개인이고 화면에도 현재 계정·소속을 명확히 표시한다.
+- 연결 이름·URL·일반 JSON 형식, 개인정보 최소화 payload 예시, 상담·전화·문자·후기의
+  담당 범위별 권장 기본값을 한 화면에 구성했다. 재통화 일정, 외부 연동·문자 실패, 기프티콘
+  결과, 센트릭스·대표 수신함 장애는 2차 후보로 구분했다. 현재 입력·테스트·저장·스위치는
+  모두 비활성 미리보기이며 DB·API·migration·실제 웹훅 발송은 추가하지 않았다.
+- Orca 내장 브라우저와 로컬 가짜 관리자 세션만 사용해 데스크톱·390px 모바일, 밝은·어두운
+  테마를 확인했다. 모바일 가로 overflow 0, 입력 글자 16px, 모든 기능 컨트롤 비활성,
+  console·hydration 오류 0이다. 긴 관리 메뉴가 390px에서 화면 밖으로 나가던 문제도 마지막
+  펼침 메뉴를 오른쪽 정렬해 교정했다. 운영 계정·데이터·외부 서비스는 사용하지 않았다.
+- 전체 5패키지 test·typecheck·lint·production build와 `git diff --check`를 통과했다. 최초
+  ERP 단독 build는 새 워크트리의 `@lawand/core` dist가 없어 실행 전 중단됐고 core를 먼저
+  build한 뒤 ERP와 전체 build가 성공했다. main 병합·운영 배포는 수행하지 않았다.
+  `PROJECT_PLAN.md`는 v1.68이다.
+
 ### 2026-08-20 — 워크트리 관리자 HERDR·Orca 세션별 판별 규칙
 - 사용자가 이 저장소를 HERDR와 Orca 양쪽에서 사용하며 현재 `LegalFlow/web_hook` 세션은
   Orca라고 명시했다. 전역 작업 규칙을 단일 HERDR 전제에서 세션별 관리자 판별로 바꿨다.
