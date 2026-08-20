@@ -14,6 +14,7 @@ import type { CentrexInboundObserver } from "./centrex-inbound-observer.js";
 import type { ConsultationService } from "./service.js";
 import type { ReviewSubmissionService } from "./review-service.js";
 import type { TelephonyService } from "./telephony-service.js";
+import type { DesktopNotificationService } from "./desktop-notification-service.js";
 
 const realtimeActor = {
   id: "019fa6a4-6834-7782-aa0b-4e71ffb8a2b1",
@@ -86,6 +87,169 @@ test("gateway health endpoint는 요청·LISTEN 풀 상태를 노출한다", asy
   };
   assert.equal(body.databasePools.request.waiting, 2);
   assert.equal(body.databasePools.listener.max, 4);
+});
+
+test("ERP 직원은 내부 인증과 세션으로 PC 연결 코드를 발급한다", async (context) => {
+  let receivedActorId = "";
+  const authService = {
+    authenticateSession: async (token: string) => {
+      assert.equal(token, "staff-session");
+      return realtimeActor;
+    },
+  } as unknown as StaffAuthService;
+  const desktopNotificationService = {
+    createPairing: async (actor: StaffPrincipal) => {
+      receivedActorId = actor.id;
+      return {
+        pairingCode: "p".repeat(43),
+        expiresAt: "2026-08-20T12:05:00.000Z",
+      };
+    },
+  } as unknown as DesktopNotificationService;
+  const server = createGatewayServer({
+    authService,
+    desktopNotificationService,
+    internalApiKey: "internal-key",
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  const unauthorized = await fetch(
+    `${baseUrl}/v1/desktop-notifications/pairings`,
+    { method: "POST" },
+  );
+  assert.equal(unauthorized.status, 401);
+
+  const response = await fetch(
+    `${baseUrl}/v1/desktop-notifications/pairings`,
+    {
+      method: "POST",
+      headers: {
+        "x-lawand-internal-key": "internal-key",
+        "x-lawand-staff-session": "staff-session",
+      },
+    },
+  );
+  assert.equal(response.status, 201);
+  assert.equal(receivedActorId, realtimeActor.id);
+  assert.equal(
+    (await response.json() as { pairingCode: string }).pairingCode,
+    "p".repeat(43),
+  );
+});
+
+test("Windows 앱은 일회용 연결 뒤 기기 토큰으로 알림을 가져오고 확인한다", async (context) => {
+  const deviceToken = "d".repeat(43);
+  const deliveryId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2b8";
+  const calls: string[] = [];
+  const desktopNotificationService = {
+    pairDevice: async (input: { deviceName: string }) => {
+      calls.push(`pair:${input.deviceName}`);
+      return {
+        deviceToken,
+        device: {
+          id: "019fa6a4-6834-7782-aa0b-4e71ffb8a2b7",
+          name: input.deviceName,
+          platform: "windows" as const,
+          appVersion: "0.1.0",
+          staffDisplayName: "로앤 직원",
+        },
+        pollIntervalSeconds: 5,
+      };
+    },
+    pollNext: async (token: string) => {
+      calls.push(`poll:${token}`);
+      return {
+        deliveryId,
+        notificationId: "019fa6a4-6834-7782-aa0b-4e71ffb8a2b9",
+        eventType: "desktop.test",
+        payload: {
+          title: "LAW& OS 테스트 알림",
+          body: "고객명 · 전화번호 · 상담 내용",
+          category: "test" as const,
+          deepLink: "https://erp.lawandfirm.com/desktop-notifications",
+        },
+        createdAt: "2026-08-20T12:00:00.000Z",
+        expiresAt: "2026-08-20T12:15:00.000Z",
+      };
+    },
+    acknowledge: async (
+      token: string,
+      input: { deliveryId: string; outcome: string },
+    ) => {
+      calls.push(`ack:${token}:${input.deliveryId}:${input.outcome}`);
+      return { ...input, acknowledged: true as const };
+    },
+  } as unknown as DesktopNotificationService;
+  const server = createGatewayServer({ desktopNotificationService });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  const paired = await fetch(`${baseUrl}/v1/desktop-notifications/pair`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      pairingCode: "p".repeat(43),
+      deviceName: "LAWAND-DESK-01",
+      platform: "windows",
+      appVersion: "0.1.0",
+    }),
+  });
+  assert.equal(paired.status, 201);
+  assert.equal((await paired.json() as { deviceToken: string }).deviceToken, deviceToken);
+
+  const polled = await fetch(`${baseUrl}/v1/desktop-notifications/poll`, {
+    headers: { "x-lawand-desktop-token": deviceToken },
+  });
+  assert.equal(polled.status, 200);
+  assert.equal((await polled.json() as { deliveryId: string }).deliveryId, deliveryId);
+
+  const acknowledged = await fetch(
+    `${baseUrl}/v1/desktop-notifications/ack`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-lawand-desktop-token": deviceToken,
+      },
+      body: JSON.stringify({ deliveryId, outcome: "displayed" }),
+    },
+  );
+  assert.equal(acknowledged.status, 200);
+  assert.deepEqual(calls, [
+    "pair:LAWAND-DESK-01",
+    `poll:${deviceToken}`,
+    `ack:${deviceToken}:${deliveryId}:displayed`,
+  ]);
+});
+
+test("PC 알림 polling은 기기 토큰이 없거나 대기 건이 없으면 안전하게 끝난다", async (context) => {
+  const desktopNotificationService = {
+    pollNext: async () => null,
+  } as unknown as DesktopNotificationService;
+  const server = createGatewayServer({ desktopNotificationService });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const url = `http://127.0.0.1:${address.port}/v1/desktop-notifications/poll`;
+
+  assert.equal((await fetch(url)).status, 401);
+  assert.equal(
+    (await fetch(url, {
+      headers: { "x-lawand-desktop-token": "d".repeat(43) },
+    })).status,
+    204,
+  );
 });
 
 test("U+ 수신 콜백은 비밀 HTML 경로만 허용하고 원문을 응답하지 않는다", async (context) => {

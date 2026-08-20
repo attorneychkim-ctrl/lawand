@@ -106,6 +106,39 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-20 — Windows 개인 PC 네이티브 알림 1차 수직 경로 후보
+- ERP 관리자 전용 `/desktop-notifications`를 실제 개인 기기 연결 화면으로 전환했다. 로그인
+  직원은 5분짜리 일회용 코드를 발급하고 본인 Windows 기기의 이름·버전·최근 접속·최근 알림을
+  확인하거나 해제하며, 연결된 모든 본인 기기에 테스트 알림을 보낼 수 있다. 관리자 전용 ZIP
+  download route는 명시된 절대 artifact만 20 MiB 이하·private no-store로 제공한다. 상담·전화·
+  문자·후기 선택 UI는 아직 권장값 미리보기이고 저장하거나 실제 이벤트를 발송하지 않는다.
+- migration `0071_dashing_skaar.sql`은 pairing·device·notification·delivery 네 원장을 추가한다.
+  일회용 코드와 기기 bearer token은 SHA-256 hash만 저장하고, 고객명·전화번호·본문이 포함된
+  payload JSON은 기존 AES-GCM data key와 notification ID AAD로 전체 암호화한다. PUBLIC과
+  `lawand_viewer`는 접근할 수 없고 `lawand_app`도 `SELECT`·`INSERT`·`UPDATE`만 가진다. Gateway는
+  직원 session용 코드/목록/해제/테스트 API와 기기 token용 pairing/poll/ACK/disconnect API를
+  분리했으며, deep link는 설정된 ERP origin과 정확히 일치해야 복호화 응답한다.
+- 별도 `apps/desktop-notifier`를 .NET Framework 4.8 x64 WinForms tray 앱으로 만들었다. 5초
+  outbound polling, 재연결 backoff, Windows Credential Manager token 보관, `NotifyIcon` 우측
+  알림, 로컬 delivery dedupe, 잠금 화면 본문 숨김, same-origin ERP 열기, HKCU 자동 시작 설치·
+  제거와 기본 서명 검증을 포함한다. Debug ZIP만 `-AllowUnsigned`로 설치할 수 있고 Release는
+  조직 Authenticode 서명 전까지 운영 배포 후보가 아니다. 센트릭스 중앙 Windows bridge와는
+  별도 프로세스다.
+- 로컬 `lawand_dev`에 migration을 적용해 원장 72개·재실행 no-op·네 테이블·앱 최소권한을
+  확인했다. 실제 `DESKTOP_KCH_AI`에서 ERP 일회용 코드로 연결하고 테스트 payload를 queue한 뒤
+  Windows 우측 알림과 displayed ACK를 확인했으며 사용자가 노출을 직접 확인했다. DB ciphertext에
+  표본 고객명이 없고 nonce 12 bytes, 전달 1회임을 확인했다. Windows 설정 파일에는 token·고객명·
+  전화번호가 없고 token은 Credential Manager에만 존재한다. 검증용 임시 직원 session은 삭제했고
+  로컬 개발 기기·가짜 테스트 알림 원장과 localhost용 자격 증명은 후속 검증을 위해 남겼다.
+- Windows Debug·Release 실제 컴파일과 self-test, PowerShell script parse, 전체 5패키지 test·
+  typecheck·lint·production build, DB schema check와 `git diff --check`를 통과했다. core 95개·
+  gateway 193개 테스트가 성공했다. 인증된 새 Orca 탭에서 관리자 ZIP 200·기기 온라인 UI·console
+  및 hydration 오류 0을 확인했다. 최초 실제 버튼 검증에서 `use server` 파일이 초기 state 객체를
+  export해 POST 500이 된 문제는 state를 client 쪽으로 옮겨 교정한 뒤 같은 경로를 재검증했다.
+  실제 상담·전화·문자·후기 생산자, 개인별 선택 저장, 만료 원장 정리, public pairing rate limit,
+  정식 서명·배포와 macOS는 다음 단계다. main 병합·운영 migration·운영 배포는 수행하지 않았다.
+  `PROJECT_PLAN.md`는 v1.70이다.
+
 ### 2026-08-20 — ERP 개인 PC 네이티브 알림 설정 화면 교정
 - 사용자가 처음 말한 `웹훅`은 외부 URL·Slack·Discord 연동이 아니라 ERP 브라우저를 열어두지
   않아도 직원 컴퓨터의 Windows/macOS 알림 영역에 뜨는 OS 네이티브 알림을 뜻한 것으로

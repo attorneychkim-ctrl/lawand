@@ -1054,6 +1054,18 @@ export type ConsultationDetail = {
   }>;
 };
 
+export type DesktopNotificationDevice = {
+  id: string;
+  name: string;
+  platform: "windows";
+  appVersion: string;
+  status: "active" | "revoked";
+  connectionState: "never_connected" | "online" | "offline" | "revoked";
+  lastSeenAt: string | null;
+  lastDeliveredAt: string | null;
+  createdAt: string;
+};
+
 async function gatewayFetch(
   path: string,
   options: {
@@ -1114,6 +1126,31 @@ export class ConsultationGatewayError extends Error {
   ) {
     super(message);
   }
+}
+
+export class DesktopNotificationGatewayError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+async function desktopNotificationResponse<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+      message?: string;
+    } | null;
+    throw new DesktopNotificationGatewayError(
+      response.status,
+      body?.error ?? "desktop_notification_error",
+      body?.message ?? "PC 알림 요청을 처리하지 못했습니다.",
+    );
+  }
+  return (await response.json()) as T;
 }
 
 type PagedDateOptions<TFilter extends string> = {
@@ -2052,4 +2089,46 @@ export async function invalidateKakaoHomepageEntry(id: string) {
     invalidatedAt: string;
     replayed: boolean;
   }>(id, "invalidate");
+}
+
+export async function getDesktopNotificationDevices(): Promise<
+  DesktopNotificationDevice[]
+> {
+  const body = await desktopNotificationResponse<{
+    items: DesktopNotificationDevice[];
+  }>(await gatewayFetch("/v1/desktop-notifications/devices"));
+  return body.items;
+}
+
+export async function createDesktopNotificationPairing(): Promise<{
+  pairingCode: string;
+  expiresAt: string;
+}> {
+  return desktopNotificationResponse(
+    await gatewayFetch("/v1/desktop-notifications/pairings", {
+      method: "POST",
+    }),
+  );
+}
+
+export async function sendDesktopNotificationTest(): Promise<{
+  notificationId: string;
+  queuedDeviceCount: number;
+  expiresAt: string;
+}> {
+  return desktopNotificationResponse(
+    await gatewayFetch("/v1/desktop-notifications/test", {
+      method: "POST",
+    }),
+  );
+}
+
+export async function revokeDesktopNotificationDevice(
+  deviceId: string,
+): Promise<{ id: string; revoked: true }> {
+  return desktopNotificationResponse(
+    await gatewayFetch(`/v1/desktop-notifications/devices/${deviceId}`, {
+      method: "DELETE",
+    }),
+  );
 }

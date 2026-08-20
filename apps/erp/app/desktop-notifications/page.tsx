@@ -2,7 +2,12 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { StaffBar } from "../_components/staff-bar";
+import { getDesktopNotificationDevices } from "../../lib/gateway";
 import { requireAdmin } from "../../lib/session";
+import {
+  DesktopNotificationConnection,
+  type DesktopNotificationDevicePresentation,
+} from "./desktop-notification-connection";
 
 export const metadata: Metadata = {
   title: "PC 알림 설정",
@@ -151,6 +156,34 @@ function PreviewSwitch({ enabled }: { enabled: boolean }) {
 
 export default async function DesktopNotificationsPage() {
   const staff = await requireAdmin();
+  const devices = await getDesktopNotificationDevices();
+  const dateFormatter = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const devicePresentations: DesktopNotificationDevicePresentation[] =
+    devices.map((device) => ({
+      id: device.id,
+      name: device.name,
+      appVersion: device.appVersion,
+      status: device.status,
+      connectionState: device.connectionState,
+      lastSeenLabel: device.lastSeenAt
+        ? dateFormatter.format(new Date(device.lastSeenAt))
+        : "아직 없음",
+      lastDeliveredLabel: device.lastDeliveredAt
+        ? dateFormatter.format(new Date(device.lastDeliveredAt))
+        : "아직 없음",
+    }));
+  const downloadUrl =
+    process.env.LAWAND_DESKTOP_NOTIFIER_DOWNLOAD_URL?.trim() ||
+    (process.env.LAWAND_DESKTOP_NOTIFIER_ARTIFACT_PATH
+      ? "/api/desktop-notifications/download"
+      : null);
 
   return (
     <>
@@ -188,77 +221,20 @@ export default async function DesktopNotificationsPage() {
             </svg>
           </span>
           <div>
-            <strong>관리자 화면 미리보기</strong>
+            <strong>Windows 1차 연결 기능</strong>
             <p>
-              지금은 PC 연결 흐름과 알림 내용을 검토하는 단계입니다. 프로그램 설치·기기 연결·실제 OS 알림은 아직 작동하지 않습니다.
+              일회용 기기 연결과 테스트 알림은 작동합니다. 실제 상담·전화·문자·후기 이벤트 자동 연결은 다음 단계에서 시작합니다.
             </p>
           </div>
-          <span className="desktop-alert-stage-badge">기능 연결 전</span>
+          <span className="desktop-alert-stage-badge">개발자 1차</span>
         </section>
 
         <div className="desktop-alert-overview-grid">
           <section aria-labelledby="desktop-device-title" className="erp-panel desktop-alert-connection-panel">
-            <header className="desktop-alert-panel-heading">
-              <div>
-                <p className="section-kicker">MY COMPUTER</p>
-                <h2 id="desktop-device-title">내 컴퓨터 연결</h2>
-                <p>로그인한 ERP 계정과 업무용 PC를 한 번 연결합니다.</p>
-              </div>
-              <span className="desktop-alert-connection-status">
-                <i aria-hidden="true" /> 연결 전
-              </span>
-            </header>
-
-            <div className="desktop-alert-app-card">
-              <span aria-hidden="true" className="desktop-alert-app-icon">
-                <svg viewBox="0 0 24 24">
-                  <rect height="13" rx="2" width="18" x="3" y="4" />
-                  <path d="M8 21h8M12 17v4M16.5 7.5a2.5 2.5 0 0 1 2.5 2.5v1.5l1 1.5h-7l1-1.5V10a2.5 2.5 0 0 1 2.5-2.5Z" />
-                </svg>
-              </span>
-              <div>
-                <small>PC 알림 프로그램</small>
-                <strong>LAW&amp; OS 알림</strong>
-                <p>컴퓨터 로그인 시 자동으로 시작되어 새 업무를 확인합니다.</p>
-              </div>
-              <span className="desktop-alert-app-badge">준비 중</span>
-            </div>
-
-            <ol className="desktop-alert-setup-list">
-              <li>
-                <span>1</span>
-                <div>
-                  <strong>알림 프로그램 설치</strong>
-                  <p>이 컴퓨터에 한 번만 설치하고 자동 시작을 허용합니다.</p>
-                </div>
-              </li>
-              <li>
-                <span>2</span>
-                <div>
-                  <strong>현재 ERP 계정과 연결</strong>
-                  <p>짧게 유효한 일회용 연결로 {staff.displayName}님의 PC임을 확인합니다.</p>
-                </div>
-              </li>
-              <li>
-                <span>3</span>
-                <div>
-                  <strong>실제 알림 확인</strong>
-                  <p>테스트 알림이 컴퓨터 우측 알림 영역에 뜨면 연결이 끝납니다.</p>
-                </div>
-              </li>
-            </ol>
-
-            <div className="desktop-alert-connection-actions">
-              <p>연결된 컴퓨터는 이곳에서 이름·마지막 접속·알림 상태를 확인하고 해제할 수 있습니다.</p>
-              <div>
-                <button className="secondary-button" disabled type="button">
-                  PC 알림 프로그램 받기
-                </button>
-                <button className="primary-button" disabled type="button">
-                  이 컴퓨터 연결
-                </button>
-              </div>
-            </div>
+            <DesktopNotificationConnection
+              devices={devicePresentations}
+              downloadUrl={downloadUrl}
+            />
           </section>
 
           <section aria-labelledby="desktop-preview-title" className="erp-panel desktop-alert-preview-panel">
@@ -376,8 +352,8 @@ export default async function DesktopNotificationsPage() {
 
         <div className="desktop-alert-save-bar">
           <div>
-            <strong>아직 PC에 알림을 보내지 않습니다</strong>
-            <span>화면 검토가 끝난 뒤 개인별 기기 등록·암호화 전달 대기열·PC 알림 프로그램을 연결합니다.</span>
+            <strong>현재는 연결 확인용 테스트 알림만 보냅니다</strong>
+            <span>실제 업무 이벤트와 개인별 알림 선택 저장은 Windows 1차 경로 검증 뒤 연결합니다.</span>
           </div>
           <button className="primary-button" disabled type="button">
             알림 설정 저장

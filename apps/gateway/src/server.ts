@@ -18,6 +18,7 @@ import { createPostgresConsultationEventSource } from "./consultation-events.js"
 import { createPostgresReviewEventSource } from "./review-events.js";
 import { createPostgresMessageEventSource } from "./message-events.js";
 import { createDataProtection } from "./crypto.js";
+import { createDesktopNotificationService } from "./desktop-notification-service.js";
 import { createDatabasePoolMonitor } from "./database-pool-monitor.js";
 import { createPublicIntakeProtection } from "./intake-protection.js";
 import { createLegalFriendsClient } from "./legalfriends.js";
@@ -81,6 +82,11 @@ const telephonyRealtimeMonitor = createTelephonyRealtimeMonitor({
   region: config.awsRegion,
 });
 const protection = createDataProtection(config);
+const desktopNotificationService = createDesktopNotificationService({
+  db: database.db,
+  protection,
+  erpBaseUrl: config.erpBaseUrl,
+});
 const centrexClient = createCentrexClient();
 const solapiClient = config.solapiApiCredentials
   ? createSolapiClient(config.solapiApiCredentials)
@@ -222,6 +228,7 @@ const server = createGatewayServer({
   reviewService,
   reviewManagementService,
   giftCouponService,
+  desktopNotificationService,
   internalApiKey: config.internalApiKey,
   publicIntakeApiKey: config.publicIntakeApiKey,
   intakeProtection,

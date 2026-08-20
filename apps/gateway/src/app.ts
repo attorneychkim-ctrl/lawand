@@ -10,6 +10,9 @@ import {
   consultationAssignmentInputSchema,
   consultationAssigneeTransferInputSchema,
   consultationGroupLinkSchema,
+  desktopNotificationDeliveryAckSchema,
+  desktopNotificationDeviceTokenSchema,
+  desktopNotificationPairingExchangeSchema,
   createKakaoSkillResponse,
   kakaoHomepageEntryConfirmationSchema,
   kakaoHomepageEntrySubmissionSchema,
@@ -112,6 +115,10 @@ import {
   TelephonyCallError,
   type TelephonyService,
 } from "./telephony-service.js";
+import {
+  DesktopNotificationError,
+  type DesktopNotificationService,
+} from "./desktop-notification-service.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_MESSAGE_TEMPLATE_BODY_BYTES = 320 * 1024;
@@ -193,6 +200,13 @@ function hasHeaderAccess(
 function staffSessionToken(request: IncomingMessage): string | null {
   const provided = request.headers["x-lawand-staff-session"];
   return typeof provided === "string" ? provided : null;
+}
+
+function desktopDeviceToken(request: IncomingMessage): string | null {
+  const provided = request.headers["x-lawand-desktop-token"];
+  if (typeof provided !== "string") return null;
+  const parsed = desktopNotificationDeviceTokenSchema.safeParse(provided);
+  return parsed.success ? parsed.data : null;
 }
 
 function invalidRequestIssues(
@@ -290,6 +304,7 @@ export function createGatewayServer(options?: {
   reviewService?: ReviewSubmissionService;
   reviewManagementService?: ReviewManagementService;
   giftCouponService?: GiftCouponService;
+  desktopNotificationService?: DesktopNotificationService;
   reviewEvents?: ReviewEventSource;
   messageEvents?: MessageEventSource;
   telephonyService?: TelephonyService;
@@ -351,6 +366,187 @@ export function createGatewayServer(options?: {
             ? { databasePools: options.databasePoolHealth() }
             : {}),
         });
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        url.pathname === "/v1/desktop-notifications/pair"
+      ) {
+        if (!options?.desktopNotificationService) {
+          sendJson(response, 503, { error: "feature_unavailable" });
+          return;
+        }
+        const parsed = desktopNotificationPairingExchangeSchema.safeParse(
+          await readJson(request),
+        );
+        if (!parsed.success) {
+          sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+          return;
+        }
+        const result = await options.desktopNotificationService.pairDevice(
+          parsed.data,
+        );
+        sendJson(response, 201, result);
+        return;
+      }
+
+      if (
+        request.method === "GET" &&
+        url.pathname === "/v1/desktop-notifications/poll"
+      ) {
+        if (!options?.desktopNotificationService) {
+          sendJson(response, 503, { error: "feature_unavailable" });
+          return;
+        }
+        const token = desktopDeviceToken(request);
+        if (!token) {
+          sendJson(response, 401, { error: "invalid_device_token" });
+          return;
+        }
+        const delivery = await options.desktopNotificationService.pollNext(token);
+        if (!delivery) {
+          response.writeHead(204, {
+            "cache-control": "no-store",
+            "x-content-type-options": "nosniff",
+          });
+          response.end();
+          return;
+        }
+        sendJson(response, 200, delivery);
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        url.pathname === "/v1/desktop-notifications/ack"
+      ) {
+        if (!options?.desktopNotificationService) {
+          sendJson(response, 503, { error: "feature_unavailable" });
+          return;
+        }
+        const token = desktopDeviceToken(request);
+        if (!token) {
+          sendJson(response, 401, { error: "invalid_device_token" });
+          return;
+        }
+        const parsed = desktopNotificationDeliveryAckSchema.safeParse(
+          await readJson(request),
+        );
+        if (!parsed.success) {
+          sendJson(response, 400, invalidRequestIssues(parsed.error.issues));
+          return;
+        }
+        const result = await options.desktopNotificationService.acknowledge(
+          token,
+          parsed.data,
+        );
+        sendJson(response, 200, result);
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        url.pathname === "/v1/desktop-notifications/disconnect"
+      ) {
+        if (!options?.desktopNotificationService) {
+          sendJson(response, 503, { error: "feature_unavailable" });
+          return;
+        }
+        const token = desktopDeviceToken(request);
+        if (!token) {
+          sendJson(response, 401, { error: "invalid_device_token" });
+          return;
+        }
+        const result =
+          await options.desktopNotificationService.disconnectCurrentDevice(
+            token,
+          );
+        sendJson(response, 200, result);
+        return;
+      }
+
+      if (
+        url.pathname === "/v1/desktop-notifications/devices" ||
+        url.pathname === "/v1/desktop-notifications/pairings" ||
+        url.pathname === "/v1/desktop-notifications/test" ||
+        url.pathname.startsWith("/v1/desktop-notifications/devices/")
+      ) {
+        if (
+          !options?.desktopNotificationService ||
+          !options.internalApiKey ||
+          !hasHeaderAccess(
+            request,
+            "x-lawand-internal-key",
+            options.internalApiKey,
+          ) ||
+          !options.authService
+        ) {
+          sendJson(response, 401, { error: "unauthorized" });
+          return;
+        }
+        const sessionToken = staffSessionToken(request);
+        if (!sessionToken) {
+          sendJson(response, 401, { error: "invalid_session" });
+          return;
+        }
+        const actor = await options.authService.authenticateSession(sessionToken);
+
+        if (
+          request.method === "GET" &&
+          url.pathname === "/v1/desktop-notifications/devices"
+        ) {
+          sendJson(
+            response,
+            200,
+            await options.desktopNotificationService.listDevices(actor),
+          );
+          return;
+        }
+        if (
+          request.method === "POST" &&
+          url.pathname === "/v1/desktop-notifications/pairings"
+        ) {
+          sendJson(
+            response,
+            201,
+            await options.desktopNotificationService.createPairing(actor),
+          );
+          return;
+        }
+        if (
+          request.method === "POST" &&
+          url.pathname === "/v1/desktop-notifications/test"
+        ) {
+          sendJson(
+            response,
+            201,
+            await options.desktopNotificationService.createTestNotification(actor),
+          );
+          return;
+        }
+        if (
+          request.method === "DELETE" &&
+          url.pathname.startsWith("/v1/desktop-notifications/devices/")
+        ) {
+          const deviceId = url.pathname.slice(
+            "/v1/desktop-notifications/devices/".length,
+          );
+          if (!validUuid(deviceId)) {
+            sendJson(response, 400, { error: "invalid_device_id" });
+            return;
+          }
+          sendJson(
+            response,
+            200,
+            await options.desktopNotificationService.revokeDevice(
+              actor,
+              deviceId,
+            ),
+          );
+          return;
+        }
+        sendJson(response, 405, { error: "method_not_allowed" });
         return;
       }
 
@@ -3630,6 +3826,13 @@ export function createGatewayServer(options?: {
         error: "not_found",
       });
     } catch (error) {
+      if (error instanceof DesktopNotificationError) {
+        sendJson(response, error.status, {
+          error: error.code,
+          message: error.message,
+        });
+        return;
+      }
       if (error instanceof StaffAuthError) {
         const statusCode =
           error.code === "forbidden"

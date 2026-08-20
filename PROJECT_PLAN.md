@@ -1,8 +1,29 @@
-# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.69)
+# 로앤 통합 플랫폼 — 프로젝트 설계·구현 기준선 (v1.70)
 
 > 이 문서는 새 로앤 홈페이지 + 새 ERP + 리걸플로/리걸프렌즈 연동을 하나의 플랫폼으로
 > 묶기 위한 **저장소 구조·아키텍처 설계 초안**이다. 코덱스/클로드코드 세션이 번갈아
 > 작업하는 것을 전제로 하며, 첫 커밋 시점에 이 문서를 기준선으로 삼는다.
+>
+> 2026-08-20 Windows 개인 PC 네이티브 알림 1차 후보: 관리자 전용
+> `/desktop-notifications` 화면을 실제 수직 경로에 연결했다. migration `0071`은 직원별
+> 5분짜리 일회용 pairing, 원문을 저장하지 않는 기기 token hash, AES-GCM 암호화 알림 원장,
+> 기기별 durable delivery/ACK를 분리한다. 앱 역할은 네 원장에 `SELECT`·`INSERT`·`UPDATE`만
+> 가지며 viewer와 PUBLIC은 접근하지 못한다. Gateway는 로그인 직원 본인의 코드 발급·기기
+> 목록·해제·테스트 전송과, 기기 token으로 인증하는 공개 pairing·5초 polling·ACK·자체 해제를
+> 제공한다. 고객명·전화번호·상담/문자/후기 본문은 알림 payload에 포함할 수 있지만 기존 data
+> key와 notification ID AAD로 전체 JSON을 암호화해 DB 평문으로 남기지 않고, 이동 URL은 설정된
+> ERP origin만 허용한다.
+>
+> 직원 PC 앱은 별도 `apps/desktop-notifier`의 .NET Framework 4.8 x64 WinForms tray 앱이다.
+> 외부 inbound port나 웹훅 listener 없이 HTTPS outbound polling만 하며 기기 token은 Windows
+> Credential Manager에만 보관한다. Windows `NotifyIcon` 알림, 최근 delivery 로컬 중복 억제,
+> 재연결 backoff, 세션 잠금 중 본문 숨김, 정확한 ERP origin 클릭 이동, HKCU 자동 시작 설치·
+> 제거 스크립트를 포함한다. 로컬 `lawand_dev`에서 pairing→암호화 queue→poll→실제 Windows
+> 우측 알림→displayed ACK를 종단 간 확인했고 사용자가 알림 노출을 직접 확인했다. 현재 실제
+> 생산자는 `desktop.test`뿐이며 상담·전화·문자·후기 이벤트 연결, 개인별 선택 저장, 만료 원장
+> 정리, public pairing rate limit, 조직 Authenticode 서명·정식 배포, macOS 클라이언트는 후속이다.
+> 개발 ZIP은 무서명이고 명시적 `-AllowUnsigned` 없이는 설치되지 않는다. 페이지·기기 기능은
+> 웹훅 전체 완성 전까지 계속 관리자 전용이며 main 병합·운영 migration·배포는 하지 않았다.
 >
 > 2026-08-20 ERP 개인 PC 네이티브 알림 화면 교정: 사용자가 처음 말한 `웹훅`은 외부
 > Slack·Discord·사용자 URL 전송이 아니라, ERP 페이지를 열어두지 않아도 직원 컴퓨터의
@@ -1506,7 +1527,9 @@ projects/lawand/                  # 모노레포 루트 (pnpm workspaces + Turbo
 ├── apps/
 │   ├── homepage/                 # 로앤 홈페이지 (Next.js) — 공개·SEO·상담신청 접점
 │   ├── erp/                      # 새 ERP (Next.js) — 직원용 운영 화면
-│   └── gateway/                  # 장수명 서버 (Node) — WebSocket/SSE, 큐 워커, 웹훅 수신
+│   ├── gateway/                  # 장수명 서버 (Node) — WebSocket/SSE, 큐 워커, 웹훅 수신
+│   ├── centrex-bridge/           # 중앙 Windows 서버 — 회선별 센트릭스 OCX host
+│   └── desktop-notifier/         # 직원 Windows PC — 개인 네이티브 알림 tray 앱
 ├── packages/
 │   ├── core/                     # 도메인 모델 + 이벤트 카탈로그 (상담 상태머신 등)
 │   ├── db/                       # 스키마·ORM 클라이언트 — DB의 단일 진실원천

@@ -625,6 +625,170 @@ export const staffSessions = pgTable(
   ],
 );
 
+export const desktopNotificationPairings = pgTable(
+  "desktop_notification_pairings",
+  {
+    id: uuid("id").primaryKey(),
+    staffUserId: uuid("staff_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "cascade" }),
+    tokenHash: bytea("token_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("desktop_notification_pairings_token_hash_uidx").on(
+      table.tokenHash,
+    ),
+    index("desktop_notification_pairings_staff_expires_idx").on(
+      table.staffUserId,
+      table.expiresAt,
+    ),
+    check(
+      "desktop_notification_pairings_token_hash_length",
+      sql`octet_length(${table.tokenHash}) = 32`,
+    ),
+    check(
+      "desktop_notification_pairings_expiry_after_creation",
+      sql`${table.expiresAt} > ${table.createdAt}`,
+    ),
+    check(
+      "desktop_notification_pairings_used_after_creation",
+      sql`${table.usedAt} IS NULL OR ${table.usedAt} >= ${table.createdAt}`,
+    ),
+  ],
+);
+
+export const desktopNotificationDevices = pgTable(
+  "desktop_notification_devices",
+  {
+    id: uuid("id").primaryKey(),
+    staffUserId: uuid("staff_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 100 }).notNull(),
+    platform: varchar("platform", { length: 20 }).notNull(),
+    appVersion: varchar("app_version", { length: 40 }).notNull(),
+    tokenHash: bytea("token_hash").notNull(),
+    status: varchar("status", { length: 20 }).default("active").notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    lastDeliveredAt: timestamp("last_delivered_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("desktop_notification_devices_token_hash_uidx").on(
+      table.tokenHash,
+    ),
+    index("desktop_notification_devices_staff_status_idx").on(
+      table.staffUserId,
+      table.status,
+    ),
+    check(
+      "desktop_notification_devices_token_hash_length",
+      sql`octet_length(${table.tokenHash}) = 32`,
+    ),
+    check(
+      "desktop_notification_devices_platform_allowed",
+      sql`${table.platform} IN ('windows')`,
+    ),
+    check(
+      "desktop_notification_devices_status_allowed",
+      sql`${table.status} IN ('active', 'revoked')`,
+    ),
+    check(
+      "desktop_notification_devices_revocation_state",
+      sql`(${table.status} = 'active' AND ${table.revokedAt} IS NULL) OR (${table.status} = 'revoked' AND ${table.revokedAt} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export const desktopNotifications = pgTable(
+  "desktop_notifications",
+  {
+    id: uuid("id").primaryKey(),
+    staffUserId: uuid("staff_user_id")
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: "cascade" }),
+    eventType: varchar("event_type", { length: 60 }).notNull(),
+    payloadCiphertext: bytea("payload_ciphertext").notNull(),
+    payloadNonce: bytea("payload_nonce").notNull(),
+    payloadKeyVersion: varchar("payload_key_version", { length: 50 }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("desktop_notifications_staff_created_idx").on(
+      table.staffUserId,
+      table.createdAt,
+    ),
+    index("desktop_notifications_expires_idx").on(table.expiresAt),
+    check(
+      "desktop_notifications_event_type_format",
+      sql`${table.eventType} ~ '^[a-z][a-z0-9_.-]{2,59}$'`,
+    ),
+    check(
+      "desktop_notifications_payload_crypto",
+      sql`octet_length(${table.payloadNonce}) = 12 AND octet_length(${table.payloadCiphertext}) >= 17`,
+    ),
+    check(
+      "desktop_notifications_expiry_after_creation",
+      sql`${table.expiresAt} > ${table.createdAt}`,
+    ),
+  ],
+);
+
+export const desktopNotificationDeliveries = pgTable(
+  "desktop_notification_deliveries",
+  {
+    id: uuid("id").primaryKey(),
+    notificationId: uuid("notification_id")
+      .notNull()
+      .references(() => desktopNotifications.id, { onDelete: "cascade" }),
+    deviceId: uuid("device_id")
+      .notNull()
+      .references(() => desktopNotificationDevices.id, {
+        onDelete: "restrict",
+      }),
+    status: varchar("status", { length: 20 }).default("pending").notNull(),
+    attemptCount: integer("attempt_count").default(0).notNull(),
+    lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    openedAt: timestamp("opened_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("desktop_notification_deliveries_notification_device_uidx").on(
+      table.notificationId,
+      table.deviceId,
+    ),
+    index("desktop_notification_deliveries_device_status_created_idx").on(
+      table.deviceId,
+      table.status,
+      table.createdAt,
+    ),
+    check(
+      "desktop_notification_deliveries_status_allowed",
+      sql`${table.status} IN ('pending', 'delivered')`,
+    ),
+    check(
+      "desktop_notification_deliveries_attempt_nonnegative",
+      sql`${table.attemptCount} >= 0`,
+    ),
+    check(
+      "desktop_notification_deliveries_terminal_state",
+      sql`(${table.status} = 'pending' AND ${table.deliveredAt} IS NULL) OR (${table.status} = 'delivered' AND ${table.deliveredAt} IS NOT NULL)`,
+    ),
+    check(
+      "desktop_notification_deliveries_opened_after_delivery",
+      sql`${table.openedAt} IS NULL OR ${table.deliveredAt} IS NOT NULL`,
+    ),
+  ],
+);
+
 export const staffExternalAccounts = pgTable(
   "staff_external_accounts",
   {
