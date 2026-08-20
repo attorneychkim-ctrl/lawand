@@ -63,3 +63,8 @@
   지시에 따라 명시적 제외했다. 두 브랜치는 깨끗하고 원격과 일치한다. `LegalFlow/web_hook`의
   원격 HEAD는 `main` ancestor지만 로컬 추적 변경 4건은 진행 중으로 보존했다.
 - 다음 작업 전에 `PROJECT_PLAN.md`, 이 문서, 해당 분야의 상세 문서만 읽는다.
+- 사용자 확인에 따라 `LegalFlow/sms_consult_complete`는 Orca 관리 워크트리에서 작업했다.
+  기능 commit `abcd58bd9970f823dbb76369b356952edbb65d16`은 문자 템플릿 모달 스타일,
+  고객명 앞 3글자 치환, 상담완료 템플릿 문자·후기 요청 독립 체크를 구현했고 migration 후보
+  `0072_consultation_completed_message.sql`을 추가했다. `main` 병합·운영 migration·gateway/ERP
+  배포·실제 고객 발송은 아직 하지 않았으며 메인 통합 세션의 승인 대기다.
