@@ -1797,7 +1797,9 @@ test("전화데스크 통화자 확정·후처리·재통화 조회·완료 API�
       dutyRequestedBy = actor.id;
       return {
         snapshotAt: "2026-08-07T05:00:00.000Z",
-        count: 1,
+        count: 2,
+        followUpCount: 1,
+        transferConfirmationCount: 1,
         items: [
           {
             id: taskId,
@@ -1847,6 +1849,20 @@ test("전화데스크 통화자 확정·후처리·재통화 조회·완료 API�
   );
   assert.equal(duty.status, 200);
   assert.equal(dutyRequestedBy, realtimeActor.id);
+  assert.deepEqual(await duty.json(), {
+    snapshotAt: "2026-08-07T05:00:00.000Z",
+    count: 2,
+    followUpCount: 1,
+    transferConfirmationCount: 1,
+    items: [
+      {
+        id: taskId,
+        source: "consultation_schedule",
+        dueAt: "2026-08-08T01:00:00.000Z",
+        dueEndAt: "2026-08-08T01:30:00.000Z",
+      },
+    ],
+  });
 
   const resolved = await fetch(
     `http://127.0.0.1:${address.port}/v1/phone-desk/calls/${callId}/resolve`,

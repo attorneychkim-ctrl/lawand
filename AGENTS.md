@@ -102,6 +102,22 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-20 — 전화 메뉴 호전환 확인 필요 배지 후보
+- ERP 전역 `전화` 메뉴 숫자를 현재 직원의 열린 재통화 업무와 관련된 호전환 확인 필요 원장의
+  합계로 확장했다. 모든 직원에게 일괄 표시하지 않고 실제 통화 참여자·활성 회선 소유자·현재
+  ERP 상담 담당자·리걸프렌즈 사건 담당자에게 표시하며, 관련자를 전혀 해석할 수 없는 건만
+  활성 관리자에게 안전망으로 표시한다. 확인 필요 상태부터 즉시 포함하고 최종 고객 연결
+  담당자를 확정하면 `call_activity.changed`로 다시 조회해 관련자 모두의 배지에서 제거한다.
+- duty 응답은 기존 알림용 재통화 `items`를 유지하면서 합계·재통화·호전환 확인 건수를 분리해
+  반환한다. ERP는 `follow_up.changed`와 `call_activity.changed`에 반응하고, 접근성 이름에는
+  두 업무 유형별 건수를 각각 안내한다. DB migration·운영 데이터·실제 전화·문자·main 병합·
+  운영 배포는 수행하지 않았다.
+- 전체 5패키지 test·typecheck·lint·production build, DB schema check와 `git diff --check`를
+  통과했다. core 95개·gateway 195개·홈페이지 9개 테스트가 성공했다. 최초 gateway test는 새
+  워크트리에 core·DB dist가 없어 실행 전 중단됐고 두 패키지를 build한 뒤 전체 검증이
+  성공했다. `HERDR_ENV`는 없고 HERDR 서버도 실행 중이 아니었다. `PROJECT_PLAN.md`는
+  v1.71이다.
+
 ### 2026-08-20 — 완료 작업 3개 통합 운영 배포 완료
 - 세 완료 브랜치를 최종 main `f8bd74d04ac240fe6c9ed02759b795b069140559`에 통합했고 모든
   로컬·원격 작업 HEAD가 ancestor임을 확인했다. `HERDR_ENV`와 HERDR 서버가 없어 Git

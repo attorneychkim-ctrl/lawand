@@ -119,7 +119,11 @@ export function ErpNav({ showStaff }: { showStaff: boolean }) {
   const pathname = usePathname();
   const [reviewDutyCount, setReviewDutyCount] = useState(0);
   const [messageDutyCount, setMessageDutyCount] = useState(0);
-  const [followUpDutyCount, setFollowUpDutyCount] = useState(0);
+  const [phoneDutyCounts, setPhoneDutyCounts] = useState({
+    count: 0,
+    followUpCount: 0,
+    transferConfirmationCount: 0,
+  });
   const consultationActive = pathname === "/" || pathname.startsWith("/consultations/");
   const phonebookActive = pathname.startsWith("/phonebook");
   const staffActive = pathname.startsWith("/staff");
@@ -178,9 +182,21 @@ export function ErpNav({ showStaff }: { showStaff: boolean }) {
       });
       const body = (await response.json().catch(() => null)) as {
         count?: unknown;
+        followUpCount?: unknown;
+        transferConfirmationCount?: unknown;
       } | null;
       if (response.ok && typeof body?.count === "number") {
-        setFollowUpDutyCount(body.count);
+        setPhoneDutyCounts({
+          count: body.count,
+          followUpCount:
+            typeof body.followUpCount === "number"
+              ? body.followUpCount
+              : body.count,
+          transferConfirmationCount:
+            typeof body.transferConfirmationCount === "number"
+              ? body.transferConfirmationCount
+              : 0,
+        });
       }
     } catch {
       // 다음 실시간 이벤트나 화면 이동 때 다시 동기화한다.
@@ -192,7 +208,8 @@ export function ErpNav({ showStaff }: { showStaff: boolean }) {
     return subscribePhoneDeskRealtime((message) => {
       if (
         message.kind === "sync" ||
-        message.payload.eventType === "follow_up.changed"
+        message.payload.eventType === "follow_up.changed" ||
+        message.payload.eventType === "call_activity.changed"
       ) {
         void refreshFollowUpDutyCount();
       }
@@ -240,12 +257,19 @@ export function ErpNav({ showStaff }: { showStaff: boolean }) {
       >
         <NavIcon kind="phone" />
         <span>전화</span>
-        {followUpDutyCount > 0 ? (
+        {phoneDutyCounts.count > 0 ? (
           <span
-            aria-label={`내 미완료 재통화 업무 ${followUpDutyCount}건`}
+            aria-label={[
+              phoneDutyCounts.followUpCount > 0
+                ? `내 미완료 재통화 업무 ${phoneDutyCounts.followUpCount}건`
+                : "",
+              phoneDutyCounts.transferConfirmationCount > 0
+                ? `호전환 확인 필요 ${phoneDutyCounts.transferConfirmationCount}건`
+                : "",
+            ].filter(Boolean).join(", ")}
             className="nav-count-badge"
           >
-            {followUpDutyCount > 99 ? "99+" : followUpDutyCount}
+            {phoneDutyCounts.count > 99 ? "99+" : phoneDutyCounts.count}
           </span>
         ) : null}
       </Link>

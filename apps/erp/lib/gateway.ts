@@ -685,6 +685,8 @@ export type PhoneDeskFollowUpSnapshot = {
 export type PhoneDeskFollowUpDuty = {
   snapshotAt: string;
   count: number;
+  followUpCount: number;
+  transferConfirmationCount: number;
   items: Array<{
     id: string;
     source: "aftercare" | "consultation_schedule";
