@@ -168,7 +168,8 @@ export default async function DesktopNotificationsPage() {
             <p className="eyebrow">PERSONAL DESKTOP NOTIFICATIONS</p>
             <h1>PC 알림 설정</h1>
             <p>
-              ERP를 열어두지 않아도 이 컴퓨터의 알림 센터에서 내 업무 알림을 받습니다.
+              ERP를 열어두지 않아도 Windows 화면 우측 상단의 LAW&amp; OS 업무 카드로 내 알림을 받습니다.
+              브라우저 알림은 기존대로 유지되며 각 사용자가 브라우저 사이트 권한에서 따로 선택합니다.
             </p>
           </div>
           <div className="desktop-alert-owner-card">
@@ -210,8 +211,8 @@ export default async function DesktopNotificationsPage() {
           <section aria-labelledby="desktop-preview-title" className="erp-panel desktop-alert-preview-panel">
             <header className="desktop-alert-panel-heading">
               <div>
-                <p className="section-kicker">OS NOTIFICATION PREVIEW</p>
-                <h2 id="desktop-preview-title">컴퓨터 알림 미리보기</h2>
+                <p className="section-kicker">LAW&amp; OS CARD PREVIEW</p>
+                <h2 id="desktop-preview-title">우측 상단 업무 카드 미리보기</h2>
                 <p>업무 중 실제로 보게 될 고객정보와 내용의 예시입니다.</p>
               </div>
               <span className="desktop-alert-content-badge">실제 내용 포함</span>
@@ -226,13 +227,13 @@ export default async function DesktopNotificationsPage() {
                   </svg>
                 </span>
                 <div>
-                  <small>LAW&amp; OS · 상담</small>
+                  <small>LAW&amp; OS · 상담 · NEW</small>
                   <strong>담당 상담 재요청 · 김로앤</strong>
                 </div>
                 <time dateTime="2026-08-20T12:00:00+09:00">방금 전</time>
               </div>
               <div className="desktop-alert-message-copy">
-                <strong>010-0000-0000 · 서울 · 전화 상담</strong>
+                <strong>고객명 김로앤 · 전화번호 010-0000-0000 · 서울</strong>
                 <p>“개인회생 상담을 다시 받고 싶습니다. 오늘 오후에 통화 가능할까요?”</p>
               </div>
               <span className="desktop-alert-preview-link">클릭해서 ERP 상담 전체 내용 열기 →</span>
@@ -256,8 +257,8 @@ export default async function DesktopNotificationsPage() {
               </span>
               <div>
                 <small>권장 기본값</small>
-                <strong>PC 사용 중 전체 내용 · 잠금 화면에서는 제목만</strong>
-                <p>업무 중에는 필요한 내용을 바로 보고, 자리를 비웠을 때 고객정보가 노출되지 않게 합니다.</p>
+                <strong>PC 사용 중 전체 내용 · 잠금·부재 중에는 한 장으로 묶기</strong>
+                <p>업무 중에는 필요한 내용을 바로 보고, 돌아오면 놓친 알림 수만 요약 카드 한 장으로 확인합니다.</p>
               </div>
             </div>
           </section>

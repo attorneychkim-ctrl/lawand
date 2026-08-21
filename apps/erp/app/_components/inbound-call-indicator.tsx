@@ -18,16 +18,14 @@ import type {
   TelephonyRealtimeAck,
 } from "../../lib/gateway";
 import {
-  browserNotificationSettingChangedEvent,
-  browserNotificationsEnabled,
   closeConsultationBrowserNotification,
   closeTelephonyBrowserNotification,
+  notificationPermissionChangedEvent,
   prepareBrowserNotifications,
   showConsultationBrowserNotification,
   showTelephonyBrowserNotification,
 } from "./browser-notification";
 import { recordBrowserNotificationDiagnostic } from "./browser-notification-diagnostics";
-import { notificationPermissionChangedEvent } from "./browser-notification-toggle";
 import { subscribeConsultationRealtime } from "./consultation-realtime";
 import { PhoneAftercareDialog } from "./phone-aftercare-form";
 
@@ -620,7 +618,6 @@ export function InboundCallIndicator({
   const [notificationPermission, setNotificationPermission] = useState<
     "default" | "denied" | "granted" | "unsupported"
   >("default");
-  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [connection, setConnection] =
     useState<ConnectionState>("connecting");
   const [answeringCallIds, setAnsweringCallIds] = useState<Set<string>>(
@@ -655,11 +652,6 @@ export function InboundCallIndicator({
       setNotificationPermission(
         "Notification" in window ? Notification.permission : "unsupported",
       );
-      setNotificationsEnabled(
-        "Notification" in window &&
-          Notification.permission === "granted" &&
-          browserNotificationsEnabled(),
-      );
     };
     synchronizeNotificationPermission();
     void prepareBrowserNotifications()?.catch(() => undefined);
@@ -667,11 +659,7 @@ export function InboundCallIndicator({
       notificationPermissionChangedEvent,
       synchronizeNotificationPermission,
     );
-    window.addEventListener(
-      browserNotificationSettingChangedEvent,
-      synchronizeNotificationPermission,
-    );
-    window.addEventListener("storage", synchronizeNotificationPermission);
+    window.addEventListener("focus", synchronizeNotificationPermission);
     notificationTabId.current = window.crypto.randomUUID();
     const peers = new Map<string, { visible: boolean; seenAt: number }>();
     const channel = "BroadcastChannel" in window
@@ -736,11 +724,7 @@ export function InboundCallIndicator({
         notificationPermissionChangedEvent,
         synchronizeNotificationPermission,
       );
-      window.removeEventListener(
-        browserNotificationSettingChangedEvent,
-        synchronizeNotificationPermission,
-      );
-      window.removeEventListener("storage", synchronizeNotificationPermission);
+      window.removeEventListener("focus", synchronizeNotificationPermission);
       document.removeEventListener("visibilitychange", announce);
       window.removeEventListener("focus", announce);
       window.clearInterval(timer);
@@ -1132,8 +1116,7 @@ export function InboundCallIndicator({
     if (
       (document.visibilityState !== "visible" &&
         !notificationLeader.current) ||
-      notificationPermission !== "granted" ||
-      !notificationsEnabled
+      notificationPermission !== "granted"
     ) return false;
     const current = Date.now();
     let matchedNotificationShown = false;
@@ -1191,7 +1174,7 @@ export function InboundCallIndicator({
       }
     }
     return matchedNotificationShown;
-  }, [notificationPermission, notificationsEnabled, staffUserId]);
+  }, [notificationPermission, staffUserId]);
 
   useEffect(() => {
     deskStartedAt.current = Date.now();
@@ -1388,7 +1371,6 @@ export function InboundCallIndicator({
       const visibleAtEvent = document.visibilityState === "visible";
       const shouldShowNotification =
         notificationPermission === "granted" &&
-        notificationsEnabled &&
         (visibleAtEvent || notificationLeader.current);
       if (!visibleAtEvent && !shouldShowNotification) {
         seenConsultationEventIds.current.add(payload.eventId);
@@ -1509,7 +1491,6 @@ export function InboundCallIndicator({
     dismissResourceToasts,
     enqueueToast,
     notificationPermission,
-    notificationsEnabled,
     staffUserId,
   ]);
 

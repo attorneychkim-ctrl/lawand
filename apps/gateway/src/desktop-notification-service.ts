@@ -689,7 +689,10 @@ export function createDesktopNotificationService(options: {
     const payload: DesktopNotificationPayload = {
       title: `LAW& OS 테스트 알림 · ${actor.displayName}`,
       body:
-        "김로앤 · 010-0000-0000\r\n개인회생 상담을 다시 받고 싶습니다. 오늘 오후에 통화 가능할까요?",
+        "고객명: 김로앤\r\n" +
+        "전화번호: 010-0000-0000\r\n" +
+        "알림 목적: 우측 상단 업무 카드 표시 확인\r\n" +
+        "테스트 내용: 개인회생 상담을 다시 받고 싶습니다. 오늘 오후에 통화 가능할까요?",
       category: "test",
       deepLink: `${erpBaseUrl}/desktop-notifications`,
     };

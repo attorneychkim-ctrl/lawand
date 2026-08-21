@@ -144,8 +144,8 @@ export function DesktopNotificationConnection({
         <li>
           <span>3</span>
           <div>
-            <strong>실제 Windows 알림 확인</strong>
-            <p>테스트 알림이 우측 알림 영역에 뜨고 ERP로 열리면 완료입니다.</p>
+            <strong>실제 업무 카드 확인</strong>
+            <p>테스트 카드가 화면 우측 상단에 뜨고 정확한 ERP 화면으로 열리면 완료입니다.</p>
           </div>
         </li>
       </ol>

@@ -44,11 +44,15 @@
     <Compile Include="src\DeliveryDispositionPolicy.cs" />
     <Compile Include="src\GatewayClient.cs" />
     <Compile Include="src\NotificationPoller.cs" />
+    <Compile Include="src\NotificationPopupManager.cs" />
+    <Compile Include="src\NotificationPopupForm.cs" />
+    <Compile Include="src\NotificationPresentation.cs" />
     <Compile Include="src\NotifierConfiguration.cs" />
     <Compile Include="src\PairingForm.cs" />
     <Compile Include="src\Program.cs" />
     <Compile Include="src\TrayApplicationContext.cs" />
     <Compile Include="src\UrlSafety.cs" />
+    <Compile Include="src\UserPresenceMonitor.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="config\notifier.defaults.example.json" />

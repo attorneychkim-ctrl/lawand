@@ -175,9 +175,24 @@ test("실제 ERP 이벤트는 기존 대상자와 개인 설정 키를 보존해
   assert.equal(
     queued.find((item) => item.preferenceKey === "consultation.assigned_repeat")
       ?.payload.body.includes(
-        "010-1234-5678 · 전화 상담\n상담 내용: 오늘 오후에 통화하고 싶습니다.",
+        "고객명: 김로앤\n전화번호: 010-1234-5678\n접수 채널: 전화 상담\n상담 내용: 오늘 오후에 통화하고 싶습니다.",
       ),
     true,
+  );
+  assert.match(
+    queued.find((item) => item.preferenceKey === "message.assigned_reply")
+      ?.payload.body ?? "",
+    /고객명: 김로앤\n전화번호: 010-1234-5678\n연결 구분: 담당 고객 회신\n문자 내용: 문자 원문입니다\./,
+  );
+  assert.match(
+    queued.find((item) => item.preferenceKey === "review.assigned_new")
+      ?.payload.body ?? "",
+    /고객명: 김로앤[\s\S]*연결 사건: 2026개회1 · 개인회생[\s\S]*후기 내용: 상담 후기 원문입니다\./,
+  );
+  assert.match(
+    queued.find((item) => item.preferenceKey === "phone.targeted_inbound")
+      ?.payload.body ?? "",
+    /고객명: 김로앤[\s\S]*지역: 서울[\s\S]*알림 구분: 내 담당·내 회선/,
   );
   assert.deepEqual(
     queued.find((item) => item.preferenceKey === "phone.all_external")
@@ -281,6 +296,12 @@ test("내선·호전환·복귀는 실제 수신 직원에게 같은 개인 설�
       "[서울] 고객 전화 복귀 · 김로앤",
     ],
   );
+  assert.match(
+    queued[0]?.payload.body ?? "",
+    /발신 직원: 박발신\n발신 내선: 201\n수신 회선: 김수신 회선\n수신 내선: 202/,
+  );
+  assert.match(queued[1]?.payload.body ?? "", /전화 상태: 고객 호전환/);
+  assert.match(queued[2]?.payload.body ?? "", /전화 상태: 호전환 실패 복귀/);
 });
 
 test("재연결 재생은 원래 발생 시각으로 만료를 계산하고 지난 전화는 큐에 넣지 않는다", async () => {

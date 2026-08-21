@@ -222,7 +222,9 @@ export function createDesktopNotificationProducer(options: {
             ? "상담 재요청"
             : "새 상담";
     const summary = [
-      `${formatPhone(latestRequest?.phone)} · ${
+      `고객명: ${customerName}`,
+      `전화번호: ${formatPhone(latestRequest?.phone)}`,
+      `접수 채널: ${
         channelLabels[latestRequest?.contactChannel ?? consultation.contactChannel] ??
         "상담"
       }`,
@@ -268,7 +270,14 @@ export function createDesktopNotificationProducer(options: {
       payload: {
         title: `새 문자 · ${message.customerName}`,
         body: truncateDesktopNotificationBody(
-          `${formatPhone(message.phone)}\n${message.body}`,
+          [
+            `고객명: ${message.customerName}`,
+            `전화번호: ${formatPhone(message.phone)}`,
+            `연결 구분: ${
+              message.targetSource === null ? "미연결 문자" : "담당 고객 회신"
+            }`,
+            `문자 내용: ${cleanText(message.body).replace(/\n+/g, " ")}`,
+          ].join("\n"),
         ),
         category: "message",
         deepLinkPath: message.href,
@@ -302,11 +311,12 @@ export function createDesktopNotificationProducer(options: {
         title: `담당 고객 후기 · ${review.customerName}`,
         body: truncateDesktopNotificationBody(
           [
+            `고객명: ${review.customerName}`,
             review.submittedPhone
-              ? formatPhone(review.submittedPhone)
-              : review.receiptCode ?? "홈페이지 고객후기",
-            caseLabel || "연결 사건을 확인해 주세요.",
-            review.content,
+              ? `연락처: ${formatPhone(review.submittedPhone)}`
+              : `접수 정보: ${review.receiptCode ?? "홈페이지 고객후기"}`,
+            `연결 사건: ${caseLabel || "연결 사건을 확인해 주세요."}`,
+            `후기 내용: ${cleanText(review.content).replace(/\n+/g, " ")}`,
           ].join("\n"),
         ),
         category: "review",
@@ -342,7 +352,13 @@ export function createDesktopNotificationProducer(options: {
               targetUserIds: directTargets,
               payload: {
                 title: `[${region}] 내 담당·내 회선 전화 · ${call.customerName}`,
-                body: `${phone}\n수신 회선 ${call.lineLabel}`,
+                body: [
+                  `고객명: ${call.customerName}`,
+                  `전화번호: ${phone}`,
+                  `지역: ${region}`,
+                  `수신 회선: ${call.lineLabel}`,
+                  "알림 구분: 내 담당·내 회선",
+                ].join("\n"),
                 category: "phone",
                 deepLinkPath: `/phone-desk/${call.id}`,
               },
@@ -358,7 +374,13 @@ export function createDesktopNotificationProducer(options: {
         excludedUserIds: directTargets,
         payload: {
           title: `[${region}] 대표번호 수신 · ${call.customerName}`,
-          body: `${phone}\n수신 회선 ${call.lineLabel}`,
+          body: [
+            `고객명: ${call.customerName}`,
+            `전화번호: ${phone}`,
+            `지역: ${region}`,
+            `수신 회선: ${call.lineLabel}`,
+            "알림 구분: 대표번호 수신",
+          ].join("\n"),
           category: "phone",
           deepLinkPath: `/phone-desk/${call.id}`,
         },
@@ -386,8 +408,21 @@ export function createDesktopNotificationProducer(options: {
             ? `[${region}] 고객 전화 복귀 · ${call.customerName}`
             : `[${region}] 호전환 전화 · ${call.customerName}`;
         const body = internal
-          ? `수신 ${call.lineLabel} · 내선 ${call.targetExtension}`
-          : `${formatPhone(call.remotePhone)}\n수신 회선 ${call.lineLabel}`;
+          ? [
+              `발신 직원: ${call.callerName ?? "직원 확인 중"}`,
+              `발신 내선: ${call.callerExtension ?? "확인 중"}`,
+              `수신 회선: ${call.lineLabel}`,
+              `수신 내선: ${call.targetExtension}`,
+            ].join("\n")
+          : [
+              `고객명: ${call.customerName}`,
+              `전화번호: ${formatPhone(call.remotePhone)}`,
+              `지역: ${region}`,
+              `수신 회선: ${call.lineLabel}`,
+              `전화 상태: ${
+                call.kind === "transfer_returned" ? "호전환 실패 복귀" : "고객 호전환"
+              }`,
+            ].join("\n");
         return queueNotification({
           sourceEventId: call.sourceEventId,
           eventType: `desktop.phone.${call.kind}`,

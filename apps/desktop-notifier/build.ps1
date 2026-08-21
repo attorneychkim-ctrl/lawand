@@ -86,7 +86,9 @@ $selfTestArguments = @(
     "/out:$selfTestExecutable",
     '/reference:System.dll',
     '/reference:System.Core.dll',
+    '/reference:System.Drawing.dll',
     (Join-Path $projectRoot 'src\DeliveryDispositionPolicy.cs'),
+    (Join-Path $projectRoot 'src\NotificationPresentation.cs'),
     (Join-Path $projectRoot 'src\UrlSafety.cs'),
     (Join-Path $projectRoot 'tests\DesktopNotifierSelfTests.cs')
 )
@@ -97,6 +99,30 @@ if ($LASTEXITCODE -ne 0) {
 & $selfTestExecutable
 if ($LASTEXITCODE -ne 0) {
     throw "Desktop notifier self-tests failed with exit code $LASTEXITCODE"
+}
+
+if ($Configuration -eq 'Debug') {
+    $previewExecutable = Join-Path $OutputDirectory 'Lawand.DesktopNotifier.PopupPreview.exe'
+    $previewArguments = @(
+        '/nologo',
+        '/target:winexe',
+        '/platform:x64',
+        '/checked+',
+        '/warn:4',
+        '/langversion:5',
+        "/out:$previewExecutable",
+        '/reference:System.dll',
+        '/reference:System.Core.dll',
+        '/reference:System.Drawing.dll',
+        '/reference:System.Windows.Forms.dll',
+        (Join-Path $projectRoot 'src\NotificationPresentation.cs'),
+        (Join-Path $projectRoot 'src\NotificationPopupForm.cs'),
+        (Join-Path $projectRoot 'tests\PopupPreview.cs')
+    )
+    & $compiler @previewArguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Desktop notifier popup preview compilation failed with exit code $LASTEXITCODE"
+    }
 }
 
 if (-not [string]::IsNullOrWhiteSpace($CodeSigningCertificateThumbprint)) {

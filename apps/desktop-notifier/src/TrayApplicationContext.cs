@@ -13,13 +13,13 @@ namespace Lawand.DesktopNotifier
         private readonly NotifierConfiguration configuration;
         private readonly GatewayClient gatewayClient;
         private readonly NotificationPoller poller;
+        private readonly NotificationPopupManager popupManager;
+        private readonly UserPresenceMonitor presenceMonitor;
         private readonly NotifyIcon notifyIcon;
         private readonly ToolStripMenuItem statusMenuItem;
         private readonly ToolStripMenuItem disconnectMenuItem;
         private readonly Control dispatcher;
         private StoredCredential credential;
-        private DesktopDelivery currentDelivery;
-        private bool sessionLocked;
         private bool exiting;
 
         public TrayApplicationContext()
@@ -27,6 +27,9 @@ namespace Lawand.DesktopNotifier
             configuration = NotifierConfiguration.Load();
             gatewayClient = new GatewayClient();
             poller = new NotificationPoller(gatewayClient, configuration);
+            popupManager = new NotificationPopupManager();
+            presenceMonitor = new UserPresenceMonitor(
+                TimeSpan.FromMinutes(configuration.AwayAfterMinutes));
             dispatcher = new Control();
             IntPtr dispatcherHandle = dispatcher.Handle;
 
@@ -58,7 +61,11 @@ namespace Lawand.DesktopNotifier
             notifyIcon.ContextMenuStrip = menu;
             notifyIcon.Visible = true;
             notifyIcon.DoubleClick += delegate { OpenErpSettings(); };
-            notifyIcon.BalloonTipClicked += BalloonTipClicked;
+
+            popupManager.DeliveryOpenRequested += OpenDelivery;
+            popupManager.ErpOpenRequested += OpenErpHome;
+            popupManager.SettingsOpenRequested += OpenErpSettings;
+            presenceMonitor.AwayChanged += PresenceAwayChanged;
 
             poller.DeliveryReceived += delivery => Dispatch(delegate
             {
@@ -72,7 +79,7 @@ namespace Lawand.DesktopNotifier
             SystemEvents.SessionSwitch += SystemEventsSessionSwitch;
 
             disconnectMenuItem.Enabled = false;
-            dispatcher.BeginInvoke(new Action(StartOrRequestPairing));
+            dispatcher.BeginInvoke(new Action(StartApplication));
         }
 
         protected override void Dispose(bool disposing)
@@ -82,11 +89,19 @@ namespace Lawand.DesktopNotifier
                 SystemEvents.SessionSwitch -= SystemEventsSessionSwitch;
                 poller.Dispose();
                 gatewayClient.Dispose();
+                presenceMonitor.Dispose();
+                popupManager.Dispose();
                 notifyIcon.Visible = false;
                 notifyIcon.Dispose();
                 dispatcher.Dispose();
             }
             base.Dispose(disposing);
+        }
+
+        private void StartApplication()
+        {
+            presenceMonitor.Start();
+            StartOrRequestPairing();
         }
 
         private void StartOrRequestPairing()
@@ -118,12 +133,10 @@ namespace Lawand.DesktopNotifier
                 if (form.ShowDialog() == DialogResult.OK)
                 {
                     StartOrRequestPairing();
-                    currentDelivery = null;
-                    notifyIcon.BalloonTipTitle = "LAW& OS 알림 연결 완료";
-                    notifyIcon.BalloonTipText =
-                        "ERP에서 테스트 알림을 보내 Windows 알림을 확인해 주세요.";
-                    notifyIcon.BalloonTipIcon = ToolTipIcon.Info;
-                    notifyIcon.ShowBalloonTip(8000);
+                    popupManager.ShowSystemMessage(
+                        "LAW& OS 알림 연결 완료",
+                        "ERP에서 테스트 알림을 보내 우측 상단 업무 카드를 확인해 주세요.",
+                        false);
                 }
             }
         }
@@ -134,6 +147,7 @@ namespace Lawand.DesktopNotifier
             {
                 return;
             }
+            presenceMonitor.Refresh();
             if (DeliveryDispositionPolicy.AlreadyDisplayed(
                 configuration.RecentlyDisplayedDeliveryIds,
                 delivery.deliveryId))
@@ -150,14 +164,12 @@ namespace Lawand.DesktopNotifier
             {
                 // 로컬 중복 원장 저장 실패가 알림 수신 자체를 막지는 않는다.
             }
-            currentDelivery = delivery;
-            notifyIcon.BalloonTipTitle = delivery.payload.title;
-            notifyIcon.BalloonTipText = DeliveryDispositionPolicy.ContentForDisplay(
-                delivery.payload.body,
-                sessionLocked,
-                configuration.HideContentWhenLocked);
-            notifyIcon.BalloonTipIcon = ToolTipIcon.Info;
-            notifyIcon.ShowBalloonTip(10000);
+            popupManager.ShowDelivery(
+                delivery,
+                DeliveryDispositionPolicy.ContentForDisplay(
+                    delivery.payload.body,
+                    false,
+                    configuration.HideContentWhenLocked));
             AcknowledgeSafe(delivery.deliveryId, "displayed");
         }
 
@@ -182,10 +194,8 @@ namespace Lawand.DesktopNotifier
             }
         }
 
-        private void BalloonTipClicked(object sender, EventArgs eventArgs)
+        private void OpenDelivery(DesktopDelivery delivery)
         {
-            DesktopDelivery delivery = currentDelivery;
-            currentDelivery = null;
             if (delivery == null ||
                 delivery.payload == null ||
                 !UrlSafety.IsAllowedErpDeepLink(
@@ -194,13 +204,43 @@ namespace Lawand.DesktopNotifier
             {
                 return;
             }
-            OpenUrl(delivery.payload.deepLink);
-            AcknowledgeSafe(delivery.deliveryId, "opened");
+            try
+            {
+                OpenUrl(delivery.payload.deepLink);
+                AcknowledgeSafe(delivery.deliveryId, "opened");
+            }
+            catch
+            {
+                popupManager.ShowSystemMessage(
+                    "ERP 화면을 열지 못했습니다",
+                    "트레이 메뉴에서 ERP PC 알림 설정을 열어 다시 시도해 주세요.",
+                    true);
+            }
         }
 
         private void OpenErpSettings()
         {
-            OpenUrl(configuration.ErpBaseUrl + "/desktop-notifications");
+            TryOpenErp(configuration.ErpBaseUrl + "/desktop-notifications");
+        }
+
+        private void OpenErpHome()
+        {
+            TryOpenErp(configuration.ErpBaseUrl);
+        }
+
+        private void TryOpenErp(string url)
+        {
+            try
+            {
+                OpenUrl(url);
+            }
+            catch
+            {
+                popupManager.ShowSystemMessage(
+                    "ERP 화면을 열지 못했습니다",
+                    "브라우저 상태를 확인한 뒤 트레이 메뉴에서 다시 열어 주세요.",
+                    true);
+            }
         }
 
         private static void OpenUrl(string url)
@@ -246,6 +286,7 @@ namespace Lawand.DesktopNotifier
             CredentialStore.Delete(configuration.CredentialTarget);
             configuration.ClearDevice();
             credential = null;
+            popupManager.Clear();
             SetStatus("연결 전");
         }
 
@@ -262,14 +303,13 @@ namespace Lawand.DesktopNotifier
                 // 상태 표시는 유지하고 사용자가 ERP에서 다시 연결할 수 있게 한다.
             }
             credential = null;
-            currentDelivery = null;
             disconnectMenuItem.Enabled = false;
+            popupManager.Clear();
             SetStatus("연결 해제됨");
-            notifyIcon.BalloonTipTitle = "LAW& OS 알림 연결 확인 필요";
-            notifyIcon.BalloonTipText =
-                "ERP의 PC 알림 설정에서 이 컴퓨터를 다시 연결해 주세요.";
-            notifyIcon.BalloonTipIcon = ToolTipIcon.Warning;
-            notifyIcon.ShowBalloonTip(8000);
+            popupManager.ShowSystemMessage(
+                "LAW& OS 알림 연결 확인 필요",
+                "ERP의 PC 알림 설정에서 이 컴퓨터를 다시 연결해 주세요.",
+                true);
         }
 
         private void SystemEventsSessionSwitch(
@@ -278,11 +318,23 @@ namespace Lawand.DesktopNotifier
         {
             if (eventArgs.Reason == SessionSwitchReason.SessionLock)
             {
-                sessionLocked = true;
+                Dispatch(delegate { presenceMonitor.SetSessionLocked(true); });
             }
             else if (eventArgs.Reason == SessionSwitchReason.SessionUnlock)
             {
-                sessionLocked = false;
+                Dispatch(delegate { presenceMonitor.SetSessionLocked(false); });
+            }
+        }
+
+        private void PresenceAwayChanged(bool away)
+        {
+            if (away)
+            {
+                popupManager.SuspendForAway();
+            }
+            else
+            {
+                popupManager.ResumeFromAway();
             }
         }
 
@@ -314,6 +366,7 @@ namespace Lawand.DesktopNotifier
         {
             exiting = true;
             poller.Stop();
+            popupManager.Clear();
             notifyIcon.Visible = false;
             ExitThread();
         }

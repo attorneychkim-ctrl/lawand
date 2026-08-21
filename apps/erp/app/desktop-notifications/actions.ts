@@ -59,7 +59,7 @@ export async function createDesktopNotificationPairingAction(
     return {
       status: "success",
       message:
-        "Windows 알림 프로그램에 아래 일회용 연결 코드를 붙여넣어 주세요.",
+        "LAW& OS PC 알림 프로그램에 아래 일회용 연결 코드를 붙여넣어 주세요.",
       pairingCode: pairing.pairingCode,
       expiresAt: pairing.expiresAt,
       queuedDeviceCount: 0,

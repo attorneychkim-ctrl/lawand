@@ -1,6 +1,6 @@
-# 로앤 통합 플랫폼 — 현재 설계·운영 기준선 (v2.1)
+# 로앤 통합 플랫폼 — 현재 설계·운영 기준선 (v2.2)
 
-> 갱신일: 2026-08-20
+> 갱신일: 2026-08-21
 >
 > 이 문서는 **현재 상태만** 설명한다. 후보·통합·배포 연대기는 누적하지 않는다. 최신
 > 인수인계는 [`docs/handoffs/CURRENT.md`](docs/handoffs/CURRENT.md), 구조 개편 이후의 작업
@@ -286,10 +286,21 @@ ERP `/desktop-notifications`는 로그인 직원 본인의 Windows 기기를 5�
 보관한다. 재연결 시 최근 원장을 짧게 재생하되 직원·원본 이벤트 unique 경계로 중복을 막고,
 만료 pairing·알림은 최소 권한 SECURITY DEFINER 함수로 정리한다.
 
-Windows client는 outbound HTTPS polling만 사용하고 잠금 화면에서는 고객 내용을 숨기며,
-deep link는 설정된 ERP same-origin만 연다. 관리 메뉴와 설정 화면은 아직 관리자 전용이다.
-조직 Authenticode 서명 전의 ZIP은 운영 다운로드로 제공하지 않고, macOS client와 일반 직원
-공개는 서명·배포 채널과 acceptance가 끝난 뒤 별도 승인한다. 외부 URL 웹훅 후보는 폐기됐다.
+Windows client는 outbound HTTPS polling만 사용한다. 현재 소스는 OS balloon 대신 화면 우측
+상단의 자체 업무 카드를 쓰며 상담·문자·후기·고객전화·내선·호전환을 서로 다른 색·크기·필드로
+구분한다. 일반 업무는 25~30초, 실시간 전화는 서버 만료 시각 기준 최대 2분 유지하고 동시에
+최대 3장까지만 표시한다. 초과분과 Windows 잠금 또는 10분 입력 부재 중 수신분은 고객 내용을
+화면에 띄우지 않고 복귀 뒤 종류별 건수 요약 한 장으로 묶는다. 표시 ACK와 사용자의 정확한
+deep link 열기 ACK는 분리하며 URL은 설정된 ERP same-origin만 연다.
+
+관리 메뉴와 설정 화면은 아직 관리자 전용이다. 새 자체 카드 빌드는 통제 PC acceptance 전의
+작업 브랜치 후보이며 기존 운영 canary 설치본을 자동 교체하지 않았다. 조직 Authenticode 서명
+전의 ZIP은 운영 다운로드로 제공하지 않고, macOS client와 일반 직원 공개는 서명·정식 배포
+채널과 acceptance가 끝난 뒤 별도 승인한다. 외부 URL 웹훅 후보는 폐기됐다.
+
+기존 브라우저 알림은 PC 알림과 독립된 개인 선택 기능으로 유지한다. ERP 내비게이션의 별도
+켜기·끄기 버튼과 로컬 보조 설정은 두지 않고, 실제 표시 여부는 각 사용자가 브라우저 사이트
+알림 권한에서 선택한 `Notification.permission`만 따른다.
 
 ## 5. 인프라·배포·데이터 보관
 

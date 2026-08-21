@@ -7,13 +7,9 @@ const NOTIFICATION_ICON_PATH = "/notification-icon.png";
 const NOTIFICATION_BADGE_PATH = "/notification-badge.png";
 const NOTIFICATION_CLOSE_DELAY_MS = 20_000;
 const SERVICE_WORKER_READY_TIMEOUT_MS = 2_000;
-const NOTIFICATION_ENABLED_STORAGE_KEY =
-  "lawand:browser-notifications-enabled";
 
-export const browserNotificationSettingChangedEvent =
-  "lawand:browser-notification-setting-changed";
-
-let memoryNotificationPreference: boolean | null = null;
+export const notificationPermissionChangedEvent =
+  "lawand:notification-permission-changed";
 
 type RichNotificationAction = {
   action: string;
@@ -83,36 +79,8 @@ type ErpBrowserNotification = {
   answerHref?: string;
 };
 
-let serviceWorkerRegistration: Promise<ServiceWorkerRegistration> | null =
-  null;
+let serviceWorkerRegistration: Promise<ServiceWorkerRegistration> | null = null;
 const pageNotifications = new Map<string, Notification>();
-
-export function browserNotificationsEnabled() {
-  if (typeof window === "undefined") return false;
-  try {
-    const stored = window.localStorage.getItem(
-      NOTIFICATION_ENABLED_STORAGE_KEY,
-    );
-    if (stored === "disabled") return false;
-    if (stored === "enabled") return true;
-  } catch {
-    // 저장소가 차단된 환경에서는 현재 탭의 메모리 설정을 사용한다.
-  }
-  return memoryNotificationPreference ?? true;
-}
-
-export function setBrowserNotificationsEnabled(enabled: boolean) {
-  memoryNotificationPreference = enabled;
-  try {
-    window.localStorage.setItem(
-      NOTIFICATION_ENABLED_STORAGE_KEY,
-      enabled ? "enabled" : "disabled",
-    );
-  } catch {
-    // 저장소가 차단돼도 현재 탭에서는 사용자가 고른 상태를 유지한다.
-  }
-  window.dispatchEvent(new Event(browserNotificationSettingChangedEvent));
-}
 
 async function registerNotificationServiceWorker() {
   const registration = await navigator.serviceWorker.register(
@@ -203,8 +171,7 @@ function showPageNotification(
 async function showErpBrowserNotification(input: ErpBrowserNotification) {
   if (
     !("Notification" in window) ||
-    Notification.permission !== "granted" ||
-    !browserNotificationsEnabled()
+    Notification.permission !== "granted"
   ) {
     return false;
   }

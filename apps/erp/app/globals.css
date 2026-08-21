@@ -2688,56 +2688,6 @@ svg {
   gap: 12px;
 }
 
-.browser-notification-toggle {
-  display: inline-flex;
-  min-height: 38px;
-  align-items: center;
-  gap: 7px;
-  padding: 0 10px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface-subtle);
-  color: var(--muted);
-  cursor: pointer;
-  font-size: .72rem;
-  font-weight: 750;
-}
-
-.browser-notification-toggle:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--brand) 42%, var(--line));
-  color: var(--brand-strong);
-}
-
-.browser-notification-toggle:disabled {
-  cursor: default;
-}
-
-.browser-notification-toggle.is-enabled {
-  border-color: color-mix(in srgb, var(--brand) 28%, var(--line));
-  background: var(--brand-soft);
-  color: var(--brand-strong);
-}
-
-.browser-notification-toggle.is-disabled {
-  border-color: color-mix(in srgb, var(--warning) 28%, var(--line));
-  background: var(--warning-soft);
-  color: var(--warning);
-}
-
-.browser-notification-toggle.is-denied {
-  color: var(--muted-2);
-}
-
-.browser-notification-toggle svg {
-  width: 17px;
-  height: 17px;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.7;
-}
-
 .inbound-call-strip {
   border-top: 1px solid color-mix(in srgb, var(--brand) 26%, var(--line));
   background: color-mix(in srgb, var(--brand-soft) 82%, var(--surface));
@@ -8810,8 +8760,6 @@ a.inbound-customer:hover { text-decoration: underline; }
 @media (max-width: 1040px) {
   .staff-bar-leading { gap: 20px; }
   .staff-brand .lawand-os-copy small { display: none; }
-  .browser-notification-toggle { width: 38px; padding: 0; justify-content: center; }
-  .browser-notification-toggle span { display: none; }
   .queue-controls { grid-template-columns: minmax(220px, 310px) minmax(0, 1fr); }
   .consultation-row-link { grid-template-columns: 42px minmax(0, 1fr) 150px 18px; }
   .consultation-command-grid { grid-template-columns: minmax(0, 1.25fr) minmax(290px, .75fr); }
@@ -8872,8 +8820,6 @@ a.inbound-customer:hover { text-decoration: underline; }
   .staff-primary-nav > a.is-active::after,
   .staff-nav-disclosure.is-active > summary::after { bottom: -12px; right: 9px; left: 9px; }
   .staff-actions { gap: 6px; }
-  .browser-notification-toggle { width: 38px; padding: 0; justify-content: center; }
-  .browser-notification-toggle span { display: none; }
   .staff-identity-copy { display: none; }
   .legalfriends-review-card { grid-template-columns: 1fr; padding: 18px 16px; }
   .legalfriends-review-action { grid-column: auto; justify-items: stretch; }

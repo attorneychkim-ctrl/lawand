@@ -16,6 +16,7 @@ namespace Lawand.DesktopNotifier
         public string DeviceName { get; set; }
         public string StaffDisplayName { get; set; }
         public bool HideContentWhenLocked { get; set; }
+        public int AwayAfterMinutes { get; set; }
         public List<string> RecentlyDisplayedDeliveryIds { get; set; }
 
         [ScriptIgnore]
@@ -54,6 +55,7 @@ namespace Lawand.DesktopNotifier
             configuration.ErpBaseUrl = "https://erp.lawandfirm.com";
             configuration.DeviceName = Environment.MachineName;
             configuration.HideContentWhenLocked = true;
+            configuration.AwayAfterMinutes = 10;
             configuration.RecentlyDisplayedDeliveryIds = new List<string>();
 
             string defaultsPath = Path.Combine(
@@ -100,6 +102,11 @@ namespace Lawand.DesktopNotifier
             if (configuration.RecentlyDisplayedDeliveryIds == null)
             {
                 configuration.RecentlyDisplayedDeliveryIds = new List<string>();
+            }
+            if (configuration.AwayAfterMinutes < 1 ||
+                configuration.AwayAfterMinutes > 120)
+            {
+                configuration.AwayAfterMinutes = 10;
             }
             configuration.RecentlyDisplayedDeliveryIds = configuration
                 .RecentlyDisplayedDeliveryIds
