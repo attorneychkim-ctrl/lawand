@@ -7,6 +7,7 @@ import {
   CONSULTATION_CUSTOMER_NAME_REVIEW_LABEL,
   desktopNotificationPreferenceDefaults,
   type PhoneDeskAftercareSave,
+  type ReviewGiftCouponSend,
 } from "@lawand/core";
 
 import { createGatewayServer } from "./app.js";
@@ -20,6 +21,7 @@ import type { ReviewManagementService } from "./review-management-service.js";
 import type { ReviewSubmissionService } from "./review-service.js";
 import type { TelephonyService } from "./telephony-service.js";
 import type { DesktopNotificationService } from "./desktop-notification-service.js";
+import type { GiftCouponService } from "./gift-coupon-service.js";
 
 const realtimeActor = {
   id: "019fa6a4-6834-7782-aa0b-4e71ffb8a2b1",
@@ -3052,6 +3054,74 @@ test("공개 후기 쓰기는 홈페이지 서버의 접수 전용 키와 검수
     status: "pending_review",
     replayed: false,
   });
+});
+
+test("후기 기프티콘 API는 직원이 수정한 고객 안내 문구를 발송 서비스에 전달한다", async (context) => {
+  const recordId = "019fa6a4-6834-7782-aa0b-4e71ffb8a2c1";
+  const message = "정성스러운 후기 정말 감사합니다.\n\n작은 선물을 준비했습니다.";
+  const receivedInputs: ReviewGiftCouponSend[] = [];
+  const authService = {
+    authorize: async () => realtimeActor,
+  } as unknown as StaffAuthService;
+  const giftCouponService = {
+    send: async (
+      receivedRecordType: string,
+      receivedRecordId: string,
+      input: ReviewGiftCouponSend,
+      actor: StaffPrincipal,
+    ) => {
+      assert.equal(receivedRecordType, "review");
+      assert.equal(receivedRecordId, recordId);
+      assert.equal(actor.id, realtimeActor.id);
+      receivedInputs.push(input);
+      return {
+        id: "019fa6a4-6834-7782-aa0b-4e71ffb8a2c2",
+        status: "sent",
+        productKey: input.productKey,
+        brandName: "메가MGC커피",
+        goodsName: "더블 아아 세트",
+        salePrice: 4_000,
+        reason: input.reason,
+        orderNo: "order-1",
+        requestedAt: "2026-08-21T00:00:00.000Z",
+        respondedAt: "2026-08-21T00:00:01.000Z",
+        replayed: false,
+      };
+    },
+  } as unknown as GiftCouponService;
+  const server = createGatewayServer({
+    authService,
+    giftCouponService,
+    internalApiKey: "test-internal-key",
+    reviewManagementService: {} as ReviewManagementService,
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  context.after(() => server.close());
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const response = await fetch(
+    `http://127.0.0.1:${address.port}/v1/reviews/review/${recordId}/gift-coupons`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-lawand-internal-key": "test-internal-key",
+        "x-lawand-staff-session": "test-session",
+      },
+      body: JSON.stringify({
+        productKey: "mega_double_americano",
+        reason: "review_thanks",
+        idempotencyKey: "019fa6a4-6834-7782-aa0b-4e71ffb8a2c3",
+        message,
+        confirmed: true,
+      }),
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(receivedInputs[0]?.message, message);
 });
 
 test("고객별 후기 링크는 이름·전화 재입력 없이 사전 선택 문맥을 읽고 제출한다", async (context) => {

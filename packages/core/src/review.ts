@@ -221,6 +221,38 @@ export const reviewCustomerLinkSchema = z
   })
   .strict();
 
+export const REVIEW_GIFT_COUPON_DEFAULT_MESSAGE = `정성스러운 후기 정말 감사합니다.
+
+함께했던 시간을 좋은 기억으로 남겨주신 것 같아 저희도 무척 감사한 마음입니다.
+그 마음에 조금이나마 보답하고자 작은 선물을 준비했습니다.
+
+늘 믿을 수 있는 법무법인 로앤이 되겠습니다.
+감사합니다.`;
+
+export const REVIEW_GIFT_COUPON_MESSAGE_MAX_LENGTH = 500;
+
+export const reviewGiftCouponSendSchema = z
+  .object({
+    productKey: z.enum([
+      "mega_double_americano",
+      "naverpay_10000",
+      "baemin_30000",
+    ]),
+    reason: z.enum(["review_thanks", "service_recovery", "event"]),
+    idempotencyKey: z.uuid(),
+    message: z
+      .string()
+      .trim()
+      .min(1, "고객 안내 문구를 입력해 주세요.")
+      .max(
+        REVIEW_GIFT_COUPON_MESSAGE_MAX_LENGTH,
+        `고객 안내 문구는 ${REVIEW_GIFT_COUPON_MESSAGE_MAX_LENGTH}자까지 입력할 수 있습니다.`,
+      )
+      .default(REVIEW_GIFT_COUPON_DEFAULT_MESSAGE),
+    confirmed: z.literal(true),
+  })
+  .strict();
+
 export const REVIEW_REQUEST_TEMPLATE_VARIABLES = [
   "{{고객명}}",
   "{{담당자명}}",
@@ -377,6 +409,9 @@ export type ReviewRestrictionReason = z.infer<
 export type ReviewModeration = z.infer<typeof reviewModerationSchema>;
 export type ReviewReplyUpsert = z.infer<typeof reviewReplyUpsertSchema>;
 export type ReviewCustomerLink = z.infer<typeof reviewCustomerLinkSchema>;
+export type ReviewGiftCouponSend = z.infer<
+  typeof reviewGiftCouponSendSchema
+>;
 export type ReviewRequestTemplateCreate = z.infer<
   typeof reviewRequestTemplateCreateSchema
 >;

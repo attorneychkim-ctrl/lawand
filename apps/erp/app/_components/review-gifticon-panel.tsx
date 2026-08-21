@@ -1,6 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  REVIEW_GIFT_COUPON_DEFAULT_MESSAGE,
+  REVIEW_GIFT_COUPON_MESSAGE_MAX_LENGTH,
+} from "@lawand/core";
 
 import type { ReviewGiftCouponDelivery, ReviewManagementDetail } from "../../lib/gateway";
 
@@ -62,6 +66,7 @@ export function ReviewGifticonPanel({
 }) {
   const [selectedId, setSelectedId] = useState<(typeof products)[number]["id"]>("mega_double_americano");
   const [reason, setReason] = useState("review_thanks");
+  const [message, setMessage] = useState(REVIEW_GIFT_COUPON_DEFAULT_MESSAGE);
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(true);
@@ -95,10 +100,10 @@ export function ReviewGifticonPanel({
   }, [recordId, recordType]);
 
   async function sendCoupon() {
-    if (!confirmed || !recipientPhone) return;
+    if (!confirmed || !recipientPhone || !message.trim()) return;
     setBusy(true); setError("");
     try {
-      const response = await fetch(`/api/reviews/${recordType}/${recordId}/gift-coupons`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ productKey: selectedId, reason, idempotencyKey: crypto.randomUUID(), confirmed: true }) });
+      const response = await fetch(`/api/reviews/${recordType}/${recordId}/gift-coupons`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ productKey: selectedId, reason, idempotencyKey: crypto.randomUUID(), message, confirmed: true }) });
       const body = await response.json().catch(() => null) as (ReviewGiftCouponDelivery & { message?: string }) | null;
       if (!response.ok) throw new Error(body?.message ?? "쿠폰 발송에 실패했습니다.");
       if (body) setDelivery(body);
@@ -140,7 +145,10 @@ export function ReviewGifticonPanel({
             <div>
               {products.map((product) => (
                 <label className={selectedId === product.id ? "is-selected" : undefined} key={product.id}>
-                  <input checked={selectedId === product.id} name="gifticon-product" onChange={() => setSelectedId(product.id)} type="radio" value={product.id} />
+                  <input checked={selectedId === product.id} name="gifticon-product" onChange={() => {
+                    setSelectedId(product.id);
+                    setConfirmed(false);
+                  }} type="radio" value={product.id} />
                   <span className={`gifticon-product-art tone-${product.tone}`} aria-hidden="true">
                     <i>LAW&amp;</i><b>MOBILE GIFT</b><small>{product.price}</small>
                   </span>
@@ -154,7 +162,10 @@ export function ReviewGifticonPanel({
           <div className="gifticon-send-settings">
             <label>
               <span>발송 사유</span>
-              <select onChange={(event) => setReason(event.target.value)} value={reason}>
+              <select onChange={(event) => {
+                setReason(event.target.value);
+                setConfirmed(false);
+              }} value={reason}>
                 <option value="review_thanks">후기 작성 감사</option>
                 <option value="service_recovery">고객 응대 후속 배려</option>
                 <option value="event">고객 참여 이벤트</option>
@@ -166,7 +177,19 @@ export function ReviewGifticonPanel({
             </label>
             <label className="gifticon-message-preview">
               <span>고객 안내 문구</span>
-              <textarea readOnly rows={3} value={`${customer.clientName}님, 소중한 후기를 남겨주셔서 감사합니다. 후기의 내용이나 평가와 관계없이 로앤의 고객 감사 운영 기준에 따라 모바일 쿠폰을 보내드립니다.`} />
+              <textarea
+                disabled={Boolean(delivery) || busy}
+                maxLength={REVIEW_GIFT_COUPON_MESSAGE_MAX_LENGTH}
+                onChange={(event) => {
+                  setMessage(event.target.value);
+                  setConfirmed(false);
+                }}
+                rows={7}
+                value={message}
+              />
+              <small>
+                발송 전 자유롭게 수정할 수 있습니다. {message.length}/{REVIEW_GIFT_COUPON_MESSAGE_MAX_LENGTH}자
+              </small>
             </label>
           </div>
 
@@ -189,9 +212,9 @@ export function ReviewGifticonPanel({
               </div>
               <label>
                 <input checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} type="checkbox" />
-                <span>수신자·상품·발송 사유를 확인했고, 긍정적 후기의 대가로 지급하지 않음을 확인했습니다.</span>
+                <span>수신자·상품·발송 사유·안내 문구를 확인했고, 긍정적 후기의 대가로 지급하지 않음을 확인했습니다.</span>
               </label>
-              <button disabled={!confirmed || busy || !recipientPhone || historyLoading || historyFailed} onClick={() => void sendCoupon()} type="button">{busy ? "발송 확인 중…" : historyLoading ? "발송 내역 확인 중…" : "모바일 쿠폰 발송"}</button>
+              <button disabled={!confirmed || !message.trim() || busy || !recipientPhone || historyLoading || historyFailed} onClick={() => void sendCoupon()} type="button">{busy ? "발송 확인 중…" : historyLoading ? "발송 내역 확인 중…" : "모바일 쿠폰 발송"}</button>
               {error ? <small role="alert">{error}</small> : <small>버튼을 누르면 비즈머니가 차감되고 기프티쇼 비즈가 MMS를 발송합니다.</small>}
             </div>
           )}

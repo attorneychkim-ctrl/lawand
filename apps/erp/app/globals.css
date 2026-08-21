@@ -1781,6 +1781,17 @@
   grid-column: 1 / -1;
 }
 
+.gifticon-message-preview textarea {
+  min-height: 168px;
+  font-family: inherit;
+}
+
+.gifticon-message-preview > small {
+  color: var(--muted);
+  font-size: .62rem;
+  text-align: right;
+}
+
 .gifticon-send-settings input,
 .gifticon-send-settings select,
 .gifticon-send-settings textarea {
@@ -2066,6 +2077,10 @@
 }
 
 @media (max-width: 620px) {
+  .gifticon-message-preview textarea {
+    font-size: 1rem;
+  }
+
   .review-tabs {
     width: 100%;
   }

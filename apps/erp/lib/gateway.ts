@@ -10,6 +10,7 @@ import type {
   LegalFriendsConsultationHandling,
   LegalFriendsDirectoryConsultationCreate,
   ResidenceRegion,
+  ReviewGiftCouponSend,
   StaffConsultationCreate,
 } from "@lawand/core";
 
@@ -1901,7 +1902,7 @@ export async function sendReviewRequests(input: {
 export async function sendReviewGiftCoupon(
   recordType: ReviewRecordType,
   id: string,
-  input: { productKey: "mega_double_americano" | "naverpay_10000" | "baemin_30000"; reason: "review_thanks" | "service_recovery" | "event"; idempotencyKey: string; confirmed: true },
+  input: ReviewGiftCouponSend,
 ): Promise<ReviewGiftCouponDelivery & { replayed: boolean }> {
   return reviewResponse(await gatewayFetch(`/v1/reviews/${recordType}/${id}/gift-coupons`, { method: "POST", body: input, timeoutMs: 30_000 }));
 }

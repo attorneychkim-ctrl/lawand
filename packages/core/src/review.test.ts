@@ -4,10 +4,13 @@ import test from "node:test";
 import {
   CURRENT_REVIEW_PRIVACY_NOTICE_VERSION,
   CURRENT_REVIEW_PUBLICATION_CONSENT_VERSION,
+  REVIEW_GIFT_COUPON_DEFAULT_MESSAGE,
+  REVIEW_GIFT_COUPON_MESSAGE_MAX_LENGTH,
   REVIEW_REQUEST_DEFAULT_TEMPLATES,
   detectReviewPiiFlags,
   maskReviewAuthorDisplay,
   renderReviewRequestTemplate,
+  reviewGiftCouponSendSchema,
   reviewModerationSchema,
   reviewRequestTemplateCreateSchema,
   reviewSubmissionSchema,
@@ -114,6 +117,52 @@ test("공개 제한에는 사유가 필요하고 기타 사유에는 메모가 �
       note: "고객과 사실관계를 추가 확인 중",
     }).success,
     true,
+  );
+});
+
+test("기프티콘 고객 안내 문구는 요청 문안을 기본값으로 사용하고 수정값을 검증한다", () => {
+  assert.equal(
+    REVIEW_GIFT_COUPON_DEFAULT_MESSAGE,
+    `정성스러운 후기 정말 감사합니다.
+
+함께했던 시간을 좋은 기억으로 남겨주신 것 같아 저희도 무척 감사한 마음입니다.
+그 마음에 조금이나마 보답하고자 작은 선물을 준비했습니다.
+
+늘 믿을 수 있는 법무법인 로앤이 되겠습니다.
+감사합니다.`,
+  );
+
+  const validInput = {
+    productKey: "mega_double_americano",
+    reason: "review_thanks",
+    idempotencyKey: "01984c7d-8500-7000-8000-000000000002",
+    message: "  직접 수정한 감사 문구입니다.  ",
+    confirmed: true,
+  } as const;
+  assert.equal(
+    reviewGiftCouponSendSchema.parse(validInput).message,
+    "직접 수정한 감사 문구입니다.",
+  );
+  assert.equal(
+    reviewGiftCouponSendSchema.parse({
+      productKey: validInput.productKey,
+      reason: validInput.reason,
+      idempotencyKey: validInput.idempotencyKey,
+      confirmed: validInput.confirmed,
+    }).message,
+    REVIEW_GIFT_COUPON_DEFAULT_MESSAGE,
+  );
+  assert.equal(
+    reviewGiftCouponSendSchema.safeParse({ ...validInput, message: "   " })
+      .success,
+    false,
+  );
+  assert.equal(
+    reviewGiftCouponSendSchema.safeParse({
+      ...validInput,
+      message: "가".repeat(REVIEW_GIFT_COUPON_MESSAGE_MAX_LENGTH + 1),
+    }).success,
+    false,
   );
 });
 

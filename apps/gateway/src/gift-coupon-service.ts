@@ -1,9 +1,9 @@
 import { sql } from "drizzle-orm";
-import { createEventId } from "@lawand/core";
+import { createEventId, type ReviewGiftCouponSend } from "@lawand/core";
 import type { createDatabaseClient } from "@lawand/db";
 import type { StaffPrincipal } from "./auth.js";
 import type { DataProtection } from "./crypto.js";
-import { GIFTISHOW_PRODUCTS, GiftishowError, type GiftishowClient, type GiftishowProductKey } from "./giftishow.js";
+import { GIFTISHOW_PRODUCTS, GiftishowError, type GiftishowClient } from "./giftishow.js";
 import type { ReviewManagementService, ReviewRecordType } from "./review-management-service.js";
 
 type Database = ReturnType<typeof createDatabaseClient>["db"];
@@ -45,7 +45,7 @@ export function createGiftCouponService(options: { db: Database; protection: Dat
     return row ? serializeDelivery(row) : null;
   }
 
-  async function send(recordType: ReviewRecordType, recordId: string, input: { productKey: GiftishowProductKey; reason: GiftCouponReason; idempotencyKey: string; confirmed: true }, actor: StaffPrincipal) {
+  async function send(recordType: ReviewRecordType, recordId: string, input: ReviewGiftCouponSend, actor: StaffPrincipal) {
     if (!client) throw new GiftishowError("giftishow_not_configured", "기프티쇼 운영 설정이 완료되지 않았습니다.");
     const replay = await db.execute(sql`SELECT id,status,product_key,brand_name_snapshot,goods_name_snapshot,sale_price_snapshot,reason,provider_order_no,requested_at,provider_responded_at FROM review_gift_coupon_deliveries WHERE idempotency_key = ${input.idempotencyKey}::uuid LIMIT 1`);
     const replayRow = replay.rows[0] as DeliveryRow | undefined;
@@ -71,9 +71,13 @@ export function createGiftCouponService(options: { db: Database; protection: Dat
       }
       throw error;
     }
-    const message = `${customer.clientName}님, 소중한 후기를 남겨주셔서 감사합니다. 후기의 내용이나 평가와 관계없이 로앤의 고객 감사 운영 기준에 따라 모바일 쿠폰을 보내드립니다.`;
     try {
-      const result = await client.send({ product, phoneNo: phone, trId, message });
+      const result = await client.send({
+        product,
+        phoneNo: phone,
+        trId,
+        message: input.message,
+      });
       const respondedAt = now();
       await db.transaction(async (tx) => {
         await tx.execute(sql`UPDATE review_gift_coupon_deliveries SET status='sent', provider_order_no=${result.orderNo}, provider_responded_at=${respondedAt}, updated_at=${respondedAt} WHERE id=${id}::uuid AND status='prepared'`);

@@ -19,3 +19,31 @@ test("발송 응답 timeout은 결과 불명으로 분류한다", async () => {
   const client = createGiftishowClient(config, async () => { throw new Error("timeout"); });
   await assert.rejects(() => client.send({ product: { key: "mega_double_americano", goodsCode: "G00005791119", brandName: "메가MGC커피", goodsName: "더블 아아 세트", salePrice: 4000 }, phoneNo: "01012345678", trId: "lawand_20260818_000001", message: "감사합니다." }), (error: unknown) => error instanceof GiftishowError && error.uncertain);
 });
+
+test("수정한 고객 안내 문구를 줄바꿈까지 그대로 MMS 요청에 전달한다", async () => {
+  const message = "정성스러운 후기 정말 감사합니다.\n\n작은 선물을 준비했습니다.";
+  let requestedMessage = "";
+  const client = createGiftishowClient(config, async (_input, init) => {
+    const body = new URLSearchParams(String(init?.body));
+    requestedMessage = body.get("mms_msg") ?? "";
+    return new Response(
+      JSON.stringify({ code: "0000", result: { orderNo: "order-1" } }),
+      { status: 200 },
+    );
+  });
+
+  await client.send({
+    product: {
+      key: "mega_double_americano",
+      goodsCode: "G00005791119",
+      brandName: "메가MGC커피",
+      goodsName: "더블 아아 세트",
+      salePrice: 4000,
+    },
+    phoneNo: "01012345678",
+    trId: "lawand_20260821_000001",
+    message,
+  });
+
+  assert.equal(requestedMessage, message);
+});
