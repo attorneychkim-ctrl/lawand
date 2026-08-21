@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$ExecutablePath = (Join-Path $PSScriptRoot 'Lawand.DesktopNotifier.exe'),
     [switch]$AllowUnsigned
