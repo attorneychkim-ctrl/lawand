@@ -75,8 +75,9 @@
 - `web_hook`의 후속 PowerShell 인코딩 hotfix를 `main`에 통합·푸시했고 모든 원격 작업 HEAD는
   현재 main ancestor다. Linux 운영 코드·migration 변화가 없어 새 ECR 이미지는 게시만 하고
   EC2 전환·snapshot·DB 작업은 하지 않았다.
-- 같은 `web_hook` 워크트리는 후속 자체 PC 알림 카드 구현을 진행 중이다. 현재 Orca 상태는
-  `in-progress`이며 기능 브랜치 커밋·푸시 전까지 main 병합·운영 배포 대상으로 보지 않는다.
+- 같은 `web_hook` 워크트리의 후속 자체 PC 알림 카드 구현·검증은 완료됐다. 구현 commit
+  `48b234552bb279635e8020b2189ab3f731a1643f`을 원격 `LegalFlow/web_hook`에 푸시하고 Orca를
+  `completed`로 전환했으며, 아직 main 병합·운영 배포 대상으로 반영하지 않았다.
 - 로컬 `lawand-prod` AWS 세션은 2026-08-21 확인 시 만료 상태다. 다음 AWS 작업 전
   `aws login --profile lawand-prod`가 필요하다.
 - 다음 작업 전에 `PROJECT_PLAN.md`, 이 문서, 해당 분야의 상세 문서만 읽는다.
