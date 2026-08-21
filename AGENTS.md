@@ -20,7 +20,7 @@
 ## 현재 기준선
 
 - 홈페이지·ERP·gateway AWS 운영 배포와 Route 53 정식 도메인 전환이 완료됐다.
-- 최신 운영 DB 원장은 migration `0071`까지 총 72개다. 최신 배포·검증값은
+- 최신 운영 DB 원장은 migration `0073`까지 총 74개다. 최신 배포·검증값은
   `docs/handoffs/CURRENT.md`에서 확인한다.
 - 스택: Next.js 16(App Router) · React 19 · TypeScript · Tailwind 4 · shadcn/ui ·
   TanStack Query · pnpm workspaces · Turborepo.

@@ -1,6 +1,6 @@
 # AWS 운영 배포 기준선 v2
 
-기준 시각: 2026-08-20 KST
+기준 시각: 2026-08-21 KST
 CloudFormation 스택: `lawand-prod`
 리전: 서울(`ap-northeast-2`)
 최초 배포 릴리스: `20260804T085006Z-84e8708`
@@ -16,6 +16,20 @@ CloudFormation 스택: `lawand-prod`
 이 문서는 정식 도메인 전환 이후를 포함한 실제 AWS 구성, 접속점, 데이터 이관 범위와
 운영 체크리스트를 기록한다. 비밀번호·API 키·AWS 계정 ID·RDS 마스터 시크릿 ARN은
 기록하지 않는다.
+
+## 2026-08-21 Windows 설치 스크립트 hotfix main 반영·운영 미전환
+
+- 완료된 `LegalFlow/web_hook` 후속 커밋을 main
+  `b95621a6506fad02f8d825e3462d221415782e27`에 통합했다. 변경은 Windows 개인 알림 client의
+  PowerShell 5.1용 UTF-8 BOM과 패키징 검사, README뿐이며 홈페이지·ERP·gateway·DB schema·
+  migration·Linux 배포 구성은 바뀌지 않았다.
+- 경로 필터에 따라 Actions `32432686543`이 전체 검증 뒤 ARM64 이미지를 게시했다. digest는
+  홈페이지 `sha256:4f501ad60b2acaf55609c5b050cf91b2a2b27740627450b914d3d51c05d1fd34`,
+  ERP `sha256:6737d31bb4c9745640aff498ab2c747f2f4497f7b1887262ee10b8ec8b636c6c`, gateway
+  `sha256:6bdc4237277a5b81e3b299731996fddd816ff74fddd3fe03b768e61e5006204b`다.
+- 이 이미지는 EC2에 적용하지 않았다. 현재 세 앱 릴리스와 digest는 위의
+  `20260820T094820Z-six-worktrees-v1`을 유지하며 snapshot·migration·SSM 명령·서버 재기동·
+  이미지/cache 정리·운영 데이터·외부 발송을 수행하지 않았다.
 
 ## 2026-08-20 완료 작업 6개 통합 운영 배포
 

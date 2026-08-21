@@ -1,13 +1,15 @@
-# 현재 인수인계 — 2026-08-20
+# 현재 인수인계 — 2026-08-21
 
 이 문서는 다음 세션이 바로 이어갈 **현재 상태만** 유지한다. 완료 작업의 세부 이력은 월별
 원장과 `docs/archive/`에서 찾고, 여기에 배포 연대기를 누적하지 않는다.
 
 ## 운영 기준선
 
-- 최신 통합·운영 애플리케이션 소스는
-  `34fc13d1e1a42126613749cfc295baea4b9885c3`이다. 배포 기록 커밋이 뒤따를 수 있으므로 실제
-  원격 HEAD는 `git rev-parse origin/main`으로 확인한다.
+- 최신 Linux 운영 애플리케이션 소스는
+  `34fc13d1e1a42126613749cfc295baea4b9885c3`이다. main에 통합된 최신 애플리케이션 commit
+  `b95621a6506fad02f8d825e3462d221415782e27`은 Windows 개인 알림 설치 스크립트의 PowerShell
+  5.1 인코딩 보정만 추가했으며 Linux 운영 앱에는 전환하지 않았다. 실제 원격 HEAD는
+  `git rev-parse origin/main`으로 확인한다.
 - 최신 운영 릴리스는 `20260820T094820Z-six-worktrees-v1`이며 홈페이지·ERP·gateway를 같은
   릴리스 ID와 immutable digest로 전환했다.
   - homepage `sha256:26c2969026cd618d44bbfb0d97462e0da8d98092155b10fb87c4f6993d1e7a16`
@@ -20,8 +22,9 @@
 - 정식·EIP 세 앱 endpoint는 각각 3회 연속 200, 앱·Caddy active, restart·error journal 0,
   env 600이다. request/LISTEN waiting은 네 표본 모두 `0/20`·`0/5`, CloudWatch는
   OK 14·ALARM 0·INSUFFICIENT_DATA 0이다.
-- Actions `32354715262`(전체 소스 검증·세 ARM64 이미지 게시)와 `32354715274`(컨텍스트 문서
-  검사)가 성공했다. ECR ARM64 child scan은 세 앱 모두 CRITICAL 3·HIGH 11·MEDIUM 11·LOW 1이다.
+- 최신 main Actions `32432686543`은 전체 소스 검증과 세 ARM64 이미지 게시에 성공했다. 경로
+  필터로 새 이미지가 생성됐지만 EC2에는 적용하지 않았고, 운영 릴리스의 Actions
+  `32354715262`·`32354715274`와 기존 digest·scan 기준은 그대로다.
 
 ## 현재 제품 상태
 
@@ -30,7 +33,9 @@
   운영 반영됐다.
 - 기존 개인 웹훅 미리보기는 관리자 전용 개인 Windows PC 알림으로 교체해 운영 반영했다.
   5분 pairing·개인별 9개 설정·실제 내부 이벤트 생산자는 활성 코드지만, unsigned client는
-  운영 artifact로 제공하지 않으며 일반 직원에게 아직 공개하지 않는다.
+  운영 artifact로 제공하지 않으며 일반 직원에게 아직 공개하지 않는다. 통제 사용자 1인
+  canary의 unsigned client 설치는 PowerShell 5.1 한글 바로가기 인코딩 보정 뒤 완료했고,
+  pairing 이후 실제 알림 acceptance는 남아 있다.
 - GA4 운영 Measurement ID·무팝업 측정과 `generate_lead` 주요 이벤트 표시는 활성화됐다.
   Google Ads·네이버 광고 연결, 광고 개인화, 자동 입찰은 시작하지 않았다.
 - 공용 센트릭스 SMS/LMS는 `070-4607-0588` 발신·mailbox snapshot 기준으로 운영 반영됐다.
@@ -54,15 +59,17 @@
    재확인한다.
 9. 네이버 예약 기준점 이후 실제 신규 메일 접수 canary와 카카오 운영자 확인 흐름을 별도
    승인 아래 수행한다.
-10. 개인 PC 알림 client는 조직 Authenticode 서명·timestamp와 정식 artifact 채널을 마련하고
-    Windows acceptance를 마친 뒤 일반 직원에게 공개한다.
+10. 개인 PC 알림 client는 통제 사용자 1인의 pairing·실제 알림 acceptance를 마치고, 조직
+    Authenticode 서명·timestamp와 정식 artifact 채널을 마련한 뒤 일반 직원에게 공개한다.
 11. OpenAI Realtime STT는 내부 PoC·보관/동의·사람 검토 경계를 확정한 뒤 시작한다.
 
 ## 세션 운영 메모
 
-- 현재 작업 관리 기준은 **Orca이며 HERDR가 아니다**. 이번 통합 세션에서 Orca 앱
-  `1.4.185`와 runtime ready/reachable, `main` 및 기능 워크트리 6개를 확인했다.
-- 사용자가 모든 기능 작업 완료와 통합 배포를 승인해 clean·원격 일치 상태의 기능 브랜치
-  6개를 `main`에 통합했다. 기존 `0071` 뒤에서 `0072`·`0073`으로 정렬하고 전체 검증·운영
-  snapshot·migration·세 앱 배포·후속 health까지 완료했다.
+- 현재 작업 관리 기준은 **Orca이며 HERDR가 아니다**. Orca 앱 `1.4.185`와 runtime은
+  ready/reachable이며, `main`과 완료 상태 `web_hook` 워크트리를 대조했다.
+- `web_hook`의 후속 PowerShell 인코딩 hotfix를 `main`에 통합·푸시했고 모든 원격 작업 HEAD는
+  현재 main ancestor다. Linux 운영 코드·migration 변화가 없어 새 ECR 이미지는 게시만 하고
+  EC2 전환·snapshot·DB 작업은 하지 않았다.
+- 로컬 `lawand-prod` AWS 세션은 2026-08-21 확인 시 만료 상태다. 다음 AWS 작업 전
+  `aws login --profile lawand-prod`가 필요하다.
 - 다음 작업 전에 `PROJECT_PLAN.md`, 이 문서, 해당 분야의 상세 문서만 읽는다.
