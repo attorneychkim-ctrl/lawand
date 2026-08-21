@@ -16,6 +16,7 @@ namespace Lawand.DesktopNotifier
         private readonly NotificationPopupManager popupManager;
         private readonly UserPresenceMonitor presenceMonitor;
         private readonly NotifyIcon notifyIcon;
+        private readonly Icon applicationIcon;
         private readonly ToolStripMenuItem statusMenuItem;
         private readonly ToolStripMenuItem disconnectMenuItem;
         private readonly Control dispatcher;
@@ -56,7 +57,8 @@ namespace Lawand.DesktopNotifier
             menu.Items.Add(exitMenuItem);
 
             notifyIcon = new NotifyIcon();
-            notifyIcon.Icon = SystemIcons.Information;
+            applicationIcon = LoadApplicationIcon();
+            notifyIcon.Icon = applicationIcon;
             notifyIcon.Text = "LAW& OS 알림";
             notifyIcon.ContextMenuStrip = menu;
             notifyIcon.Visible = true;
@@ -93,9 +95,27 @@ namespace Lawand.DesktopNotifier
                 popupManager.Dispose();
                 notifyIcon.Visible = false;
                 notifyIcon.Dispose();
+                applicationIcon.Dispose();
                 dispatcher.Dispose();
             }
             base.Dispose(disposing);
+        }
+
+        private static Icon LoadApplicationIcon()
+        {
+            try
+            {
+                Icon icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+                if (icon != null)
+                {
+                    return icon;
+                }
+            }
+            catch
+            {
+                // 실행 파일 아이콘 추출 실패 시 Windows 기본 정보 아이콘을 복제한다.
+            }
+            return (Icon)SystemIcons.Information.Clone();
         }
 
         private void StartApplication()

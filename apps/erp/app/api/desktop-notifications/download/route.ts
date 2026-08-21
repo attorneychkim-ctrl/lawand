@@ -15,7 +15,7 @@ export async function GET() {
   if (
     !artifactPath ||
     !isAbsolute(artifactPath) ||
-    !/Lawand\.DesktopNotifier[^/\\]*\.zip$/i.test(artifactPath)
+    !/Lawand\.DesktopNotifier[^/\\]*\.(?:exe|zip)$/i.test(artifactPath)
   ) {
     return Response.json({ error: "artifact_unavailable" }, { status: 404 });
   }
@@ -25,13 +25,17 @@ export async function GET() {
       return Response.json({ error: "artifact_unavailable" }, { status: 404 });
     }
     const artifact = await readFile(artifactPath);
+    const isInstaller = artifactPath.toLowerCase().endsWith(".exe");
     return new Response(artifact, {
       headers: {
         "cache-control": "private, no-store",
-        "content-disposition":
-          'attachment; filename="Lawand.DesktopNotifier-win-x64.zip"',
+        "content-disposition": isInstaller
+          ? 'attachment; filename="Lawand.DesktopNotifier-Setup.exe"'
+          : 'attachment; filename="Lawand.DesktopNotifier-win-x64.zip"',
         "content-length": String(artifact.byteLength),
-        "content-type": "application/zip",
+        "content-type": isInstaller
+          ? "application/vnd.microsoft.portable-executable"
+          : "application/zip",
         "x-content-type-options": "nosniff",
       },
     });

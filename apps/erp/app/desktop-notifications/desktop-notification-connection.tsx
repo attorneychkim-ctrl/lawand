@@ -121,7 +121,7 @@ export function DesktopNotificationConnection({
         <div>
           <small>Windows PC 알림 프로그램</small>
           <strong>LAW&amp; OS 알림</strong>
-          <p>Windows 로그인 시 자동으로 시작되어 5초 간격으로 새 업무를 확인합니다.</p>
+          <p>바탕화면에서 바로 실행하고, Windows 로그인 시 자동으로 새 업무를 확인합니다.</p>
         </div>
         <span className="desktop-alert-app-badge is-ready">1차 버전</span>
       </div>
@@ -131,7 +131,7 @@ export function DesktopNotificationConnection({
           <span>1</span>
           <div>
             <strong>알림 프로그램 설치</strong>
-            <p>개발용 무서명 빌드를 내려받아 이 컴퓨터에 한 번 설치합니다.</p>
+            <p>설치 파일을 내려받아 더블클릭하면 바탕화면 바로가기까지 자동으로 만듭니다.</p>
           </div>
         </li>
         <li>
@@ -220,7 +220,7 @@ export function DesktopNotificationConnection({
         <div>
           {downloadUrl ? (
             <a className="secondary-button" href={downloadUrl}>
-              Windows 프로그램 받기
+              Windows 설치파일 받기
             </a>
           ) : (
             <button className="secondary-button" disabled type="button">

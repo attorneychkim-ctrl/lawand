@@ -17,7 +17,8 @@ LAW& OS 업무 카드로 표시하는 개인 알림 클라이언트다. 중앙 W
 - 공식 Windows session lock과 10분 키보드·마우스 부재를 감지해 고객 카드 표시를 멈추고,
   복귀 시 놓친 종류별 건수를 요약 카드 한 장으로 표시
 - 트레이에서 상태 확인, ERP 설정 열기, 서버·로컬 기기 연결 해제, 명시적 종료
-- 현재 사용자 로그인 시 HKCU 자동 시작
+- 단일 `Setup.exe`로 사용자별 설치, 바탕화면·시작 메뉴 바로가기와 현재 사용자 자동 시작 등록
+- Windows `설정 → 앱 → 설치된 앱`에서 일반 프로그램처럼 제거
 - 개인 설정에 따른 상담·외부 수신전화·내선/호전환/복귀·문자·후기 자동 알림
 - Gateway 재연결 시 durable 업무 원장의 단기 재생과 전달 ID 기반 중복 방지
 
@@ -43,31 +44,29 @@ Set-ExecutionPolicy -Scope Process Bypass
   -DefaultErpBaseUrl 'http://localhost:3021'
 ```
 
-실행 파일 self-test 뒤 `artifacts\<Configuration>`에 exe와
-`Lawand.DesktopNotifier-v0.1.0-win-x64.zip`을 만든다. 운영 후보는 조직 코드 서명
-인증서로 Authenticode 서명과 timestamp를 적용한다.
+실행 파일 self-test 뒤 `artifacts\<Configuration>`에 직원에게 바로 전달할 단일
+`Lawand.DesktopNotifier-v0.1.0-Setup.exe`와 보관용 ZIP을 만든다. Setup 안에는 본 프로그램,
+제거 프로그램, ERP·Gateway 운영 기본값이 들어 있다. 운영 후보는 조직 코드 서명 인증서로
+세 실행 파일 모두에 Authenticode 서명과 timestamp를 적용한다.
 
 Debug 빌드는 실제 연결 없이 여섯 카드와 부재중 요약을 확인할 수 있는 개발용
 `Lawand.DesktopNotifier.PopupPreview.exe`도 만든다. 인자는 `consultation`, `message`,
-`review`, `phone`, `internal`, `transfer`, `summary` 중 하나다.
+`review`, `phone`, `internal`, `transfer`, `summary`, `test` 중 하나다.
 
-`install.ps1`과 `uninstall.ps1`은 Windows PowerShell 5.1이 한글 문자열을 정확히 읽도록
-UTF-8 BOM을 유지해야 하며, `build.ps1`이 패키징 전에 이 조건을 검사한다.
+`install.ps1`과 `uninstall.ps1`은 이전 개발 빌드를 복구할 때만 쓰는 호환용 파일이며 직원용
+패키지에는 포함하지 않는다.
 
 ```powershell
 .\build.ps1 -Configuration Release `
   -CodeSigningCertificateThumbprint '<certificate-thumbprint>'
 ```
 
-## 개발용 설치와 연결
+## 직원 PC 설치와 연결
 
-ZIP을 푼 일반 사용자 PowerShell에서 실행한다. 서명 전 개발 빌드는 통제된 PC에서만
-명시적으로 허용한다.
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\install.ps1 -AllowUnsigned
-```
+ERP에서 받은 `Lawand.DesktopNotifier-Setup.exe`를 더블클릭하고 `설치`를 누른다. 관리자 권한이나
+PowerShell 명령은 필요 없다. 기본값으로 바탕화면 바로가기, Windows 로그인 자동 실행, 설치 후
+즉시 실행이 선택된다. 기존 버전 위에 다시 설치해도 연결 코드와 개인 설정은 유지된다. 서명 전
+개발 빌드는 법무법인 로앤의 통제된 테스트 PC에서만 사용한다.
 
 1. ERP `관리 → PC 알림 설정`에서 `이 컴퓨터 연결`을 누른다.
 2. 5분짜리 코드를 복사해 Windows 연결 창에 붙여넣는다.
@@ -85,5 +84,7 @@ Gateway·ERP 주소는 HTTPS만 허용하고 로컬 개발에서는 `localhost` 
   `%LOCALAPPDATA%\Lawand\DesktopNotifier\settings.json`
 - 고객명·전화번호·본문은 파일이나 로그에 저장하지 않는다.
 
-연결 해제는 트레이 메뉴 또는 ERP 기기 목록에서 실행한다. 제거 전 트레이에서 연결 해제를
-권장하며, `uninstall.ps1`도 자동 시작·shortcut·설정·해당 Gateway 자격 증명을 정리한다.
+연결 해제는 트레이 메뉴 또는 ERP 기기 목록에서 실행한다. 프로그램 제거는 Windows
+`설정 → 앱 → 설치된 앱 → LAW& OS 알림 → 제거`에서 하며, 제거 프로그램이 자동 시작,
+바탕화면·시작 메뉴 바로가기, 로컬 설정과 해당 Gateway 자격 증명을 정리한다. 서버의 기기
+목록은 ERP에서 별도로 연결 해제할 수 있다.

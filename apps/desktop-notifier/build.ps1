@@ -17,26 +17,58 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = Join-Path $projectRoot "artifacts\$Configuration"
 }
 
-foreach ($scriptName in @('install.ps1', 'uninstall.ps1')) {
-    $scriptPath = Join-Path $projectRoot $scriptName
-    $scriptBytes = [IO.File]::ReadAllBytes($scriptPath)
-    $hasUtf8Bom =
-        $scriptBytes.Length -ge 3 -and
-        $scriptBytes[0] -eq 0xEF -and
-        $scriptBytes[1] -eq 0xBB -and
-        $scriptBytes[2] -eq 0xBF
-    if (-not $hasUtf8Bom) {
-        throw "$scriptName must use UTF-8 with BOM for Windows PowerShell 5.1."
-    }
-}
-
 $frameworkRoot = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
 $compiler = Join-Path $frameworkRoot 'csc.exe'
 if (-not (Test-Path -LiteralPath $compiler)) {
     throw ".NET Framework 4.8 x64 C# compiler not found: $compiler"
 }
 
+$iconPath = [IO.Path]::GetFullPath((Join-Path $projectRoot '..\erp\app\favicon.ico'))
+if (-not (Test-Path -LiteralPath $iconPath)) {
+    throw "LAW& OS application icon was not found: $iconPath"
+}
+
+$script:SignToolPath = $null
+if (-not [string]::IsNullOrWhiteSpace($CodeSigningCertificateThumbprint)) {
+    $signTool = Get-ChildItem -Path 'C:\Program Files (x86)\Windows Kits\10\bin' `
+        -Filter 'signtool.exe' -Recurse -ErrorAction SilentlyContinue |
+        Sort-Object FullName -Descending |
+        Select-Object -First 1
+    if ($null -eq $signTool) {
+        throw 'signtool.exe was not found. Install Windows SDK signing tools.'
+    }
+    $script:SignToolPath = $signTool.FullName
+}
+
+function Invoke-CodeSigning {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string]$ComponentName
+    )
+
+    if ([string]::IsNullOrWhiteSpace($CodeSigningCertificateThumbprint)) {
+        return
+    }
+    & $script:SignToolPath sign /sha1 $CodeSigningCertificateThumbprint /fd SHA256 `
+        /tr $TimestampUrl /td SHA256 $Path
+    if ($LASTEXITCODE -ne 0) {
+        throw "$ComponentName signing failed with exit code $LASTEXITCODE"
+    }
+    $signature = Get-AuthenticodeSignature -LiteralPath $Path
+    if ($signature.Status -ne 'Valid') {
+        throw "$ComponentName signature is not valid: $($signature.Status)"
+    }
+}
+
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
+$defaultsPath = Join-Path $OutputDirectory 'notifier.defaults.json'
+[pscustomobject]@{
+    GatewayBaseUrl = $DefaultGatewayBaseUrl
+    ErpBaseUrl = $DefaultErpBaseUrl
+} | ConvertTo-Json | Set-Content -LiteralPath $defaultsPath -Encoding UTF8
+
 $sourceFiles = Get-ChildItem -LiteralPath (Join-Path $projectRoot 'src') -Filter '*.cs' |
     Sort-Object Name |
     ForEach-Object { $_.FullName }
@@ -52,6 +84,7 @@ $compilerArguments = @(
     '/langversion:5',
     "/out:$executable",
     "/pdb:$pdb",
+    "/win32icon:$iconPath",
     '/debug:pdbonly',
     '/optimize+',
     '/reference:System.dll',
@@ -111,6 +144,7 @@ if ($Configuration -eq 'Debug') {
         '/warn:4',
         '/langversion:5',
         "/out:$previewExecutable",
+        "/win32icon:$iconPath",
         '/reference:System.dll',
         '/reference:System.Core.dll',
         '/reference:System.Drawing.dll',
@@ -125,23 +159,68 @@ if ($Configuration -eq 'Debug') {
     }
 }
 
-if (-not [string]::IsNullOrWhiteSpace($CodeSigningCertificateThumbprint)) {
-    $signtool = Get-ChildItem -Path 'C:\Program Files (x86)\Windows Kits\10\bin' `
-        -Filter 'signtool.exe' -Recurse -ErrorAction SilentlyContinue |
-        Sort-Object FullName -Descending |
-        Select-Object -First 1
-    if ($null -eq $signtool) {
-        throw 'signtool.exe was not found. Install Windows SDK signing tools.'
-    }
-    & $signtool.FullName sign /sha1 $CodeSigningCertificateThumbprint /fd SHA256 `
-        /tr $TimestampUrl /td SHA256 $executable
-    if ($LASTEXITCODE -ne 0) {
-        throw "Desktop notifier signing failed with exit code $LASTEXITCODE"
-    }
-    $signature = Get-AuthenticodeSignature -LiteralPath $executable
-    if ($signature.Status -ne 'Valid') {
-        throw "Desktop notifier signature is not valid: $($signature.Status)"
-    }
+$uninstaller = Join-Path $OutputDirectory 'Lawand.DesktopNotifier.Uninstall.exe'
+$uninstallerArguments = @(
+    '/nologo',
+    '/target:winexe',
+    '/platform:x64',
+    '/checked+',
+    '/warn:4',
+    '/langversion:5',
+    '/optimize+',
+    "/out:$uninstaller",
+    "/win32icon:$iconPath",
+    '/reference:System.dll',
+    '/reference:System.Core.dll',
+    '/reference:System.Web.Extensions.dll',
+    '/reference:System.Windows.Forms.dll',
+    '/reference:Microsoft.CSharp.dll',
+    (Join-Path $projectRoot 'src\CredentialStore.cs'),
+    (Join-Path $projectRoot 'installer\InstallerShared.cs'),
+    (Join-Path $projectRoot 'installer\UninstallProgram.cs')
+)
+& $compiler @uninstallerArguments
+if ($LASTEXITCODE -ne 0) {
+    throw "Desktop notifier uninstaller compilation failed with exit code $LASTEXITCODE"
+}
+& $uninstaller --verify
+if ($LASTEXITCODE -ne 0) {
+    throw "Desktop notifier uninstaller verification failed with exit code $LASTEXITCODE"
+}
+
+Invoke-CodeSigning -Path $executable -ComponentName 'Desktop notifier'
+Invoke-CodeSigning -Path $uninstaller -ComponentName 'Desktop notifier uninstaller'
+
+$installer = Join-Path $OutputDirectory 'Lawand.DesktopNotifier-v0.1.0-Setup.exe'
+$installerArguments = @(
+    '/nologo',
+    '/target:winexe',
+    '/platform:x64',
+    '/checked+',
+    '/warn:4',
+    '/langversion:5',
+    '/optimize+',
+    "/out:$installer",
+    "/win32icon:$iconPath",
+    '/reference:System.dll',
+    '/reference:System.Core.dll',
+    '/reference:System.Drawing.dll',
+    '/reference:System.Windows.Forms.dll',
+    '/reference:Microsoft.CSharp.dll',
+    "/resource:$executable,Lawand.DesktopNotifier.Payload.exe",
+    "/resource:$uninstaller,Lawand.DesktopNotifier.UninstallPayload.exe",
+    "/resource:$defaultsPath,Lawand.DesktopNotifier.Defaults.json",
+    (Join-Path $projectRoot 'installer\InstallerShared.cs'),
+    (Join-Path $projectRoot 'installer\SetupProgram.cs')
+)
+& $compiler @installerArguments
+if ($LASTEXITCODE -ne 0) {
+    throw "Desktop notifier installer compilation failed with exit code $LASTEXITCODE"
+}
+Invoke-CodeSigning -Path $installer -ComponentName 'Desktop notifier installer'
+& $installer --verify
+if ($LASTEXITCODE -ne 0) {
+    throw "Desktop notifier installer verification failed with exit code $LASTEXITCODE"
 }
 
 $packageDirectory = Join-Path $OutputDirectory 'package'
@@ -149,33 +228,23 @@ if (Test-Path -LiteralPath $packageDirectory) {
     Remove-Item -LiteralPath $packageDirectory -Recurse -Force
 }
 New-Item -ItemType Directory -Path $packageDirectory -Force | Out-Null
-Copy-Item -LiteralPath $executable -Destination $packageDirectory -Force
-if ($Configuration -eq 'Debug') {
-    Copy-Item -LiteralPath $pdb -Destination $packageDirectory -Force
-}
-Copy-Item -LiteralPath (Join-Path $projectRoot 'install.ps1') -Destination $packageDirectory -Force
-Copy-Item -LiteralPath (Join-Path $projectRoot 'uninstall.ps1') -Destination $packageDirectory -Force
+Copy-Item -LiteralPath $installer -Destination $packageDirectory -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md') -Destination $packageDirectory -Force
-
-[pscustomobject]@{
-    GatewayBaseUrl = $DefaultGatewayBaseUrl
-    ErpBaseUrl = $DefaultErpBaseUrl
-} | ConvertTo-Json | Set-Content `
-    -LiteralPath (Join-Path $packageDirectory 'notifier.defaults.json') `
-    -Encoding UTF8
 
 $zipPath = Join-Path $OutputDirectory 'Lawand.DesktopNotifier-v0.1.0-win-x64.zip'
 if (Test-Path -LiteralPath $zipPath) {
     Remove-Item -LiteralPath $zipPath -Force
 }
 Compress-Archive -Path (Join-Path $packageDirectory '*') -DestinationPath $zipPath
-$hash = Get-FileHash -LiteralPath $zipPath -Algorithm SHA256
+$installerHash = Get-FileHash -LiteralPath $installer -Algorithm SHA256
+$archiveHash = Get-FileHash -LiteralPath $zipPath -Algorithm SHA256
 
 [pscustomobject]@{
-    Executable = $executable
-    Package = $zipPath
+    Installer = $installer
+    InstallerSha256 = $installerHash.Hash
+    Archive = $zipPath
+    ArchiveSha256 = $archiveHash.Hash
     Architecture = 'x64'
-    Sha256 = $hash.Hash
     Signed = -not [string]::IsNullOrWhiteSpace($CodeSigningCertificateThumbprint)
     DefaultGatewayBaseUrl = $DefaultGatewayBaseUrl
     DefaultErpBaseUrl = $DefaultErpBaseUrl
