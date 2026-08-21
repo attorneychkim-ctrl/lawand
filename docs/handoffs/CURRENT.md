@@ -34,12 +34,13 @@
 - 기존 개인 웹훅 미리보기는 관리자 전용 개인 Windows PC 알림으로 교체해 운영 반영했다.
   5분 pairing·개인별 9개 설정·실제 내부 이벤트 생산자는 활성 코드지만, unsigned client는
   운영 artifact로 제공하지 않으며 일반 직원에게 아직 공개하지 않는다. 통제 사용자 1인
-  canary의 unsigned client 설치는 PowerShell 5.1 한글 바로가기 인코딩 보정 뒤 완료했고,
-  pairing 이후 실제 알림 acceptance는 남아 있다. `LegalFlow/web_hook`에는 OS balloon을
-  상담·문자·후기·고객전화·내선·호전환별 자체 우측 상단 카드로 교체하고 잠금·10분 부재·
-  화면 초과분을 한 장으로 묶는 후속 후보가 있다. 브라우저 알림 자체는 유지하되 ERP 상단의
-  앱 전용 허용·차단 버튼은 제거하고 브라우저 사이트 권한만 개인 선택 기준으로 삼았다. 이
-  후보는 아직 main·운영 설치본에는 반영하지 않았다.
+  canary의 unsigned client 연결은 완료했고 pairing 이후 실제 알림 acceptance는 남아 있다.
+  `LegalFlow/web_hook`에는 OS balloon을 상담·문자·후기·고객전화·내선·호전환별 자체 우측 상단
+  카드로 교체하고 잠금·10분 부재·화면 초과분을 한 장으로 묶는 후보가 있다. 직원이 PowerShell을
+  실행하지 않아도 되는 단일 `Setup.exe` 후보도 구현해 통제 PC에서 기존 연결·설정을 보존한
+  업데이트, 바탕화면·시작 메뉴 바로가기, 자동 실행, 설치된 앱 제거 등록과 재실행을 확인했다.
+  브라우저 알림 자체는 유지하되 ERP 상단의 앱 전용 허용·차단 버튼은 제거하고 브라우저 사이트
+  권한만 개인 선택 기준으로 삼았다. 이 후보들은 아직 main·운영 다운로드에는 반영하지 않았다.
 - GA4 운영 Measurement ID·무팝업 측정과 `generate_lead` 주요 이벤트 표시는 활성화됐다.
   Google Ads·네이버 광고 연결, 광고 개인화, 자동 입찰은 시작하지 않았다.
 - 공용 센트릭스 SMS/LMS는 `070-4607-0588` 발신·mailbox snapshot 기준으로 운영 반영됐다.
@@ -63,9 +64,10 @@
    재확인한다.
 9. 네이버 예약 기준점 이후 실제 신규 메일 접수 canary와 카카오 운영자 확인 흐름을 별도
    승인 아래 수행한다.
-10. 개인 PC 알림 client는 자체 카드 후보를 main에 통합한 뒤 통제 사용자 1인의 실제 상담·
-    문자·전화·내선·호전환, 잠금·부재 요약과 정확한 ERP 이동 acceptance를 마친다. 그 다음 조직
-    Authenticode 서명·timestamp와 정식 artifact 채널을 마련한 뒤 일반 직원에게 공개한다.
+10. 개인 PC 알림 client의 자체 카드·단일 설치파일 후보를 main에 통합하고 조직 Authenticode
+    서명·timestamp와 정식 artifact 채널을 마련한다. 서명본 설치·업데이트·제거와 통제 사용자
+    1인의 실제 상담·문자·전화·내선·호전환, 잠금·부재 요약, 정확한 ERP 이동 acceptance를 마친
+    뒤 일반 직원에게 공개한다.
 11. OpenAI Realtime STT는 내부 PoC·보관/동의·사람 검토 경계를 확정한 뒤 시작한다.
 
 ## 세션 운영 메모
@@ -77,7 +79,9 @@
   EC2 전환·snapshot·DB 작업은 하지 않았다.
 - 같은 `web_hook` 워크트리의 후속 자체 PC 알림 카드 구현·검증은 완료됐다. 구현 commit
   `48b234552bb279635e8020b2189ab3f731a1643f`을 원격 `LegalFlow/web_hook`에 푸시하고 Orca를
-  `completed`로 전환했으며, 아직 main 병합·운영 배포 대상으로 반영하지 않았다.
+  `completed`로 전환했다. 이후 단일 Windows 설치파일 후보 구현 commit
+  `afa8bd14144ae59c7e4acc61ab3c13e6f0300e5f`을 같은 브랜치에 추가했으며, 아직 main 병합·운영
+  배포 대상으로 반영하지 않았다.
 - 로컬 `lawand-prod` AWS 세션은 2026-08-21 확인 시 만료 상태다. 다음 AWS 작업 전
   `aws login --profile lawand-prod`가 필요하다.
 - 다음 작업 전에 `PROJECT_PLAN.md`, 이 문서, 해당 분야의 상세 문서만 읽는다.

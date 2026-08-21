@@ -293,10 +293,14 @@ Windows client는 outbound HTTPS polling만 사용한다. 현재 소스는 OS ba
 화면에 띄우지 않고 복귀 뒤 종류별 건수 요약 한 장으로 묶는다. 표시 ACK와 사용자의 정확한
 deep link 열기 ACK는 분리하며 URL은 설정된 ERP same-origin만 연다.
 
-관리 메뉴와 설정 화면은 아직 관리자 전용이다. 새 자체 카드 빌드는 통제 PC acceptance 전의
-작업 브랜치 후보이며 기존 운영 canary 설치본을 자동 교체하지 않았다. 조직 Authenticode 서명
-전의 ZIP은 운영 다운로드로 제공하지 않고, macOS client와 일반 직원 공개는 서명·정식 배포
-채널과 acceptance가 끝난 뒤 별도 승인한다. 외부 URL 웹훅 후보는 폐기됐다.
+관리 메뉴와 설정 화면은 아직 관리자 전용이다. Windows 후보는 본 프로그램·제거 프로그램·운영
+기본값을 내장한 단일 `Setup.exe`로 현재 사용자 영역에 설치하며 관리자 권한이나 직원의
+PowerShell 실행을 요구하지 않는다. 바탕화면·시작 메뉴 바로가기, 로그인 자동 실행, 설치 후
+실행과 Windows 설치된 앱 제거 항목을 등록하고 업데이트 때 기존 연결·개인 설정을 보존한다.
+ERP의 관리자 전용 다운로드 route는 설정된 artifact가 `Setup.exe`면 직접 전달하고 기존 ZIP도
+호환한다. 다만 조직 Authenticode 서명 전 artifact는 운영 다운로드로 제공하지 않으며, macOS
+client와 일반 직원 공개는 서명·정식 배포 채널과 acceptance가 끝난 뒤 별도 승인한다. 외부 URL
+웹훅 후보는 폐기됐다.
 
 기존 브라우저 알림은 PC 알림과 독립된 개인 선택 기능으로 유지한다. ERP 내비게이션의 별도
 켜기·끄기 버튼과 로컬 보조 설정은 두지 않고, 실제 표시 여부는 각 사용자가 브라우저 사이트
@@ -373,8 +377,9 @@ Glacier 정책은 아직 활성 설계 과제다.
 - 센트릭스 일반 내선·무조건/통화 후 호전환·실패 복귀 canary를 다시 수행한다.
 - 통화 후 호전환 B/customer final leg는 추가 provider 증거가 없으면 `확인 필요`로 유지한다.
 - Windows bridge 조직용 Authenticode 인증서를 발급·배포한다.
-- Windows 개인 PC 알림 client도 조직 Authenticode 서명·timestamp와 정식 다운로드 채널을
-  마련한 뒤 통제 PC에서 설치·업데이트·제거 acceptance를 수행한다.
+- Windows 개인 PC 알림 client의 단일 설치파일 후보는 통제 PC 업데이트까지 검증했다. 조직
+  Authenticode 서명·timestamp와 정식 다운로드 채널을 마련한 뒤 서명본 설치·업데이트·제거
+  acceptance를 수행한다.
 - 실제 배정 수가 50개에 가까워지기 전에 Windows 서버 메모리 여유와 인스턴스 상향을 검토한다.
 - 통제 JPG MMS 단말 수신, mailbox별 문자 회신, 50건 cursor 경계를 검증한다.
 - 네이버 예약 신규 확정 메일과 카카오 홈페이지 접수→직원 확인 흐름을 승인된 canary로 확인한다.
