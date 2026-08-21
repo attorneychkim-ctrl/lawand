@@ -17,6 +17,19 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = Join-Path $projectRoot "artifacts\$Configuration"
 }
 
+foreach ($scriptName in @('install.ps1', 'uninstall.ps1')) {
+    $scriptPath = Join-Path $projectRoot $scriptName
+    $scriptBytes = [IO.File]::ReadAllBytes($scriptPath)
+    $hasUtf8Bom =
+        $scriptBytes.Length -ge 3 -and
+        $scriptBytes[0] -eq 0xEF -and
+        $scriptBytes[1] -eq 0xBB -and
+        $scriptBytes[2] -eq 0xBF
+    if (-not $hasUtf8Bom) {
+        throw "$scriptName must use UTF-8 with BOM for Windows PowerShell 5.1."
+    }
+}
+
 $frameworkRoot = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
 $compiler = Join-Path $frameworkRoot 'csc.exe'
 if (-not (Test-Path -LiteralPath $compiler)) {

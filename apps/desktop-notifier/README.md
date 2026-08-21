@@ -43,6 +43,9 @@ Set-ExecutionPolicy -Scope Process Bypass
 `Lawand.DesktopNotifier-v0.1.0-win-x64.zip`을 만든다. 운영 후보는 조직 코드 서명
 인증서로 Authenticode 서명과 timestamp를 적용한다.
 
+`install.ps1`과 `uninstall.ps1`은 Windows PowerShell 5.1이 한글 문자열을 정확히 읽도록
+UTF-8 BOM을 유지해야 하며, `build.ps1`이 패키징 전에 이 조건을 검사한다.
+
 ```powershell
 .\build.ps1 -Configuration Release `
   -CodeSigningCertificateThumbprint '<certificate-thumbprint>'

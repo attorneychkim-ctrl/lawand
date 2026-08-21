@@ -106,6 +106,23 @@
 
 ## 작업 인수인계 로그 (append-only, 최신이 위)
 
+### 2026-08-21 — Windows PowerShell 5.1 설치 바로가기 인코딩 hotfix
+- 운영 ERP는 통합 릴리스 의도대로 unsigned client artifact를 제공하지 않아 `Windows 빌드
+  준비 중`을 표시했다. 사용자 1인 canary를 위해 로컬 Release ZIP을 Windows Downloads에 풀어
+  `install.ps1 -AllowUnsigned`로 실행했으나, BOM 없는 UTF-8 스크립트를 Windows PowerShell 5.1이
+  ANSI로 읽으면서 한글 `LAW& OS 알림.lnk`를 잘못된 파일명으로 바꿔 WScript shortcut 저장이
+  중단됐다. 실패 지점 전에 실행 파일 복사와 HKCU 자동 시작 등록은 완료됐고 프로세스는 시작 전이었다.
+- `install.ps1`과 `uninstall.ps1`에 UTF-8 BOM을 추가하고 `build.ps1`이 두 파일의 BOM을 패키징
+  전에 강제 검사하도록 했다. Windows PowerShell 5.1 parser 오류 0, 정확한 한글 코드포인트와
+  격리 임시 디렉터리 shortcut 저장을 확인했다. 교정한 운영 주소용 Release package로 실제 설치를
+  마쳐 실행 파일·`https://api.lawandfirm.com` 기본값·한글 시작 메뉴 shortcut·HKCU 자동 시작·
+  실행 프로세스가 모두 정상이다. 사용자는 운영 ERP의 일회용 연결 코드 입력부터 이어간다.
+- Windows Debug·Release x64 컴파일과 self-test를 다시 통과했다. 최종 Release ZIP SHA-256은
+  `48B8D8E743203BDEA475690DA07EE9637CF315F1A8E11EF05828D8B168E2591D`다. 새 ZIP은 계속
+  무서명이며 사용자 한 명의 통제 canary에만 `-AllowUnsigned`를 사용한다. 운영 서버 artifact·
+  환경변수·DB·외부 발송은
+  변경하지 않았다. 이 요청의 HERDR 지침을 따랐으나 `HERDR_ENV`와 서버가 없어 Git 상태만 사용했다.
+
 ### 2026-08-20 — Windows 개인 PC 알림 전화·재생·운영 방어 3차 후보
 - 기존 `lawand_telephony_desk_events`를 재사용해 내선 수신·고객 호전환·미연결 복귀를
   `phone.internal_transfer` 개인 설정에 연결했다. 최근 5분의 안정적인 call observation UUID를
